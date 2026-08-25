@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   },
   hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
   hostedMemberRoutingRecordsEqual: vi.fn(),
+  hostedLinqDeliveryFindFirst: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
   hostedLinqDeliveryUpdate: vi.fn(),
   hostedLinqDeliveryUpdateMany: vi.fn(),
@@ -129,6 +130,7 @@ import {
   abandonHostedLinqInstantFirstTurn,
   claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn,
+  finalizeHostedLinqInstantFirstTurnReceipt,
   isHostedLinqInstantFirstTurnRequestEligible,
   startHostedLinqInstantFirstTurnGeneration,
 } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
@@ -154,9 +156,55 @@ const WAKE_HANDOFF = {
   },
 };
 
+function buildSealedPayload(input: {
+  accepted?: {
+    acceptedAt: string;
+    chatId: string;
+    messageId: string;
+  } | null;
+  message?: string;
+} = {}): string {
+  return `sealed:${JSON.stringify({
+    accepted: input.accepted ?? null,
+    inboundMessageId: "inbound_message_123",
+    message: input.message ?? "Exact prior reply",
+    participantContact: {
+      kind: "phone",
+      lookupKey: "phone_lookup_123",
+    },
+    recipientPhoneNumber: "+15550000000",
+    service: "iMessage",
+    wakeHandoff: WAKE_HANDOFF,
+  })}`;
+}
+
+function buildTerminalDeliveryRow(status: "delivered" | "failed") {
+  return {
+    deliveredAt: status === "delivered"
+      ? new Date("2026-08-22T21:00:02.000Z")
+      : null,
+    failedAt: status === "failed"
+      ? new Date("2026-08-22T21:00:02.000Z")
+      : null,
+    idempotencyKey: "lookup:instant-first-turn",
+    payloadCiphertext: buildSealedPayload({
+      accepted: {
+        acceptedAt: "2026-08-22T21:00:01.000Z",
+        chatId: "chat_123",
+        messageId: "provider_message_123",
+      },
+    }),
+    payloadOwnerMemberId: WAKE_HANDOFF.userId,
+    payloadSchema:
+      "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+    status,
+  };
+}
+
 function createPrisma(): PrismaClient {
   const transaction = {
     hostedLinqDelivery: {
+      findFirst: mocks.hostedLinqDeliveryFindFirst,
       findUnique: mocks.hostedLinqDeliveryFindUnique,
       update: mocks.hostedLinqDeliveryUpdate,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
@@ -169,6 +217,7 @@ function createPrisma(): PrismaClient {
     $transaction: vi.fn(async (operation: (tx: typeof transaction) => unknown) =>
       operation(transaction)),
     hostedLinqDelivery: {
+      findFirst: mocks.hostedLinqDeliveryFindFirst,
       findUnique: mocks.hostedLinqDeliveryFindUnique,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
@@ -474,7 +523,7 @@ describe("hosted Linq instant first turn", () => {
     });
   });
 
-  it("runs one high-reasoning reply from durable claim through the runtime handoff", async () => {
+  it("runs one high-reasoning reply and leaves accepted delivery pending", async () => {
     const prisma = createPrisma();
     const reply =
       "A short walk after dinner can help your muscles use glucose, which may soften the post-meal blood-sugar rise.";
@@ -521,34 +570,9 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({ message: reply }),
     );
-    expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          message: expect.objectContaining({
-            linqMessage: expect.objectContaining({
-              parts: [{ type: "text", value: reply }],
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
-      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
-      where: expect.objectContaining({
-        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
-      }),
-    });
-    expect(completion).toEqual({
-      kind: "accepted",
-      wakeHandoff: {
-        ...WAKE_HANDOFF,
-        mailboxItemId: "mailbox_outbound",
-        wakeMailboxCheckpoint: {
-          lane: "conversation",
-          laneSeq: "2",
-        },
-      },
-    });
+    expect(mocks.prepareHostedMailboxEnvelopeAppend).not.toHaveBeenCalled();
+    expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+    expect(completion).toEqual({ kind: "pending" });
   });
 
   it("makes unsafe model output unavailable", async () => {
@@ -564,6 +588,14 @@ describe("hosted Linq instant first turn", () => {
   });
 
   it("delivers the accepted reply and wakes through two consumed conversation rows", async () => {
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildTerminalDeliveryRow("delivered"),
+    );
+    mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
+    });
     const prisma = createPrisma();
     const result = await completeHostedLinqInstantFirstTurn({
       generation: {
@@ -609,6 +641,76 @@ describe("hosted Linq instant first turn", () => {
         },
       },
     });
+  });
+
+  it("commits truthful continuity when the delivery receipt arrives later", async () => {
+    mocks.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      deliveredAt: new Date("2026-08-22T21:00:02.000Z"),
+      failedAt: null,
+      idempotencyKey: "lookup:instant-first-turn",
+      payloadCiphertext: buildSealedPayload({
+        accepted: {
+          acceptedAt: "2026-08-22T21:00:01.000Z",
+          chatId: "chat_123",
+          messageId: "provider_message_123",
+        },
+      }),
+      payloadOwnerMemberId: WAKE_HANDOFF.userId,
+      payloadSchema:
+        "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+      status: "delivered",
+    });
+
+    await expect(finalizeHostedLinqInstantFirstTurnReceipt({
+      deliveryStatus: "delivered",
+      messageId: "provider_message_123",
+      prisma: createPrisma(),
+    })).resolves.toEqual({
+      ...WAKE_HANDOFF,
+      mailboxItemId: "mailbox_outbound",
+      wakeMailboxCheckpoint: {
+        lane: "conversation",
+        laneSeq: "2",
+      },
+    });
+
+    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
+      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
+      where: expect.objectContaining({
+        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
+      }),
+    });
+  });
+
+  it("releases the unchanged inbound when the delivery receipt fails", async () => {
+    mocks.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      deliveredAt: null,
+      failedAt: new Date("2026-08-22T21:00:02.000Z"),
+      idempotencyKey: "lookup:instant-first-turn",
+      payloadCiphertext: buildSealedPayload({
+        accepted: {
+          acceptedAt: "2026-08-22T21:00:01.000Z",
+          chatId: "chat_123",
+          messageId: "provider_message_123",
+        },
+      }),
+      payloadOwnerMemberId: WAKE_HANDOFF.userId,
+      payloadSchema:
+        "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+      status: "failed",
+    });
+
+    await expect(finalizeHostedLinqInstantFirstTurnReceipt({
+      deliveryStatus: "failed",
+      messageId: "provider_message_123",
+      prisma: createPrisma(),
+    })).resolves.toEqual(WAKE_HANDOFF);
+
+    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.hostedLinqDeliveryUpdateMany.mock.calls.at(-1)?.[0])
+      .toMatchObject({ where: { status: "failed" } });
   });
 
   it("terminalizes a generated reply when direct-route projection fails", async () => {
@@ -729,7 +831,10 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps accepted Web ownership when a buffered provider failure is replayed", async () => {
+  it("cedes to the runtime when a buffered provider failure is replayed", async () => {
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildTerminalDeliveryRow("failed"),
+    );
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValueOnce({
       deliveryStatus: "failed",
       reopenOnboardingLink: null,
@@ -755,25 +860,10 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).resolves.toEqual({
-      kind: "accepted",
-      wakeHandoff: {
-        ...WAKE_HANDOFF,
-        mailboxItemId: "mailbox_outbound",
-        wakeMailboxCheckpoint: {
-          lane: "conversation",
-          laneSeq: "2",
-        },
-      },
-    });
+    })).resolves.toEqual({ kind: "fallback" });
 
-    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
-    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
-      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
-      where: expect.objectContaining({
-        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
-      }),
-    });
+    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(mocks.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
@@ -783,13 +873,19 @@ describe("hosted Linq instant first turn", () => {
         },
       }),
     );
-    const clearData = mocks.hostedLinqDeliveryUpdateMany.mock.calls.at(-1)?.[0]
-      ?.data;
-    expect(clearData).not.toHaveProperty("skippedAt");
-    expect(clearData).not.toHaveProperty("skipReason");
+    expect(mocks.hostedLinqDeliveryUpdateMany.mock.calls.at(-1)?.[0])
+      .toMatchObject({ where: { status: "failed" } });
   });
 
   it("retries instead of exposing a partial continuity handoff", async () => {
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildTerminalDeliveryRow("delivered"),
+    );
+    mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
+    });
     mocks.hostedMailboxItemUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(completeHostedLinqInstantFirstTurn({
@@ -823,7 +919,8 @@ describe("hosted Linq instant first turn", () => {
     mocks.hostedLinqDeliveryFindUnique.mockResolvedValue({
       acceptedAt: null,
       deliveredAt: null,
-      payloadCiphertext: "sealed:Exact prior reply",
+      idempotencyKey: "lookup:resume",
+      payloadCiphertext: buildSealedPayload(),
       payloadOwnerMemberId: WAKE_HANDOFF.userId,
       payloadSchema:
         "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
@@ -845,7 +942,7 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).resolves.toMatchObject({ kind: "accepted" });
+    })).resolves.toEqual({ kind: "pending" });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Exact prior reply" }),
     );

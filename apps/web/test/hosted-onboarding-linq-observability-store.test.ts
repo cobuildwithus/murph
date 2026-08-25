@@ -1489,8 +1489,8 @@ describe("hosted Linq observability stores", () => {
       },
     },
     {
-      expected: "already_answered",
-      label: "accepted Web delivery",
+      expected: "defer",
+      label: "provider-accepted Web delivery awaiting its receipt",
       row: {
         acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
         deliveredAt: null,
@@ -1567,8 +1567,8 @@ describe("hosted Linq observability stores", () => {
 
   it.each([
     {
-      expectedReplay: "completed",
-      expectedRuntime: "already_answered",
+      expectedReplay: "terminal",
+      expectedRuntime: "available",
       label: "provider-accepted buffered failure",
       overrides: {
         acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
@@ -5768,6 +5768,49 @@ describe("hosted Linq signup-link delivery attempts", () => {
       },
     });
   });
+
+  it.each([
+    { current: "failed", laterEvent: "message.delivered" },
+    { current: "delivered", laterEvent: "message.failed" },
+  ] as const)(
+    "keeps the first terminal instant-turn receipt final after $current",
+    async ({ current, laterEvent }) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+        failureCode: current === "failed" ? "4001" : null,
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_instant_terminal",
+        idempotencyKey: "instant-terminal",
+        lastReceiptAt: new Date("2026-03-26T12:01:00.000Z"),
+        phoneNumberLookupKey: null,
+        sourceRef: "instant-terminal-source",
+        status: current,
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      });
+
+      await expect(applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: "provider_msg_terminal",
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: "evt_later_terminal",
+          eventType: laterEvent,
+        })),
+        prisma: fixture.prisma as never,
+      })).resolves.toEqual({
+        advanced: false,
+        deliveryId: "hld_instant_terminal",
+        phoneNumberLookupKey: null,
+        reopenOnboardingLink: null,
+        restoreOnboardingLink: null,
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("owned multi-part Linq delivery receipts", () => {

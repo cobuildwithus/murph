@@ -774,7 +774,7 @@ function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   skippedAt: Date | null;
   status: string;
 }): HostedLinqInstantFirstTurnDeliveryDisposition {
-  if (isHostedLinqDeliveryProviderCorrelated(input)) {
+  if (input.deliveredAt !== null || input.status === "delivered") {
     return "answered";
   }
   if (isHostedLinqInstantFirstTurnFallbackTerminal(input)) {
@@ -1969,6 +1969,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       idempotencyKey: true,
       phoneNumberLookupKey: true,
       sourceRef: true,
+      lastReceiptAt: true,
       status: true,
       template: true,
     },
@@ -1988,6 +1989,21 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     && delivery.failureCode
       === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
   ) {
+    return {
+      advanced: false,
+      deliveryId: delivery.id,
+      phoneNumberLookupKey: delivery.phoneNumberLookupKey,
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
+    };
+  }
+  if (
+    delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && delivery.lastReceiptAt !== null
+    && (delivery.status === "delivered" || delivery.status === "failed")
+  ) {
+    // Linq defines delivered and failed as alternative terminal outcomes.
+    // Neither may reverse the sender chosen by the first terminal receipt.
     return {
       advanced: false,
       deliveryId: delivery.id,

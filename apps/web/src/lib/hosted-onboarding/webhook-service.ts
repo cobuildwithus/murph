@@ -131,6 +131,7 @@ import {
   abandonHostedLinqInstantFirstTurn,
   claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn,
+  finalizeHostedLinqInstantFirstTurnReceipt,
   startHostedLinqInstantFirstTurnGeneration,
   type HostedLinqInstantFirstTurnGeneration,
 } from "./linq-instant-first-turn";
@@ -479,12 +480,31 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ? "duplicate-linq-provider-event"
           : `recorded-linq-provider-event:${providerEvent.eventType}`,
       };
+      const instantFirstTurnWake =
+        providerEvent.deliveryStatus && providerEvent.linqMessageId
+          ? await finalizeHostedLinqInstantFirstTurnReceipt({
+              deliveryStatus: providerEvent.deliveryStatus,
+              messageId: providerEvent.linqMessageId,
+              prisma,
+            })
+          : null;
+      const wakeHandoffResult = instantFirstTurnWake
+        ? await maybeHandoffHostedExecutionWebhookWake({
+            response,
+            scheduleAfterResponse: input.scheduleAfterResponse,
+            signal: input.signal,
+            wakeHandoff: instantFirstTurnWake,
+          })
+        : null;
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
         alertCount: providerResult.alertIds.length,
         duplicate: providerResult.duplicate,
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
         eventType,
+        wakeHandoffReason: wakeHandoffResult?.reason ?? null,
+        wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
+        wakeHandoffStarted: wakeHandoffResult?.started ?? false,
         ...(providerEvent.eventType === "chat.group_icon_updated"
           || providerEvent.eventType === "chat.group_icon_update_failed"
             ? {
@@ -1132,6 +1152,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           });
           if (instantFirstTurn.kind === "accepted") {
             wakeHandoff = instantFirstTurn.wakeHandoff;
+          } else if (instantFirstTurn.kind === "pending") {
+            // The shell is already prewarming. Wait for Linq's terminal
+            // receipt before either sender consumes this conversation input.
+            wakeHandoff = undefined;
+            pendingInstantStartActivationWake = null;
           }
         } catch (error) {
           if (

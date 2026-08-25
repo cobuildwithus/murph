@@ -82,6 +82,7 @@ const mocks = vi.hoisted(() => {
     classifyHostedLinqFirstContactAdmission: vi.fn(),
     claimHostedLinqInstantFirstTurn: vi.fn(),
     completeHostedLinqInstantFirstTurn: vi.fn(),
+    finalizeHostedLinqInstantFirstTurnReceipt: vi.fn(),
     abandonHostedLinqInstantFirstTurn: vi.fn(),
     hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
     ensureHostedLinqInstantStartStarterUsageEnrollment: vi.fn(),
@@ -393,6 +394,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-instant-first-turn", () => ({
   claimHostedLinqInstantFirstTurn: mocks.claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn:
     mocks.completeHostedLinqInstantFirstTurn,
+  finalizeHostedLinqInstantFirstTurnReceipt:
+    mocks.finalizeHostedLinqInstantFirstTurnReceipt,
   startHostedLinqInstantFirstTurnGeneration:
     mocks.startHostedLinqInstantFirstTurnGeneration,
 }));
@@ -1126,6 +1129,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.completeHostedLinqInstantFirstTurn.mockResolvedValue({
       kind: "fallback",
     });
+    mocks.finalizeHostedLinqInstantFirstTurnReceipt.mockResolvedValue(null);
     mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockResolvedValue({
       deferredActivationWake: {
         hostedExecutionEventId: "member.activated:instant-start",
@@ -1729,6 +1733,52 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(completedTiming?.[2]).not.toHaveProperty("providerStatus");
     },
   );
+
+  it("hands a terminal first-turn receipt back to the existing runtime wake path", async () => {
+    const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+      sourceRef: "synthetic-first-turn-receipt",
+      template: "invite_signup",
+    });
+    mocks.finalizeHostedLinqInstantFirstTurnReceipt.mockResolvedValueOnce({
+      eventId: "evt_first_turn_inbound",
+      linqChatId: "chat_first_turn",
+      mailboxItemId: "mailbox_first_turn_inbound",
+      source: "linq",
+      userId: "member_first_turn",
+      wakeMailboxCheckpoint: {
+        lane: "conversation",
+        laneSeq: "1",
+      },
+    });
+    const event = buildHostedLinqProviderReceiptEvent({
+      chatId: "chat_first_turn",
+      eventId: "evt_first_turn_failed",
+      eventType: "message.failed",
+      messageId: "provider_msg_first_turn",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify(event),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "recorded-linq-provider-event:message.failed",
+    });
+
+    expect(mocks.finalizeHostedLinqInstantFirstTurnReceipt).toHaveBeenCalledWith({
+      deliveryStatus: "failed",
+      messageId: "provider_msg_first_turn",
+      prisma,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      abortSignal: expect.anything(),
+      expectedUserId: "member_first_turn",
+      mailboxItemId: "mailbox_first_turn_inbound",
+    }));
+  });
 
   it("shares a delivered invite_signup_fallback contact card once in the newly created chat", async () => {
     const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
@@ -7987,7 +8037,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("starts the web reply beside shell prewarm and wakes the runtime from the completed first turn", async () => {
+  it("starts the Web reply beside shell prewarm and lets the runtime wait on its receipt", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_prewarm";
     const eventId = "evt_instant_start_prewarm";
@@ -8137,18 +8187,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       usage: { requestedModel: "gpt-5.6-luna", response: {} },
     });
     mocks.completeHostedLinqInstantFirstTurn.mockResolvedValueOnce({
-      kind: "accepted",
-      wakeHandoff: {
-        eventId,
-        linqChatId: "chat_123",
-        mailboxItemId: "mailbox_instant_first_turn_outbound",
-        source: "linq",
-        userId: memberId,
-        wakeMailboxCheckpoint: {
-          lane: "conversation",
-          laneSeq: "2",
-        },
-      },
+      kind: "pending",
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -8180,15 +8219,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     const enrollmentIndex = callOrder.indexOf("enrollment");
-    const activationWakeIndex = callOrder.indexOf("activation-continuation");
     const replanIndex = callOrder.indexOf("replan");
-    const signalIndex = callOrder.indexOf("conversation-signal");
     const shellPrewarmIndex = callOrder.indexOf("shell-prewarm");
     const typingIndex = callOrder.indexOf("typing:chat_123");
     expect(enrollmentIndex).toBeGreaterThanOrEqual(0);
     expect(replanIndex).toBeGreaterThan(enrollmentIndex);
-    expect(signalIndex).toBeGreaterThan(replanIndex);
-    expect(activationWakeIndex).toBeGreaterThan(signalIndex);
+    expect(callOrder).not.toContain("conversation-signal");
+    expect(callOrder).not.toContain("activation-continuation");
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
     expect(shellPrewarmIndex).toBeGreaterThanOrEqual(0);
@@ -8198,22 +8235,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       source: "linq-instant-start",
       userId: memberId,
     });
-    expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
-    expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
-      userId: memberId,
-    }));
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
       chatId: "chat_123",
       timeoutMs: 2_500,
     });
     expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
-      .toHaveBeenCalledWith({
-        continuation: {
-          hostedExecutionEventId: "member.activated:instant-start",
-          memberId,
-        },
-        prisma,
-      });
+      .not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
       linqChatId: "chat_123",
       prisma,
@@ -8244,16 +8271,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: memberId,
       }),
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: memberId,
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "2",
-        userId: memberId,
-      },
-      mailboxItemId: "mailbox_instant_first_turn_outbound",
-    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
 
     typingResult.resolve({ ok: false, status: 503 });
     await typingResult.promise;
