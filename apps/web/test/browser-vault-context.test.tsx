@@ -1596,13 +1596,26 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   });
 
   assert.equal(fetchMock.mock.calls.length > 1, true);
+  const firstPollBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.equal(firstPollBody.refreshObservationOnly, true);
+  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
+  assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+  const fetchCountAfterBoundedPolling = fetchMock.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAfterBoundedPolling);
   assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
   assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
 
   await rendered.cleanup();
 });
 
-test("browser-vault provider adopts a refreshed Patterns replica after the fast polling window", async () => {
+test("browser-vault provider stops unchanged stale polling after the fast window", async () => {
   vi.useFakeTimers();
   const legacyReplica = createReplica({
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
@@ -1635,7 +1648,7 @@ test("browser-vault provider adopts a refreshed Patterns replica after the fast 
     keyId: "browser-vault-replica:e",
   });
   let currentReplicaPublished = false;
-  const fetchMock = vi.fn(() => {
+  const fetchMock = vi.fn((_url: RequestInfo | URL, _init?: RequestInit) => {
     if (fetchMock.mock.calls.length === 1) {
       return Promise.resolve(jsonResponse({
         encryptedReplica: createReplicaEnvelope(),
@@ -1687,14 +1700,22 @@ test("browser-vault provider adopts a refreshed Patterns replica after the fast 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(25_000);
   });
-  assert.equal(rendered.container.textContent, "legacy:pending");
+  await waitForText(rendered.container, "legacy:ready");
+  const fetchCountAfterBoundedPolling = fetchMock.mock.calls.length;
 
   currentReplicaPublished = true;
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAfterBoundedPolling);
+  assert.equal(rendered.container.textContent, "legacy:ready");
+
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
   await waitForText(rendered.container, "patterns:ready");
-  assert.equal(fetchMock.mock.calls.length > 2, true);
+  const focusBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+  assert.equal(focusBody.refreshObservationOnly, true);
 
   await rendered.cleanup();
 });

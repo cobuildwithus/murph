@@ -112,6 +112,14 @@ export function createBrowserVaultSessionRoute() {
       );
     }
     const requestRefresh = readOptionalRequestRefresh(body.requestRefresh);
+    const refreshObservationOnly = readOptionalRefreshObservationOnly(
+      body.refreshObservationOnly,
+    );
+    if (requestRefresh && refreshObservationOnly) {
+      throw invalidBrowserVaultSessionRequest(
+        "Browser vault session refresh requests cannot be observation-only.",
+      );
+    }
     const [workspace, deviceSyncImportPending] = await Promise.all([
       readHostedWorkspace({ userId: auth.member.id }),
       new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(
@@ -140,7 +148,10 @@ export function createBrowserVaultSessionRoute() {
       );
     };
 
-    if (freshnessAssessment.shouldRefresh || requestRefresh) {
+    if (requestRefresh || (
+      freshnessAssessment.shouldRefresh
+      && !refreshObservationOnly
+    )) {
       scheduleRefreshAfterResponse();
     }
 
@@ -311,6 +322,20 @@ function readOptionalRequestRefresh(value: unknown): boolean {
     throw hostedOnboardingError({
       code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
       message: "Browser vault session request refresh flag must be a boolean.",
+      httpStatus: 400,
+    });
+  }
+  return value;
+}
+
+function readOptionalRefreshObservationOnly(value: unknown): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  if (typeof value !== "boolean") {
+    throw hostedOnboardingError({
+      code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      message: "Browser vault session refresh observation flag must be a boolean.",
       httpStatus: 400,
     });
   }

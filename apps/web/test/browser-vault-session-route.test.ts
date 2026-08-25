@@ -212,6 +212,31 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("does not schedule runtime work for an observation-only missing replica poll", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        refreshObservationOnly: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      encryptedReplica: null,
+      freshness: "stale",
+      refreshPending: true,
+      state: "empty",
+    });
+  });
+
   it("rejects an all-bucket interactive request reserved for export", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
 
@@ -1901,6 +1926,25 @@ describe("browser vault session route", () => {
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
         requestRefresh: "yes",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      },
+    });
+  });
+
+  it("rejects a refresh request marked observation-only", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        refreshObservationOnly: true,
+        requestRefresh: true,
       }),
     );
 

@@ -56,6 +56,7 @@ export type BrowserVaultWarmLoadOutcome =
 
 export interface StartBrowserVaultWarmLoadOptions {
   expectedMemberId?: string | null;
+  refreshObservationOnly?: boolean;
   requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
   requestedShards?: readonly BrowserVaultReplicaShard[];
   requestRefresh?: boolean;
@@ -142,6 +143,7 @@ export function startBrowserVaultWarmLoad(
         knownReplicaRef: readySnapshot?.ref ?? null,
         requestedShards,
         requestedMetricBuckets,
+        refreshObservationOnly: options.refreshObservationOnly,
         requestRefresh: options.requestRefresh,
         signal: controller.signal,
       });

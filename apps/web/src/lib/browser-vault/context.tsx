@@ -473,6 +473,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         options.requestRuntimeRefreshUntilAfterRequest !== undefined;
       const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined
         || options.retryPostRequestRefresh === true;
+      const refreshObservationOnly = background && !requestRuntimeRefresh;
       const targetPathname = authorityPathname ?? pathname;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
@@ -549,6 +550,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         expectedMemberId: initialMemberId,
         requestedMetricBuckets,
         requestedShards,
+        refreshObservationOnly,
         requestRefresh: requestRuntimeRefresh,
       });
       if (
@@ -806,7 +808,13 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       void pollStaleReplica().finally(() => {
         if (!cancelled) {
-          const interval = Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS
+          const elapsedMs = Date.now() - startedAt;
+          const inFastWindow = elapsedMs <= BROWSER_VAULT_STALE_POLL_WINDOW_MS;
+          if (!runtimeRefreshPolling && !inFastWindow) {
+            setSessionRefreshPending(false);
+            return;
+          }
+          const interval = inFastWindow
             ? BROWSER_VAULT_STALE_POLL_INTERVAL_MS
             : BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS;
           timeoutId = setTimeout(poll, interval);
