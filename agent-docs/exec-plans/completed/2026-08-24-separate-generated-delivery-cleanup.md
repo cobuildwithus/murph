@@ -1,7 +1,7 @@
 # Separate Generated-Delivery Cleanup From Shutdown Handoff
 
-Status: active
-Updated: 2026-08-24
+Status: completed
+Updated: 2026-08-25
 
 ## Goal
 
@@ -44,3 +44,25 @@ PR 2235 exclusively owns shutdown wake handoff behavior.
 - Preserve the completed historical plan as an immutable snapshot.
 - Do not weaken shutdown fencing, generated-delivery ownership checks, or
   structural fail-closed behavior.
+
+## Verification
+
+- Generated-delivery cleanup unit coverage passed (33 assertions).
+- Hosted snapshot bridge coverage passed (54 assertions).
+- Assistant engine, assistant runtime, Cloudflare, and Web typechecks passed.
+- Changelog fragment/archive coverage passed (49 assertions).
+- The production-shaped hosted-local E2E passed without a direct wake nudge:
+  cleanup metrics, one committed shutdown snapshot, cold restore, and one reply
+  were all observed.
+- The current head produced a clean Git merge tree with PR 2235's current head.
+
+## Review
+
+- The parent final review found no remaining wake-protocol or retry-scheduler
+  diff in PR 2231 and confirmed that the shared E2E assertions compose.
+- Final ReviewGPT round 2 used a fresh full snapshot and passed with no
+  qualifying findings.
+- The changelog remains applicable because members can experience lighter
+  restarts after completed delivery residue is removed; its copy makes no
+  shutdown-handoff claim.
+Completed: 2026-08-25
