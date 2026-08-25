@@ -15248,12 +15248,17 @@ describe('assistant automation run loop', () => {
     expect(events).toContainEqual({
       type: 'daemon.failed',
       details: 'daemon down',
+      errorCode: 'daemon_failed',
+      failureContext: {
+        retryable: false,
+      },
+      safeErrorMessage: 'daemon down',
     })
     expect(result.lastFailure).toEqual({
       phase: 'daemon',
       code: 'daemon_failed',
       retryable: false,
-      message: 'The assistant daemon stopped unexpectedly.',
+      message: 'daemon down',
     })
   })
 

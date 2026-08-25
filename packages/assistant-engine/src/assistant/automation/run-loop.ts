@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { assistantRunResultSchema, type AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { InboxServices, InboxRunEvent } from '@murphai/inbox-services'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
@@ -185,6 +187,45 @@ function normalizeAssistantRunFailureMessage(
   return Array.from(selected).slice(0, ASSISTANT_RUN_FAILURE_MESSAGE_MAX_LENGTH).join('')
 }
 
+function buildAssistantDaemonFailureEvent(error: unknown): AssistantRunEvent {
+  const diagnosticError = error instanceof VaultCliError
+    ? error
+    : new VaultCliError(
+        readAssistantRunFailureCode(error) ?? 'daemon_failed',
+        formatStructuredErrorMessage(error),
+        {
+          retryable: false,
+          stage: 'response',
+        },
+      )
+  const projection = projectVaultCliError(diagnosticError)
+  const message = normalizeAssistantRunFailureMessage(
+    projection.message,
+    'The assistant daemon stopped unexpectedly.',
+  )
+
+  return {
+    type: 'daemon.failed',
+    details: message,
+    errorCode: projection.code,
+    failureContext: {
+      retryable: projection.retryable,
+    },
+    safeErrorMessage: message,
+  }
+}
+
+function readAssistantRunFailureCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+
+  const code = error.code
+  return typeof code === 'string' && SAFE_ASSISTANT_RUN_FAILURE_CODE_PATTERN.test(code)
+    ? code
+    : null
+}
+
 export async function runAssistantAutomation(
   input: RunAssistantAutomationInput,
 ) {
@@ -267,12 +308,9 @@ export async function runAssistantAutomation(
                   vault: input.vault,
                 })
               }).catch((error) => {
-                const detail = formatStructuredErrorMessage(error)
-                lastError = detail
-                onEvent({
-                  type: 'daemon.failed',
-                  details: detail,
-                })
+                const failureEvent = buildAssistantDaemonFailureEvent(error)
+                lastError = failureEvent.safeErrorMessage ?? null
+                onEvent(failureEvent)
                 controller.abort()
               })
             } else if (
@@ -312,12 +350,9 @@ export async function runAssistantAutomation(
         },
       )
       .catch((error) => {
-        const detail = formatStructuredErrorMessage(error)
-        lastError = detail
-        onEvent({
-          type: 'daemon.failed',
-          details: detail,
-        })
+        const failureEvent = buildAssistantDaemonFailureEvent(error)
+        lastError = failureEvent.safeErrorMessage ?? null
+        onEvent(failureEvent)
         controller.abort()
       })
   }

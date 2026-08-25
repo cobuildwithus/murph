@@ -561,7 +561,10 @@ async function assistantDaemonFetchJson(
     throw buildAssistantDaemonTransportError(routePath)
   }
   if (!response.ok) {
-    throw buildAssistantDaemonHttpError(response.status)
+    throw buildAssistantDaemonHttpError(
+      response.status,
+      readAssistantDaemonErrorCode(text),
+    )
   }
 
   const parsedPayload = parseAssistantDaemonJsonPayload(text)
@@ -583,7 +586,37 @@ function buildAssistantDaemonTransportError(routePath: string): VaultCliError {
   )
 }
 
-function buildAssistantDaemonHttpError(status: number): VaultCliError {
+const ASSISTANT_DAEMON_OWNER_FAILURES = {
+  '400:ASSISTANT_INVALID_RUNTIME_ID': {
+    message: 'Assistant daemon rejected an invalid runtime identifier. Correct the identifier and retry.',
+    stage: 'validation',
+  },
+  '400:ASSISTANT_STATE_INVALID_DOC_ID': {
+    message: 'Assistant daemon rejected an invalid state document identifier. Correct the identifier and retry.',
+    stage: 'validation',
+  },
+  '400:ASSISTANTD_VAULT_MISMATCH': {
+    message: 'Assistant daemon is bound to a different vault. Use the configured vault or restart the daemon for the intended vault.',
+    stage: 'conflict',
+  },
+  '404:ASSISTANT_SESSION_NOT_FOUND': {
+    message: 'Assistant session was not found. List current sessions and retry with an existing session id.',
+    stage: 'read',
+  },
+  '404:ASSISTANT_CRON_JOB_NOT_FOUND': {
+    message: 'Assistant cron job was not found. List current cron jobs and retry with an existing job id.',
+    stage: 'read',
+  },
+  '409:assistantd_conflict': {
+    message: 'Assistant daemon rejected the request because local state changed. Refresh the affected resource, then retry the request.',
+    stage: 'conflict',
+  },
+} as const
+
+function buildAssistantDaemonHttpError(
+  status: number,
+  ownerCode: string | null,
+): VaultCliError {
   if (status === 401 || status === 403) {
     return new VaultCliError(
       'assistant_daemon_auth_failed',
@@ -591,6 +624,59 @@ function buildAssistantDaemonHttpError(status: number): VaultCliError {
       {
         retryable: false,
         stage: 'authorization',
+      },
+    )
+  }
+
+  const ownerFailure = ownerCode
+    ? ASSISTANT_DAEMON_OWNER_FAILURES[
+        `${status}:${ownerCode}` as keyof typeof ASSISTANT_DAEMON_OWNER_FAILURES
+      ]
+    : undefined
+  if (ownerFailure && ownerCode) {
+    return new VaultCliError(
+      ownerCode,
+      ownerFailure.message,
+      {
+        retryable: false,
+        stage: ownerFailure.stage,
+      },
+    )
+  }
+
+  if (status === 400 || status === 413 || status === 422) {
+    return new VaultCliError(
+      status === 413
+        ? 'assistant_daemon_request_too_large'
+        : 'assistant_daemon_request_invalid',
+      status === 413
+        ? 'Assistant daemon request was too large. Reduce the submitted request and retry.'
+        : 'Assistant daemon rejected invalid request input. Correct the command arguments and retry.',
+      {
+        retryable: false,
+        stage: 'validation',
+      },
+    )
+  }
+
+  if (status === 404) {
+    return new VaultCliError(
+      'assistant_daemon_resource_not_found',
+      'Assistant daemon could not find the requested resource. List current resources and retry with an existing identifier.',
+      {
+        retryable: false,
+        stage: 'read',
+      },
+    )
+  }
+
+  if (status === 409) {
+    return new VaultCliError(
+      'assistant_daemon_conflict',
+      'Assistant daemon rejected the request because local state changed. Refresh the affected resource, then retry the request.',
+      {
+        retryable: false,
+        stage: 'conflict',
       },
     )
   }
@@ -606,6 +692,23 @@ function buildAssistantDaemonHttpError(status: number): VaultCliError {
       stage: 'response',
     },
   )
+}
+
+function readAssistantDaemonErrorCode(value: string): string | null {
+  const parsed = parseAssistantDaemonJsonPayload(value)
+  if (
+    !parsed.ok ||
+    typeof parsed.value !== 'object' ||
+    parsed.value === null ||
+    Array.isArray(parsed.value)
+  ) {
+    return null
+  }
+
+  const code = (parsed.value as { code?: unknown }).code
+  return typeof code === 'string' && /^[A-Za-z0-9_.:-]{1,96}$/u.test(code)
+    ? code
+    : null
 }
 
 function buildAssistantDaemonResponseError(): VaultCliError {

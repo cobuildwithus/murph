@@ -662,6 +662,12 @@ test('cron and outbox mutation helpers serialize payloads and parse counts', asy
           daemonStarted: false,
           failed: 0,
           lastError: null,
+          lastFailure: {
+            code: 'PROVIDER_TEMPORARY_FAILURE',
+            message: 'The provider was temporarily unavailable.',
+            phase: 'reply',
+            retryable: true,
+          },
           noAction: 0,
           reason: 'completed',
           replied: 0,
@@ -770,19 +776,21 @@ test('cron and outbox mutation helpers serialize payloads and parse counts', asy
       sent: 1,
     },
   )
-  assert.equal(
-    (
-      await maybeRunAssistantAutomationViaDaemon(
-        {
-          once: true,
-          requestId: undefined,
-          vault: '/tmp/vault',
-        },
-        TEST_ENV,
-      )
-    )?.reason,
-    'completed',
+  const automationResult = await maybeRunAssistantAutomationViaDaemon(
+    {
+      once: true,
+      requestId: undefined,
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
   )
+  assert.equal(automationResult?.reason, 'completed')
+  assert.deepEqual(automationResult?.lastFailure, {
+    code: 'PROVIDER_TEMPORARY_FAILURE',
+    message: 'The provider was temporarily unavailable.',
+    phase: 'reply',
+    retryable: true,
+  })
   assert.deepEqual(
     await maybeProcessDueAssistantCronViaDaemon(
       {
@@ -942,7 +950,7 @@ test('daemon helpers surface structured HTTP errors, request transport failures,
       new Response(
         JSON.stringify({
           code: 'assistantd_conflict',
-          error: 'daemon rejected the request',
+          error: 'PRIVATE_DAEMON_REJECTION_MARKER',
         }),
         {
           headers: {
@@ -1008,13 +1016,13 @@ test('daemon helpers surface structured HTTP errors, request transport failures,
       ),
     (error: unknown) => {
       assertDaemonClientError(error, {
-        code: 'assistant_daemon_http_failed',
+        code: 'assistantd_conflict',
         retryable: false,
-        stage: 'response',
+        stage: 'conflict',
       })
       const serialized = JSON.stringify(error)
-      assert.equal(serialized.includes('daemon rejected the request'), false)
-      assert.equal(serialized.includes('assistantd_conflict'), false)
+      assert.equal(serialized.includes('PRIVATE_DAEMON_REJECTION_MARKER'), false)
+      assert.equal(serialized.includes('assistantd_conflict'), true)
       return true
     },
   )
@@ -1048,6 +1056,62 @@ test('daemon helpers surface structured HTTP errors, request transport failures,
         retryable: false,
         stage: 'response',
       })
+      return true
+    },
+  )
+})
+
+test('daemon client preserves bounded owner codes for correctable 400 and 404 responses', async () => {
+  fetchMock
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        code: 'ASSISTANT_INVALID_RUNTIME_ID',
+        error: 'PRIVATE_INVALID_RUNTIME_MARKER',
+      }), { status: 400 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
+        error: 'PRIVATE_MISSING_CRON_MARKER',
+      }), { status: 404 }),
+    )
+
+  await assert.rejects(
+    () => maybeGetAssistantOutboxIntentViaDaemon(
+      { intentId: '../escape', vault: '/tmp/vault' },
+      TEST_ENV,
+    ),
+    (error: unknown) => {
+      assertDaemonClientError(error, {
+        code: 'ASSISTANT_INVALID_RUNTIME_ID',
+        retryable: false,
+        stage: 'validation',
+      })
+      assert.match(
+        error.message,
+        /Correct the identifier and retry\.$/u,
+      )
+      assert.equal(JSON.stringify(error).includes('PRIVATE_INVALID_RUNTIME_MARKER'), false)
+      return true
+    },
+  )
+
+  await assert.rejects(
+    () => maybeGetAssistantCronJobViaDaemon(
+      { job: 'missing-job', vault: '/tmp/vault' },
+      TEST_ENV,
+    ),
+    (error: unknown) => {
+      assertDaemonClientError(error, {
+        code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
+        retryable: false,
+        stage: 'read',
+      })
+      assert.match(
+        error.message,
+        /List current cron jobs and retry with an existing job id\.$/u,
+      )
+      assert.equal(JSON.stringify(error).includes('PRIVATE_MISSING_CRON_MARKER'), false)
       return true
     },
   )
