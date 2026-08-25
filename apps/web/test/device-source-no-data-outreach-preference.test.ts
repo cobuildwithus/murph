@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  buildHostedExecutionEmailConversationMessageWake,
+} from "@murphai/hosted-execution";
+
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readInputAuthority: vi.fn(),
@@ -44,6 +48,18 @@ function telegramWake(threadIsDirect: boolean) {
       telegramMessage: { threadIsDirect },
     },
   };
+}
+
+function directEmailWake(assistantStyleSettingsAuthorized: boolean) {
+  return buildHostedExecutionEmailConversationMessageWake({
+    assistantStyleSettingsAuthorized,
+    eventId: "email-event-synthetic",
+    identityId: "email-identity-synthetic",
+    occurredAt: "2026-08-25T04:00:00.000Z",
+    rawMessageKey: "email-raw-synthetic",
+    threadIsDirect: true,
+    userId: "member-synthetic",
+  });
 }
 
 function createPreferenceStore(initial: number | null | undefined = undefined) {
@@ -207,5 +223,34 @@ describe("hosted source no-data outreach policy", () => {
       },
     })).rejects.toThrow("current private member input");
     expect(store.read()).toEqual({ reminderAfterDays: 10 });
+  });
+
+  it("requires authenticated direct email sender authority before mutation", async () => {
+    const store = createPreferenceStore();
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    mocks.readInputWake.mockResolvedValue(directEmailWake(false));
+
+    const request = {
+      assistantInputId: ASSISTANT_INPUT_ID,
+      mode: "off" as const,
+      sourceProviderSlug: "garmin",
+    };
+    await expect(configureHostedSourceNoDataOutreach({
+      memberId: "member-synthetic",
+      request,
+    })).rejects.toThrow("current private member input");
+    expect(store.preference.findUnique).not.toHaveBeenCalled();
+    expect(store.preference.upsert).not.toHaveBeenCalled();
+
+    mocks.readInputWake.mockResolvedValue(directEmailWake(true));
+    await expect(configureHostedSourceNoDataOutreach({
+      memberId: "member-synthetic",
+      request,
+    })).resolves.toMatchObject({
+      effectiveAfterDays: null,
+      setting: "off",
+      status: "saved",
+    });
+    expect(store.preference.upsert).toHaveBeenCalledTimes(1);
   });
 });

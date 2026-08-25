@@ -113,7 +113,8 @@ function isDirectMemberConversationWake(
     return wake.message.linqMessage.threadIsDirect === true;
   }
   if (isHostedEmailConversationMessageWake(wake)) {
-    return wake.message.threadIsDirect === true;
+    return wake.message.threadIsDirect === true
+      && wake.message.assistantStyleSettingsAuthorized === true;
   }
   return isHostedTelegramConversationMessageWake(wake)
     && wake.message.telegramMessage.threadIsDirect === true;
