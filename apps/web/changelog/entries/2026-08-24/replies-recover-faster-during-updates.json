@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "replies-recover-faster-during-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Replies recover faster during updates",
+    "summary": "Messages that arrive while Murph is restarting after a service update now move into recovery without an avoidable retry delay.",
+    "details": "Recovery still waits for the current conversation state to be saved safely before a replacement begins, so the faster handoff does not trade away context or duplicate replies.",
+    "relevanceTags": ["assistant", "messaging", "reliability"],
+    "sourcePullRequests": [2235]
+  }
+}

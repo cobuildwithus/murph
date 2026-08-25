@@ -166,21 +166,19 @@ A short acknowledgement after a set message or assistant reply is not another
 set completion and cannot advance the coordinate. The last exact workout,
 exercise, and set the member identified remain the only candidate. If an exact
 coordinate is not available from a current command result, durable card marker,
-the exact marker on Murph's workout-specific follow-up, or immediate
-causal context, Murph asks which workout or set is intended. It does not select
+or host-preserved immediate causal context, Murph asks which workout or set is
+intended. It does not select
 by recency, create a recovery workout, close another workout, or demand
 unrelated finish metadata.
 
-In an ordinary private conversation, when Murph asks a question whose answer
-should update one exact workout, its model-authored response ends with
-`[Murph workout follow-up: <evt_id>]` using the exact id already returned by the
-current workout command or carried by an existing exact marker. The delivered
-and persisted text are identical, and the member may see the canonical id.
-Structured-output, scheduled-notification, group, output-only, and maintenance
-turns keep their existing output contract unchanged and never use this marker.
-The marker is only a handoff: the reply still exact-reads and mutates that
-workout through the canonical owner. It creates no active-workout selector,
-focused-workout state, or recency fallback.
+After a successful live-workout start, the runtime attaches its schema-validated
+exact `activity_session` id to that assistant delivery through the existing
+outbox context-reference field. A later reply carries it forward only when a
+successful exact read or mutation returns the same id. The relationship is
+runtime-owned and absent from member-facing text. An unrelated assistant
+delivery, invalid result, multiple ids, or conflict clears implicit continuity.
+This creates no active-workout selector, focused-workout state, timeout, or
+recency fallback.
 
 Starting or logging a new workout is independent of older unfinished workouts.
 Every mutation carries the exact canonical workout id and uses that workout's

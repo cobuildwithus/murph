@@ -954,6 +954,17 @@ function collectCallProviderIds(input: {
   readonly relativePath: string;
   readonly urlPath: NodePath<Node> | null;
 }): string[] {
+  const staticHost = readStaticHttpUrlHost(input.urlPath);
+  if (staticHost !== null) {
+    // A proven request host outranks naming heuristics; unresolved URLs use the fallback below.
+    return providerBoundaryRegistry
+      .filter((provider) =>
+        provider.hosts.some((host) => isSameOrSubdomain(staticHost, host)),
+      )
+      .map((provider) => provider.id)
+      .sort((left, right) => left.localeCompare(right));
+  }
+
   const providerIds = new Set(input.importedProviderIds);
   const callText = readNodeText(input.callPath.node, input.contents);
   const urlText = input.urlPath
@@ -972,6 +983,86 @@ function collectCallProviderIds(input: {
     }
   }
   return [...providerIds].sort((left, right) => left.localeCompare(right));
+}
+
+function readStaticHttpUrlHost(
+  originalPath: NodePath<Node> | null,
+): string | null {
+  const value = readStaticString(originalPath, new Set());
+  if (value === null) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.hostname.toLowerCase().replace(/\.+$/u, "")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStaticString(
+  originalPath: NodePath<Node> | null,
+  resolvingBindings: Set<string>,
+): string | null {
+  if (!originalPath?.node) {
+    return null;
+  }
+  const expressionPath = unwrapExpressionPath(originalPath);
+  if (expressionPath.isStringLiteral()) {
+    return expressionPath.node.value;
+  }
+  if (expressionPath.isTemplateLiteral()) {
+    return expressionPath.node.expressions.length === 0
+      ? expressionPath.node.quasis[0]?.value.cooked ?? null
+      : null;
+  }
+  if (expressionPath.isBinaryExpression() && expressionPath.node.operator === "+") {
+    const left = readStaticString(
+      expressionPath.get("left") as NodePath<Node>,
+      resolvingBindings,
+    );
+    if (left === null) {
+      return null;
+    }
+    const right = readStaticString(
+      expressionPath.get("right") as NodePath<Node>,
+      resolvingBindings,
+    );
+    return right === null ? null : left + right;
+  }
+  if (!expressionPath.isIdentifier()) {
+    return null;
+  }
+  const binding = expressionPath.scope.getBinding(expressionPath.node.name);
+  if (!binding?.constant) {
+    return null;
+  }
+  const bindingKey = `${expressionPath.node.name}:${binding.identifier.start ?? 0}`;
+  if (resolvingBindings.has(bindingKey)) {
+    return null;
+  }
+  const declarator = binding.path.isVariableDeclarator()
+    ? binding.path
+    : binding.path.parentPath?.isVariableDeclarator()
+      ? binding.path.parentPath
+      : null;
+  if (
+    !declarator ||
+    declarator.node.id.type !== "Identifier" ||
+    declarator.node.id.name !== expressionPath.node.name
+  ) {
+    return null;
+  }
+  const initPath = declarator.get("init") as NodePath<Node> | null;
+  return initPath?.node
+    ? readStaticString(initPath, new Set(resolvingBindings).add(bindingKey))
+    : null;
+}
+
+function isSameOrSubdomain(hostname: string, registeredHost: string): boolean {
+  return hostname === registeredHost || hostname.endsWith(`.${registeredHost}`);
 }
 
 function isStaticSameOrigin(

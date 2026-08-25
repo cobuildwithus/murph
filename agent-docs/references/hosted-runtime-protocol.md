@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-16
+Last verified: 2026-08-24
 
 ## Decision
 
@@ -2430,6 +2430,13 @@ retention remains model-free, and custom inference keeps its selected route.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`
 state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
+The existing signed usage-record response carries Web's decision from the same
+locked allowance settlement. A false, malformed, or unavailable settlement
+monotonically revokes managed-AI admission on the exact active attempt and
+generation; it never changes write authority or re-enables admission. The
+first paid request adds no new admission round trip, while every later provider
+request continues through the existing active-fence check and is denied after
+the crossing settlement completes.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
 workspace read/readiness steps are capped by the remaining budget. Fresh starts
@@ -2705,14 +2712,17 @@ maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
-may join through the generic live-steering path only before the first completed
-assistant response, only while the turn remains below the cumulative 50-message
+may join through the generic live-steering path while the current provider
+request is open, only while the turn remains below the cumulative 50-message
 initial-plus-live bound, and only when the stored event is the next positive
 causal-sequence successor and preserves the direct actor and native reply
 anchor, or for an authenticated non-direct group preserves the room, delivery
 route, account/audience, projection readiness, and reaction boundary. Every
-completed provider text or media segment remains deliverable; the group audience
-does not create a latest-response replacement rule. A
+completed provider text or media segment remains deliverable for ordinary
+turns. An ordinary interactive Linq/iMessage or Telegram group auto-reply is the
+narrow exception: provider request 0 is an in-memory draft until the existing
+commit boundary, and late input during a four-second held-draft window may
+select one same-thread provider request 1 whose result replaces that draft. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
@@ -2722,16 +2732,26 @@ acknowledges transport only. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a
-normal later assistant turn. First-response closure removes the conversation
-registration and starts no further steer, but retains the existing
-provider-turn correlation until the one steer already started under that exact
-key settles; a rejected steer is not acknowledged and its input remains
-pending. Missing input, a causal gap, a boundary change, capacity overflow, or
-input arriving after the first completed response remains pending for a normal
+normal later assistant turn. Outside the held-draft group exception,
+first-response closure removes the conversation registration and starts no
+further steer, but retains the existing provider-turn correlation until the one
+steer already started under that exact key settles; a rejected steer is not
+acknowledged and its input remains pending. In the exception, request 0 pauses
+provider steering but keeps conversation admission registered until an atomic
+quiet cutoff or one reconsideration admission; request 1 closes at its first
+completed response. Missing input, a causal gap, a boundary change, capacity
+overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
-instead of falling through, and the assistant engine does not synthesize
-another provider request inside the same assistant turn. Final-delivery and
-hosted-tool effect keys use the newest accepted causal input as the stable
+instead of falling through. Reconsideration is capped at provider request 1 and
+only its selected conversational result may enter transcript, terminal
+evidence, and outbox state; completed tools and progress effects remain
+authoritative and are not repeated. While either held request remains
+fallible, source events and the accepted-input journal own recovery; canonical
+user transcript entries and their journal references materialize only after
+the selected turn crosses `commit-started`. A failed request 1 can therefore
+retry the same source events without leaving duplicate transcript history.
+Final-delivery and hosted-tool effect keys use the newest accepted causal input
+as the stable
 replay anchor while the full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
@@ -2901,8 +2921,16 @@ marker, or second persistence owner is introduced.
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
-cache/tmp, rebuildable projections, and assistant JSONL event logs. The one
-derived-cache exception is the exact query SQLite triplet
+cache/tmp, rebuildable projections, and assistant JSONL event logs. The
+private-media-specific exclusion is ordinary inbound hosted video: snapshot planning
+reads validated canonical inbox-capture records and excludes every normalized
+video path that has not been promoted through an explicit canonical event raw
+reference. Pending accepted input may protect the local file for active work,
+but never makes it portable; invalid capture metadata fails snapshot planning
+closed. Idle maintenance separately gives unprotected video a zero-length
+retention window, preserving descriptors and parser derivatives while the
+canonical retention transaction appends the tombstone and deletes the bytes.
+The one derived-cache exception is the exact query SQLite triplet
 `.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
 canonical rescan after a cold restore, while normal source-manifest validation
 still discards and rebuilds stale copies. New archives use the POSIX PAX format
@@ -2976,7 +3004,7 @@ request. Conversation and other foreground work still preempt refresh work.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a
-legacy readable replica while refresh retries, but the Worker and warm containers
+legacy readable replica while refresh remains pending or stale, but the Worker and warm containers
 should converge immediately after a generation bump so refreshes produce the
 current marker instead of repeatedly publishing legacy refs. During rollback,
 an older Web or Worker parser may omit the additive marker while echoing an
@@ -2987,13 +3015,30 @@ all other immutable-field mismatches still fail closed.
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
 hashes; mtimes, generatedAt, user ids, and runtime cache paths are excluded.
-Refresh builds from the restored `vaultRoot`, recomputes the source hash before
-publish, and discards the attempt if source content changed. Empty current
-query-visible content is publishable so deletions can clear stale dashboard
-state. Runtime-side refresh runs only after foreground work and checkpoint
-correctness are settled, is capped by the browser-vault replica byte limit, and
-races the existing runtime wake signal; if a wake arrives before publish, refresh
-returns scheduled/deferred work instead of publishing partial state.
+Refresh reads one strict canonical source snapshot from the restored `vaultRoot`,
+derives its metric projection in memory, and does not read, rebuild, or mutate
+the local SQLite query projection. It recomputes the source hash before publish
+and discards the attempt if source content changed. Empty current query-visible
+content is publishable so deletions can clear stale dashboard state. Runtime-side
+refresh runs only after foreground work and checkpoint correctness are settled,
+is capped by the browser-vault replica byte limit, and races the existing runtime
+wake signal; if a wake arrives before publish, refresh retains the current work
+instead of publishing partial state.
+The default refresh deadline is 20 seconds and remains bounded by any earlier
+invocation deadline. Cancellation reaches the direct canonical reads, replica
+build checkpoints, content hashing, and size serialization; parallel source
+reads share that signal and every started child settles before the lane returns,
+so timed-out or preempted work cannot continue beside a successor attempt. A
+Browser Vault control or no-record device-sync item that already reached
+`recording` is selected read-only. A runtime wake or host abort leaves its durable
+state untouched for the next foreground-safe opportunity. Timeout, source
+change, publication conflict, generic failure, and an oversized replica
+terminally record the current item without a future retry; a later browser
+freshness request may enqueue new work after the underlying state changes.
+Fresh work and recording items that own post-checkpoint effects retain their
+existing pre-effect preparation checkpoint. Missing optional publication
+support and missing workspace context remain explicit terminal no-op
+classifications rather than implicit fallthrough.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
@@ -3115,7 +3160,9 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted member identity/routing/billing/email authorization
 - hosted device-sync authority
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
-- anonymized assistant-runtime issue sink
+- anonymized assistant-runtime issue sink, including nullable public release,
+  stable runtime-name, and occurrence-attempt columns used to correlate failures
+  with deploy and runner evidence without adding member identity
 - Assistant Ask target resolution, membership-generation and origin binding,
   deterministic request/completion identity, expiry checks, and private return
   route authority; immutable consented-disclosure permissions, per-membership
@@ -3136,6 +3183,9 @@ routing.
 - staged assistant input events and accepted-input journal state
 - auto-reply channel state, including channel enablement, `eligibleAfter`, and terminal handling evidence
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
+- pending assistant-runtime issue records stamped at occurrence with the current
+  authenticated invocation attempt; a later invocation that retries export does
+  not become the issue's attempt
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy
 - runtime timers, assistant next wake projection, and the shared inbound
@@ -3152,12 +3202,18 @@ routing.
 
 - per-user Durable Object routing
 - lease/fencing generation
+- the stable `cloudflare-hosted-runner` runtime identity and runner-bundle
+  manifest public release SHA injected into hosted assistant issue capture; a
+  Cloudflare version UUID and private deployment-workflow SHA are not substitutes
 - alarm/fence coordination
 - container invocation
 - no signed usage-allow decision or live Web usage-gate callback in runner-start
   authority; Temporal consumes the web-owned member-access decision, and
   Cloudflare/runner #587 or newer is the permanent rollback floor while Web
   omits the retired callback route
+- exact-attempt revocation of the active fence's managed-AI admission bit from
+  the existing signed post-settlement usage response; this does not grant
+  allowance, change write authority, or create durable spend truth
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing

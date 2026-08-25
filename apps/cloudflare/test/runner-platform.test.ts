@@ -6462,6 +6462,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (url.pathname.endsWith("/api/internal/hosted-execution/usage/record")) {
         return new Response(JSON.stringify({
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: "turn_usage.runtime_write_123",
         }), {
@@ -6792,6 +6793,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (url.pathname.endsWith("/api/internal/hosted-execution/usage/record")) {
         return new Response(JSON.stringify({
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: "turn_usage.runtime_write_123",
         }), {
@@ -7853,6 +7855,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
 
       return new Response(JSON.stringify({
+        platformAiUsageAllowedAfter: true,
         recorded: true,
         usageId: "turn_usage.attempt-1",
       }), {
@@ -7875,6 +7878,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(
       platform.usageRecordPort!.recordUsage(usageRecord, noticeDeliveryTarget),
     ).resolves.toEqual({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: "turn_usage.attempt-1",
     });
@@ -7897,6 +7901,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       requestBodies.push(await request.json());
 
       return new Response(JSON.stringify({
+        platformAiUsageAllowedAfter: true,
         recorded: true,
         usageId: usageRecord.usageId,
       }), {
@@ -7927,6 +7932,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("wraps invalid hosted usage recording responses", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      platformAiUsageAllowedAfter: true,
       recorded: 2,
       usageId: "turn_usage.attempt-1",
     }), {

@@ -3,9 +3,11 @@ import { promises as fs } from "node:fs";
 import {
   assertContract,
   collectEventRawReferencePaths,
+  eventRecordSchema,
   inboxAttachmentRetentionRecordSchema,
   inboxCaptureRecordSchema,
   safeParseContract,
+  type EventRecord,
   type InboxAttachmentRetentionRecord,
   type InboxCaptureAttachmentRecord,
   type InboxCaptureRecord,
@@ -29,11 +31,6 @@ export const INBOX_MEDIA_RETENTION_DAYS = 14;
 export const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
-const RETAINABLE_INBOX_MEDIA_KINDS = new Set<InboxCaptureAttachmentRecord["kind"]>([
-  "audio",
-  "image",
-  "video",
-]);
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RETENTION_REASON = "inbox_media_retention" as const;
 
@@ -48,6 +45,7 @@ export interface RunInboxMediaRetentionInput {
   protectedStoredPaths?: Iterable<string>;
   signal?: AbortSignal | null;
   vaultRoot: string;
+  videoRetentionWindowMs?: number;
 }
 
 export interface InboxMediaRetentionMaterializeResult {
@@ -65,8 +63,15 @@ export interface InboxMediaRetentionResult {
 interface InboxMediaRetentionCandidate {
   attachment: InboxCaptureAttachmentRecord;
   capture: InboxCaptureRecord;
+  cutoffMs: number;
   materialize: boolean;
+  retentionWindowMs: number;
   storedPath: string;
+}
+
+export interface ListTransientInboxVideoStoredPathsInput {
+  signal?: AbortSignal | null;
+  vaultRoot: string;
 }
 
 export async function runInboxMediaRetention(
@@ -74,16 +79,16 @@ export async function runInboxMediaRetention(
 ): Promise<InboxMediaRetentionResult> {
   throwIfRetentionAborted(input.signal);
   const now = normalizeRetentionNow(input.now);
+  const nowMs = Date.parse(now);
   const maxAttachments = normalizeRetentionBatchSize(input.maxAttachments);
   if (maxAttachments === 0) {
     return emptyRetentionResult();
   }
-  const cutoffMs = Date.parse(now) - INBOX_MEDIA_RETENTION_WINDOW_MS;
   const protectedAttachmentIds = new Set(input.protectedAttachmentIds ?? []);
   const protectedCaptureIds = new Set(input.protectedCaptureIds ?? []);
   const protectedStoredPaths = normalizeProtectedStoredPaths(input.protectedStoredPaths ?? []);
   const protectedMediaRecheckAt = new Date(
-    Date.parse(now) + INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS,
+    nowMs + INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS,
   ).toISOString();
   const [captureRecords, durableRawInboxRefs, initialRetentionRecords] = await Promise.all([
     listInboxCaptureRecords(input.vaultRoot),
@@ -103,6 +108,7 @@ export async function runInboxMediaRetention(
 
   const resolveActiveParserJobProtectionExpiresAt = async (
     attachment: InboxCaptureAttachmentRecord,
+    cutoffMs: number,
   ): Promise<string | null> => {
     activeParserJobProtector ??= await openActiveAttachmentParseJobProtector(input.vaultRoot);
     return activeParserJobProtector.resolveProtectionExpiresAt(attachment, cutoffMs);
@@ -123,9 +129,14 @@ export async function runInboxMediaRetention(
       for (const attachment of capture.attachments) {
         throwIfRetentionAborted(input.signal);
         const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
-        if (!storedPath || !attachment.sha256 || !RETAINABLE_INBOX_MEDIA_KINDS.has(attachment.kind)) {
+        if (!storedPath || !attachment.sha256 || !isRetainableInboxMediaKind(attachment.kind)) {
           continue;
         }
+        const retentionWindowMs = resolveInboxMediaRetentionWindowMs({
+          kind: attachment.kind,
+          videoRetentionWindowMs: input.videoRetentionWindowMs,
+        });
+        const cutoffMs = nowMs - retentionWindowMs;
 
         const alreadyRetained =
           initiallyRetainedAttachmentIds.has(attachment.attachmentId) ||
@@ -146,6 +157,7 @@ export async function runInboxMediaRetention(
             nextEligibleAt,
             protectedMediaRecheckAt,
             recordedAtMs,
+            retentionWindowMs,
           });
           continue;
         }
@@ -153,7 +165,7 @@ export async function runInboxMediaRetention(
           if (!alreadyRetained) {
             nextEligibleAt = selectEarliestRetentionWake(
               nextEligibleAt,
-              new Date(recordedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString(),
+              new Date(recordedAtMs + retentionWindowMs).toISOString(),
             );
           }
           continue;
@@ -165,6 +177,7 @@ export async function runInboxMediaRetention(
         }
         const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
           attachment,
+          cutoffMs,
         );
         if (parserJobProtectionExpiresAt) {
           nextEligibleAt = selectEarliestRetentionWake(
@@ -191,7 +204,9 @@ export async function runInboxMediaRetention(
         candidates.push({
           attachment,
           capture,
+          cutoffMs,
           materialize: fileState.kind === "missing",
+          retentionWindowMs,
           storedPath,
         });
         if (fileState.kind !== "missing") {
@@ -261,16 +276,18 @@ export async function runInboxMediaRetention(
             )
           ) {
             nextEligibleAt = selectProtectedMediaRetentionWake({
-              cutoffMs,
+              cutoffMs: candidate.cutoffMs,
               nextEligibleAt,
               protectedMediaRecheckAt,
               recordedAtMs: Date.parse(candidate.capture.recordedAt),
+              retentionWindowMs: candidate.retentionWindowMs,
             });
             continue;
           }
 
           const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
             candidate.attachment,
+            candidate.cutoffMs,
           );
           if (parserJobProtectionExpiresAt) {
             nextEligibleAt = selectEarliestRetentionWake(
@@ -374,6 +391,33 @@ export async function runInboxMediaRetention(
   }
 }
 
+export async function listTransientInboxVideoStoredPaths(
+  input: ListTransientInboxVideoStoredPathsInput,
+): Promise<string[]> {
+  throwIfRetentionAborted(input.signal);
+  const [captureRecords, durableRawInboxRefs] = await Promise.all([
+    listInboxCaptureRecords(input.vaultRoot, { rejectInvalidRecords: true }),
+    listDurableRawInboxReferences(input.vaultRoot, { rejectInvalidRecords: true }),
+  ]);
+  throwIfRetentionAborted(input.signal);
+
+  const storedPaths = new Set<string>();
+  for (const capture of captureRecords) {
+    throwIfRetentionAborted(input.signal);
+    for (const attachment of capture.attachments) {
+      if (attachment.kind !== "video") {
+        continue;
+      }
+      const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
+      if (storedPath && !durableRawInboxRefs.has(storedPath)) {
+        storedPaths.add(storedPath);
+      }
+    }
+  }
+
+  return [...storedPaths].sort();
+}
+
 function uniqueRetentionStoredPaths(paths: readonly string[]): string[] {
   return [...new Set(paths)];
 }
@@ -428,7 +472,10 @@ function buildRetentionRecord(input: {
   return record;
 }
 
-async function listInboxCaptureRecords(vaultRoot: string): Promise<InboxCaptureRecord[]> {
+async function listInboxCaptureRecords(
+  vaultRoot: string,
+  options: { rejectInvalidRecords?: boolean } = {},
+): Promise<InboxCaptureRecord[]> {
   const records: InboxCaptureRecord[] = [];
   const ledgerPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.inboxCaptureLedgerDirectory, {
     extension: ".jsonl",
@@ -439,6 +486,10 @@ async function listInboxCaptureRecords(vaultRoot: string): Promise<InboxCaptureR
       const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, rawRecord);
       if (result.success) {
         records.push(result.data);
+      } else if (options.rejectInvalidRecords) {
+        throw new Error(
+          "Invalid inbox capture record prevents safe hosted snapshot construction.",
+        );
       }
     }
   }
@@ -471,14 +522,24 @@ export async function listInboxAttachmentRetentionRecords(
   return records;
 }
 
-async function listDurableRawInboxReferences(vaultRoot: string): Promise<Set<string>> {
+async function listDurableRawInboxReferences(
+  vaultRoot: string,
+  options: { rejectInvalidRecords?: boolean } = {},
+): Promise<Set<string>> {
   const references = new Set<string>();
   const ledgerPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
 
   for (const relativePath of ledgerPaths) {
-    for (const record of await readJsonlRecords({ vaultRoot, relativePath })) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot, relativePath })) {
+      const parsed = safeParseContract<EventRecord>(eventRecordSchema, rawRecord);
+      if (!parsed.success && options.rejectInvalidRecords) {
+        throw new Error(
+          "Invalid event record prevents safe hosted snapshot construction.",
+        );
+      }
+      const record = parsed.success ? parsed.data : rawRecord;
       for (const referencedPath of collectEventRawReferencePaths(record)) {
         const storedPath = normalizeRawInboxMediaPath(referencedPath);
         if (storedPath) {
@@ -506,6 +567,27 @@ function normalizeRetentionBatchSize(value: number | undefined): number {
     return Math.floor(value);
   }
   return DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE;
+}
+
+function resolveInboxMediaRetentionWindowMs(input: {
+  kind: "audio" | "image" | "video";
+  videoRetentionWindowMs: number | undefined;
+}): number {
+  const candidate = input.kind === "video" ? input.videoRetentionWindowMs : undefined;
+  if (
+    typeof candidate === "number"
+    && Number.isFinite(candidate)
+    && candidate >= 0
+  ) {
+    return Math.floor(candidate);
+  }
+  return INBOX_MEDIA_RETENTION_WINDOW_MS;
+}
+
+function isRetainableInboxMediaKind(
+  kind: InboxCaptureAttachmentRecord["kind"],
+): kind is "audio" | "image" | "video" {
+  return kind === "audio" || kind === "image" || kind === "video";
 }
 
 function emptyRetentionResult(input: {
@@ -537,12 +619,13 @@ function selectProtectedMediaRetentionWake(input: {
   nextEligibleAt: string | null;
   protectedMediaRecheckAt: string;
   recordedAtMs: number;
+  retentionWindowMs: number;
 }): string | null {
   if (!Number.isFinite(input.recordedAtMs)) {
     return input.nextEligibleAt;
   }
   const candidate = input.recordedAtMs > input.cutoffMs
-    ? new Date(input.recordedAtMs + INBOX_MEDIA_RETENTION_WINDOW_MS).toISOString()
+    ? new Date(input.recordedAtMs + input.retentionWindowMs).toISOString()
     : input.protectedMediaRecheckAt;
   return selectEarliestRetentionWake(input.nextEligibleAt, candidate);
 }

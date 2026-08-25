@@ -53,6 +53,8 @@ const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
 const BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS = 15_000;
 const BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS = 60_000;
 const BROWSER_VAULT_POST_REQUEST_POLL_WINDOW_MS = 5 * 60 * 1_000;
+const BROWSER_VAULT_UNAVAILABLE_MESSAGE =
+  "Your dashboard data is not available right now.";
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -389,9 +391,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     (outcome: BrowserVaultWarmLoadOutcome, options: {
       authorityPathname?: string;
       background: boolean;
+      refreshObservationOnly: boolean;
       requiredDemand: boolean;
     }) => {
-      const { authorityPathname, background, requiredDemand } = options;
+      const {
+        authorityPathname,
+        background,
+        refreshObservationOnly,
+        requiredDemand,
+      } = options;
       if (outcome.status === "superseded") {
         return;
       }
@@ -428,6 +436,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         return;
       }
       if (outcome.status === "empty") {
+        // Passive checks may discover a later publication, but an empty
+        // observation is not authorized to replace the provider's stable
+        // ready or error state.
+        if (refreshObservationOnly && authorityPathname === undefined) {
+          return;
+        }
         commitEmpty(outcome.metadata);
         if (authorityPathname !== undefined) {
           setAdmittedPathname(authorityPathname);
@@ -455,6 +469,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const runProviderLoad = useCallback(
     async (options: BrowserVaultRefreshOptions & {
       authorityPathname?: string;
+      refreshObservationOnly?: boolean;
       retryPostRequestRefresh?: boolean;
     } = {}) => {
       const background = options.background ?? false;
@@ -473,6 +488,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         options.requestRuntimeRefreshUntilAfterRequest !== undefined;
       const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined
         || options.retryPostRequestRefresh === true;
+      const refreshObservationOnly = options.refreshObservationOnly === true;
       const targetPathname = authorityPathname ?? pathname;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
@@ -549,6 +565,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         expectedMemberId: initialMemberId,
         requestedMetricBuckets,
         requestedShards,
+        refreshObservationOnly,
         requestRefresh: requestRuntimeRefresh,
       });
       if (
@@ -618,6 +635,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       applyOutcome(outcome, {
         authorityPathname,
         background,
+        refreshObservationOnly,
         requiredDemand,
       });
       return outcome;
@@ -633,7 +651,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const retryRuntimeRefreshAfterRequest = useCallback(async () => {
-    const observed = await runProviderLoad({ background: true });
+    const observed = await runProviderLoad({
+      background: true,
+      refreshObservationOnly: true,
+    });
     const admission = runtimeRefreshAdmissionRef.current;
     const stillAtAdmission = admission?.status === "admitted"
       && (
@@ -696,7 +717,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const pollStaleReplica = useCallback(async () => {
-    await runProviderLoad({ background: true });
+    await runProviderLoad({
+      background: true,
+      refreshObservationOnly: true,
+    });
   }, [runProviderLoad]);
 
   const revalidateAuthority = useCallback(async (authorityPathname: string) => {
@@ -806,7 +830,17 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       void pollStaleReplica().finally(() => {
         if (!cancelled) {
-          const interval = Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS
+          const elapsedMs = Date.now() - startedAt;
+          const inFastWindow = elapsedMs <= BROWSER_VAULT_STALE_POLL_WINDOW_MS;
+          if (!runtimeRefreshPolling && !inFastWindow) {
+            setSessionRefreshPending(false);
+            if (clientRef.current === null) {
+              setStatus("error");
+              setError(BROWSER_VAULT_UNAVAILABLE_MESSAGE);
+            }
+            return;
+          }
+          const interval = inFastWindow
             ? BROWSER_VAULT_STALE_POLL_INTERVAL_MS
             : BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS;
           timeoutId = setTimeout(poll, interval);

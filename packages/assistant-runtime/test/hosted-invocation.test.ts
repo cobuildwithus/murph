@@ -101,6 +101,10 @@ describe("runHostedWorkspaceInvocation", () => {
         userId: job.request.userId,
         workspaceVersion: job.request.workspaceVersion,
       }),
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
+      },
       runtimeWakeSignal,
       signal: abortController.signal,
       snapshotArchiveBuilder,
@@ -116,6 +120,10 @@ describe("runHostedWorkspaceInvocation", () => {
     captured?.options.onConversationActivityObserved?.("observed");
     expect(onConversationActivityObserved).toHaveBeenCalledOnce();
     expect(captured?.options.runtimeWakeSignal).toBe(runtimeWakeSignal);
+    expect(captured?.options.runtimeIssueProvenance).toEqual({
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
+      runtimeName: "cloudflare-hosted-runner",
+    });
     expect(captured?.options.signal).toBe(abortController.signal);
     expect(captured?.options.vaultRoot).toBe(vaultRoot);
 
