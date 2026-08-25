@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Image from "next/image";
 import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
 import { defaultAssistantVoiceOptionId } from "@murphai/contracts";
@@ -23,6 +24,32 @@ import type {
 } from "./connect-page-types";
 
 const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC = `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
+
+export function ConnectSourceDialog({
+  children,
+  onOpenChange,
+  source,
+}: {
+  children: ReactNode;
+  onOpenChange: (open: boolean) => void;
+  source: Pick<ConnectSource, "name"> | null;
+}) {
+  const sourceName = source?.name ?? "Health source";
+
+  return (
+    <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md gap-0 overflow-y-auto p-6 md:p-7">
+        <DialogHeader className="sr-only">
+          <DialogTitle>{sourceName} connection</DialogTitle>
+          <DialogDescription>
+            Review the current connection status and available actions for {sourceName}.
+          </DialogDescription>
+        </DialogHeader>
+        {source ? children : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function VitalConnectionDialog({
   onContinue,

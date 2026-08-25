@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Direct links to device connections",
-    "summary": "Links can now open a specific connection card on Murph's Connect Devices page.",
-    "details": "The link scrolls to and highlights the requested source; sign-in and authorization still require the member's explicit action.",
+    "summary": "Links can now open a specific connection on Murph's Connect Devices page.",
+    "details": "The requested source opens in a focused dialog; sign-in and authorization still require the member's explicit action.",
     "relevanceTags": ["connections", "device-sync"],
     "sourcePullRequests": [2261]
   }

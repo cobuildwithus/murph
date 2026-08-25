@@ -195,12 +195,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /aria-label="Search sources"/);
   assert.match(markup, />33 of 33 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
-  assert.match(markup, /id="fitbit"/u);
-  assert.match(markup, /id="oura"/u);
-  assert.equal(markup.match(/scroll-mt-24/gu)?.length, 33);
-  assert.equal(markup.match(/target:border-primary\/80/gu)?.length, 33);
-  assert.equal(markup.match(/target:ring-2/gu)?.length, 33);
-  assert.equal(markup.match(/target:ring-primary(?=\s)/gu)?.length, 33);
+  assert.match(markup, /data-connect-source="fitbit"/u);
+  assert.match(markup, /data-connect-source="oura"/u);
+  assert.equal(markup.match(/data-connect-source=/gu)?.length, 33);
+  assert.doesNotMatch(markup, /scroll-mt-24/gu);
+  assert.doesNotMatch(markup, /target:ring/gu);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
   assert.doesNotMatch(
@@ -768,6 +767,87 @@ test("filterConnectSourcesForSearch matches source names, ids, and descriptions"
     filterConnectSourcesForSearch(sources, "  ").map((source) => source.id),
     ["oura", "freestyle-libre", "xiaomi-mi-fitness"],
   );
+});
+
+test("ConnectSourcesGrid opens source hashes in a dialog and clears them on close", async () => {
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectTarget: "fitbit",
+          description: "Sleep, activity, heart rate, and workouts.",
+          id: "fitbit",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/fitbit.svg",
+            width: 44,
+          },
+          name: "Fitbit",
+        },
+        {
+          connectTarget: "oura",
+          description: "Sleep and recovery.",
+          id: "oura",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/oura.png",
+            width: 44,
+          },
+          name: "Oura",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: "#fitbit",
+        href: "https://example.test/connect#fitbit",
+        origin: "https://example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  const dialog = rendered.container.querySelector("[data-dialog-open]");
+  assert.ok(dialog);
+  assert.match(dialog.textContent ?? "", /Fitbit/u);
+  assert.doesNotMatch(dialog.textContent ?? "", /Oura/u);
+  assert.ok(dialog.querySelector('[data-connect-source="fitbit"]'));
+
+  const closeButton = dialog.querySelector('button[aria-label="Close"]');
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    closeButton.click();
+  });
+
+  assert.equal(rendered.container.querySelector("[data-dialog-open]"), null);
+  assert.equal(rendered.window.location.hash, "");
+  assert.equal(rendered.replaceState.mock.calls.length, 1);
+  assert.equal(
+    String(rendered.replaceState.mock.calls[0]?.[2]),
+    "https://example.test/connect",
+  );
+
+  Object.assign(rendered.window.location, {
+    hash: "#oura",
+    href: "https://example.test/connect#oura",
+  });
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("hashchange"));
+  });
+
+  const reopenedDialog = rendered.container.querySelector("[data-dialog-open]");
+  assert.ok(reopenedDialog);
+  assert.match(reopenedDialog.textContent ?? "", /Oura/u);
+  assert.doesNotMatch(reopenedDialog.textContent ?? "", /Fitbit/u);
+  assert.ok(reopenedDialog.querySelector('[data-connect-source="oura"]'));
+  await rendered.cleanup();
 });
 
 test("sortConnectSourcesByConnectionState keeps connected sources first, then popularity order", async () => {
