@@ -57,6 +57,52 @@ export default async function HomePage({
 
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();
+  const initialVisitProjectionPromise = member
+    ? (async () => {
+        const state = await readHostedInitialOnboardingState({
+          memberId: member.id,
+          prisma,
+        });
+        return {
+          contactAction: state.status === "pending"
+            ? await resolveHomeInitialVisitContactAction()
+            : null,
+          state,
+        };
+      })()
+    : Promise.resolve(null);
+  const messagingSetupStatePromise = initialVisitProjectionPromise.then(
+    () => member
+      ? readHostedMemberMessagingSetupState({
+          memberId: member.id,
+          prisma,
+        })
+      : null,
+    () => member
+      ? readHostedMemberMessagingSetupState({
+          memberId: member.id,
+          prisma,
+        })
+      : null,
+  );
+  const deviceCompletionPromise = Promise.resolve(
+    resolveDeviceSyncCompletionDialogModel({
+      member,
+      searchParams: resolvedSearchParams,
+    }),
+  );
+  const connectedAppCompletionPromise = deviceCompletionPromise.then(
+    (deviceCompletion) => deviceCompletion
+      ? null
+      : resolveConnectedAppCompletionDialogModel({
+          member,
+          searchParams: resolvedSearchParams,
+        }),
+    () => resolveConnectedAppCompletionDialogModel({
+      member,
+      searchParams: resolvedSearchParams,
+    }),
+  );
   const homeProjectionResults = await Promise.allSettled([
     shouldShowHomeDeviceSyncStep({
       member,
@@ -69,34 +115,10 @@ export default async function HomePage({
           prisma,
         })
       : Promise.resolve(null),
-    resolveDeviceSyncCompletionDialogModel({
-      member,
-      searchParams: resolvedSearchParams,
-    }),
-    resolveConnectedAppCompletionDialogModel({
-      member,
-      searchParams: resolvedSearchParams,
-    }),
-    member
-      ? (async () => {
-          const state = await readHostedInitialOnboardingState({
-            memberId: member.id,
-            prisma,
-          });
-          return {
-            contactAction: state.status === "pending"
-              ? await resolveHomeInitialVisitContactAction()
-              : null,
-            state,
-          };
-        })()
-      : Promise.resolve(null),
-    member
-      ? readHostedMemberMessagingSetupState({
-          memberId: member.id,
-          prisma,
-        })
-      : Promise.resolve(null),
+    deviceCompletionPromise,
+    connectedAppCompletionPromise,
+    initialVisitProjectionPromise,
+    messagingSetupStatePromise,
   ]);
   const [
     showDeviceStepResult,

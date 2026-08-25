@@ -317,6 +317,52 @@ test("HomePage keeps its core content when an independent projection fails", asy
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
 });
 
+test("HomePage sequences advisory onboarding and messaging projections", async () => {
+  type InitialState = {
+    preferences: { persona: null; tone: null; voice: null };
+    status: "pending";
+  };
+  const resolveInitialState = vi.fn<(value: InitialState) => void>();
+  const signalInitialStarted = vi.fn<() => void>();
+  const initialStarted = new Promise<void>((resolve) => {
+    signalInitialStarted.mockImplementation(resolve);
+  });
+  mocks.readHostedInitialOnboardingState.mockImplementationOnce(() => {
+    signalInitialStarted();
+    return new Promise<InitialState>((resolve) => {
+      resolveInitialState.mockImplementation(resolve);
+    });
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const page = HomePage({ searchParams: Promise.resolve({}) });
+
+  await initialStarted;
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 0);
+
+  resolveInitialState({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
+  await page;
+
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+});
+
+test("HomePage still reads messaging when the earlier advisory projection fails", async () => {
+  mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
+    new Error("initial onboarding unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+});
+
 test("HomePage degrades a failed read-only usage projection without mutating allowance state", async () => {
   mocks.readHostedAiUsageGate.mockRejectedValueOnce(
     new Error("usage projection unavailable"),
@@ -866,6 +912,24 @@ test("HomePage presents connection results before canonical onboarding", async (
     plainHomeMarkup,
     /data-home-initial-visit-persona-picker="shown"/,
   );
+});
+
+test("HomePage skips the losing connected-app resolver after device completion", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        connectedAppCompletion: "1",
+        connectedAppStatus: "success",
+        deviceSyncCompletion: "1",
+        toolkit: "gmail",
+      }),
+    }),
+  );
+
+  assert.match(markup, /Device connection complete/);
+  assert.equal(mocks.resolveConnectedAppCompletionDialogModel.mock.calls.length, 0);
 });
 
 test("HomePage opens pending persona onboarding on plain home", async () => {
