@@ -13,7 +13,9 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  getHostedDashboardLayoutAuthSnapshot: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  readHostedConsentStatus: vi.fn(),
   resolveConnectedAppCompletionDialogModel: vi.fn(),
   resolveDeviceSyncCompletionDialogModel: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
@@ -162,8 +164,15 @@ vi.mock("@/src/lib/connected-apps/connect-completion", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedDashboardLayoutAuthSnapshot:
+    mocks.getHostedDashboardLayoutAuthSnapshot,
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  hasHostedHistoricalLaunchConsent: () => false,
+  readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -199,6 +208,16 @@ beforeEach(() => {
     authenticatedMember: MEMBER,
     session: null,
   });
+  mocks.getHostedDashboardLayoutAuthSnapshot.mockResolvedValue({
+    pageAuth: {
+      authenticated: true,
+      authenticatedMember: MEMBER,
+      session: null,
+    },
+    sidebarAuth: { authenticated: true, label: null },
+    status: "ready",
+  });
+  mocks.readHostedConsentStatus.mockResolvedValue({ launchGranted: true });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.resolveDeviceSyncCompletionDialogModel.mockImplementation(
     ({ searchParams }: { searchParams: Record<string, string | undefined> }) => {
@@ -317,36 +336,169 @@ test("HomePage keeps its core content when an independent projection fails", asy
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
 });
 
-test("HomePage sequences advisory onboarding and messaging projections", async () => {
+test("HomePage bounds composed dashboard owners and preserves advisory siblings", async () => {
   type InitialState = {
     preferences: { persona: null; tone: null; voice: null };
     status: "pending";
   };
-  const resolveInitialState = vi.fn<(value: InitialState) => void>();
-  const signalInitialStarted = vi.fn<() => void>();
-  const initialStarted = new Promise<void>((resolve) => {
-    signalInitialStarted.mockImplementation(resolve);
-  });
-  mocks.readHostedInitialOnboardingState.mockImplementationOnce(() => {
-    signalInitialStarted();
-    return new Promise<InitialState>((resolve) => {
-      resolveInitialState.mockImplementation(resolve);
+  const activeOwners = new Set<string>();
+  let peakOwners = new Set<string>();
+
+  function createOwner<T>(label: string) {
+    let rejectPromise: ((reason?: unknown) => void) | null = null;
+    let resolvePromise: ((value: T) => void) | null = null;
+    let signalStarted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
     });
-  });
+
+    const settle = (settler: () => void) => {
+      assert.ok(activeOwners.delete(label), `${label} must be active before settling`);
+      settler();
+    };
+
+    return {
+      reject(reason: unknown) {
+        assert.ok(rejectPromise, `${label} must start before rejection`);
+        settle(() => rejectPromise?.(reason));
+      },
+      resolve(value: T) {
+        assert.ok(resolvePromise, `${label} must start before resolution`);
+        settle(() => resolvePromise?.(value));
+      },
+      run() {
+        assert.equal(activeOwners.has(label), false, `${label} must start once`);
+        activeOwners.add(label);
+        if (activeOwners.size > peakOwners.size) {
+          peakOwners = new Set(activeOwners);
+        }
+        signalStarted?.();
+        return new Promise<T>((resolve, reject) => {
+          resolvePromise = resolve;
+          rejectPromise = reject;
+        });
+      },
+      started,
+    };
+  }
+
+  const consentOwner = createOwner<{ launchGranted: boolean }>("layout consent");
+  const deviceOwner = createOwner<boolean>("device onboarding");
+  const usageOwner = createOwner<null>("usage allowance");
+  const initialOwner = createOwner<InitialState>("initial onboarding");
+  const contactOwner = createOwner<{
+    href: string;
+    kind: string;
+    label: string;
+    rel: undefined;
+    target: undefined;
+  }>("contact projection");
+  const messagingOwner = createOwner<{
+    identity: { phoneLookupKey: string };
+    routing: null;
+  }>("messaging setup");
+
+  mocks.readHostedConsentStatus.mockImplementationOnce(consentOwner.run);
+  mocks.shouldShowHomeDeviceSyncStep.mockImplementationOnce(deviceOwner.run);
+  mocks.readHostedAiUsageGate.mockImplementationOnce(usageOwner.run);
+  mocks.readHostedInitialOnboardingState.mockImplementationOnce(initialOwner.run);
+  mocks.resolveHostedMurphContactOption.mockImplementationOnce(contactOwner.run);
+  mocks.readHostedMemberMessagingSetupState.mockImplementationOnce(
+    messagingOwner.run,
+  );
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const { default: DashboardLayout } = await import("../app/(dashboard)/layout");
   const page = HomePage({ searchParams: Promise.resolve({}) });
+  const layout = DashboardLayout({ children: null });
 
-  await initialStarted;
+  await Promise.all([
+    consentOwner.started,
+    deviceOwner.started,
+    usageOwner.started,
+    initialOwner.started,
+  ]);
+  assert.deepEqual(
+    [...peakOwners].sort(),
+    ["device onboarding", "initial onboarding", "layout consent", "usage allowance"],
+  );
+  assert.ok(peakOwners.size < 5);
   assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 0);
 
-  resolveInitialState({
+  initialOwner.resolve({
     preferences: { persona: null, tone: null, voice: null },
     status: "pending",
   });
-  await page;
+  await contactOwner.started;
+  assert.equal(activeOwners.has("contact projection"), true);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 0);
+  assert.ok(peakOwners.size < 5);
+
+  contactOwner.resolve({
+    href: "sms:+15555550123",
+    kind: "text",
+    label: "Text Murph",
+    rel: undefined,
+    target: undefined,
+  });
+  await messagingOwner.started;
 
   assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+  assert.ok(peakOwners.size < 5);
+
+  consentOwner.resolve({ launchGranted: true });
+  deviceOwner.resolve(true);
+  usageOwner.resolve(null);
+  messagingOwner.resolve({
+    identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+    routing: null,
+  });
+  const [pageElement] = await Promise.all([page, layout]);
+  const markup = renderToStaticMarkup(pageElement);
+
+  assert.equal(activeOwners.size, 0);
+  assert.equal(peakOwners.size, 4);
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+
+  mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
+    new Error("initial onboarding unavailable"),
+  );
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValueOnce({
+    identity: { phoneLookupKey: null },
+    routing: {
+      linqChatId: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    },
+  });
+  const initialRejectedMarkup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+
+  assert.match(initialRejectedMarkup, /Some dashboard details are unavailable/);
+  assert.match(initialRejectedMarkup, /Message Murph/);
+  assert.doesNotMatch(initialRejectedMarkup, /data-home-initial-visit-persona-picker/);
+
+  mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
+  mocks.readHostedMemberMessagingSetupState.mockRejectedValueOnce(
+    new Error("messaging setup unavailable"),
+  );
+  const messagingRejectedMarkup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+
+  assert.match(messagingRejectedMarkup, /Some dashboard details are unavailable/);
+  assert.match(
+    messagingRejectedMarkup,
+    /data-home-initial-visit-persona-picker="shown"/,
+  );
+  assert.match(messagingRejectedMarkup, /data-contact-action-href="sms:\+15555550123"/);
 });
 
 test("HomePage still reads messaging when the earlier advisory projection fails", async () => {
