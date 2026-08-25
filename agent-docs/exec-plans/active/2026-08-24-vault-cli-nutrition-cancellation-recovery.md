@@ -160,3 +160,13 @@ Updated: 2026-08-25
   including nested repair paths and no-write behavior. The same run exposed and
   corrected a stale assertion so provider schema failures match their retained
   fieldless runtime contract.
+- Current-main integration retained nutrition's domain owners while accepting
+  the foundation's post-merge prompt ceiling. The nutrition/provider/protocol
+  matrix passed 85 tests; assistant model behavior passed 74 tests; the bundle
+  boundary passed 14 tests; and Core, Vault use-cases, and CLI typechecks passed.
+- Prepared-runtime construction and CLI package-shape verification passed. The
+  regenerated skill hash is `b54adadf9486f94c`.
+- Canonical production assembly passed all eight parity probes. Vault CLI is
+  9,493,848 of 9,510,683 bytes, with an 805-byte entry and 25,155-byte static
+  startup closure. The runner is 11,321,071 of 11,393,617 bytes, with a
+  1,748,948-byte entry and 8,641,800-byte static boot closure.

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-20
+Last verified: 2026-08-23
 
 ## Local Frog autofix authority
 
@@ -608,7 +608,16 @@ Last verified: 2026-08-20
   snapshots with the current accepted-input scope. Open the resolved file
   without following the final symlink, read only the exact snapshotted size,
   probe EOF, verify its SHA-256 digest and supported container signature, and
-  fail closed on unavailable materialization or drift. The tool
+  fail closed on unavailable materialization or drift. Ordinary hosted inbox
+  videos are warm-container-only material: derive their normalized paths from
+  validated canonical capture records, fail snapshot construction closed if
+  those records cannot be classified safely, and exclude the paths from every
+  new encrypted workspace snapshot even while pending input still protects the
+  local file. Once unprotected, use the existing atomic inbox-retention write
+  with a zero-length video window. Retention failure may remain nonblocking for
+  replies only because snapshot exclusion is the independent persistence
+  boundary. An explicit canonical event raw reference is the sole durable-save
+  exception and keeps its separately authorized lifecycle. The tool
   pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
   cap, a 90-second timeout, and a bounded response. The Worker must revalidate
   the exact request and use manual redirects before replacing the runner
@@ -1448,6 +1457,14 @@ Last verified: 2026-08-20
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
+  GitHub App credential only through the protected `frog-reconciliation`
+  environment. Its workflow-provided token has no permissions; the controller
+  mints a current-repository installation token with only
+  `pull-requests: write`, uses it for the exact-target reads and sole draft
+  mutation, and requests no Contents, Issues, Actions, or other App authority.
+  The controller remains default-branch-owned and must not check out candidate
+  code or weaken its exact-head, open-state, draft-state, or one-target gates.
 - Public Temporal compatibility credentials belong only to the protected
   `temporal-compatibility` GitHub Environment. The GitHub App installation is
   limited to private `cobuildwithus/murph-cloud` and grants only Actions write
@@ -1568,7 +1585,7 @@ Last verified: 2026-08-20
   this public repository, or in repo files/logs. The private post-CI deploy job
   must attach that environment and may call the hook only for the exact current
   protected `main` commit after required push CI passes.
-- Resend-backed hosted signup welcome email must keep `RESEND_API_KEY` and sender identity in environment variables only, send a plain-text-only body, claim the durable per-member welcome-attempt marker before the provider call, keep the stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata such as status/code. The optional internal signup notification must also keep recipients in environment variables only, use a plain-text-only body, claim its own durable per-member attempt marker before the provider call, keep a separate stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata. Its optional request context may contain only a schema-closed server timestamp, validated IANA time zone, closed signup surface, and bounded advisory network city/region/country values; Web must encrypt it with the member control root, must not retain IP address, coordinates, or postal data, and must label the emailed location as approximate. Reads must stop disclosing the context at its 24-hour expiry, and the existing hourly hosted-retention owner must clear expired or missing-expiry ciphertext through the indexed bounded sweep. The database must clear both ciphertext and expiry for every durable attempt claim, including rollback-runner claims, and prevent later writes from restoring context after an attempt. Unreadable live optional context or email enrichment must degrade to the context-free formatter rather than suppress the durable attempt claim or provider path. A batch activation without exact per-member provenance must omit source rather than infer it. The notification must not include the member ID or provider event identifiers. Resend-backed subscription cancellation feedback email must use the same env-only API key/sender configuration, send plain text only, rely on the existing Stripe event receipt for retry ownership until completion, store a receipt-local sent marker only after provider success so later receipt retries do not resend, use a subscription-scoped Resend idempotency key as provider replay defense, and log only sanitized provider metadata. A Stripe-collected checkout email may be stored only as an encrypted unverified email hint plus transactional welcome and cancellation-feedback recipient; do not use it for hosted account lookup, direct-public sender authorization, direct-public start instructions, or email-linked channel state until Privy verifies it. Later successful Stripe payments must not re-run activation welcome side effects.
+- Resend-backed hosted signup welcome email must keep `RESEND_API_KEY` and sender identity in environment variables only, send a plain-text-only body, claim the durable per-member welcome-attempt marker before the provider call, keep the stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata such as status/code. The optional internal signup notification must also keep recipients in environment variables only, use a plain-text-only body, claim its own durable per-member attempt marker before the provider call, keep a separate stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata. Its optional request context may contain only a schema-closed server timestamp, validated IANA time zone, closed signup surface, and bounded advisory network city/region/country values; Web must encrypt it with the member control root, must not retain IP address, coordinates, or postal data, and must label the emailed location as approximate. Reads must stop disclosing the context at its 24-hour expiry, and the existing hourly hosted-retention owner must clear expired or missing-expiry ciphertext through the indexed bounded sweep. The database must clear both ciphertext and expiry for every durable attempt claim, including rollback-runner claims, and prevent later writes from restoring context after an attempt. Unreadable live optional context must degrade to the context-free formatter rather than suppress the durable attempt claim or provider path. A batch activation without exact per-member provenance must omit source rather than infer it. The notification must not read or include member email addresses or phone numbers, the member ID, or provider event identifiers. Resend-backed subscription cancellation feedback email must use the same env-only API key/sender configuration, send plain text only, rely on the existing Stripe event receipt for retry ownership until completion, store a receipt-local sent marker only after provider success so later receipt retries do not resend, use a subscription-scoped Resend idempotency key as provider replay defense, and log only sanitized provider metadata. A Stripe-collected checkout email may be stored only as an encrypted unverified email hint plus transactional welcome and cancellation-feedback recipient; do not use it for hosted account lookup, direct-public sender authorization, direct-public start instructions, or email-linked channel state until Privy verifies it. Later successful Stripe payments must not re-run activation welcome side effects.
 - Resend-backed Stripe failure alerts must use only the environment-owned shared
   operational sender, recipient allowlist, and API key. Their plain-text body
   may include only bounded operation/event types, sanitized error tokens and

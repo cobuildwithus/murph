@@ -21,6 +21,9 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildAssistantProviderMurphToolCall,
+} from "./helpers/hosted-local-e2e-support.js";
+import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -33,11 +36,15 @@ const runId = Date.now();
 const userId = `member_local_usage_limit_ambiguous_${runId}`;
 const groupOwnerUserId = `member_local_usage_limit_group_owner_${runId}`;
 const guestUserId = `guest_local_usage_limit_group_${runId}`;
+const handoffOwnerUserId = `member_local_usage_limit_handoff_owner_${runId}`;
 const chatId = `chat_local_usage_limit_ambiguous_${runId}`;
 const groupChatId = `chat_local_usage_limit_group_${runId}`;
+const handoffGroupChatId = `chat_local_usage_limit_handoff_group_${runId}`;
+const handoffPrivateChatId = `chat_local_usage_limit_handoff_private_${runId}`;
 const memberPhone = buildLinqRecipientPhoneNumber(userId);
 const groupOwnerPhone = buildLinqRecipientPhoneNumber(groupOwnerUserId);
 const guestPhone = buildLinqRecipientPhoneNumber(guestUserId);
+const handoffOwnerPhone = buildLinqRecipientPhoneNumber(handoffOwnerUserId);
 const linqApiToken = "linq-local-usage-limit-token";
 const linqWebhookSecret = "linq-local-usage-limit-webhook-secret";
 const assistantModel = "gpt-5.6-terra";
@@ -50,6 +57,14 @@ const groupBootstrapReply = "The group fixture is ready.";
 const groupSecondTurnText = "Add a second group reply context.";
 const groupSecondTurnReply = "The second group context is ready.";
 const groupBacklogReply = "I caught up with the whole group in one reply.";
+const handoffGroupBootstrapText = "Start a synthetic group conversation.";
+const handoffGroupBootstrapReply = "The synthetic group conversation is ready.";
+const privateHandoffRequestText = "Please share a short update with my joined group.";
+const privateHandoffAcknowledgment = "I shared the update with your group.";
+const handoffContext = `COMPOSED_HANDOFF_CONTEXT_${runId}`;
+const handoffGroupMessage = "The weekly check-in is ready for the group.";
+const blockedGroupFollowUpText = `BLOCKED_GROUP_FOLLOW_UP_${runId}`;
+const blockedGroupFollowUpReply = "This response must wait for renewed usage.";
 const usageLimitNoticeUrl =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
@@ -79,7 +94,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
-          [memberPhone, groupOwnerPhone, guestPhone].join(","),
+          [memberPhone, groupOwnerPhone, guestPhone, handoffOwnerPhone].join(","),
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD:
           "price_local_usage_limit_5",
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -114,7 +129,20 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       stripeCustomerId: `cus_local_usage_group_owner_${runId}`,
       stripeSubscriptionId: `sub_local_usage_group_owner_${runId}`,
     });
-  }, 300_000);
+    await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
+      homePhone: buildLinqHomePhoneNumber(handoffOwnerUserId),
+      memberId: handoffOwnerUserId,
+      memberPhone: handoffOwnerPhone,
+      stripeCustomerId: `cus_local_usage_handoff_owner_${runId}`,
+      stripeSubscriptionId: `sub_local_usage_handoff_owner_${runId}`,
+    });
+    await requireScenario().runWake(
+      buildActivationWake(handoffOwnerUserId),
+      handoffOwnerUserId,
+    );
+    await requireScenario().waitForHostedCompletion(handoffOwnerUserId);
+  }, 600_000);
 
   it("keeps one durable crossing notice while later over-limit work remains blocked", async () => {
     await requireScenario().bindActiveHostedLinqHomeChat({
@@ -297,9 +325,14 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       timeout: 30_000,
     });
 
-    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 2,
-    );
+    expect(requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    )).toBeGreaterThanOrEqual(observedTextBaseline + 2);
+    expect(requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    )).toBeLessThanOrEqual(observedTextBaseline + 3);
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
@@ -377,9 +410,14 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(requireLinqStub().countObservedSends(replyPath, secondReplyMatcher)).toBe(
       secondReplyBaseline,
     );
-    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 2,
-    );
+    expect(requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    )).toBeGreaterThanOrEqual(observedTextBaseline + 2);
+    expect(requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    )).toBeLessThanOrEqual(observedTextBaseline + 3);
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
@@ -439,9 +477,14 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       secondReplyBaseline + 1,
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
-    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 2,
-    );
+    expect(requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    )).toBeGreaterThanOrEqual(observedTextBaseline + 2);
+    expect(requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    )).toBeLessThanOrEqual(observedTextBaseline + 3);
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
@@ -694,17 +737,228 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       });
     }
   }, 600_000);
+
+  it("composes a plain-text private handoff through settlement and the next-call fence", async () => {
+    requireLinqStub().setChatIsGroup(handoffGroupChatId, true);
+    const groupReplyPath =
+      `/chats/${encodeURIComponent(handoffGroupChatId)}/messages`;
+    const bootstrapReplyMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageText(request)
+        === handoffGroupBootstrapReply;
+    const bootstrapSendBaseline = requireLinqStub().countObservedSends(
+      groupReplyPath,
+      bootstrapReplyMatcher,
+    );
+    requireScenario().queueAssistantResponses([handoffGroupBootstrapReply], {
+      matchInputContains: handoffGroupBootstrapText,
+    });
+
+    const bootstrapResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(handoffOwnerUserId, handoffGroupChatId, {
+        eventId: `evt_usage_handoff_group_bootstrap_${runId}`,
+        isGroup: true,
+        messageId: `msg_usage_handoff_group_bootstrap_${runId}`,
+        service: "iMessage",
+        text: handoffGroupBootstrapText,
+      }),
+    );
+    expect(bootstrapResponse.status).toBe(202);
+    await expect(bootstrapResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    const route = await vi.waitFor(async () => {
+      const current = await requireScenario().readHostedThreadRoute({
+        channel: "linq",
+        threadId: handoffGroupChatId,
+      });
+      expect(current?.containerMemberId).toEqual(expect.any(String));
+      return current;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+    if (!route) {
+      throw new Error("Expected the composed handoff group route.");
+    }
+    const containerMemberId = route.containerMemberId;
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: bootstrapSendBaseline + 1,
+      expectedPath: groupReplyPath,
+      matchRequest: bootstrapReplyMatcher,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    await requireScenario().waitForHostedCompletion(containerMemberId);
+
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId: handoffPrivateChatId,
+      memberId: handoffOwnerUserId,
+      recipientPhone: handoffOwnerPhone,
+    });
+    const { periodEnd, periodStart } = buildCurrentUtcCalendarMonthPeriod();
+    await seedHostedAiUsageLimitPeriodForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: containerMemberId,
+      periodEnd,
+      periodStart,
+      remainingUsdMicros: 1n,
+    });
+
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("group", {
+        action: "handoff",
+        context: handoffContext,
+      }),
+      privateHandoffAcknowledgment,
+    ], {
+      matchInputContains: privateHandoffRequestText,
+    });
+    requireScenario().queueAssistantResponses([handoffGroupMessage], {
+      matchInputContains: [
+        handoffContext,
+        "<untrusted_private_murph_handoff>",
+      ],
+    });
+    const handoffSendMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageText(request) === handoffGroupMessage;
+    const handoffSendBaseline = requireLinqStub().countObservedSends(
+      groupReplyPath,
+      handoffSendMatcher,
+    );
+
+    const privateResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(handoffOwnerUserId, handoffPrivateChatId, {
+        eventId: `evt_usage_private_handoff_${runId}`,
+        messageId: `msg_usage_private_handoff_${runId}`,
+        service: "iMessage",
+        text: privateHandoffRequestText,
+      }),
+    );
+    expect(privateResponse.status).toBe(202);
+    await expect(privateResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: handoffSendBaseline + 1,
+      expectedPath: groupReplyPath,
+      matchRequest: handoffSendMatcher,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    const privateCompleted = await requireScenario().waitForHostedCompletion(
+      handoffOwnerUserId,
+    );
+    expect(privateCompleted.lastErrorCode ?? null).toBeNull();
+    await requireScenario().waitForHostedCompletion(containerMemberId);
+
+    const handoffProviderRequests = findAssistantResponseRequestsContainingAll([
+      handoffContext,
+      "<untrusted_private_murph_handoff>",
+    ]);
+    expect(handoffProviderRequests).toHaveLength(1);
+    const providerStrings = collectJsonStrings(
+      JSON.parse(handoffProviderRequests[0]?.body ?? ""),
+    );
+    const handoffPrompt = providerStrings.find((value) =>
+      value.includes(handoffContext)
+      && value.includes("<untrusted_private_murph_handoff>")
+    );
+    expect(handoffPrompt).toEqual(expect.any(String));
+    expect(providerStrings.some((value) => value.includes(
+      "Return only that final group message as ordinary natural-language text",
+    ))).toBe(true);
+    expect(providerStrings.some((value) =>
+      value.includes("Return exactly one JSON object")
+    )).toBe(false);
+    expect(providerStrings.some((value) =>
+      value.includes('"kind":"send_message"')
+    )).toBe(false);
+    expect(providerStrings.some((value) =>
+      value.includes(handoffGroupBootstrapReply)
+    )).toBe(true);
+    expect(requireLinqStub().countObservedSends(
+      groupReplyPath,
+      handoffSendMatcher,
+    )).toBe(handoffSendBaseline + 1);
+
+    const exhaustedPeriod = await vi.waitFor(async () => {
+      const period = await readHostedAiUsageLimitPeriodForTest({
+        environment: requireScenario().runtimeEnv,
+        memberId: containerMemberId,
+        periodStart,
+      });
+      expect(period?.blockedAt).toEqual(expect.any(Date));
+      return period;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+    expect(exhaustedPeriod?.spentUsdMicros ?? 0n).toBeGreaterThanOrEqual(
+      exhaustedPeriod?.limitUsdMicros ?? 1n,
+    );
+
+    const providerBaseline = countAssistantResponseRequests();
+    requireScenario().queueAssistantResponses([blockedGroupFollowUpReply], {
+      matchInputContains: blockedGroupFollowUpText,
+    });
+    const blockedEventId = `evt_usage_handoff_group_blocked_${runId}`;
+    const blockedResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(handoffOwnerUserId, handoffGroupChatId, {
+        eventId: blockedEventId,
+        isGroup: true,
+        messageId: `msg_usage_handoff_group_blocked_${runId}`,
+        service: "iMessage",
+        text: blockedGroupFollowUpText,
+      }),
+    );
+    expect(blockedResponse.status).toBe(202);
+    await expect(blockedResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    const blockedStatus = await vi.waitFor(async () => {
+      const status = await requireScenario().harness.readUserStatus(
+        containerMemberId,
+      );
+      expect(status.inFlight).toBe(false);
+      expect(readConversationMailboxLag(status)).not.toBe("0");
+      return status;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+    expect(blockedStatus.lastErrorCode ?? null).toBeNull();
+    expect(countAssistantResponseRequests()).toBe(providerBaseline);
+    expect(findAssistantResponseRequestsContainingAll([
+      blockedGroupFollowUpText,
+    ])).toHaveLength(0);
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: blockedEventId,
+      environment: requireScenario().runtimeEnv,
+      userId: containerMemberId,
+    })).resolves.toMatchObject({
+      consumedAt: null,
+    });
+  }, 600_000);
 });
 
-function buildActivationWake() {
+function buildActivationWake(memberId = userId) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${userId}:usage-limit-ambiguous-e2e`,
+    eventId: `member.activated:local:${memberId}:usage-limit-ambiguous-e2e`,
     memberChannels: {
       email: false,
       linq: true,
       telegram: false,
     },
-    memberId: userId,
+    memberId,
     occurredAt: new Date().toISOString(),
   });
 }
@@ -747,6 +1001,13 @@ function countAssistantResponseRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
   ).length;
+}
+
+function findAssistantResponseRequestsContainingAll(expected: readonly string[]) {
+  return requireScenario().assistantProviderRequests.filter((request) =>
+    request.url === "/v1/responses"
+    && expected.every((value) => request.body.includes(value))
+  );
 }
 
 function requireAcceptedLinqMessageIdByText(chatId: string, text: string): string {

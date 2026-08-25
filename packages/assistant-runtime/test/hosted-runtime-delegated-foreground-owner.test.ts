@@ -114,6 +114,10 @@ describe("hosted runtime delegated foreground owner", () => {
         async runAssistantPhase(input) {
           assistantPhaseCalls += 1;
           expect(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+          expect(input.runtimeIssueProvenance).toEqual({
+            releaseSha: "0123456789abcdef0123456789abcdef01234567",
+            runtimeName: "cloudflare-hosted-runner",
+          });
           const pending = await readHostedSystemMailboxState(vaultRoot);
           const selected = pending.pending.find(
             (item) => item.itemId === delegated.itemId,
@@ -134,6 +138,10 @@ describe("hosted runtime delegated foreground owner", () => {
             checkpointReason: "assistant_runtime_commit" as const,
             progressed: true,
           };
+        },
+        runtimeIssueProvenance: {
+          releaseSha: "0123456789abcdef0123456789abcdef01234567",
+          runtimeName: "cloudflare-hosted-runner",
         },
         vaultRoot,
       });

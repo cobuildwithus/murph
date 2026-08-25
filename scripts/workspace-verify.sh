@@ -647,8 +647,12 @@ run_dependency_policy_check() {
 }
 
 run_workspace_boundary_check() {
-  node "scripts/verify-workspace-boundaries.mjs"
-  node "scripts/check-workspace-package-cycles.mjs"
+  local status=0
+
+  node "scripts/verify-workspace-boundaries.mjs" || status=$?
+  node "scripts/check-workspace-package-cycles.mjs" || status=$?
+
+  return "$status"
 }
 
 run_typecheck_packages() {
@@ -1507,13 +1511,13 @@ run_typecheck_overlapped() {
   pids+=("$package_typecheck_pid")
   register_background_pid "$package_typecheck_pid"
 
-  wait_for_background_jobs "${pids[@]}"
+  wait_for_background_jobs_allow_failures "${pids[@]}"
 }
 
 run_typecheck() {
   if [[ "$typecheck_preflight_parallel" == "1" ]]; then
     run_typecheck_overlapped
-    return 0
+    return $?
   fi
 
   run_typecheck_preflight

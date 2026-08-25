@@ -214,6 +214,21 @@ Prefer a forward fix. A temporary Web-only rollback with the new runner retained
 is safety preserving but degrades legacy connection-scoped work and may fail
 old-Web apply parsing, so restore the compatible Web release promptly.
 
+## Wearable no-data outreach preference rollout
+
+Apply the additive preference-table migration, deploy the preference-aware Web,
+and only then deploy the Worker/runtime operation that can write a member's
+Garmin no-data outreach preference. Before that operation is exposed, an older
+Web remains a valid rollback target because no preference row can exist.
+
+Once the operation can produce its first durable row, the preference-aware Web
+is the hard rollback floor. Disable or roll back the Worker/runtime caller first,
+but keep Web at that floor or move it forward to another compatible build. A
+preference-unaware Web is not a valid rollback target while preference rows may
+exist: it would ignore stored off or longer-wait authority, and account deletion
+could leave the foreign-key-free preference row orphaned. Recovery is a forward
+deploy of a compatible Web; the additive table and rows may remain in place.
+
 Hosted E2E orchestration helpers live under `apps/web/test/support`, not
 `apps/web/src`. Application source should expose production runtime seams such
 as client factories and dependency-bearing functions; the testkit owns smoke-env
@@ -1869,6 +1884,25 @@ checkpoints, and hosted runtime logs/status.
 This branch is a greenfield hosted-runtime cutover. If you have an older local
 database from the superseded run/ingress/cursor chain, reset it before
 reapplying migrations.
+
+## Local Vercel prebuilt deployment
+
+Use the repository-owned local prebuilt boundary instead of running a bare
+`vercel build` followed by `vercel deploy --prebuilt`:
+
+```bash
+pnpm --dir apps/web vercel:deploy:prebuilt -- --prod
+```
+
+Omit `--prod` for a preview deployment. The command runs `vercel build`,
+captures the SDK-generated Workflow function config in an ephemeral local file
+before the normal generated-source cleanup, and applies every exact generated
+trigger to the resolved final function bundle. It handles distinct functions
+and Next.js-deduplicated route links, revalidates the finished Build Output
+artifact, removes the captured evidence, and starts `vercel deploy --prebuilt`
+only after that proof succeeds. Missing, malformed, escaping, or conflicting
+evidence stops before upload. Managed Vercel builds continue to use the
+checked-in `vercel.json` build command and do not use this local boundary.
 
 ## Local dev aids
 

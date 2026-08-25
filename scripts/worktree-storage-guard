@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-max_regular="${MURPH_WORKTREE_MAX_LIVE:-100}"
+max_regular="${MURPH_WORKTREE_MAX_LIVE:-200}"
 min_free_gib="${MURPH_WORKTREE_MIN_FREE_GIB:-20}"
 
 for value in "$max_regular" "$min_free_gib"; do

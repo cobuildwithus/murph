@@ -7,13 +7,18 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
-- run inbox media retention during existing idle checkpoint maintenance so old raw inbox image/audio/video bytes expire without a separate scheduler
+- run inbox media retention during existing idle checkpoint maintenance so raw inbox image/audio bytes expire at their ordinary deadline, while unprotected hosted video bytes expire immediately and stay outside every new snapshot without a separate scheduler
 - run bounded post-device-sync dense raw retention through the core dense-prune primitive, logging only counts, byte totals, and tombstone totals
 - build the encrypted hosted browser-vault replica from generic canonical query sources plus schema-valid saved experiment outcomes referenced by canonical experiment frontmatter; referenced outcome bytes participate in source freshness, while invalid, escaping, missing, or mismatched references are omitted fail-closed
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
 - keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
+- prune assistant-generated delivery staging before snapshot construction when
+  the outbox inventory is trusted: existing active files remain protected, a
+  missing active reference is counted without blocking safe cleanup of other
+  regular files, and structural uncertainty fails closed with a bounded error
+  code; checkpoint logs report counts and byte totals without paths or names
 - admit only joined-group Assistant Ask requests and legacy joined-group completions through the pre-checkpoint-safe system prefix; keep consented requests and reviewed completions checkpoint-gated, order a legacy completion against older personal input through the read-only pending index, and deliver typed `cannot_answer` with fixed exact copy instead of another provider turn
 - before provider execution for a direct user-action turn, compare the resident session with the session ids restored from the published snapshot; when absent, including a session created earlier in the same invocation by deterministic welcome output, stop foreground mailbox watching and pause detached work while the existing full `idle_shutdown` checkpoint makes the origin durable
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
@@ -86,7 +91,11 @@ group-routed email remains intentionally raw-free. Attachment-bearing non-email
 input makes one best-effort inbox projection attempt while the decoded wake is
 still in memory so raw attachment paths remain inspectable and audio/video
 transcription jobs can drain before prompt construction when parser output is
-available. Normal foreground work may defer intermediate hosted workspace
+available. Ordinary video bytes remain warm-container-only: accepted input may
+protect them locally while active, but snapshot planning excludes their
+validated canonical paths and idle maintenance deletes them atomically as soon
+as protection ends. Explicit canonical durable raw references remain outside
+this transient policy. Normal foreground work may defer intermediate hosted workspace
 checkpoints before Codex admission or reply delivery. While dirty, the exact
 assistant wake projected by the current foreground phase may run once when due
 before the idle floor without publishing a snapshot. Otherwise the invocation

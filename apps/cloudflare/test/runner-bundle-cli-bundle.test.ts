@@ -487,15 +487,15 @@ describe("runner bundle vault-cli esbuild step", () => {
     });
 
     expect(
-      assertVaultCliBundleWithinBudgets(createMetafile(9_467_676)),
+      assertVaultCliBundleWithinBudgets(createMetafile(9_500_683)),
     ).toEqual({
       entryBytes: 10_000,
       staticClosureBytes: 10_000,
-      totalBytes: 9_477_676,
+      totalBytes: 9_510_683,
     });
     expect(() =>
-      assertVaultCliBundleWithinBudgets(createMetafile(9_467_677)),
-    ).toThrow(/total output 9477677B exceeds budget 9477676B/u);
+      assertVaultCliBundleWithinBudgets(createMetafile(9_500_684)),
+    ).toThrow(/total output 9510684B exceeds budget 9510683B/u);
   });
 
   it("rejects dynamic-to-static graph drift without relying on total size growth", () => {

@@ -94,7 +94,7 @@ export interface AssistantActiveTurnLiveProviderTurn {
 }
 
 export interface AssistantActiveTurnLiveProviderSteering {
-  closeInputAdmission(): void
+  onFirstAssistantResponseCompleted(): void
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
 }
 

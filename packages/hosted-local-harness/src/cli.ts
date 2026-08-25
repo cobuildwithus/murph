@@ -517,6 +517,12 @@ async function runDoctor(
     profileName: parsed.profileName,
   });
   const config = resolveHostedLocalDevConfig(profiled.env);
+  if (config.temporal.mode !== "disabled") {
+    const { requireHostedLocalTemporalWorkerPackageDir } = await import(
+      "./dev-hosted-local/temporal.ts"
+    );
+    requireHostedLocalTemporalWorkerPackageDir(profiled.env);
+  }
   const commands = [
     runDoctorCommand("node", ["--version"]),
     runDoctorCommand("pnpm", ["--version"]),

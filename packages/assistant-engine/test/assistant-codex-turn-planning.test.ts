@@ -3855,8 +3855,8 @@ describe('assistant Codex turn planning', () => {
     expect(attendedPlan.systemPrompt).toContain(
       '`murph.select_reply_target` annotates the one eventual group response',
     )
-    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 8`')
-    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 8')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 6')
     expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
@@ -4016,7 +4016,10 @@ describe('assistant Codex turn planning', () => {
       'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(plan.developerInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(plan.developerInstructions).toContain(
       'Provider and reasoning controls remain unavailable in a group',
