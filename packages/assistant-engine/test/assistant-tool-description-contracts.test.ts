@@ -88,4 +88,19 @@ describe("assistant tool description call contracts", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("queued, not sent");
   });
+
+  it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "For a complete current-sender private request, use message_current_sender",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Before asking any follow-up needed to complete a current-sender handoff, call clarify_current_sender",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "continue_current_sender_privately or continue_current_sender_in_group only on a later Message",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "never for a fresh request",
+    );
+  });
 });

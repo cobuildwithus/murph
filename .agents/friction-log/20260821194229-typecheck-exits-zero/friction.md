@@ -1,6 +1,7 @@
 ---
 title: 'Typecheck exits zero after workspace boundary verification failure'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2141'
 ---
 
 ## Expected Behavior

@@ -1799,6 +1799,7 @@ async function projectHostedAutomationResponseFields(input: {
     AssistantAutomationOccurrenceProjectionIssue
   >();
   let occurrenceProjectionPending = false;
+  let occurrenceProjectionStale = false;
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1831,10 +1832,13 @@ async function projectHostedAutomationResponseFields(input: {
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        occurrenceProjectionPending =
-          projection.occurrenceUnverifiedReason === "runtime_state_pending"
-          || projection.occurrenceUnverifiedReason === "stale_recurring_occurrence";
-        if (!occurrenceProjectionPending) {
+        if (projection.occurrenceUnverifiedReason === "runtime_state_pending") {
+          occurrenceProjectionPending = true;
+        } else if (
+          projection.occurrenceUnverifiedReason === "stale_recurring_occurrence"
+        ) {
+          occurrenceProjectionStale = true;
+        } else {
           occurrenceProjectionIssues.add("projection_unavailable");
         }
       }
@@ -1847,6 +1851,9 @@ async function projectHostedAutomationResponseFields(input: {
     } catch {
       occurrenceProjectionIssues.add("projection_unavailable");
     }
+  }
+  if (occurrenceProjectionStale && occurrenceProjectionIssues.size === 0) {
+    occurrenceProjectionIssues.add("stale_recurring_occurrence");
   }
   const occurrenceProjectionIssueList = [...occurrenceProjectionIssues];
   let occurrenceProjection: AssistantAutomationOccurrenceProjection;

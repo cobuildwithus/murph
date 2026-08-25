@@ -57,6 +57,12 @@ describe('hosted domain dynamic tools', () => {
       'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'stale_recurring_occurrence as an overdue recurrence whose scheduler projection has not advanced',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not describe the occurrence as current scheduler work, promise automatic recovery, or say that no member action is needed',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(

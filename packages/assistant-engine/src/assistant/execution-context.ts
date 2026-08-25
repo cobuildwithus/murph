@@ -222,6 +222,7 @@ export type AssistantAutomationOccurrenceProjectionIssue =
   | 'default_timezone_unverified'
   | 'projection_unavailable'
   | 'record_readback_mismatch'
+  | 'stale_recurring_occurrence'
 
 export type AssistantAutomationOccurrenceProjection =
   | {

@@ -1,6 +1,7 @@
 ---
 title: 'finish-task rejects intentionally deleted task paths'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2222'
 ---
 
 ## Expected Behavior

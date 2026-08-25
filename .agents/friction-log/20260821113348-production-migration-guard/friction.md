@@ -1,6 +1,7 @@
 ---
 title: 'Production migration guard carries ADD COLUMN checks across SQL statements'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2116'
 ---
 
 ## Expected Behavior
