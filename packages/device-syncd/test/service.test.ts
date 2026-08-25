@@ -605,6 +605,100 @@ test("device sync service facade exposes explicit controls without exposing the 
     assert.equal(Reflect.has(service, "publicIngress"), false);
     assert.equal(typeof service.queueManualReconcile, "function");
     assert.equal(typeof service.disconnectAccount, "function");
+    assert.equal(typeof service.listJobTimingDiagnostics, "function");
+  } finally {
+    close();
+  }
+});
+
+test("device sync service records privacy-safe job phase timings", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-timings");
+  let now = new Date("2026-08-25T10:00:00.000Z");
+  const advanceClock = (elapsedMs: number): void => {
+    now = new Date(now.getTime() + elapsedMs);
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    listConnectionSourcesForJob: async () => {
+      advanceClock(1_000);
+      return [];
+    },
+    providers: [createFakeProvider({
+      async refreshTokens(): Promise<ProviderAuthTokens> {
+        advanceClock(500);
+        return {
+          accessToken: "refreshed-access-token",
+          refreshToken: "refreshed-refresh-token",
+        };
+      },
+      async executeJob(context) {
+        await context.listConnectionSources?.();
+        await context.refreshAccountTokens();
+        await context.importSnapshot({ kind: "timing-test" });
+        advanceClock(1_500);
+        return {};
+      },
+    })],
+    importer: {
+      async importDeviceProviderSnapshot() {
+        advanceClock(2_000);
+        return { ok: true };
+      },
+    },
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-job-timings",
+      displayName: "Demo Job Timings",
+      scopes: ["read:data"],
+      tokens: {
+        accessToken: "job-timings-access",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo",
+          "demo-job-timings",
+          "job-timings-access",
+        ),
+        refreshToken: "job-timings-refresh",
+      },
+      connectedAt: now.toISOString(),
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "resource",
+      payload: { resource: "sleep" },
+      availableAt: now.toISOString(),
+    });
+
+    await service.runWorkerOnce();
+
+    assert.deepEqual(service.listJobTimingDiagnostics(), [{
+      at: "2026-08-25T10:00:05.000Z",
+      attempts: 1,
+      connectionSourceReadCount: 1,
+      connectionSourceReadElapsedMs: 1_000,
+      credentialRefreshCount: 1,
+      credentialRefreshElapsedMs: 500,
+      durableProgressCommitted: true,
+      elapsedMs: 5_000,
+      jobCount: 1,
+      jobKind: "resource",
+      outcome: "completed",
+      provider: "demo",
+      providerExecutionElapsedMs: 5_000,
+      providerUnattributedElapsedMs: 1_500,
+      resource: "sleep",
+      snapshotImportCount: 1,
+      snapshotImportElapsedMs: 2_000,
+    }]);
   } finally {
     close();
   }
@@ -6794,6 +6888,18 @@ test("device sync service aborts and releases provider jobs when foreground work
     assert.equal(executionCount, 1);
     assert.equal(imports.length, 0);
     assert.deepEqual(service.listJobFailureDiagnostics(), []);
+    assert.deepEqual(
+      service.listJobTimingDiagnostics().map((diagnostic) => ({
+        durableProgressCommitted: diagnostic.durableProgressCommitted,
+        jobKind: diagnostic.jobKind,
+        outcome: diagnostic.outcome,
+      })),
+      [{
+        durableProgressCommitted: false,
+        jobKind: "backfill",
+        outcome: "yielded",
+      }],
+    );
 
     const releasedJob = yieldedJob ? store.getJobById(yieldedJob.id) : null;
     assert.equal(releasedJob?.status, "queued");
@@ -6808,6 +6914,25 @@ test("device sync service aborts and releases provider jobs when foreground work
     assert.equal(executionCount, 2);
     assert.equal(imports.length, 1);
     assert.equal(store.getJobById(completedJob!.id)?.status, "succeeded");
+    assert.deepEqual(
+      service.listJobTimingDiagnostics().map((diagnostic) => ({
+        durableProgressCommitted: diagnostic.durableProgressCommitted,
+        jobKind: diagnostic.jobKind,
+        outcome: diagnostic.outcome,
+      })),
+      [
+        {
+          durableProgressCommitted: false,
+          jobKind: "backfill",
+          outcome: "yielded",
+        },
+        {
+          durableProgressCommitted: true,
+          jobKind: "backfill",
+          outcome: "completed",
+        },
+      ],
+    );
   } finally {
     close();
   }
