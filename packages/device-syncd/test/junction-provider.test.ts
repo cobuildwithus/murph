@@ -1224,10 +1224,8 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
   });
 });
 
-test.each([
-  "glucose",
-  "electrocardiogram_voltage",
-] as const)("Junction direct %s units complete three-page grouped responses", async (resource) => {
+test("Junction direct glucose units complete three-page grouped responses", async () => {
+  const resource = "glucose";
   let pages = 0;
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
@@ -21796,6 +21794,269 @@ test("Junction opt-in dense webhooks wait for a closed UTC day before importing"
       assert.equal(event.fields?.value, 48);
     }
   }
+});
+
+test("Junction ECG voltage uses stable summaries to bind documented id-less groups", async () => {
+  const requests: URL[] = [];
+  const importedSnapshots: unknown[] = [];
+  const recordingIds = ["ecg-recording-a", "ecg-recording-b"];
+  const deviceIds = ["watch-a", "watch-b"];
+  let voltageRequest = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-1",
+          slug: "apple_health_kit",
+          name: "Apple Health",
+          status: "connected",
+          resource_availability: { electrocardiogram_voltage: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/summary/electrocardiogram/junction-user-1") {
+      return createJsonResponse({
+        electrocardiogram: recordingIds.map((id, index) => ({
+          id,
+          session_start: "2026-04-02T12:00:00.000Z",
+          session_end: "2026-04-02T12:01:00.000Z",
+          voltage_sample_count: 2,
+          source_provider: "apple_health_kit",
+          source_type: "watch",
+          source_device_id: deviceIds[index],
+          created_at: "2026-04-02T12:01:00.000Z",
+          updated_at: "2026-04-02T12:01:00.000Z",
+          user_id: "junction-user-1",
+          source: {
+            provider: "apple_health_kit",
+            type: "watch",
+            device_id: deviceIds[index],
+          },
+        })),
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/electrocardiogram_voltage/grouped") {
+      const deviceId = requireValue(deviceIds[voltageRequest], "expected one voltage request per summary");
+      voltageRequest += 1;
+      return createJsonResponse({
+        groups: {
+          apple_health_kit: [{
+            source: {
+              provider: "apple_health_kit",
+              type: "watch",
+              device_id: deviceId,
+            },
+            data: [
+              {
+                id: 1,
+                timestamp: "2026-04-02T12:00:00.000Z",
+                type: "lead_i",
+                unit: "mV",
+                value: -0.1,
+              },
+              {
+                id: 2,
+                timestamp: "2026-04-02T12:00:01.000Z",
+                type: "lead_i",
+                unit: "mV",
+                value: 0.1,
+              },
+            ],
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["electrocardiogram_voltage"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "electrocardiogram_voltage",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "apple_health_kit",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    timeseries?: { electrocardiogram_voltage?: Array<Record<string, unknown>> };
+  };
+  const features = snapshot.timeseries?.electrocardiogram_voltage ?? [];
+  assert.deepEqual(features.map((feature) => feature.id), recordingIds);
+  assert.deepEqual(features.map((feature) => feature.voltageSampleCount), [2, 2]);
+  const summaryRequests = requests.filter((url) =>
+    url.pathname.includes("/summary/electrocardiogram/")
+  );
+  const voltageRequests = requests.filter((url) =>
+    url.pathname.includes("/electrocardiogram_voltage/grouped")
+  );
+  assert.equal(summaryRequests.length, 1);
+  assert.equal(voltageRequests.length, 2);
+  for (const url of voltageRequests) {
+    assert.equal(url.searchParams.get("start_date"), "2026-04-02T12:00:00.000Z");
+    assert.equal(url.searchParams.get("end_date"), "2026-04-02T12:01:00.000Z");
+    assert.equal(url.searchParams.get("provider"), "apple_health_kit");
+  }
+});
+
+test("Junction ECG voltage retries when summary cardinality and voltage disagree", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-1",
+          slug: "apple_health_kit",
+          name: "Apple Health",
+          status: "connected",
+          resource_availability: { electrocardiogram_voltage: true },
+        }],
+      });
+    }
+    if (url.pathname.includes("/summary/electrocardiogram/")) {
+      return createJsonResponse({
+        electrocardiogram: [{
+          id: "ecg-recording-a",
+          session_start: "2026-04-02T12:00:00.000Z",
+          session_end: "2026-04-02T12:01:00.000Z",
+          voltage_sample_count: 2,
+          source_provider: "apple_health_kit",
+          source_type: "watch",
+          source_device_id: "watch-a",
+          created_at: "2026-04-02T12:01:00.000Z",
+          updated_at: "2026-04-02T12:01:00.000Z",
+          user_id: "junction-user-1",
+          source: {
+            provider: "apple_health_kit",
+            type: "watch",
+            device_id: "watch-a",
+          },
+        }],
+      });
+    }
+    if (url.pathname.includes("/electrocardiogram_voltage/grouped")) {
+      return createJsonResponse({
+        groups: {
+          apple_health_kit: [{
+            source: {
+              provider: "apple_health_kit",
+              type: "watch",
+              device_id: "watch-a",
+            },
+            data: [{
+              timestamp: "2026-04-02T12:00:00.000Z",
+              type: "lead_i",
+              unit: "mV",
+              value: 0.1,
+            }],
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["electrocardiogram_voltage"],
+  });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext(),
+      createJob("resource", {
+        resource: "electrocardiogram_voltage",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
+      assert.equal(error.failure.code, "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+      assert.equal(error.failure.retryable, true);
+      return true;
+    },
+  );
+});
+
+test("Junction ECG voltage rejects overlapping summaries without reading an ambiguous group", async () => {
+  let voltageRequests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-1",
+          slug: "apple_health_kit",
+          name: "Apple Health",
+          status: "connected",
+          resource_availability: { electrocardiogram_voltage: true },
+        }],
+      });
+    }
+    if (url.pathname.includes("/summary/electrocardiogram/")) {
+      return createJsonResponse({
+        electrocardiogram: ["a", "b"].map((suffix) => ({
+          id: `ecg-recording-${suffix}`,
+          session_start: "2026-04-02T12:00:00.000Z",
+          session_end: "2026-04-02T12:01:00.000Z",
+          voltage_sample_count: 1,
+          source_provider: "apple_health_kit",
+          source_type: "watch",
+          source_device_id: "watch-a",
+          created_at: "2026-04-02T12:01:00.000Z",
+          updated_at: "2026-04-02T12:01:00.000Z",
+          user_id: "junction-user-1",
+          source: {
+            provider: "apple_health_kit",
+            type: "watch",
+            device_id: "watch-a",
+          },
+        })),
+      });
+    }
+    voltageRequests += 1;
+    return createJsonResponse({ groups: {} });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["electrocardiogram_voltage"],
+  });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext(),
+      createJob("resource", {
+        resource: "electrocardiogram_voltage",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
+      assert.equal(error.failure.code, "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+      assert.equal(error.failure.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(voltageRequests, 0);
 });
 
 test("Junction workout_stream diagnostics use one bounded index read and serial dedicated stream reads", async () => {

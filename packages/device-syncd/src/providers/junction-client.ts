@@ -24,7 +24,10 @@ import {
 import { VitalsClient, type StepsGroupedVitalsRequest } from "@junction-api/sdk/vitals";
 import { WorkoutsClient } from "@junction-api/sdk/workouts";
 import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
-import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
+import {
+  normalizeJunctionSourceProviderSlug,
+  resolveJunctionOrigin,
+} from "@murphai/importers/device-providers/junction-origin";
 
 import {
   normalizeJunctionProviderSlug,
@@ -126,6 +129,13 @@ export interface JunctionWindowInput {
   userId: string;
   windowStart: string;
   windowEnd: string;
+}
+
+export interface JunctionElectrocardiogramVoltageInput
+  extends Omit<JunctionWindowInput, "resource"> {
+  recordingId: string;
+  sourceInstanceId?: string | null;
+  sourceType?: string | null;
 }
 
 export interface JunctionProfileSummaryInput {
@@ -541,6 +551,11 @@ export class JunctionClient {
         "Junction workout_stream uses the dedicated workout stream endpoint.",
       );
     }
+    if (policy?.normalizationMode === "ecg_recording_feature") {
+      throw new TypeError(
+        "Junction electrocardiogram_voltage uses its dedicated identity-bound fetch path.",
+      );
+    }
     return this.fetchWindowedCollection(
       {
         ...input,
@@ -556,6 +571,38 @@ export class JunctionClient {
           )
         : extractTimeseriesRecords,
       (cursor) => this.requestTimeseriesPage(input, cursor),
+    );
+  }
+
+  async listElectrocardiogramVoltage(
+    input: JunctionElectrocardiogramVoltageInput,
+  ): Promise<unknown[]> {
+    const recordingId = normalizeString(input.recordingId);
+    const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+      input.sourceProviderSlug,
+    );
+    if (!recordingId || !sourceProviderSlug) {
+      throw new TypeError(
+        "Junction ECG voltage requires summary recording and source identity.",
+      );
+    }
+    const requestInput: JunctionWindowInput = {
+      ...input,
+      dateQueryFormat: "datetime",
+      resource: "electrocardiogram_voltage",
+      sourceProviderSlug,
+    };
+    return this.fetchWindowedCollection(
+      requestInput,
+      (payload) => extractBoundElectrocardiogramVoltageRecords(payload, {
+        recordingId,
+        sessionEnd: input.windowEnd,
+        sessionStart: input.windowStart,
+        sourceInstanceId: normalizeString(input.sourceInstanceId),
+        sourceProviderSlug,
+        sourceType: normalizeString(input.sourceType),
+      }),
+      (cursor) => this.requestTimeseriesPage(requestInput, cursor),
     );
   }
 
@@ -837,6 +884,12 @@ export class JunctionClient {
         providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames,
         signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
       },
       (clientOptions, requestOptions) => {
         const client = new VitalsClient(clientOptions);
@@ -1891,6 +1944,123 @@ function extractTimeseriesRecords(payload: unknown, resource: string): unknown[]
   return groupedRecords ?? extractCollectionRecords(payload, resource);
 }
 
+interface BoundElectrocardiogramVoltageIdentity {
+  recordingId: string;
+  sessionEnd: string;
+  sessionStart: string;
+  sourceInstanceId?: string;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}
+
+function extractBoundElectrocardiogramVoltageRecords(
+  payload: unknown,
+  identity: BoundElectrocardiogramVoltageIdentity,
+): unknown[] {
+  const envelope = readPlainObject(payload);
+  const groups = readPlainObject(envelope?.groups);
+  if (!groups) {
+    throw junctionElectrocardiogramBindingError("group_envelope_invalid");
+  }
+
+  const sessionStartMs = Date.parse(identity.sessionStart);
+  const sessionEndMs = Date.parse(identity.sessionEnd);
+  if (
+    !Number.isFinite(sessionStartMs)
+    || !Number.isFinite(sessionEndMs)
+    || sessionEndMs < sessionStartMs
+  ) {
+    throw new TypeError("Junction ECG summary window was invalid.");
+  }
+
+  const records: unknown[] = [];
+  let matchingGroupCount = 0;
+  for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+    if (!Array.isArray(rawGroups)) {
+      throw junctionElectrocardiogramBindingError("group_collection_invalid");
+    }
+    for (const rawGroup of rawGroups) {
+      const group = readPlainObject(rawGroup);
+      if (!group || !Array.isArray(group.data)) {
+        throw junctionElectrocardiogramBindingError("group_invalid");
+      }
+      const origin = resolveJunctionOrigin(group, {
+        groupedSourceSlug: sourceSlug,
+      });
+      if (
+        normalizeJunctionSourceProviderSlug(origin.sourceProviderSlug)
+        !== identity.sourceProviderSlug
+      ) {
+        continue;
+      }
+      if (
+        identity.sourceInstanceId
+        && origin.sourceInstanceId !== identity.sourceInstanceId
+      ) {
+        continue;
+      }
+      if (identity.sourceType && origin.sourceType !== identity.sourceType) {
+        continue;
+      }
+
+      matchingGroupCount += 1;
+      if (matchingGroupCount > 1) {
+        throw junctionElectrocardiogramBindingError("group_ambiguous");
+      }
+      const groupId = firstDefinedString(group, [
+        "id",
+        "recordingId",
+        "recording_id",
+      ]);
+      if (groupId && groupId !== identity.recordingId) {
+        throw junctionElectrocardiogramBindingError("group_identity_conflict");
+      }
+
+      for (const rawSample of group.data) {
+        const sample = readPlainObject(rawSample);
+        if (!sample) {
+          throw junctionElectrocardiogramBindingError("sample_invalid");
+        }
+        const sampleRecordingId = firstDefinedString(sample, [
+          "recordingId",
+          "recording_id",
+        ]);
+        if (sampleRecordingId && sampleRecordingId !== identity.recordingId) {
+          throw junctionElectrocardiogramBindingError("sample_identity_conflict");
+        }
+        const sampleTimestamp = firstDefinedValue(sample, ["timestamp"]);
+        const sampleTimestampMs = sampleTimestamp instanceof Date
+          ? sampleTimestamp.getTime()
+          : typeof sampleTimestamp === "string"
+            ? Date.parse(sampleTimestamp)
+            : Number.NaN;
+        if (
+          !Number.isFinite(sampleTimestampMs)
+          || sampleTimestampMs < sessionStartMs
+          || sampleTimestampMs > sessionEndMs
+        ) {
+          throw junctionElectrocardiogramBindingError("sample_outside_summary_window");
+        }
+
+        records.push(stripUndefinedRecord({
+          ...sample,
+          // Junction documents the numeric sample `id` as deprecated. It is
+          // not recording identity and must not escape this transient buffer.
+          id: undefined,
+          junctionGroupId: identity.recordingId,
+          junctionResource: "electrocardiogram_voltage",
+          sourceInstanceId: identity.sourceInstanceId ?? origin.sourceInstanceId,
+          sourceProviderSlug: identity.sourceProviderSlug,
+          sourceType: identity.sourceType ?? origin.sourceType,
+          timestamp: new Date(sampleTimestampMs).toISOString(),
+        }));
+      }
+    }
+  }
+
+  return records;
+}
+
 function extractStructurallyCompleteTimeseriesRecords(
   payload: unknown,
   resource: string,
@@ -1957,9 +2127,6 @@ function flattenGroupedTimeseries(
         if (options.strict) {
           throw incompleteJunctionCalendarCollectionError();
         }
-        if (resource === "electrocardiogram_voltage") {
-          throw new TypeError("Junction ECG group must be an object.");
-        }
         continue;
       }
       if (
@@ -1972,33 +2139,13 @@ function flattenGroupedTimeseries(
         throw incompleteJunctionCalendarCollectionError();
       }
 
-      const groupId = firstDefinedString(group, ["id", "recordingId", "recording_id"]);
-      if (resource === "electrocardiogram_voltage" && !groupId) {
-        throw new TypeError("Junction ECG group lacked a stable recording id.");
-      }
-      if (resource === "electrocardiogram_voltage" && !Array.isArray(group.data)) {
-        throw new TypeError("Junction ECG group data must be an array.");
-      }
-
       for (const rawSample of asArray(group.data)) {
         const sample = readPlainObject(rawSample);
         if (!sample) {
           if (options.strict) {
             throw incompleteJunctionCalendarCollectionError();
           }
-          if (resource === "electrocardiogram_voltage") {
-            throw new TypeError("Junction ECG sample must be an object.");
-          }
           continue;
-        }
-
-        const sampleId = firstDefinedString(sample, ["recordingId", "recording_id"]);
-        if (
-          resource === "electrocardiogram_voltage"
-          && sampleId
-          && sampleId !== groupId
-        ) {
-          throw new TypeError("Junction ECG sample conflicted with its group recording id.");
         }
 
         const origin = resolveJunctionOrigin(sample, {
@@ -2012,9 +2159,6 @@ function flattenGroupedTimeseries(
         records.push(stripUndefinedRecord({
           ...sample,
           sourceProviderSlug: sourceProviderSlug ?? undefined,
-          junctionGroupId: resource === "electrocardiogram_voltage"
-            ? groupId
-            : undefined,
           sourceType: origin.sourceType,
           sourceInstanceId: origin.sourceInstanceId,
           junctionResource: resource,
@@ -2030,6 +2174,16 @@ function incompleteJunctionCalendarCollectionError() {
   return deviceSyncError({
     code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
     message: "Junction calendar refresh response was not structurally complete.",
+    retryable: true,
+    httpStatus: 502,
+  });
+}
+
+function junctionElectrocardiogramBindingError(reason: string) {
+  return deviceSyncError({
+    code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+    details: { reason },
+    message: "Junction ECG summary and voltage response were inconsistent.",
     retryable: true,
     httpStatus: 502,
   });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
+
 import {
   JunctionClient,
   resolveJunctionTimeseriesApiResource,
@@ -122,30 +124,34 @@ test("Junction workout_stream uses only the dedicated workout stream endpoint", 
   assert.equal(urls.length, 1);
 });
 
-test("Junction ECG grouped fetch admits its explicit dense cap and preserves group identity", async () => {
+test("Junction ECG voltage binds the documented id-less group to summary identity", async () => {
   const count = 30_000;
-  const client = createClient(async () => createJsonResponse({
-    groups: {
-      apple_health_kit: [{
-        id: "ecg-recording-1",
-        session_start: "2026-01-15T12:00:00.000Z",
-        session_end: "2026-01-15T12:02:00.000Z",
-        revision: 2,
-        updated_at: "2026-01-15T13:00:00.000Z",
-        source: { provider: "apple_health_kit", type: "watch", device_id: "watch-1" },
-        data: Array.from({ length: count }, (_, index) => ({
-          timestamp: new Date(Date.parse("2026-01-15T12:00:00.000Z") + index * 4).toISOString(),
-          type: "lead_i",
-          unit: "mV",
-          value: index % 2 === 0 ? -0.1 : 0.1,
-        })),
-      }],
-    },
-  }));
+  const urls: string[] = [];
+  const client = createClient(async (input) => {
+    urls.push(readUrl(input));
+    return createJsonResponse({
+      groups: {
+        apple_health_kit: [{
+          source: { provider: "apple_health_kit", type: "watch", device_id: "watch-1" },
+          data: Array.from({ length: count }, (_, index) => ({
+            id: index,
+            timestamp: new Date(Date.parse("2026-01-15T12:00:00.000Z") + index * 4).toISOString(),
+            type: "lead_i",
+            unit: "mV",
+            value: index % 2 === 0 ? -0.1 : 0.1,
+          })),
+        }],
+      },
+    });
+  });
 
-  const records = await client.listTimeseries({
+  const records = await client.listElectrocardiogramVoltage({
     ...WINDOW,
-    resource: "electrocardiogram_voltage",
+    maxRecords: count,
+    recordingId: "ecg-recording-1",
+    sourceProviderSlug: "apple_health_kit",
+    windowStart: "2026-01-15T12:00:00.000Z",
+    windowEnd: "2026-01-15T12:02:00.000Z",
   });
 
   assert.equal(records.length, count);
@@ -156,19 +162,63 @@ test("Junction ECG grouped fetch admits its explicit dense cap and preserves gro
     sourceInstanceId: first?.sourceInstanceId,
     sourceProviderSlug: "apple-health-kit",
     sourceType: "watch",
-    timestamp: new Date("2026-01-15T12:00:00.000Z"),
+    timestamp: "2026-01-15T12:00:00.000Z",
     type: "lead_i",
     unit: "mV",
     value: -0.1,
   });
   assert.match(String(first?.sourceInstanceId), /^source-[a-f0-9]{24}$/u);
+  assert.equal("id" in (first ?? {}), false);
+  const url = new URL(urls[0] ?? "https://invalid.example");
+  assert.equal(url.searchParams.get("start_date"), "2026-01-15T12:00:00.000Z");
+  assert.equal(url.searchParams.get("end_date"), "2026-01-15T12:02:00.000Z");
+  assert.equal(url.searchParams.get("provider"), "apple_health_kit");
+});
+
+test("Junction ECG voltage admits only the complete summary source identity", async () => {
+  const targetSource = {
+    device_id: "watch-b",
+    provider: "apple_health_kit",
+    type: "watch",
+  };
+  const sourceInstanceId = resolveJunctionOrigin({ source: targetSource }).sourceInstanceId;
+  assert.ok(sourceInstanceId);
+  const sample = (source: Record<string, unknown>, value: number) => ({
+    data: [{
+      timestamp: "2026-01-15T12:00:00.000Z",
+      type: "lead_i",
+      unit: "mV",
+      value,
+    }],
+    source,
+  });
+  const client = createClient(async () => createJsonResponse({
+    groups: {
+      apple_health_kit: [
+        sample({ provider: "apple_health_kit" }, 0.1),
+        sample({ ...targetSource, type: "phone" }, 0.2),
+        sample({ ...targetSource, device_id: "watch-a" }, 0.3),
+        sample(targetSource, 0.4),
+      ],
+    },
+  }));
+
+  const records = await client.listElectrocardiogramVoltage({
+    ...WINDOW,
+    recordingId: "ecg-recording-1",
+    sourceInstanceId,
+    sourceProviderSlug: "apple_health_kit",
+    sourceType: "watch",
+  });
+
+  assert.equal(records.length, 1);
+  assert.equal((records[0] as Record<string, unknown>).value, 0.4);
 });
 
 test("Junction ECG grouped fetch rejects responses above the explicit dense cap", async () => {
   const client = createClient(async () => createJsonResponse({
     groups: {
       apple_health_kit: [{
-        id: "ecg-recording-over-cap",
         data: Array.from({ length: 100_001 }, (_, index) => ({
           timestamp: new Date(Date.parse("2026-01-15T12:00:00.000Z") + index).toISOString(),
           type: "lead_i",
@@ -181,16 +231,17 @@ test("Junction ECG grouped fetch rejects responses above the explicit dense cap"
   }));
 
   await assert.rejects(
-    client.listTimeseries({
+    client.listElectrocardiogramVoltage({
       ...WINDOW,
-      maxRecords: 200_000,
-      resource: "electrocardiogram_voltage",
+      maxRecords: 100_000,
+      recordingId: "ecg-recording-over-cap",
+      sourceProviderSlug: "apple_health_kit",
     }),
     { code: "JUNCTION_API_RECORD_LIMIT" },
   );
 });
 
-test("Junction ECG grouped fetch requires group identity and rejects sample conflicts", async () => {
+test("Junction ECG voltage rejects conflicting provider identities retryably", async () => {
   for (const group of [
     {
       data: [{
@@ -199,10 +250,10 @@ test("Junction ECG grouped fetch requires group identity and rejects sample conf
         unit: "mV",
         value: 0.1,
       }],
+      id: "different-recording",
       source: { provider: "apple_health_kit", type: "watch" },
     },
     {
-      id: "ecg-group-1",
       data: [{
         recording_id: "ecg-sample-2",
         timestamp: "2026-01-15T12:00:00.000Z",
@@ -217,8 +268,77 @@ test("Junction ECG grouped fetch requires group identity and rejects sample conf
       groups: { apple_health_kit: [group] },
     }));
     await assert.rejects(
-      client.listTimeseries({ ...WINDOW, resource: "electrocardiogram_voltage" }),
-      /ECG (?:group lacked|sample conflicted)/u,
+      client.listElectrocardiogramVoltage({
+        ...WINDOW,
+        recordingId: "ecg-group-1",
+        sourceProviderSlug: "apple_health_kit",
+      }),
+      { code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE", retryable: true },
     );
   }
+});
+
+test("Junction ECG voltage cannot use the unbound generic collection path", async () => {
+  const client = createClient(async () => createJsonResponse({ groups: {} }));
+  await assert.rejects(
+    client.listTimeseries({ ...WINDOW, resource: "electrocardiogram_voltage" }),
+    /dedicated identity-bound fetch path/u,
+  );
+});
+
+test("Junction ECG voltage honors the bounded collection attempt contract", async () => {
+  let requests = 0;
+  const client = createClient(async () => {
+    requests += 1;
+    return createJsonResponse({ error: "temporary" }, 500);
+  });
+
+  await assert.rejects(
+    client.listElectrocardiogramVoltage({
+      ...WINDOW,
+      collectionWorkLimit: {
+        maxAttemptsPerPage: 1,
+        maxPages: 3,
+        requestTimeoutMs: 8_000,
+      },
+      recordingId: "ecg-recording-1",
+      sourceProviderSlug: "apple_health_kit",
+    }),
+    { code: "JUNCTION_API_REQUEST_FAILED" },
+  );
+  assert.equal(requests, 1);
+});
+
+test("Junction ECG voltage preserves bound identity across pagination", async () => {
+  let page = 0;
+  const client = createClient(async () => {
+    page += 1;
+    return createJsonResponse({
+      groups: {
+        apple_health_kit: [{
+          source: { provider: "apple_health_kit", type: "watch" },
+          data: [{
+            timestamp: `2026-01-15T12:00:0${page}.000Z`,
+            type: "lead_i",
+            unit: "mV",
+            value: page / 10,
+          }],
+        }],
+      },
+      ...(page < 3 ? { next_cursor: `page-${page + 1}` } : {}),
+    });
+  });
+
+  const records = await client.listElectrocardiogramVoltage({
+    ...WINDOW,
+    maxRecords: 4,
+    recordingId: "ecg-recording-1",
+    sourceProviderSlug: "apple_health_kit",
+  });
+
+  assert.equal(page, 3);
+  assert.deepEqual(
+    records.map((record) => (record as Record<string, unknown>).junctionGroupId),
+    ["ecg-recording-1", "ecg-recording-1", "ecg-recording-1"],
+  );
 });
