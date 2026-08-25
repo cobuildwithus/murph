@@ -1,6 +1,6 @@
 # Scheduled Card Send Intent
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -86,3 +86,24 @@ unchanged.
   card-only completion, and cardless overflow across supported channels.
 - `@murphai/assistant-engine` typecheck.
 - `git diff --check` and privacy-safe final diff inspection.
+
+## Results
+
+- The full notification runtime file passes with 77 tests, including card-only
+  private delivery, full deterministic recovery, strict append-only handling,
+  and every currently supported authenticated group-card combination.
+- Focused outbox tests pass for supported Telegram and Linq group cards and
+  retain rejection of unsupported audience or channel combinations.
+- Assistant-engine typecheck and the 16 focused changelog archive/fragment
+  tests pass.
+- Preliminary and final ReviewGPT round one identified the same private-envelope
+  exposure in append-only augmentation. The accepted correction classifies
+  append-only augmentation before send-intent derivation and restores strict
+  parsing for that path.
+- Final ReviewGPT round two confirmed the production correction, then identified
+  undisclosed existing group-card scope. The accepted non-production correction
+  adds exact-route regressions and updates the plan, changelog, and PR intent;
+  it adds no production branch or audience owner.
+- Parent final review found no remaining correctness, privacy, architecture,
+  Product UX, or proof gap in the task patch. Product UX result: `Ready`.
+Completed: 2026-08-25
