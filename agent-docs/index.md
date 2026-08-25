@@ -10,6 +10,14 @@ It intentionally lists live architecture, product, verification, and package-bou
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
+Assistant Engine local-service runtime verification is partitioned into
+behavior-owned test modules backed by one adjacent shared harness. Root,
+diff-aware, package, and release coverage lanes run that owner on the ordinary
+Node heap without a package-specific invocation branch. The command contract
+and proof map are specified by
+`agent-docs/operations/verification-and-runtime.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Every pull request carries one mechanically validated, field-complete
 deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
 rollback floor, expected exposure, reversibility, convergence proof, and
