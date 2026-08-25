@@ -24,6 +24,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  live-terra-nutrition-card-recovery:
+    name: Live Terra nutrition-card recovery
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Codex CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          codex_cli_version="$(sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1)"
+          test -n "${codex_cli_version}"
+          npm install --global --ignore-scripts --no-audit --no-fund "@openai/codex@${codex_cli_version}"
+
+      - name: Run interactive nutrition-card recovery with gpt-5.6-terra
+        env:
+          MURPH_REAL_CODEX_MODEL: gpt-5.6-terra
+          MURPH_RUN_REAL_CODEX_E2E: "1"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        working-directory: packages/assistant-engine
+        run: >-
+          pnpm exec vitest run --config vitest.config.ts --no-coverage
+          test/assistant-codex-real-e2e.test.ts
+          -t "interactive nutrition-card meal recovery"
+
   mirror:
     name: Mirror MinIO image to GHCR
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
