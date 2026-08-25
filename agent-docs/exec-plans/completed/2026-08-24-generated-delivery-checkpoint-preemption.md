@@ -1,6 +1,6 @@
 # Generated Delivery Cleanup And Retiring Runner Wake Recovery
 
-Status: active
+Status: completed
 Updated: 2026-08-24
 
 ## Goal
@@ -67,9 +67,23 @@ runner explicit and promptly retryable without abandoning its dirty checkpoint.
 - Generated-delivery residue unit coverage passes, including missing active
   staging, missing root, and malformed hard-link cases.
 - Hosted snapshot bridge coverage passes with bounded cleanup diagnostics.
-- Cloudflare container, runner boundary, and retry-response coverage passes.
+- Cloudflare container, runner boundary, controller-fence, and retry-response
+  coverage passes (419 focused assertions).
 - The hosted-local shutdown checkpoint conversation-ahead E2E passes with
   residue cleanup, one committed shutdown snapshot, cold restore, and one reply.
+- Assistant engine, assistant runtime, Cloudflare, and Web package typechecks
+  pass; the changelog test suite passes.
+
+## Review
+
+- The preliminary specialist review raised two medium findings: the docs named
+  the retry owner imprecisely, and the controller boundary lacked direct fence
+  proof. Both were accepted and resolved with corrected docs plus a focused
+  controller test.
+- The final cross-cutting exact-head review passed with no qualifying findings.
+- The parent review confirmed that the retiring checkpoint stays fenced, the
+  existing continuation owns the one-second recheck, cleanup retains ambiguous
+  state, and diagnostics remain bounded and metadata-only.
 
 ## Product UX Walkthrough
 
@@ -89,3 +103,4 @@ runner explicit and promptly retryable without abandoning its dirty checkpoint.
   one-second replacement recheck; ordinary idle checkpoints retain their
   existing prepublication foreground interruption.
 - Verdict: Ready.
+Completed: 2026-08-24
