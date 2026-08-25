@@ -114,6 +114,54 @@ Updated: 2026-08-25
   usage attribution. The exact subscription-backed child leaf passed with a
   Sol parent and Luna child, without depending on ambient profile settings.
 
+## ReviewGPT round-3 retrospective
+
+- **Original requirement:** provide one guarded developer-local command that
+  runs exactly one existing production-derived live assistant journey through
+  intentional normal local subscription auth or the existing isolated
+  provider-key lane, exposes real effects and replies for a `Ready`/`Hold`
+  decision, makes no paid request in routine CI, and changes no production
+  assistant behavior.
+- **Baseline comparison:** the immutable first-reviewed head changed 13 files
+  with 614 additions and 17 deletions (631 lines). The reviewed direction
+  changes 14 files with 984 additions and 49 deletions (1,033 lines), growth of
+  402 lines (about 64%). Authored production-source churn remains zero.
+- **Growth attribution:** the accepted selector correction added the live tag
+  and config, list-before-login exact-one admission, escaped exact-leaf
+  execution, deterministic process seam, and zero/multiple/single-match tests.
+  Documentation made that contract required and discoverable. The child-model
+  correction was subtractive: it removed auth-branch-specific multi-agent TOML
+  ownership and hard-coded model attribution, then reused the existing
+  per-turn override boundary. Normal main integration supplied that child leaf
+  and required one composed resolver input; it did not add another task owner.
+- **Concepts retained:** one root runner, the existing live-harness file, one
+  generic live tag, Vitest collection as admission authority, an exact
+  collected leaf as paid-execution authority, one injected command seam for
+  deterministic process proof, the repo-local skill, and workflow routing.
+- **Concepts removed or rejected:** raw nonempty-regex authority over paid
+  execution, auth-branch ownership of leaf-specific capability settings, and
+  hard-coded parent model attribution are removed. Copying the normal local
+  Codex profile remains rejected; normal developer-local subscription auth is
+  intentional, while provider-key mode keeps its isolated home.
+- **Indivisibility decision:** continue as one feature. The executable gate,
+  skill, and workflow docs form one acceptance path; splitting them would ship
+  either an undiscoverable and unenforced safety command or instructions that
+  reference absent behavior.
+- **Selector decision:** retain human-friendly pattern input for discovery,
+  then require exactly one collected tagged leaf and execute its escaped full
+  name. A separate leaf-ID registry would duplicate Vitest ownership and add
+  maintenance without improving the paid boundary.
+- **Direction:** explicitly justified continuation at the 14-file shape. Keep
+  the existing owners above and add no framework, identifier registry, auth
+  copy, runtime branch, state owner, or dependency. The review-driven growth is
+  deterministic proof and durable workflow adoption for the demonstrated
+  accidental paid-fanout risk.
+- **Why this is smallest:** it reuses the existing real-Codex harness, Vitest
+  tags and listing, per-turn Codex overrides, normal subscription login,
+  isolated provider mode, and repository workflow system. The only new
+  executable owner is the focused runner, and its process seam exists solely
+  to prove invalid cardinality stops before login or paid execution.
+
 ## Verification
 
 - Commands to run: focused repo-tool tests, focused live-harness unit tests,
