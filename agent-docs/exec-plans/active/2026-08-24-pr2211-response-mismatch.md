@@ -8,6 +8,8 @@ Updated: 2026-08-24
 
 Make the already-detected hosted device response-action mismatch distinguishable
 from an unclassified operation failure without changing device effect semantics.
+Keep the route lookup failure contract aligned with the reviewed foundation so
+caller cancellation cannot be mistaken for a retryable timeout.
 
 ## Evidence
 
@@ -41,3 +43,15 @@ from an unclassified operation failure without changing device effect semantics.
   is 9,464,449 / 9,476,041 bytes with 805-byte entry and 25,155-byte static
   closure. Runner total is 11,279,228 / 11,393,617 bytes with 1,740,666-byte
   entry and 8,604,433-byte static closure.
+- The foundation review proved that the existing route owner still treated
+  caller cancellation as retryable and omitted the model-facing transport or
+  response stage. The owner now matches the foundation byte-for-byte:
+  cancellation is terminal, timeout and ordinary transport failures are
+  retryable, finite HTTP classes expose `response`, and no retry loop or state
+  was added.
+- Focused source and prepared route suites pass 42/42; CLI typecheck and docs
+  gates pass.
+- Production runner assembly and all eight parity probes pass after the route
+  alignment. Vault CLI total is 9,465,037 / 9,476,041 bytes with 805-byte entry
+  and 25,155-byte static closure. Runner totals remain 11,279,228 / 11,393,617
+  bytes with 1,740,666-byte entry and 8,604,433-byte static closure.

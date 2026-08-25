@@ -235,6 +235,7 @@ export async function resolveMapboxAddress(
     throw new VaultCliError(
       'route_mapbox_token_missing',
       'Mapbox address resolution is not configured. Set MAPBOX_ACCESS_TOKEN in the runtime environment before resolving an address.',
+      { retryable: false, stage: 'configuration' },
     )
   }
 

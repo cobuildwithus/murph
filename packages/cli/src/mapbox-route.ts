@@ -54,6 +54,7 @@ export async function estimateMapboxRoute(
     throw new VaultCliError(
       'route_mapbox_token_missing',
       'Mapbox routing is not configured. Set MAPBOX_ACCESS_TOKEN in the runtime environment before using route estimation.',
+      { retryable: false, stage: 'configuration' },
     )
   }
 

@@ -41,6 +41,7 @@ export async function fetchMapboxJson<T>(input: {
   }
 
   if (!response.ok) {
+    await discardMapboxResponseBody(response)
     throw createMapboxHttpError(response.status)
   }
 
@@ -59,6 +60,7 @@ export function createMapboxResponseInvalidError(
     'Mapbox returned an invalid response.',
     {
       retryable: true,
+      stage: 'response',
       ...(status === undefined ? {} : { status }),
     },
   )
@@ -84,33 +86,46 @@ export function resolveMapboxTimeoutMs(env: NodeJS.ProcessEnv): number {
   return Math.min(parsed, MAX_MAPBOX_TIMEOUT_MS)
 }
 
-function createMapboxTransportError(
-  error: unknown,
-): VaultCliError {
-  const timedOut =
-    error instanceof Error &&
-    (error.name === 'AbortError' || error.name === 'TimeoutError')
+async function discardMapboxResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel()
+  } catch {
+    // The status is sufficient to classify the failure; disposal is best effort.
+  }
+}
+
+function createMapboxTransportError(error: unknown): VaultCliError {
+  const errorName = readErrorName(error)
+
+  if (errorName === 'TimeoutError') {
+    return new VaultCliError(
+      'route_mapbox_timeout',
+      'The Mapbox request timed out.',
+      { retryable: true, stage: 'transport', timedOut: true },
+    )
+  }
+
+  if (errorName === 'AbortError') {
+    return new VaultCliError(
+      'route_mapbox_cancelled',
+      'The Mapbox request was cancelled.',
+      { retryable: false, stage: 'transport' },
+    )
+  }
 
   return new VaultCliError(
-    timedOut ? 'route_mapbox_timeout' : 'route_mapbox_unavailable',
-    timedOut
-      ? 'The Mapbox request timed out.'
-      : 'Mapbox is temporarily unavailable.',
-    {
-      retryable: true,
-      ...(timedOut ? { timedOut: true } : {}),
-    },
+    'route_mapbox_unavailable',
+    'Mapbox is temporarily unavailable.',
+    { retryable: true, stage: 'transport' },
   )
 }
 
-function createMapboxHttpError(
-  status: number,
-): VaultCliError {
+function createMapboxHttpError(status: number): VaultCliError {
   if (status === 401 || status === 403) {
     return new VaultCliError(
       'route_mapbox_auth_invalid',
       'Mapbox rejected the runtime credential.',
-      { retryable: false, status },
+      { retryable: false, stage: 'response', status },
     )
   }
 
@@ -118,7 +133,7 @@ function createMapboxHttpError(
     return new VaultCliError(
       'route_mapbox_timeout',
       'The Mapbox request timed out.',
-      { retryable: true, status, timedOut: true },
+      { retryable: true, stage: 'response', status, timedOut: true },
     )
   }
 
@@ -126,21 +141,25 @@ function createMapboxHttpError(
     return new VaultCliError(
       'route_mapbox_rate_limited',
       'Mapbox rate-limited the request.',
-      { retryable: true, status },
+      { retryable: true, stage: 'response', status },
     )
   }
 
-  if (status >= 500 || status < 400) {
+  if (status >= 500 && status <= 599) {
     return new VaultCliError(
       'route_mapbox_unavailable',
       'Mapbox is temporarily unavailable.',
-      { retryable: true, status },
+      { retryable: true, stage: 'response', status },
     )
   }
 
   return new VaultCliError(
     'route_mapbox_request_rejected',
     'Mapbox rejected the request.',
-    { retryable: false, status },
+    { retryable: false, stage: 'response', status },
   )
+}
+
+function readErrorName(error: unknown): string | undefined {
+  return error instanceof Error ? error.name : undefined
 }

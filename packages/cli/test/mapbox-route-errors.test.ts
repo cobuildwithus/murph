@@ -56,7 +56,7 @@ describe('Mapbox final error envelopes', () => {
 
       assert.equal(result.envelope.error.code, testCase.code)
       assert.equal(result.envelope.error.retryable, testCase.retryable)
-      assert.equal(result.envelope.error.stage, undefined)
+      assert.equal(result.envelope.error.stage, 'response')
       assert.equal(result.envelope.error.hint, undefined)
       const rendered = JSON.stringify(result.envelope)
       assert.equal(rendered.includes(providerBody), false)
@@ -83,11 +83,11 @@ describe('Mapbox final error envelopes', () => {
 
     assert.equal(result.envelope.error.code, 'route_mapbox_unavailable')
     assert.equal(result.envelope.error.retryable, true)
-    assert.equal(result.envelope.error.stage, undefined)
+    assert.equal(result.envelope.error.stage, 'transport')
     assert.equal(JSON.stringify(result.envelope).includes(rawCause), false)
   })
 
-  it('classifies aborted transport as a retryable timeout', async () => {
+  it('classifies a transport timeout as retryable', async () => {
     vi.stubEnv('MAPBOX_ACCESS_TOKEN', 'private-mapbox-token')
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockRejectedValue(
       new DOMException('private-timeout-detail', 'TimeoutError'),
@@ -105,8 +105,33 @@ describe('Mapbox final error envelopes', () => {
 
     assert.equal(result.envelope.error.code, 'route_mapbox_timeout')
     assert.equal(result.envelope.error.retryable, true)
-    assert.equal(result.envelope.error.stage, undefined)
+    assert.equal(result.envelope.error.stage, 'transport')
     assert.equal(JSON.stringify(result.envelope).includes('private-timeout-detail'), false)
+  })
+
+  it('keeps caller cancellation terminal', async () => {
+    vi.stubEnv('MAPBOX_ACCESS_TOKEN', 'private-mapbox-token')
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockRejectedValue(
+      new DOMException('private-cancellation-detail', 'AbortError'),
+    ))
+
+    const result = await runInProcessJsonCli(createRouteCli(), [
+      'route',
+      'estimate',
+      '11.1234,22.2345',
+      '33.3456,44.4567',
+    ])
+    if (result.envelope.ok) {
+      throw new Error('expected a Mapbox error envelope')
+    }
+
+    assert.equal(result.envelope.error.code, 'route_mapbox_cancelled')
+    assert.equal(result.envelope.error.retryable, false)
+    assert.equal(result.envelope.error.stage, 'transport')
+    assert.equal(
+      JSON.stringify(result.envelope).includes('private-cancellation-detail'),
+      false,
+    )
   })
 
   it('classifies malformed successful JSON as a retryable provider response failure', async () => {
@@ -130,7 +155,7 @@ describe('Mapbox final error envelopes', () => {
 
     assert.equal(result.envelope.error.code, 'route_mapbox_response_invalid')
     assert.equal(result.envelope.error.retryable, true)
-    assert.equal(result.envelope.error.stage, undefined)
+    assert.equal(result.envelope.error.stage, 'response')
     assert.equal(JSON.stringify(result.envelope).includes('{not-json'), false)
   })
 })
