@@ -31,6 +31,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   applyMurphManagedAutomations: vi.fn(),
@@ -250,6 +251,7 @@ import {
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   saveAssistantSession,
+  setAssistantCronJobEnabled,
   upsertAssistantInputEvent,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
@@ -327,6 +329,35 @@ function withoutAssistantTurnTimingLogs(
       request.entries[0]?.redactedJson?.schema
         !== "murph.assistant-turn-timing.v1",
   );
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function setPendingAutomationDeliveryIntentForTest(input: {
+  automationId: string;
+  intentId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const runtimeStatePath = resolveAssistantStatePaths(
+    input.vaultRoot,
+  ).cronAutomationStatePath;
+  const runtimeStore: unknown = JSON.parse(
+    await readFile(runtimeStatePath, "utf8"),
+  );
+  if (!isUnknownRecord(runtimeStore) || !Array.isArray(runtimeStore.jobs)) {
+    throw new Error("Expected canonical cron runtime store.");
+  }
+  const runtimeRecord = runtimeStore.jobs.find(
+    (candidate) =>
+      isUnknownRecord(candidate) && candidate.jobId === input.automationId,
+  );
+  if (!isUnknownRecord(runtimeRecord) || !isUnknownRecord(runtimeRecord.state)) {
+    throw new Error("Expected canonical cron runtime record.");
+  }
+  runtimeRecord.state.pendingDeliveryIntentId = input.intentId;
+  await writeFile(runtimeStatePath, `${JSON.stringify(runtimeStore, null, 2)}\n`);
 }
 
 function extractTopLevelFunctionBody(source: string, functionName: string): string {
@@ -5416,7 +5447,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         ],
         effectiveTimeZone: "America/Chicago",
         lookupId: "group-check-in",
-        nextOccurrenceAt: expect.any(String),
+        occurrenceProjection: {
+          nextOccurrenceAt: expect.any(String),
+          status: 'resolved' as const,
+        },
         routeBinding: "current_conversation",
         schedule: {
           kind: "dailyLocal",
@@ -5424,7 +5458,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           timeZone: "America/Chicago",
         },
         status: "active",
-        timingVerified: true,
       }));
       const telegramResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
@@ -5536,7 +5569,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("returns the scheduler's exact future occurrence after reactivation and schedule revision", async () => {
+  it("distinguishes pending scheduler work, stale recurrences, and resolved occurrences after reminder patches", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
@@ -5614,7 +5647,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }
       expect(nextWorkout).toEqual(expect.objectContaining({
         effectiveTimeZone: null,
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: "resolved",
+        },
         schedule: {
           activityKind: "workout",
           after: "2026-08-01T12:00:00.000Z",
@@ -5622,7 +5658,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           source: "whoop",
         },
         status: "active",
-        timingVerified: true,
       }));
       await expect(requestAutomation({
         action: "patch",
@@ -5630,10 +5665,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         instructions: "Ask briefly how the next workout felt.",
         lookup: "next-workout-check-in",
       })).resolves.toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         schedule: expect.objectContaining({ kind: "deviceActivity" }),
         status: "active",
-        timingVerified: true,
       }));
 
       const dailyEveningReminder = await requestAutomation({
@@ -5652,9 +5689,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected daily reminder save result.");
       }
       expect(dailyEveningReminder).toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         status: "paused",
-        timingVerified: true,
       }));
 
       const oneTimeEveningReminder = await requestAutomation({
@@ -5672,9 +5711,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected one-time reminder save result.");
       }
       expect(oneTimeEveningReminder).toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         status: "paused",
-        timingVerified: true,
       }));
 
       const finiteOneTimeReminder = await requestAutomation({
@@ -5693,9 +5734,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected finite reminder save result.");
       }
       expect(finiteOneTimeReminder).toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         status: "paused",
-        timingVerified: true,
       }));
 
       const recurringIntervalReminder = await requestAutomation({
@@ -5712,10 +5755,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected recurring reminder save result.");
       }
       expect(recurringIntervalReminder).toEqual(expect.objectContaining({
-        nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
+          status: 'resolved' as const,
+        },
         status: "active",
-        timingVerified: true,
       }));
+
+      const inFlightRecurringReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the recurring in-flight reminder.",
+        schedule: {
+          everyMs: 43_200_000,
+          kind: "every",
+        },
+        slug: "in-flight-recurring-reminder",
+        title: "In-flight recurring reminder",
+      });
+      if (inFlightRecurringReminder.action !== "save") {
+        throw new Error("Expected in-flight recurring reminder save result.");
+      }
+      const initializedInFlightRecurringReminder =
+        await setAssistantCronJobEnabled(
+          vaultRoot,
+          inFlightRecurringReminder.automationId,
+          true,
+        );
+      await setPendingAutomationDeliveryIntentForTest({
+        automationId: inFlightRecurringReminder.automationId,
+        intentId: "intent_in_flight_recurring_reminder",
+        vaultRoot,
+      });
+      const inFlightProjectionCallsBefore =
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: initializedInFlightRecurringReminder.updatedAt,
+        instructions: "Send the revised recurring in-flight reminder.",
+        lookup: "in-flight-recurring-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        occurrenceProjection: { status: "pending" },
+        schedule: {
+          everyMs: 43_200_000,
+          kind: "every",
+        },
+        status: "active",
+      }));
+      expect(
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+        - inFlightProjectionCallsBefore,
+      ).toBe(1);
 
       vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
       await expect(requestAutomation({
@@ -5724,40 +5813,72 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         lookup: "finite-one-time-reminder",
         status: "active",
       })).resolves.toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         status: "active",
-        timingVerified: true,
       }));
 
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
+      const staleProjectionCallsBefore =
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
       await expect(requestAutomation({
         action: "patch",
         expectedUpdatedAt: recurringIntervalReminder.updatedAt,
         instructions: "Send the revised recurring interval reminder.",
         lookup: "recurring-interval-reminder",
       })).resolves.toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          issues: ["stale_recurring_occurrence"],
+          status: "unavailable",
+        },
         schedule: {
           everyMs: 86_400_000,
           kind: "every",
         },
         status: "active",
-        timingVerified: false,
-        timingVerificationIssues: ["stale_recurring_occurrence"],
       }));
+      expect(
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+        - staleProjectionCallsBefore,
+      ).toBe(2);
+      const staleInspectCallsBefore =
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "recurring-interval-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        occurrenceProjection: {
+          issues: ["stale_recurring_occurrence"],
+          status: "unavailable",
+        },
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        status: "active",
+      }));
+      expect(
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+        - staleInspectCallsBefore,
+      ).toBe(1);
       await expect(requestAutomation({
         action: "patch",
         expectedUpdatedAt: oneTimeEveningReminder.updatedAt,
         lookup: "one-time-evening-reminder",
         status: "active",
       })).resolves.toEqual(expect.objectContaining({
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         schedule: {
           at: "2026-08-01T13:00:00.000Z",
           kind: "at",
         },
         status: "active",
-        timingVerified: true,
       }));
       const dailyReactivated = await requestAutomation({
         action: "patch",
@@ -5770,8 +5891,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }
       expect(dailyReactivated).toEqual(expect.objectContaining({
         effectiveTimeZone: "America/Chicago",
-        nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
-        timingVerified: true,
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
+          status: 'resolved' as const,
+        },
       }));
       await expect(getAssistantCronJob(
         vaultRoot,
@@ -5795,13 +5918,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected daily revised patch result.");
       }
       expect(dailyRevised).toEqual(expect.objectContaining({
-        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+          status: 'resolved' as const,
+        },
         schedule: {
           kind: "dailyLocal",
           localTime: "22:00",
           timeZone: "America/Chicago",
         },
-        timingVerified: true,
       }));
       await expect(getAssistantCronJob(
         vaultRoot,
@@ -5828,7 +5953,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         contextReferences: [],
         effectiveTimeZone: "America/Chicago",
         lookupId: "daily-evening-reminder",
-        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+          status: 'resolved' as const,
+        },
         routeBinding: "preserved",
         schedule: {
           kind: "dailyLocal",
@@ -5836,8 +5964,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           timeZone: "America/Chicago",
         },
         status: "active",
-        timingVerified: true,
-        timingVerificationIssues: [],
         updatedAt: dailyRevised.updatedAt,
       });
       await expect(readFile(recordPath, "utf8")).resolves.toBe(
@@ -5867,13 +5993,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(dailyPreservedTimeZone).toEqual(expect.objectContaining({
         action: "patch",
         effectiveTimeZone: "America/Chicago",
-        nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
+          status: 'resolved' as const,
+        },
         schedule: {
           kind: "dailyLocal",
           localTime: "23:00",
           timeZone: "America/Chicago",
         },
-        timingVerified: true,
       }));
 
       await expect(requestAutomation({
@@ -5883,8 +6011,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         lookup: "daily-evening-reminder",
       })).resolves.toEqual(expect.objectContaining({
         action: "patch",
-        nextOccurrenceAt: null,
-        timingVerified: true,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
       }));
       await expect(getAssistantCronJob(
         vaultRoot,
@@ -5892,6 +6022,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       )).resolves.toMatchObject({
         state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
       });
+
+      vi.setSystemTime(new Date("2026-08-11T01:00:00.000Z"));
+      const implicitTimeZoneReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the implicit-timezone reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        slug: "implicit-timezone-reminder",
+        title: "Implicit timezone reminder",
+      });
+      if (implicitTimeZoneReminder.action !== "save") {
+        throw new Error("Expected implicit-timezone reminder save result.");
+      }
+      expect(implicitTimeZoneReminder).toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/New_York",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-11T06:00:00.000Z",
+          status: "resolved",
+        },
+      }));
+
+      vi.setSystemTime(new Date("2026-08-11T03:01:00.000Z"));
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "UTC",
+        vaultTimeZoneVerified: false,
+      });
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "implicit-timezone-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        effectiveTimeZone: "UTC",
+        occurrenceProjection: {
+          issues: ["default_timezone_unverified"],
+          status: "unavailable",
+        },
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        status: "active",
+      }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -5960,8 +6134,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               title: "Synthetic private verification reminder",
             });
             expect(saved).toEqual(expect.objectContaining({
-              timingVerified: true,
-              timingVerificationIssues: [],
+              occurrenceProjection: expect.objectContaining({
+                status: "resolved",
+              }),
             }));
             expect(
               mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
@@ -5984,8 +6159,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               slug: "synthetic-private-persistent-verification-reminder",
               title: "Synthetic private persistent verification reminder",
             })).resolves.toEqual(expect.objectContaining({
-              timingVerified: false,
-              timingVerificationIssues: ["default_timezone_unverified"],
+              occurrenceProjection: {
+                issues: ["default_timezone_unverified"],
+                status: "unavailable",
+              },
             }));
             expect(
               mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
@@ -6029,11 +6206,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               slug: "synthetic-readback-mismatch-reminder",
               title: "Synthetic readback mismatch reminder",
             })).resolves.toEqual(expect.objectContaining({
-              nextOccurrenceAt: null,
-              timingVerified: false,
-              timingVerificationIssues: expect.arrayContaining([
-                "record_readback_mismatch",
-              ]),
+              occurrenceProjection: {
+                issues: expect.arrayContaining(["record_readback_mismatch"]),
+                status: "unavailable",
+              },
             }));
 
             mocks.resolveAssistantCronDefaultTimeZoneProjection
@@ -6061,12 +6237,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               slug: "synthetic-projection-failure-reminder",
               title: "Synthetic projection failure reminder",
             })).resolves.toEqual(expect.objectContaining({
-              nextOccurrenceAt: null,
-              timingVerified: false,
-              timingVerificationIssues: expect.arrayContaining([
-                "projection_unavailable",
-                "record_readback_mismatch",
-              ]),
+              occurrenceProjection: {
+                issues: expect.arrayContaining([
+                  "projection_unavailable",
+                  "record_readback_mismatch",
+                ]),
+                status: "unavailable",
+              },
+            }));
+
+            const staleRecurring = await automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic recurring reminder.",
+              schedule: {
+                everyMs: 86_400_000,
+                kind: "every",
+              },
+              slug: "synthetic-stale-recurring-reminder",
+              title: "Synthetic stale recurring reminder",
+            });
+            if (staleRecurring.action !== "save") {
+              throw new Error("Expected the stale recurring save result.");
+            }
+            vi.setSystemTime(new Date("2026-08-15T02:01:00.000Z"));
+            await expect(automationTool.request({
+              action: "patch",
+              expectedUpdatedAt: staleRecurring.updatedAt,
+              instructions: "Send the revised synthetic recurring reminder.",
+              lookup: "synthetic-stale-recurring-reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              occurrenceProjection: {
+                issues: ["stale_recurring_occurrence"],
+                status: "unavailable",
+              },
             }));
           },
           turnEnvironment: null,
@@ -6093,7 +6296,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           && entry.redactedJson?.schema
             === "murph.hosted-automation-timing-verification.v1"
         );
-      expect(verificationEntries).toHaveLength(8);
+      expect(verificationEntries).toHaveLength(10);
       expect(verificationEntries[0]).toEqual(expect.objectContaining({
         errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
         level: "info",
@@ -6155,6 +6358,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           automationTimingVerificationStage: "readback",
         }),
       }));
+      expect(verificationEntries[8]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "patch",
+          automationTimingVerificationIssues: ["stale_recurring_occurrence"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+        }),
+      }));
+      expect(verificationEntries[9]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "patch",
+          automationTimingVerificationIssues: ["stale_recurring_occurrence"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
       expect(JSON.stringify(logRequests)).not.toContain(
         "synthetic-private-verification-reminder",
       );
@@ -6193,6 +6416,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "Synthetic projection failure reminder",
       );
       expect(JSON.stringify(logRequests)).not.toContain("07:30");
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-stale-recurring-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "revised synthetic recurring reminder",
+      );
       expect(() => logRequests.forEach(parseHostedRuntimeLogRequest)).not.toThrow();
     } finally {
       await rm(parentRoot, { force: true, recursive: true });

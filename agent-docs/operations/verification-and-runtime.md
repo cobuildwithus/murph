@@ -52,8 +52,12 @@ The expensive pull-request workflows admit only non-draft `opened` or
 `synchronize`. A synchronize event that occurred while the PR was ready records
 the new exact head through a successful read-only observer receipt, then a
 trusted default-branch controller returns the PR to draft only while that event
-still names the current SHA. The controller lists open PRs in the base
-repository with GitHub's validated `head=owner:branch` filter, then resolves
+still names the current SHA. The controller runs in the protected
+`frog-reconciliation` environment, leaves the workflow-provided token with no
+permissions, and mints a current-repository Frog GitHub App installation token
+with only `pull-requests: write` for its reads and sole draft mutation. The
+controller lists open PRs in the base repository with GitHub's validated
+`head=owner:branch` filter, then resolves
 exactly one target from the workflow-run head repository, branch, and SHA. Fork
 default branches therefore follow the same path without depending on GitHub
 populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched

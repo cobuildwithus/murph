@@ -61,6 +61,33 @@ metadata, bounded output, and one usage
 record. Inspect only bounded status/error aggregates, never media, prompts,
 paths, response bodies, or credential values.
 
+### Hosted inbox video transience rollout
+
+Deploy the snapshot-excluding Worker and runner bundle with immediate
+convergence, then prove older containers have drained before deploying Web with
+`20260824010000_rearm_hosted_inbox_video_retention`. The migration advances the
+CAS version and makes every snapshot-bearing workspace due on the existing
+indexed inbox-media-retention lane; it does not scan members or introduce a new
+scheduler. Do not apply the migration while an older runner can still publish a
+snapshot containing ordinary inbound video bytes.
+
+After the migration, invoke the existing authenticated retention cron
+serially—not concurrently—until an aggregate database check reports zero due
+workspace retention wakes. Each invocation retains the existing five-workspace
+admission bound; serial repetition accelerates this one-time privacy drain
+without widening runtime concurrency. Confirm replacement checkpoints are
+advancing, snapshot failures remain bounded, and replaced snapshot objects are
+entering the existing orphan-cleanup lifecycle. Inspect only aggregate counts
+and redacted event codes.
+
+Once the first re-armed workspace publishes an exclusion-capable snapshot, that
+runner is the rollback floor until the due queue is zero and old snapshot
+objects have drained. Prefer a forward fix. A rollback below the floor requires
+stopping retention admission and proving no replacement or restored workspace
+can be written by the older runner. The ordinary video-analysis behavior,
+image/audio retention windows, and explicitly durable raw references remain
+unchanged.
+
 ## Assistant Turn-Profile V2 Rollout
 
 Deploy Web's shared hosted-execution reader first; it accepts both v1 and v2

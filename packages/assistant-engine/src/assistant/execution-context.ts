@@ -88,9 +88,6 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
-import type {
-  AssistantCronOccurrenceUnverifiedReason,
-} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -221,11 +218,24 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
-export type AssistantAutomationTimingVerificationIssue =
-  | AssistantCronOccurrenceUnverifiedReason
+export type AssistantAutomationOccurrenceProjectionIssue =
   | 'default_timezone_unverified'
   | 'projection_unavailable'
   | 'record_readback_mismatch'
+  | 'stale_recurring_occurrence'
+
+export type AssistantAutomationOccurrenceProjection =
+  | {
+      nextOccurrenceAt: string | null
+      status: 'resolved'
+    }
+  | {
+      status: 'pending'
+    }
+  | {
+      issues: readonly AssistantAutomationOccurrenceProjectionIssue[]
+      status: 'unavailable'
+    }
 
 export type AssistantHostedAutomationToolResponse =
   | {
@@ -234,12 +244,10 @@ export type AssistantHostedAutomationToolResponse =
       contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -249,12 +257,10 @@ export type AssistantHostedAutomationToolResponse =
       created: boolean
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'current_conversation' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {

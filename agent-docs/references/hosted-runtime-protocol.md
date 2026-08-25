@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-16
+Last verified: 2026-08-23
 
 ## Decision
 
@@ -1309,9 +1309,23 @@ Cloudflare state and cannot attach to default foreground processing.
 The optional workspace `systemMailboxFrontier` fact is a separate rollout seam.
 An omitted field means an older Web producer, `model_free` means the first live
 system item beyond the runtime's handled-through frontier is eligible for the
-bounded system-mailbox executor, `default_owned` leaves that item with ordinary
-default processing, and `null` proves no live retained frontier. Deploy the
+bounded system-mailbox executor, and `default_owned` leaves that item with
+ordinary default processing. `null` means no system work is admitted by the
+current reconciliation facts. For active access, Web derives that result from
+the durable retained frontier. For inactive access, Web emits `null` without a
+mailbox read so Temporal can retire its pointer projection while the durable
+mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
+Because explicit-null retirement removes Temporal's last local reason to wake,
+every Web owner that restores active access must append a deterministic
+`runtime.maintenance-requested` mailbox item in the same transaction as the
+access change. The normal exact-pointer signal is only a latency hint: the
+existing bounded mailbox-handoff sweep recovers a failed first signal from the
+durable item. Direct `invoice.paid` recovery, won or reinstated disputes,
+Family subscription recovery for its bounded active roster, and established
+member Family invite acceptance all use this one handoff. Stripe receipts retain
+the exact mailbox pointers for replay. Ordinary successful active-to-active
+billing events append no restoration item and do not wake the member or roster.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
@@ -2144,9 +2158,11 @@ insufficient.
 ### Hosted Runtime Maintenance Wake
 
 `runtime.maintenance-requested` is the durable no-payload wake for one-time
-hosted runtime maintenance such as a vault format rollout and for a committed
-group projection grant that needs its first private-runtime pass. Web appends
-the runtime-control mailbox row and signals the normal hosted runtime workflow;
+hosted runtime maintenance such as a vault format rollout, for a committed
+group projection grant that needs its first private-runtime pass, and for an
+access-restoration transaction whose runtime may have retired its inactive
+frontier. Web appends the runtime-control mailbox row and signals the normal
+hosted runtime workflow;
 the assistant runtime treats the row as a no-op control receipt, then runs the
 same restore, local runtime maintenance, idle checkpoint, and workspace-version
 CAS path as any other hosted invocation. The maintenance wake must not carry
@@ -2689,14 +2705,17 @@ maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
-may join through the generic live-steering path only before the first completed
-assistant response, only while the turn remains below the cumulative 50-message
+may join through the generic live-steering path while the current provider
+request is open, only while the turn remains below the cumulative 50-message
 initial-plus-live bound, and only when the stored event is the next positive
 causal-sequence successor and preserves the direct actor and native reply
 anchor, or for an authenticated non-direct group preserves the room, delivery
 route, account/audience, projection readiness, and reaction boundary. Every
-completed provider text or media segment remains deliverable; the group audience
-does not create a latest-response replacement rule. A
+completed provider text or media segment remains deliverable for ordinary
+turns. An ordinary interactive Linq/iMessage or Telegram group auto-reply is the
+narrow exception: provider request 0 is an in-memory draft until the existing
+commit boundary, and late input during a four-second held-draft window may
+select one same-thread provider request 1 whose result replaces that draft. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
@@ -2706,16 +2725,26 @@ acknowledges transport only. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a
-normal later assistant turn. First-response closure removes the conversation
-registration and starts no further steer, but retains the existing
-provider-turn correlation until the one steer already started under that exact
-key settles; a rejected steer is not acknowledged and its input remains
-pending. Missing input, a causal gap, a boundary change, capacity overflow, or
-input arriving after the first completed response remains pending for a normal
+normal later assistant turn. Outside the held-draft group exception,
+first-response closure removes the conversation registration and starts no
+further steer, but retains the existing provider-turn correlation until the one
+steer already started under that exact key settles; a rejected steer is not
+acknowledged and its input remains pending. In the exception, request 0 pauses
+provider steering but keeps conversation admission registered until an atomic
+quiet cutoff or one reconsideration admission; request 1 closes at its first
+completed response. Missing input, a causal gap, a boundary change, capacity
+overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
-instead of falling through, and the assistant engine does not synthesize
-another provider request inside the same assistant turn. Final-delivery and
-hosted-tool effect keys use the newest accepted causal input as the stable
+instead of falling through. Reconsideration is capped at provider request 1 and
+only its selected conversational result may enter transcript, terminal
+evidence, and outbox state; completed tools and progress effects remain
+authoritative and are not repeated. While either held request remains
+fallible, source events and the accepted-input journal own recovery; canonical
+user transcript entries and their journal references materialize only after
+the selected turn crosses `commit-started`. A failed request 1 can therefore
+retry the same source events without leaving duplicate transcript history.
+Final-delivery and hosted-tool effect keys use the newest accepted causal input
+as the stable
 replay anchor while the full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
@@ -2885,8 +2914,16 @@ marker, or second persistence owner is introduced.
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
-cache/tmp, rebuildable projections, and assistant JSONL event logs. The one
-derived-cache exception is the exact query SQLite triplet
+cache/tmp, rebuildable projections, and assistant JSONL event logs. The
+private-media-specific exclusion is ordinary inbound hosted video: snapshot planning
+reads validated canonical inbox-capture records and excludes every normalized
+video path that has not been promoted through an explicit canonical event raw
+reference. Pending accepted input may protect the local file for active work,
+but never makes it portable; invalid capture metadata fails snapshot planning
+closed. Idle maintenance separately gives unprotected video a zero-length
+retention window, preserving descriptors and parser derivatives while the
+canonical retention transaction appends the tombstone and deletes the bytes.
+The one derived-cache exception is the exact query SQLite triplet
 `.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
 canonical rescan after a cold restore, while normal source-manifest validation
 still discards and rebuilds stale copies. New archives use the POSIX PAX format

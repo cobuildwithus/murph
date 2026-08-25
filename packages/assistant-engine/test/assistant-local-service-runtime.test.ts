@@ -15,6 +15,7 @@ import type {
 import type {
   HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import { createAssistantUsageId } from '@murphai/hosted-execution/assistant-usage'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import {
   readAssistantAcceptedTurnInputJournal,
@@ -3395,7 +3396,7 @@ test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending a
       })
     providerStarted.resolve()
     await finishProviderResult.promise
-    providerInput.activeTurnSteering?.closeInputAdmission()
+    providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
     admissionClosed.resolve()
     await steerSettled.promise
     releaseLiveTurn?.()
@@ -4294,6 +4295,11 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
           kind: 'no-new-input',
         }
       }
+      if (!input.availableInputIds?.length) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
       expect(input.availableInputIds).toEqual([hostedInput.inputId])
       return {
         acceptedInputs: [
@@ -4482,11 +4488,11 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   providerRelease.resolve()
 
   await expect(resultPromise).resolves.toMatchObject({
-    prompt: 'Event-backed follow up',
+    prompt: 'Initial prompt\n\nEvent-backed follow up',
     response: 'final after event input',
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnInput.mock.calls.length, 3)
   const journal = await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
     'turn-1',
@@ -6059,6 +6065,860 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
   assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
 })
 
+test('sendAssistantMessageLocal commits only the selected held-group result', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const {
+    mocks,
+    resetAcceptedInputJournal,
+    sendAssistantMessageLocal,
+  } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    session,
+  })
+  type SendInput = Parameters<typeof sendAssistantMessageLocal>[0]
+  const groupConversation = {
+    channel: 'telegram',
+    directness: 'group' as const,
+    identityId: 'identity-1',
+    threadId: 'thread-1',
+  }
+  const progressDeliveryDependencies = {
+    sendTelegram: vi.fn(async () => ({
+      providerMessageId: 'telegram-progress-message',
+      providerThreadId: 'thread-1',
+      target: 'thread-1',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const capture = <T>(promise: Promise<T>) =>
+    promise.then(
+      (result) => ({ result, status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+  const resetScenario = () => {
+    resetAcceptedInputJournal()
+    mocks.appendAssistantTranscriptEntries.mockClear()
+    mocks.appendAssistantTranscriptEntriesWithRefs.mockClear()
+    mocks.appendAssistantTurnReceiptEvent.mockClear()
+    mocks.executeCodexTurnWithRecovery.mockReset()
+    mocks.deliverAssistantPrecedingReplies.mockClear()
+    mocks.deliverAssistantProgressUpdate.mockClear()
+    mocks.deliverAssistantReaction.mockClear()
+    mocks.dispatchAssistantReply.mockClear()
+    mocks.finalizeAssistantTurnArtifacts.mockClear()
+    mocks.finalizeAssistantTurnReceipt.mockClear()
+    mocks.recordAdditionalAssistantUsageEvents.mockClear()
+    mocks.recordAssistantUsageEvent.mockClear()
+    mocks.resolveAssistantAcceptedMessageTarget.mockClear()
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mockClear()
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs.mockClear()
+  }
+  const addFirstDraft = (
+    ready: Deferred<void>,
+    providerThreadId: string,
+  ) => {
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+      async (providerInput) => {
+        await providerInput.onProviderRequestPlanned?.({
+          providerAttemptId: 'attempt-0',
+          codexContinuation: { kind: 'explicit-structured-history' },
+        })
+        providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+        ready.resolve()
+        return {
+          kind: 'succeeded',
+          providerTurn: {
+            additionalUsages: [
+              {
+                occurredAt: '2026-08-20T20:00:01.000Z',
+                provider: 'openai-image',
+                providerRequestOrdinal: 1,
+                providerRequestOutcome: 'succeeded',
+                usage: createProviderUsage({ providerRequestId: 'image-usage' }),
+              },
+              {
+                occurredAt: '2026-08-20T20:00:02.000Z',
+                provider: 'codex-subagent',
+                providerRequestOrdinal: 2,
+                providerRequestOutcome: 'succeeded',
+                usage: createProviderUsage({ providerRequestId: 'child-usage' }),
+              },
+            ],
+            onboardingGuidanceInjected: true,
+            attemptCount: 1,
+            codexContinuation: { kind: 'explicit-structured-history' },
+            codexThreadId: providerThreadId,
+            precedingResponseSegments: [{
+              deliveryContextOrdinal: 0,
+              media: [],
+              response: 'Provisional segment.',
+            }],
+            response: 'The stale draft.',
+            responseDeliveryContextOrdinal: 0,
+            provider: 'codex-cli',
+            providerOptions: session.providerOptions,
+            route: { routeId: 'route-group-review' },
+            session,
+            transcriptResponse: 'The stale draft.',
+            usage: createProviderUsage({ providerRequestId: 'request-0' }),
+          },
+        }
+      },
+    )
+  }
+  const startHeldTurn = async (input: {
+    activeTurnCheckpoint?: NonNullable<SendInput['activeTurnCheckpoint']>
+    firstDraftReady: Deferred<void>
+    latePrompt: string
+    onFinishWithoutReplyAccepted?: NonNullable<
+      SendInput['onFinishWithoutReplyAccepted']
+    >
+  }) => {
+    const initial = capture(sendAssistantMessageLocal({
+      ...(input.activeTurnCheckpoint
+        ? { activeTurnCheckpoint: input.activeTurnCheckpoint }
+        : {}),
+      activeTurnInput: async () => ({ kind: 'no-new-input' }),
+      conversation: groupConversation,
+      deliverResponse: true,
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies,
+          userEnvKeys: [],
+        },
+      },
+      ...(input.onFinishWithoutReplyAccepted
+        ? {
+            onFinishWithoutReplyAccepted:
+              input.onFinishWithoutReplyAccepted,
+          }
+        : {}),
+      prompt: 'Initial group message',
+      turnTrigger: 'automation-auto-reply',
+      vault: '/vaults/test',
+    }))
+    await input.firstDraftReady.promise
+    const late = capture(sendAssistantMessageLocal({
+      conversation: groupConversation,
+      expectedActiveTurnId: 'turn-1',
+      prompt: input.latePrompt,
+      vault: '/vaults/test',
+    }))
+    await vi.advanceTimersByTimeAsync(4_000)
+    return { initial, late }
+  }
+
+  vi.useFakeTimers()
+  for (const scenario of [
+    {
+      finalResponse: 'The stale draft.',
+      liveSteer: true,
+    },
+    {
+      finalResponse: 'The updated final reply.',
+      liveSteer: false,
+    },
+  ]) {
+    resetScenario()
+    const firstDraftReady = createDeferred<void>()
+    const reconsiderationStarted = createDeferred<void>()
+    const reconsiderationRelease = createDeferred<void>()
+    const reconsiderationSteers: string[] = []
+    const activeTurnCheckpoint = vi.fn(
+      async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
+    )
+    addFirstDraft(firstDraftReady, 'provider-thread-group-review')
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+      async (providerInput) => {
+        await providerInput.onProviderRequestPlanned?.({
+          providerAttemptId: 'attempt-1',
+          codexContinuation: { kind: 'explicit-structured-history' },
+        })
+        const releaseLiveTurn = scenario.liveSteer
+          ? providerInput.activeTurnSteering?.registerLiveProviderTurn({
+              interrupt: async () => undefined,
+              codexThreadId: 'provider-thread-group-review',
+              providerTurnId: 'provider-turn-group-review-1',
+              sessionId: session.sessionId,
+              steer: async (steerInput) => {
+                reconsiderationSteers.push(steerInput.prompt)
+              },
+              turnId: 'turn-1',
+            })
+          : undefined
+        reconsiderationStarted.resolve()
+        await reconsiderationRelease.promise
+        if (scenario.liveSteer) {
+          await providerInput.progressDelivery?.send(
+            'Replying to the late message.',
+            {
+              deliveryContextOrdinal: 0,
+              required: true,
+              source: 'system',
+              targetInputId: 'manual-1',
+            },
+          )
+          await providerInput.progressDelivery?.send(
+            'Replying to the live-steered message.',
+            {
+              deliveryContextOrdinal: 1,
+              required: true,
+              source: 'system',
+              targetInputId: 'manual-2',
+            },
+          )
+        }
+        providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+        releaseLiveTurn?.()
+        return {
+          kind: 'succeeded',
+          providerTurn: {
+            additionalUsages: [{
+              occurredAt: '2026-08-20T20:00:03.000Z',
+              provider: 'request-1-tool',
+              providerRequestOrdinal: 2,
+              providerRequestOutcome: 'succeeded',
+              usage: createProviderUsage({ providerRequestId: 'request-1-tool' }),
+            }],
+            onboardingGuidanceInjected: true,
+            attemptCount: 1,
+            codexContinuation: { kind: 'explicit-structured-history' },
+            codexThreadId: 'provider-thread-group-review',
+            precedingResponseSegments: [{
+              deliveryContextOrdinal: 0,
+              media: [],
+              response: 'Selected completed segment.',
+            }],
+            provider: 'codex-cli',
+            providerOptions: session.providerOptions,
+            response: scenario.finalResponse,
+            responseDeliveryContextOrdinal: scenario.liveSteer ? 1 : 0,
+            route: { routeId: 'route-group-review' },
+            session,
+            transcriptResponse: scenario.finalResponse,
+            usage: createProviderUsage({ providerRequestId: 'request-1' }),
+          },
+        }
+      },
+    )
+    const turn = await startHeldTurn({
+      activeTurnCheckpoint,
+      firstDraftReady,
+      latePrompt: 'Actually, plans changed.',
+    })
+    await reconsiderationStarted.promise
+    const live = scenario.liveSteer
+      ? capture(sendAssistantMessageLocal({
+          conversation: groupConversation,
+          expectedActiveTurnId: 'turn-1',
+          prompt: 'One more group detail.',
+          vault: '/vaults/test',
+        }))
+      : null
+    if (live) {
+      await vi.waitFor(() => {
+        expect(reconsiderationSteers).toEqual(['One more group detail.'])
+      })
+    }
+    reconsiderationRelease.resolve()
+
+    const outcomes = await Promise.all([
+      turn.initial,
+      turn.late,
+      ...(live ? [live] : []),
+    ])
+    expect(outcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(true)
+    for (const outcome of outcomes) {
+      assert.equal(outcome.status, 'fulfilled')
+      expect(outcome.result).toMatchObject({
+        prompt: scenario.liveSteer
+          ? 'One more group detail.'
+          : 'Actually, plans changed.',
+        response: scenario.finalResponse,
+      })
+    }
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls.map(
+        ([providerInput]) => providerInput.providerRequestOrdinal,
+      ),
+    ).toEqual([0, 1])
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
+    ).toMatchObject({
+      prompt: 'Actually, plans changed.',
+      turnContext: expect.stringContaining(
+        'Re-evaluate all accepted messages under the group turn rules and return one final result.',
+      ),
+    })
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
+    ).not.toContain('previous response was held')
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
+        ?.resumeState,
+    ).toMatchObject({
+      routeFingerprint: 'route-group-review',
+      threadId: 'provider-thread-group-review',
+    })
+    expect(activeTurnCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ providerRequestOrdinal: 1 }),
+    )
+    expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledOnce()
+    expect(
+      mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
+    ).toMatchObject({
+      precedingResponseSegments: [],
+      response: scenario.finalResponse,
+      responseDeliveryContextOrdinal: scenario.liveSteer ? 2 : 1,
+    })
+    expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
+      expect.objectContaining({ segments: [] }),
+    )
+    expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+    expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
+      scenario.finalResponse,
+    )
+    expect(
+      mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+    ).toHaveBeenCalledOnce()
+    if (scenario.liveSteer) {
+      expect(mocks.resolveAssistantAcceptedMessageTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          acceptedInputIds: ['initial', 'manual-1'],
+          action: 'native-reply',
+          messageRef: 'manual-1',
+        }),
+      )
+      expect(mocks.resolveAssistantAcceptedMessageTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          acceptedInputIds: ['initial', 'manual-1', 'manual-2'],
+          action: 'native-reply',
+          messageRef: 'manual-2',
+        }),
+      )
+      expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(2)
+    }
+    expect(
+      mocks.recordAssistantUsageEvent.mock.calls.map(
+        ([usageInput]) => usageInput.providerRequestOrdinal,
+      ),
+    ).toEqual([0, 3])
+    expect(
+      mocks.recordAdditionalAssistantUsageEvents.mock.calls.map(
+        ([usageInput]) =>
+          usageInput.additionalUsages?.map(
+            (usage) => usage.providerRequestOrdinal,
+          ),
+      ),
+    ).toEqual([[1, 2], [4]])
+    const canonicalUsageIds = [0, 1, 2, 3, 4].map(
+      (providerRequestOrdinal) => createAssistantUsageId({
+        attemptCount: 1,
+        providerRequestOrdinal,
+        turnId: 'turn-1',
+      }),
+    )
+    expect(new Set(canonicalUsageIds).size).toBe(canonicalUsageIds.length)
+  }
+
+  resetScenario()
+  const quietDraftReady = createDeferred<void>()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      quietDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-quiet',
+          precedingResponseSegments: [{
+            deliveryContextOrdinal: 0,
+            media: [{
+              alt: 'Selected quiet segment image',
+              kind: 'image',
+              source: null,
+              url: 'https://cdn.example.test/selected-quiet.png',
+            }],
+            response: 'Selected quiet segment.',
+          }],
+          response: 'Selected quiet final reply.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: 'Selected quiet final reply.',
+        },
+      }
+    },
+  )
+  const quietDraft = capture(sendAssistantMessageLocal({
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: groupConversation,
+    deliverResponse: true,
+    prompt: 'Quiet group message',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  }))
+  await quietDraftReady.promise
+  await vi.advanceTimersByTimeAsync(4_000)
+  const quietDraftOutcome = await quietDraft
+  assert.equal(quietDraftOutcome.status, 'fulfilled')
+  expect(quietDraftOutcome.result.response).toBe('Selected quiet final reply.')
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
+  ).toMatchObject({
+    precedingResponseSegments: [],
+  })
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
+    expect.objectContaining({ segments: [] }),
+  )
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+
+  resetScenario()
+  const silenceDraftReady = createDeferred<void>()
+  const noReplyAccepted = vi.fn(async () => undefined)
+  addFirstDraft(silenceDraftReady, 'provider-thread-group-silence')
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: true,
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-silence',
+          finalAction: { kind: 'none' },
+          reactions: [{
+            deliveryContextOrdinal: 0,
+            reaction: 'thumbs_up',
+            targetInputId: 'manual-1',
+          }],
+          response: 'This contradictory text must not escape.',
+          responseDeliveryContextOrdinal: 0,
+          responseMedia: [{
+            alt: 'provisional image',
+            kind: 'image',
+            source: null,
+            url: 'https://cdn.example.test/provisional.png',
+          }],
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: 'This contradictory text must not escape.',
+        },
+      }
+    },
+  )
+  const silenceTurn = await startHeldTurn({
+    firstDraftReady: silenceDraftReady,
+    latePrompt: 'A human already answered.',
+    onFinishWithoutReplyAccepted: noReplyAccepted,
+  })
+  const silenceOutcomes = await Promise.all([
+    silenceTurn.initial,
+    silenceTurn.late,
+  ])
+  expect(silenceOutcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(
+    true,
+  )
+  for (const outcome of silenceOutcomes) {
+    assert.equal(outcome.status, 'fulfilled')
+    expect(outcome.result).toMatchObject({
+      response: '',
+      responseDisposition: 'none',
+    })
+  }
+  expect(noReplyAccepted).toHaveBeenCalledOnce()
+  expect(noReplyAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: ['initial', 'manual-1'],
+    deliveryContextOrdinal: 1,
+    messageReactionPending: true,
+  })
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
+  ).toMatchObject({
+    acceptedNoReplyDeliveryContextOrdinals: [1],
+    precedingResponseSegments: [],
+    reactions: [{ deliveryContextOrdinal: 1, reaction: 'thumbs_up' }],
+    response: '',
+    responseDeliveryContextOrdinal: 1,
+    responseMedia: [],
+    transcriptResponse: null,
+  })
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+
+  resetScenario()
+  const abortedSilenceDraftReady = createDeferred<void>()
+  const abortController = new AbortController()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      abortedSilenceDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-aborted-silence',
+          finalAction: { kind: 'none' },
+          response: '',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: null,
+        },
+      }
+    },
+  )
+  const abortedSilence = capture(sendAssistantMessageLocal({
+    abortSignal: abortController.signal,
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: groupConversation,
+    deliverResponse: true,
+    prompt: 'Initial human-owned group beat',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  }))
+  await abortedSilenceDraftReady.promise
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+  abortController.abort()
+  const abortedSilenceOutcome = await abortedSilence
+  assert.equal(abortedSilenceOutcome.status, 'rejected')
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+
+  resetScenario()
+  const quietSilenceDraftReady = createDeferred<void>()
+  const quietNoReplyAccepted = vi.fn(async () => undefined)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      quietSilenceDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-quiet-silence',
+          finalAction: { kind: 'none' },
+          response: 'This contradictory text must remain provisional.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: 'This contradictory text must remain provisional.',
+        },
+      }
+    },
+  )
+  const quietSilence = capture(sendAssistantMessageLocal({
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: groupConversation,
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted: quietNoReplyAccepted,
+    prompt: 'Initial human-owned group beat',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  }))
+  await quietSilenceDraftReady.promise
+  expect(quietNoReplyAccepted).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(4_000)
+  const quietSilenceOutcome = await quietSilence
+  assert.equal(quietSilenceOutcome.status, 'fulfilled')
+  expect(quietSilenceOutcome.result).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(quietNoReplyAccepted).toHaveBeenCalledOnce()
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).toHaveBeenCalledOnce()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock
+      .invocationCallOrder[0],
+  ).toBeLessThan(quietNoReplyAccepted.mock.invocationCallOrder[0]!)
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).toHaveBeenCalledOnce()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).toHaveBeenCalledWith(
+    '/vaults/test',
+    session.sessionId,
+    [expect.objectContaining({
+      kind: 'user',
+      text: 'Initial human-owned group beat',
+    })],
+  )
+  expect(mocks.appendAssistantTurnReceiptEvent).toHaveBeenCalledOnce()
+  expect(mocks.appendAssistantTurnReceiptEvent).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'user.persisted' }),
+  )
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).toHaveBeenCalledOnce()
+
+  resetScenario()
+  const initialFailure = new Error('initial provider failed after no reply')
+  const initialFailedNoReplyAccepted = vi.fn(async () => undefined)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      return {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        attemptCount: 1,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-group-initial-failure',
+        error: initialFailure,
+        kind: 'failed_terminal',
+        providerRequestOutcome: 'failed',
+        providerTurnId: 'provider-turn-group-initial-failure',
+        rawEvents: [],
+        route: {
+          provider: 'codex-cli',
+          providerOptions: { model: 'gpt-5.4' },
+          routeId: 'route-group-initial-failure',
+        },
+        session,
+        usage: null,
+        usageAttribution: null,
+      }
+    },
+  )
+  const initialFailureOutcome = await capture(sendAssistantMessageLocal({
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: groupConversation,
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted: initialFailedNoReplyAccepted,
+    prompt: 'Initial group message',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  }))
+  assert.equal(initialFailureOutcome.status, 'rejected')
+  assert.equal(initialFailureOutcome.error, initialFailure)
+  expect(initialFailedNoReplyAccepted).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+
+  resetScenario()
+  const failureDraftReady = createDeferred<void>()
+  const terminalError = new Error('reconsideration provider failed')
+  const failedNoReplyAccepted = vi.fn(async () => undefined)
+  addFirstDraft(failureDraftReady, 'provider-thread-group-failure')
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      return {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        attemptCount: 1,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-group-failure',
+        error: terminalError,
+        kind: 'failed_terminal',
+        providerRequestOutcome: 'failed',
+        providerTurnId: 'provider-turn-group-failure',
+        rawEvents: [],
+        route: {
+          provider: 'codex-cli',
+          providerOptions: { model: 'gpt-5.4' },
+          routeId: 'route-group-failure',
+        },
+        session,
+        usage: null,
+        usageAttribution: null,
+      }
+    },
+  )
+  const failureTurn = await startHeldTurn({
+    firstDraftReady: failureDraftReady,
+    latePrompt: 'New group input',
+    onFinishWithoutReplyAccepted: failedNoReplyAccepted,
+  })
+  const failureOutcomes = await Promise.all([
+    failureTurn.initial,
+    failureTurn.late,
+  ])
+  expect(failureOutcomes.every((outcome) => outcome.status === 'rejected')).toBe(
+    true,
+  )
+  for (const outcome of failureOutcomes) {
+    assert.equal(outcome.status, 'rejected')
+    assert.equal(outcome.error, terminalError)
+  }
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+  expect(failedNoReplyAccepted).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(
+    mocks.appendAssistantTurnReceiptEvent.mock.calls
+      .map(([event]) => event.kind)
+      .filter((kind) => kind === 'user.persisted'),
+  ).toEqual([])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnReceipt).toHaveBeenCalledWith(
+    expect.objectContaining({ response: null, status: 'failed' }),
+  )
+
+  resetScenario()
+  const retryDraftReady = createDeferred<void>()
+  const retryNoReplyAccepted = vi.fn(async () => undefined)
+  addFirstDraft(retryDraftReady, 'provider-thread-group-retry')
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-retry',
+          finalAction: { kind: 'none' },
+          response: '',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: null,
+        },
+      }
+    },
+  )
+  const retryTurn = await startHeldTurn({
+    firstDraftReady: retryDraftReady,
+    latePrompt: 'New group input',
+    onFinishWithoutReplyAccepted: retryNoReplyAccepted,
+  })
+  const retryOutcomes = await Promise.all([
+    retryTurn.initial,
+    retryTurn.late,
+  ])
+  expect(retryOutcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(
+    true,
+  )
+  for (const outcome of retryOutcomes) {
+    assert.equal(outcome.status, 'fulfilled')
+    expect(outcome.result).toMatchObject({
+      response: '',
+      responseDisposition: 'none',
+    })
+  }
+  expect(retryNoReplyAccepted).toHaveBeenCalledOnce()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.appendAssistantTranscriptEntriesWithRefs.mock.calls.map(
+      ([, , entries]) => entries.map((entry) => entry.text),
+    ),
+  ).toEqual([
+    ['Initial group message'],
+    ['New group input'],
+  ])
+  expect(
+    mocks.appendAssistantTurnReceiptEvent.mock.calls
+      .map(([event]) => event.kind)
+      .filter((kind) => kind === 'user.persisted'),
+  ).toEqual(['user.persisted', 'user.persisted'])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock
+      .invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.appendAssistantTranscriptEntriesWithRefs.mock.invocationCallOrder[0]!,
+  )
+})
+
 test('sendAssistantMessageLocal probes active-turn input once before provider start', async () => {
   let admissionOrdinal = 0
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => {
@@ -6123,6 +6983,134 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
       source: 'manual',
     }),
   ])
+})
+
+test('sendAssistantMessageLocal keeps every group prompt accepted before provider start', async () => {
+  const initialImage = Buffer.from('synthetic-image-input')
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  let admissionCount = 0
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
+    async () => {
+      admissionCount += 1
+      if (admissionCount > 1) {
+        return { kind: 'no-new-input' }
+      }
+      return {
+        acceptedInputs: [
+          {
+            id: 'hook-1',
+            promptFallbackReason: 'manual-input',
+            promptFallbackText: 'Also share the walking time.',
+            source: 'manual',
+          },
+        ],
+        kind: 'accepted' as const,
+        prompt: 'Also share the walking time.',
+        transcriptText: 'Also share the walking time.',
+        userMessageContent: [
+          {
+            text: 'Also share the walking time.',
+            type: 'text' as const,
+          },
+        ],
+      }
+    },
+  )
+  const firstDraftReady = createDeferred<void>()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      firstDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-pre-provider',
+          response: 'The venue opens at nine, and the walk takes ten minutes.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-pre-provider' },
+          session,
+          transcriptResponse:
+            'The venue opens at nine, and the walk takes ten minutes.',
+        },
+      }
+    },
+  )
+
+  vi.useFakeTimers()
+  const resultPromise = sendAssistantMessageLocal({
+    activeTurnInput,
+    conversation: {
+      channel: 'telegram',
+      directness: 'group',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliverResponse: true,
+    prompt: 'What time does the venue open?',
+    turnTrigger: 'automation-auto-reply',
+    userMessageContent: [
+      {
+        image: initialImage,
+        mediaType: 'image/png',
+        type: 'image',
+      },
+      {
+        text: 'What time does the venue open?',
+        type: 'text',
+      },
+    ],
+    vault: '/vaults/test',
+  })
+  await firstDraftReady.promise
+
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input.prompt,
+  ).toBe(
+    'What time does the venue open?\n\nAlso share the walking time.',
+  )
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input
+      .userMessageContent,
+  ).toEqual([
+    {
+      image: initialImage,
+      mediaType: 'image/png',
+      type: 'image',
+    },
+    {
+      text: 'What time does the venue open?',
+      type: 'text',
+    },
+    {
+      text: 'Also share the walking time.',
+      type: 'text',
+    },
+  ])
+  await vi.advanceTimersByTimeAsync(4_000)
+  await expect(resultPromise).resolves.toMatchObject({
+    response: 'The venue opens at nine, and the walk takes ten minutes.',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
 })
 
 test('sendAssistantMessageLocal exposes hosted current-input authority to dynamic tools', async () => {
@@ -6197,7 +7185,7 @@ test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-r
   })
 
   assert.equal(result.response, 'assistant response')
-  assert.equal(activeTurnInput.mock.calls.length, 1)
+  assert.equal(activeTurnInput.mock.calls.length, 2)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
@@ -9533,6 +10521,9 @@ async function loadLocalServiceModule(input?: {
     ),
     recordAdditionalAssistantUsageEvents: vi.fn(
       async (_input: {
+        additionalUsages?: readonly {
+          providerRequestOrdinal: number
+        }[] | null
         providerRequestAcceptedInputIds?: readonly string[]
         providerRequestOrdinal?: number
       }) => undefined,
@@ -9930,6 +10921,11 @@ async function loadLocalServiceModule(input?: {
     ...module,
     mocks,
     deliveryOutcome,
+    resetAcceptedInputJournal() {
+      acceptedInputIds.length = 0
+      acceptedInputs.length = 0
+      transcriptEntryCount = 0
+    },
     session,
   }
 }
