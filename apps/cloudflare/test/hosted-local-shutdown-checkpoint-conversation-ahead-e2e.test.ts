@@ -53,6 +53,7 @@ const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.6-terra";
 const idleCheckpointDelayMs = 180_000;
 const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
+const shutdownHandoffStartDeadlineMs = 10_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -240,6 +241,14 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(requireLinqStub().readObservedMessageText(restoredReply))
       .toBe(conversationAheadReplyText);
     expect(countContainerStartLogs()).toBeGreaterThanOrEqual(baselineContainerStartCount + 2);
+    const replacementStartLatencyMs = requireFirstContainerStartAtOrAfter(
+      committedShutdownSnapshotAtMs,
+    ) - committedShutdownSnapshotAtMs;
+    expect(replacementStartLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(replacementStartLatencyMs).toBeLessThan(shutdownHandoffStartDeadlineMs);
+    console.info(
+      `Hosted shutdown checkpoint replacement-start latency: ${replacementStartLatencyMs}ms`,
+    );
 
     const acceptedReplies = requireLinqStub().acceptedSendRequests
       .slice(baselineAcceptedRequestCount)
@@ -570,7 +579,29 @@ function countContainerStartLogs(): number {
   ).length;
 }
 
-function readStructuredLogRecords(): Array<{ message?: unknown }> {
+function requireFirstContainerStartAtOrAfter(afterAtMs: number): number {
+  const startedAtMs = readStructuredLogRecords().flatMap((record) => {
+    if (
+      record.message !== "Hosted execution container starting."
+      || typeof record.time !== "string"
+    ) {
+      return [];
+    }
+    const atMs = Date.parse(record.time);
+    return Number.isFinite(atMs) && atMs >= afterAtMs ? [atMs] : [];
+  }).sort((left, right) => left - right)[0];
+  if (startedAtMs === undefined) {
+    throw new Error(
+      "Hosted shutdown checkpoint did not issue a replacement start after publication.",
+    );
+  }
+  return startedAtMs;
+}
+
+function readStructuredLogRecords(): Array<{
+  message?: unknown;
+  time?: unknown;
+}> {
   const output = [
     requireScenario().harness.stdoutTail(2_000_000),
     requireScenario().harness.stderrTail(2_000_000),
@@ -583,7 +614,10 @@ function readStructuredLogRecords(): Array<{ message?: unknown }> {
     try {
       const value: unknown = JSON.parse(trimmed);
       return value && typeof value === "object" && !Array.isArray(value)
-        ? [value as { message?: unknown }]
+        ? [value as {
+            message?: unknown;
+            time?: unknown;
+          }]
         : [];
     } catch {
       return [];

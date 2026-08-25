@@ -637,6 +637,247 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
+  it("reports no active child as soon as an exact rejected invocation settles", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_wake_after_shutdown_settles");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    let wakeSettled = false;
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    }).finally(() => {
+      wakeSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    expect(wakeSettled).toBe(false);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+    await expect(wake).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation/abort")
+    )).toBe(false);
+  });
+
+  it("keeps a rejected wake unconfirmed when a successor invocation is queued", async () => {
+    const activeRequestStarted = createDeferred<void>();
+    const activeResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_rejected_wake_before_successor");
+    let executeCallCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        executeCallCount += 1;
+        if (executeCallCount === 1) {
+          activeRequestStarted.resolve(undefined);
+          return await activeResponse.promise;
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const activeInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await activeRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    const queuedInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_successor_after_rejected_wake"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    activeResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(activeInvocation).resolves.toEqual(createRunnerResult());
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    await expect(queuedInvocation).resolves.toEqual(createRunnerResult());
+    expect(executeCallCount).toBe(2);
+  });
+
+  it("keeps a rejected wake fail-closed after invocation transport uncertainty", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_rejected_wake_transport_uncertain");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    const invocationFailure = expect(invocation).rejects.toThrow(
+      "Network connection lost",
+    );
+    runnerResponse.reject(new Error("Network connection lost"));
+
+    await invocationFailure;
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    await expect(container.readActiveRuntimeUserFence()).resolves.toMatchObject({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+    });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("posts an exact runtime wake when the outer active-operation pointer is missing", async () => {
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
