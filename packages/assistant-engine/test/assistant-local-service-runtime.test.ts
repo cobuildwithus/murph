@@ -4488,7 +4488,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   providerRelease.resolve()
 
   await expect(resultPromise).resolves.toMatchObject({
-    prompt: 'Event-backed follow up',
+    prompt: 'Initial prompt\n\nEvent-backed follow up',
     response: 'final after event input',
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
