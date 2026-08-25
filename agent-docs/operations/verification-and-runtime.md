@@ -55,9 +55,13 @@ trusted default-branch controller returns the PR to draft only while that event
 still names the current SHA. The controller runs in the protected
 `frog-reconciliation` environment, leaves the workflow-provided token with no
 permissions, and mints a current-repository Frog GitHub App installation token
-with only `pull-requests: write` for its reads and sole draft mutation. The
-controller lists open PRs in the base repository with GitHub's validated
-`head=owner:branch` filter, then resolves
+with exactly `contents: write` and `pull-requests: write`. Pull requests write
+covers the controller's REST pull-request reads; Contents write is requested
+only because GitHub App authorization for GraphQL `convertPullRequestToDraft`
+requires it. The controller never calls the Contents API, mutates repository
+contents, or checks out code, and its sole mutation remains the exact pull
+request's draft state. The controller lists open PRs in the base repository
+with GitHub's validated `head=owner:branch` filter, then resolves
 exactly one target from the workflow-run head repository, branch, and SHA. Fork
 default branches therefore follow the same path without depending on GitHub
 populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
