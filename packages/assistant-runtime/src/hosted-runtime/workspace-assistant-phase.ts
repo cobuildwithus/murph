@@ -364,6 +364,10 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  runtimeIssueProvenance?: {
+    releaseSha: string | null;
+    runtimeName: string;
+  } | null;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
@@ -2031,6 +2035,9 @@ export async function runHostedWorkspaceAssistantPhase(
         executionContext: {
           hosted: {
             memberId: input.request.userId,
+            releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+            runtimeAttemptId: input.request.attemptId,
+            runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
             ...(usageRecorder ? { usageRecorder } : {}),
             userEnvKeys: Object.keys(input.runtime.userEnv),
           },
@@ -2197,6 +2204,9 @@ export async function runHostedWorkspaceAssistantPhase(
             }
           : {}),
         memberId: input.request.userId,
+        releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+        runtimeAttemptId: input.request.attemptId,
+        runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
         createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
           createHostedScheduledGroupTools({
             channel,

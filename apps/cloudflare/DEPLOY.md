@@ -28,6 +28,24 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Assistant Runtime Issue Provenance Rollout
+
+Apply the nullable `hosted_assistant_runtime_issue.runtime_attempt_id`
+migration and deploy the Web issue importer first. Then deploy the Worker and
+runner bundle through the canonical Murph Cloud workflow. During that bounded
+skew window, older runners continue to emit legacy issue records with null
+release, runtime, and attempt provenance; the new Web importer accepts those
+records, and no historical backfill is required. Require managed-container
+smoke to report the exact release SHA and bundle fingerprints, and wait for the
+normal rollout to converge and older containers to drain before using
+provenance completeness as an operational signal.
+
+Roll back the Cloudflare Worker/runner producer first, then Web if necessary;
+leave the additive nullable migration in place. After deployment, inspect only
+bounded aggregate counts of populated versus null provenance fields and
+redacted error/event codes. Do not expose attempt IDs or issue rows in deploy
+logs or durable artifacts.
+
 ## Hosted Runtime Terminal-Event Rollout
 
 When the runner adds a strict hosted runtime event code, deploy Web's shared

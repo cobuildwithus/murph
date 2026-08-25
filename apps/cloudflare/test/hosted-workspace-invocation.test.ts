@@ -238,6 +238,7 @@ describe("runHostedWorkspaceInvocation", () => {
       onConversationActivityObserved,
       onRuntimeWakeReady,
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
       signal: abortController.signal,
       supervisorEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
@@ -266,6 +267,10 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(onConversationActivityObserved).toHaveBeenCalledOnce();
     expect(capturedInput.latencyMilestones).toEqual({
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+    });
+    expect(capturedInput.runtimeIssueProvenance).toEqual({
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
+      runtimeName: "cloudflare-hosted-runner",
     });
     expect(capturedInput.platform).toBeTruthy();
     expect(typeof capturedInput.readCurrentLease).toBe("function");

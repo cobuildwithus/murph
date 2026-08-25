@@ -768,6 +768,10 @@ export interface HostedWorkspaceRuntimeJobOptions {
     observation: Exclude<HostedConversationActivityObservation, "not_observed">,
   ) => void;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
+  runtimeIssueProvenance?: {
+    releaseSha: string | null;
+    runtimeName: string;
+  } | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   /**
    * Fires when the container has been told to exit (for example a deploy
@@ -3590,6 +3594,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 request: input.request,
                 restored,
                 runtime: phaseRuntime,
+                runtimeIssueProvenance: options.runtimeIssueProvenance ?? null,
                 runtimeEnv: {
                   ...runtimeEnv,
                   ...(confirmedAssistantTargetEnv ?? {}),
@@ -3864,6 +3869,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             executionContext: {
               hosted: {
                 memberId: input.request.userId,
+                releaseSha: options.runtimeIssueProvenance?.releaseSha ?? null,
+                runtimeAttemptId: input.request.attemptId,
+                runtimeName: options.runtimeIssueProvenance?.runtimeName ?? null,
                 userEnvKeys: Object.keys(runtime.userEnv),
               },
             },
