@@ -14,6 +14,7 @@ import {
   LoaderCircle,
   Mic,
   RotateCcw,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
@@ -1582,6 +1583,16 @@ export function EnvironmentVoiceCapture({
                   <Mic data-icon="inline-start" aria-hidden="true" />
                   Start recording
                 </Button>
+                <details className="mt-3 text-xs text-muted-foreground">
+                  <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <ShieldCheck className="size-3.5" aria-hidden="true" />
+                    Private
+                  </summary>
+                  <p className="mt-2 leading-relaxed">
+                    Only confirmed details are saved. Audio and the live
+                    transcript are not added to your report.
+                  </p>
+                </details>
               </aside>
               <main className="hidden min-h-0 overflow-y-auto px-6 py-5 sm:block sm:px-10 sm:py-10">
                 <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">

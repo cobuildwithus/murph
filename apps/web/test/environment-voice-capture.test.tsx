@@ -146,7 +146,11 @@ test("opens with concise instructions before showing the first topic", async () 
     assert.match(bodyText, /One topic at a time/);
     assert.match(bodyText, /Start recording/);
     assert.match(bodyText, /Speaking language/);
-    assert.doesNotMatch(bodyText, /Only confirmed details/);
+    assert.match(bodyText, /Private/);
+    assert.match(
+      bodyText,
+      /Only confirmed details are saved. Audio and the live transcript are not added to your report./,
+    );
     assert.doesNotMatch(bodyText, /focused topics/);
     assert.doesNotMatch(bodyText, /Your bedroom at night/);
   } finally {
