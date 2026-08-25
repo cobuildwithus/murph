@@ -2253,6 +2253,15 @@ export async function sendAssistantMessageLocal(
                 codexThreadId: providerResult.codexThreadId ?? null,
                 threadScope,
               })
+        if (
+          providerRequestOrdinal === 0 &&
+          providerResumeStateAction === 'clear'
+        ) {
+          currentSession = await clearAssistantSessionCodexResumeState({
+            session: currentSession,
+            vault: input.vault,
+          })
+        }
         const noReplySelected = providerResult.finalAction?.kind === 'none'
         const rawFinalResponseText = noReplySelected
           ? null
