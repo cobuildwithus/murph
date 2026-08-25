@@ -3,9 +3,14 @@ import { createVaultReadModel } from "./read-model.ts";
 import { isDefaultProjectedQueryEntity } from "./query-visibility.ts";
 import { readVaultSourceTolerant } from "./vault-source.ts";
 
-export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
+export async function readVault(
+  vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<VaultReadModel> {
+  options.signal?.throwIfAborted();
   const { loadProjectedVaultSource } = await import("./query-projection.ts");
-  const snapshot = await loadProjectedVaultSource(vaultRoot);
+  const snapshot = await loadProjectedVaultSource(vaultRoot, options);
+  options.signal?.throwIfAborted();
 
   return createVaultReadModel({
     vaultRoot,

@@ -15,6 +15,22 @@ afterEach(async () => {
   );
 });
 
+test("listMetricPointsRuntime rejects an already-aborted projection read", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("Metric projection was cancelled.", "AbortError");
+  controller.abort(reason);
+  const { listMetricPointsRuntime } = await import("../src/query-projection.ts");
+
+  await assert.rejects(
+    listMetricPointsRuntime(
+      "unused-vault-root",
+      { limit: null },
+      { signal: controller.signal },
+    ),
+    (error: unknown) => error === reason,
+  );
+});
+
 test("concurrent stale projection readers share one rebuild", async () => {
   vi.resetModules();
 

@@ -81,6 +81,11 @@ Updated: 2026-08-24
   lifecycle. Browser Vault control rows and no-record device-sync rows qualify;
   notification delivery and every post-checkpoint effect owner retain their
   established checkpoint fence.
+- Accept the preliminary specialist finding that eager owned-work construction
+  and fail-fast query fan-out could leave a production query child running after
+  timeout. Start owned work lazily, pass the existing abort signal through the
+  source/read/metric query boundaries, and settle every started local child;
+  add no executor or duplicate cancellation owner.
 
 ## Product UX
 
@@ -96,8 +101,9 @@ Updated: 2026-08-24
 ## Verification
 
 - `hosted-runtime-workspace-entrypoint.test.ts`: 351 passed.
-- Focused assistant-runtime Browser Vault and system-mailbox suites: 20 passed.
-- Query Browser Vault replica suite: 18 passed.
+- Focused assistant-runtime Browser Vault and system-mailbox suites: 35 passed.
+- Query Browser Vault, source, reader, and projection suites: 31 passed.
 - Assistant-runtime and query package typechecks passed.
-- Agent-docs drift passed; final diff/privacy inspection remains before commit.
+- Agent-docs drift passed; remediation diff/privacy inspection remains before
+  the corrected-head commit.
 - Exact pushed-head required GitHub Actions plus preliminary and final ReviewGPT.

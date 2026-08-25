@@ -824,6 +824,119 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("does not start local query work after its owner is already aborted", async () => {
+    const hashCanonicalQuerySources = vi.fn(async () => ({
+      fileCount: 0,
+      hash: "empty",
+      totalBytes: 0,
+    }));
+    vi.doMock(
+      "@murphai/query/browser-replica-server",
+      async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import("@murphai/query/browser-replica-server")
+        >();
+        return {
+          ...actual,
+          hashCanonicalQuerySources,
+        };
+      },
+    );
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const controller = new AbortController();
+    controller.abort(new DOMException("Foreground work took priority.", "AbortError"));
+
+    try {
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef: vi.fn(),
+            write: vi.fn(),
+          },
+        }),
+        signal: controller.signal,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+
+      expect(result).toMatchObject({ status: "deferred_aborted" });
+      expect(hashCanonicalQuerySources).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("cancels and joins the production metric query before returning its timeout", async () => {
+    let resolveMetricQueryStarted: (() => void) | null = null;
+    const metricQueryStarted = new Promise<void>((resolve) => {
+      resolveMetricQueryStarted = resolve;
+    });
+    let metricQueryStopped = false;
+    vi.doMock(
+      "@murphai/query/browser-replica-server",
+      async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import("@murphai/query/browser-replica-server")
+        >();
+        return {
+          ...actual,
+          async listMetricPoints(
+            ...args: Parameters<typeof actual.listMetricPoints>
+          ) {
+            const signal = args[2]?.signal;
+            resolveMetricQueryStarted?.();
+            await new Promise<void>((resolve) => {
+              if (signal?.aborted) {
+                resolve();
+                return;
+              }
+              signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+            metricQueryStopped = true;
+            signal?.throwIfAborted();
+            throw new Error("Expected the Browser Vault metric query to be cancelled.");
+          },
+        };
+      },
+    );
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef: vi.fn(),
+            write: vi.fn(),
+          },
+        }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      await metricQueryStarted;
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        status: "deferred_timeout",
+      });
+      expect(metricQueryStopped).toBe(true);
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("caps the refresh timeout at an earlier caller deadline", async () => {
     mockImmediateBrowserVaultReplicaBuild();
     const {

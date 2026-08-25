@@ -106,12 +106,16 @@ function explicitCanonicalLinks(value: unknown) {
 
 export async function readVaultSourceStrict(
   vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<VaultSourceSnapshot> {
+  options.signal?.throwIfAborted();
   const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
+  options.signal?.throwIfAborted();
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata),
     collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
   ]);
+  options.signal?.throwIfAborted();
 
   return {
     metadata,
@@ -211,19 +215,23 @@ export async function readVaultMetadataSource(
 
 export async function listCanonicalSourceManifest(
   vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<QuerySourceManifestEntry[]> {
+  options.signal?.throwIfAborted();
   const relativePaths = new Set<string>();
 
   for (const relativePath of CANONICAL_OPTIONAL_FILES) {
     if (await pathExists(path.join(vaultRoot, relativePath))) {
       relativePaths.add(relativePath);
     }
+    options.signal?.throwIfAborted();
   }
 
   for (const root of CANONICAL_MARKDOWN_ROOTS) {
     const paths = root === VAULT_LAYOUT.experimentsDirectory
       ? await listCanonicalExperimentMarkdownPaths(vaultRoot)
       : await walkRelativeFiles(vaultRoot, root, ".md");
+    options.signal?.throwIfAborted();
     for (const relativePath of paths) {
       relativePaths.add(relativePath);
     }
@@ -233,6 +241,7 @@ export async function listCanonicalSourceManifest(
     for (const relativePath of await walkRelativeFiles(vaultRoot, root, ".jsonl")) {
       relativePaths.add(relativePath);
     }
+    options.signal?.throwIfAborted();
   }
 
   const manifest = await Promise.all(
@@ -245,6 +254,7 @@ export async function listCanonicalSourceManifest(
       } satisfies QuerySourceManifestEntry;
     }),
   );
+  options.signal?.throwIfAborted();
 
   return manifest;
 }
@@ -282,14 +292,20 @@ export function isCanonicalQuerySourcePath(relativePath: string): boolean {
 
 export async function hashCanonicalQuerySources(
   vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<CanonicalQuerySourceHash> {
-  const manifest = await listCanonicalSourceManifest(vaultRoot);
+  const manifest = await listCanonicalSourceManifest(vaultRoot, options);
+  options.signal?.throwIfAborted();
   const digest = createHash("sha256");
   let totalBytes = 0;
 
   digest.update("murph.query-source.v1\0");
   for (const entry of manifest) {
-    const fileHash = await hashFileContents(path.join(vaultRoot, entry.relativePath));
+    const fileHash = await hashFileContents(
+      path.join(vaultRoot, entry.relativePath),
+      options.signal,
+    );
+    options.signal?.throwIfAborted();
     totalBytes += fileHash.byteLength;
     digest.update(entry.relativePath);
     digest.update("\0");
@@ -306,11 +322,14 @@ export async function hashCanonicalQuerySources(
   };
 }
 
-function hashFileContents(filePath: string): Promise<{ byteLength: number; hash: string }> {
+function hashFileContents(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<{ byteLength: number; hash: string }> {
   return new Promise((resolve, reject) => {
     const digest = createHash("sha256");
     let byteLength = 0;
-    const stream = createReadStream(filePath);
+    const stream = createReadStream(filePath, { signal });
 
     stream.on("data", (chunk: Buffer) => {
       byteLength += chunk.byteLength;
