@@ -57,5 +57,6 @@ write fence, fail-closed cleanup, and current-version replacement.
 - Hosted-local shutdown-checkpoint latency scenario: passed; replacement start
   remained below the 10-second bound and the restored reply remained singular.
 - Focused Cloudflare typecheck/test selection: passed.
+- Changelog fragment validation and Web typecheck: passed.
 - Preliminary and final ReviewGPT: pending.
 - Required exact-head CI: pending.
