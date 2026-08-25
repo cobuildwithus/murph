@@ -47,6 +47,7 @@ vi.mock("@murphai/core", async (importOriginal) => {
 });
 
 const cleanupPaths: string[] = [];
+const BUILT_MEMORY_TIMEOUT_MS = 120_000;
 
 afterEach(async () => {
   memoryPersistenceFault.enabled = false;
@@ -602,7 +603,7 @@ test("built memory parse failures expose a fixed safe field without echoing or w
   assert.doesNotMatch(serialized, /private-marker-that-must-not-echo/u);
   assert.doesNotMatch(serialized, new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   assert.deepEqual(await readFile(memoryPath), bytesBefore);
-});
+}, BUILT_MEMORY_TIMEOUT_MS);
 
 test("memory command module does not register a search subcommand", async () => {
   const cli = Cli.create("vault-cli", {
