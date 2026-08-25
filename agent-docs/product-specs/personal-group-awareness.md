@@ -2,11 +2,17 @@
 
 Status: Implemented
 
-Last verified: 2026-07-15
+Last verified: 2026-08-25
 
 ## User outcome
 
 A member can ask their personal Murph which hosted groups they belong to and why a group can or cannot use a specific fact such as their preferred name, verified email, or HRV.
+
+When an active member first establishes a routed Linq or Telegram group by
+adding Murph and talking in that chat, the route transaction creates the
+ordinary unnamed group and owner membership immediately. The owner can
+therefore discover that group from private Murph without first creating a join
+link. Other observed chat participants do not become members implicitly.
 
 Murph answers from current web-owned membership and sharing authority. For each group it may report:
 
@@ -25,6 +31,7 @@ The same link supports both initial join and later sharing changes. It is reusab
 - A missing grant is sufficient to explain why the group lacks permission.
 - An active grant is permission evidence only. It does not prove that the member currently has source data, that the source is fresh, or that the projection has already materialized in the group runtime. Murph should state that distinction when debugging a missing value.
 - If the member is not the group owner or the group has no existing join code, personal Murph reports the membership and grants without inventing or exposing a link. Link creation and disclosure remain owner-authorized actions from the route-bound group runtime.
+- One unnamed membership may be selected when it is the member's only group. Multiple unnamed memberships remain ambiguous and fail closed instead of guessing a destination.
 - Results are bounded. If the bound is reached, Murph says the list was truncated rather than implying it is complete.
 
 ## Authority and privacy
@@ -35,6 +42,12 @@ The same link supports both initial join and later sharing changes. It is reusab
   and supplies the opaque selector for leaving that exact membership.
 - `HostedGroup.joinPolicyJson` supplies requested permission scopes.
 - active `HostedVaultShare` rows from that member to the group's runtime supply granted scopes.
+
+The canonical thread-route owner composes initial group materialization through
+the existing group-store primitive in the same transaction. That structural
+write creates only the route owner membership and its existing automatic
+`profile-name.v0` share. It does not mint a join code, request health or email
+sharing, import a provider title, or enroll roster participants.
 
 The personal list derives its member id from the signed hosted callback. The
 model cannot choose another member. Results may include the member's own opaque

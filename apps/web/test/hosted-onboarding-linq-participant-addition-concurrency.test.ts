@@ -728,6 +728,40 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedMailboxItem.count({
           where: { userId: { in: [...containerMemberIds] } },
         })).resolves.toBe(1);
+        await expect(observer.hostedGroup.findUnique({
+          where: { runtimeMemberId: containerMemberIds[0] },
+          select: {
+            displayName: true,
+            joinCode: true,
+            kind: true,
+            members: {
+              orderBy: { memberId: "asc" },
+              select: { memberId: true, role: true },
+            },
+            ownerMemberId: true,
+            runtimeMemberId: true,
+          },
+        })).resolves.toEqual({
+          displayName: null,
+          joinCode: null,
+          kind: "custom",
+          members: [{ memberId: ownerMemberIds[0], role: "owner" }],
+          ownerMemberId: ownerMemberIds[0],
+          runtimeMemberId: containerMemberIds[0],
+        });
+        await expect(observer.hostedVaultShare.findMany({
+          orderBy: { projectionKind: "asc" },
+          select: {
+            grantorMemberId: true,
+            projectionKind: true,
+            status: true,
+          },
+          where: { destinationMemberId: containerMemberIds[0] },
+        })).resolves.toEqual([{
+          grantorMemberId: ownerMemberIds[0],
+          projectionKind: "profile-name.v0",
+          status: "granted",
+        }]);
       } finally {
         releaseWinner.resolve();
         await Promise.allSettled([
@@ -742,6 +776,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         clearHostedOnboardingEnvCache();
         await observer.hostedThreadRoute.deleteMany({
           where: { containerMemberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedGroup.deleteMany({
+          where: { runtimeMemberId: { in: [...containerMemberIds] } },
         });
         await observer.hostedThreadContainer.deleteMany({
           where: { memberId: { in: [...containerMemberIds] } },
@@ -881,6 +918,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
         await observer.hostedThreadRoute.deleteMany({
           where: { containerMemberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedGroup.deleteMany({
+          where: { runtimeMemberId: { in: [...containerMemberIds] } },
         });
         await observer.hostedThreadContainer.deleteMany({
           where: { memberId: { in: [...containerMemberIds] } },

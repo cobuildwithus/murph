@@ -2620,7 +2620,14 @@ at processing
 time. The selected row stays locked through
 `ensureHostedThreadContainerRouteTx`, which remains the only route and
 `ownerMemberId` owner, and is deleted only when that transaction creates the
-route. Only a newly created route applies sparse style through the synthetic
+route. That same transaction materializes the routed chat's ordinary unnamed
+`HostedGroup`, route-owner `HostedGroupMember`, and the membership-implied
+`profile-name.v0` share through the canonical group-store primitive before it
+appends the activation wake. It creates no join code, requested health or email
+scope, or roster-participant membership. Failure rolls back the route and group
+state together. Later owner-authorized naming, join-link, and sharing changes
+retain their existing active-access gate and state owner. Only a newly created
+route applies sparse style through the synthetic
 member's existing preference owner and carries explicit room context on the
 existing activation wake to initialize the fixed group-room-model page exactly
 once before conversation work. Existing-route convergence and transaction
