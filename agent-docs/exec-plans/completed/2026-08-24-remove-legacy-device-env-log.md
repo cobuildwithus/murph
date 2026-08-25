@@ -1,6 +1,6 @@
 # Remove obsolete device-sync environment telemetry
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-24
 
@@ -89,5 +89,10 @@ Updated: 2026-08-24
 - Passed after remediation: focused no-emission test (1 passed), complete
   maintenance test (94 passed), assistant-runtime typecheck, and
   `git diff --check`.
-- Pending: final exact-head ReviewGPT, required GitHub checks, and current-base
-  merge-tree proof.
+- Final ReviewGPT round 1 passed the full patch with no findings at
+  `84c584aecaa08c4870745291d7e4b69efb20dc01`.
+- Parent final review found no remaining correctness, privacy, architecture,
+  compatibility, or proof gap.
+- Required GitHub checks and current-base merge-tree proof remain merge gates
+  on the final archived-plan head.
+Completed: 2026-08-24
