@@ -1235,9 +1235,17 @@ only the synthetic room member's model from an authenticated, accepted Linq or
 Telegram group turn; it never reads or changes a participant's private
 configuration.
 
-Model and reasoning
-changes remain exclusively owned by `murph.assistant_configuration`. The
-runtime may request an update only from eligible user input in the active
+Persistent core-reply model and reasoning
+changes remain exclusively owned by `murph.assistant_configuration`. A model
+named only for one bounded delegated task stays invocation-local on Codex's
+native `spawn_agent.model` field and never mutates that saved configuration.
+Web exposes the native field only when its existing assistant-configuration
+resolution confirms that the current managed runtime is authorized for the
+full product-model catalog; missing authority and custom inference fail closed.
+The production image gives Codex a catalog containing exactly Luna, Terra, and
+Sol, so Codex's native spawn validation rejects other bundled models before a
+provider request.
+The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
 web binds that input id to the callback member and one live conversation

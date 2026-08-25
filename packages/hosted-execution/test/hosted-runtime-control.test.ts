@@ -2220,15 +2220,22 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: true,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: true,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(() => parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: "true",
+      workspace: null,
+    })).toThrow(/hostedAssistantSubagentModelOverridesAllowed/u);
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
