@@ -266,6 +266,15 @@ product-decision owners.
     default completion bar; if a required check failed for a credibly unrelated
     pre-existing reason, name the command, failing target, and why the current
     diff did not cause it.
+    For every completed feature or bug fix, the final message to the developer
+    or user must also include a concise `How to verify` section for testing the
+    landed change. Name any prerequisite or environment, give the shortest
+    concrete action sequence, and state the observable expected result. For a
+    feature, cover its shortest end-to-end path. For a bug fix, start from the
+    original reproduction when practical and name the behavior that proves the
+    regression is gone. Automated check names may supplement these instructions
+    but do not replace them. If practical human verification is unavailable,
+    say why and point to the closest direct proof.
     If the completed task could break or degrade production when deployed components are temporarily out of sync, include a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, expected skew behavior, and post-deploy checks. For Cloudflare hosted execution changes, explicitly consider both web/Worker skew and Worker/container skew: a new Worker version can receive traffic while active warm `RunnerContainer` processes still run the previous runner bundle, process env, or provider-credential shape during gradual rollout.
 
 ## PR Description

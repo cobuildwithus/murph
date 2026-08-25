@@ -1,6 +1,6 @@
 export type EnvironmentShareCardData = {
   coverage: number;
-  grade: "A" | "B" | "C" | "D" | "E";
+  grade: "A" | "B" | "C" | "D" | "F";
   known: number;
   score: number;
   total: number;

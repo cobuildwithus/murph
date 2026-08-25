@@ -445,6 +445,10 @@
       "path": ".agents/friction-log/20260821173334-prebuilt-vercel-output/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2162",
+      "path": ".agents/friction-log/20260822001736-removing-a-temporary/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2167",
       "path": ".agents/friction-log/20260822141634-fresh-worktree-focused/friction.md"
     },
@@ -515,6 +519,10 @@
     {
       "issue": "cobuildwithus/murph#2252",
       "path": ".agents/friction-log/20260824234256-changelog-only-pr/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2284",
+      "path": ".agents/friction-log/20260825162524-private-runner-composition/friction.md"
     }
   ],
   "version": 1

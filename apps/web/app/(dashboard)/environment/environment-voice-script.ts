@@ -23,7 +23,7 @@ export type EnvironmentVoiceTopic = {
   id: string;
   title: string;
   eyebrow: string;
-  prompt: string;
+  prompt?: string;
   fields?: readonly EnvironmentVoiceField[];
   focus?: readonly string[];
 };
@@ -32,7 +32,6 @@ export type EnvironmentVoiceScript = {
   flow: EnvironmentVoiceFlow;
   dialogTitle: string;
   idleTitle: string;
-  idleDescription: string;
   initialCoveredDetails?: number;
   totalDetails?: number;
   topics: readonly [EnvironmentVoiceTopic, ...EnvironmentVoiceTopic[]];
@@ -124,8 +123,6 @@ function buildUpdateScript(notes: HabitatIndicatorNotes): EnvironmentVoiceScript
   flow: "update",
   dialogTitle: "Update your environment",
   idleTitle: "Tell Murph what changed",
-  idleDescription:
-    "Speak naturally. Murph will save only the clear details that changed.",
   topics: [
     {
       fields: listEnvironmentInterviewFields("update")
@@ -177,8 +174,6 @@ export function buildEnvironmentVoiceScriptForIndicator(
     return {
       dialogTitle: "Add an Environment detail",
       flow: "update",
-      idleDescription:
-        "Answer one short prompt. Murph processes your answer as you speak.",
       idleTitle: "Ready when you are",
       topics: [
         {
@@ -186,7 +181,6 @@ export function buildEnvironmentVoiceScriptForIndicator(
           fields: [voiceField],
           focus: [voiceField.label],
           id: `${group.id}:0`,
-          prompt: topicPrompt(1),
           title: voiceTopicCopy?.title ?? group.title,
         },
       ],
@@ -223,7 +217,6 @@ export function buildEnvironmentVoiceScriptForGroup(
       fields,
       focus: fields.map((field) => field.label),
       id: buildEnvironmentInterviewTopicId(group.id, chunkIndex),
-      prompt: topicPrompt(fields.length),
       title: copy?.title ?? group.title,
     };
   });
@@ -238,8 +231,6 @@ export function buildEnvironmentVoiceScriptForGroup(
         ? `Complete ${group.title}`
         : `Update ${group.title}`,
     flow: missingFields.length > 0 ? "fill-gaps" : "update",
-    idleDescription:
-      "Speak naturally. Murph saves each clear detail as you cover this section.",
     idleTitle: `Talk through ${(
       VOICE_TOPIC_COPY[group.id]?.title ?? group.title
     ).toLowerCase()}`,
@@ -309,7 +300,6 @@ function buildMissingScript(
           fields,
           focus: fields.map((field) => field.label),
           id: buildEnvironmentInterviewTopicId(group.id, chunkIndex),
-          prompt: topicPrompt(fields.length),
           title: voiceTopicCopy?.title ?? group.title,
         };
       },
@@ -338,9 +328,6 @@ function buildMissingScript(
       ? "Continue your Environment report"
       : "Build your Environment report",
     flow: hasKnownOrDeclinedValue ? "fill-gaps" : "walkthrough",
-    idleDescription: `${typedTopics.length} focused ${
-      typedTopics.length === 1 ? "topic" : "topics"
-    }. Murph saves each topic before moving on.`,
     idleTitle: hasKnownOrDeclinedValue
       ? "Pick up where you left off"
       : "Ready when you are",
@@ -366,13 +353,6 @@ function toVoiceField({
     ...(indicator.question ? { question: indicator.question } : {}),
     valueType: indicator.valueType,
   };
-}
-
-function topicPrompt(fieldCount: number): string {
-  if (fieldCount === 1) {
-    return "Describe the item below. Leave it for later if you do not know.";
-  }
-  return "Describe each item below. Leave anything unknown for later.";
 }
 
 function chunk<T>(values: readonly T[], size: number): T[][] {

@@ -155,7 +155,12 @@ re-signal the same durable mailbox item once in each Web recovery bucket without
 minting another schedule-event or mailbox-item identity. Provider execution is
 intentionally at-least-once across a lost post-pull record/completion checkpoint:
 the canonical mailbox item/event already exists in the committed input
-workspace. The fixture commits that clean input through the production v2
+workspace. Each background device-sync pass has a 120-second cooperative budget
+while foreground work and invocation aborts may end it earlier. Its terminal
+runtime marker carries only a bounded slowest-job sample with job/provider/
+resource classification, disposition, durable-progress presence, and phase
+counts and timings; it omits identities, payloads, cursors, provider responses,
+health values, and raw errors. The fixture commits that clean input through the production v2
 checkpoint bridge before the four read-only provider classes run. The incident
 pass then creates the machine-local SQLite execution record, and its production
 v2 post-pull archive plan observes the live store, omits it from the archive, and

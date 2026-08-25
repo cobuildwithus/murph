@@ -1267,13 +1267,20 @@ Last verified: 2026-08-23
   contains only bounded metadata: the last pass stage, outcome, elapsed time,
   processed-job count, checkpoint/retry presence, and a typed yield reason
   (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
-  `outer_signal`, or `unknown`). A persisted start without a matching finish is
-  the queryable abrupt-loss signal and must be correlated with runner,
+  `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
+  summaries with provider, job kind, code-owned resource class, outcome,
+  attempt/job counts, durable-progress presence, total/provider execution time,
+  provider time unattributed after subtracting measured callbacks, and measured
+  connection-source read, credential-refresh, and canonical-import counts and
+  durations. The service retains at most one pass budget of those summaries in
+  memory, and the terminal marker declares both the observed count and whether
+  the slowest-job sample was truncated. A persisted start without a matching
+  finish is the queryable abrupt-loss signal and must be correlated with runner,
   container, and checkpoint events for that attempt. The pair remains
   best-effort: abrupt loss before the background writer flushes can omit either
-  marker. These entries
-  never include member/account/job identifiers, provider payloads, resource
-  values, or raw abort/error messages.
+  marker. These entries never include member/account/job identifiers, provider
+  payloads, cursor values, provider responses, health values, or raw
+  abort/error messages.
   This event taxonomy is a strict Web parser boundary. Shared workspace packages
   are build inputs, not separately deployed planes. Deploy the Web artifact that
   contains its parser first, then deploy and fully recycle the Cloudflare
@@ -1574,7 +1581,7 @@ Last verified: 2026-08-23
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 90-second device-pass cancellation can release it as an unclassified
+  hosted 120-second device-pass cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
   UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
