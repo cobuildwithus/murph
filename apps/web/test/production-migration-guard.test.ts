@@ -1110,6 +1110,24 @@ describe("hosted web production migration guard", () => {
     assert.equal(migration.sql, predeploySql);
   });
 
+  test("pins the wearable outreach preference Web rollback floor in operator docs", async () => {
+    const readme = await readFile(path.join(appRoot, "README.md"), "utf8");
+
+    assert.match(
+      readme,
+      /Apply the additive preference-table migration, deploy the preference-aware Web,[\s\S]*only then deploy the Worker\/runtime operation/u,
+    );
+    assert.match(
+      readme,
+      /Once the operation can produce its first durable row, the preference-aware Web\s+is the hard rollback floor/u,
+    );
+    assert.match(
+      readme,
+      /A\s+preference-unaware Web is not a valid rollback target while preference rows may\s+exist/u,
+    );
+    assert.match(readme, /Recovery is a forward\s+deploy of a compatible Web/u);
+  });
+
   test("pins the Linq invite deletion producer rollback floor in operator docs", async () => {
     const readme = await readFile(path.join(appRoot, "README.md"), "utf8");
 

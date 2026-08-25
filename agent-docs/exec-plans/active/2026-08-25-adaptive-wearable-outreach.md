@@ -45,6 +45,8 @@ Updated: 2026-08-25
    Mitigation: Require an accepted direct invocation in the engine and revalidate the accepted direct mailbox wake in Web before the upsert/delete.
 4. Risk: Rollout changes suppress or duplicate an existing silence episode.
    Mitigation: Retain the existing episode identity and delivery fence; only its current eligibility policy changes.
+5. Risk: Rolling Web below the preference-aware build after the writer is exposed ignores durable member authority and can orphan a preference during account deletion.
+   Mitigation: Deploy migration, compatible Web, then Worker/runtime; after writer exposure, keep compatible Web as the hard rollback floor and recover by forward deploy.
 
 ## Tasks
 
@@ -62,6 +64,7 @@ Updated: 2026-08-25
 - The supported custom interval is 5–30 days. This permits the demonstrated longer-wait behavior without letting the tool create more aggressive outreach than the product default.
 - Preference identity is member plus source-provider slug so it survives source-row and connection replacement.
 - The existing durable mailbox, exact-text notification turn, transcript persistence, and delivery idempotency key remain the only delivery machinery.
+- The preference-aware Web becomes the hard rollback floor once the Worker/runtime can produce the first preference row; an older Web is eligible only before writer exposure.
 
 ## Verification
 
@@ -78,6 +81,8 @@ Updated: 2026-08-25
 - After that correction, the focused Web preference suite passed 4 tests, including rejection before any preference read/write for an unauthorized direct email and successful mutation for an authenticated direct email. Web typecheck passed.
 - Final ReviewGPT round 3 returned one accepted production-wiring finding: the hosted runtime's abort-guard wrapper reconstructed the device port without forwarding the optional no-data outreach operation. The correction forwards that operation through the existing `guard` helper and adds no state, owner, or abstraction.
 - After that correction, the production-entrypoint abort-guard suite passed all 6 tests, including a regression proving that the first outreach-setting call reaches the underlying device port and a later call is fenced after host cancellation. The existing hosted device phase proof passed with 304 unrelated tests skipped, and the Assistant Runtime typecheck passed.
+- Final ReviewGPT round 4 returned one accepted deployment-contract finding: once preference writes are possible, a pre-feature Web would ignore stored authority and could leave a foreign-key-free preference row after successful account deletion. The non-production-remediation correction declares the preference-aware Web a hard rollback floor, preserves the existing current-Web deletion proof, and adds no compatibility machinery or runtime change.
+- The focused operator-doc contract test passed with 58 unrelated tests skipped. An initial invocation from the Web package directory matched no files because its config uses repository-root include paths; rerunning the same test from the repository root passed.
 - Complete initial provider requests were captured through the pinned real Codex App Server with identical synthetic direct/group fixtures and `gpt-tokenizer` 3.4.0 `o200k_harmony`. After the specialist description correction, direct changes from 31,676 tokens / 143,991 bytes to 31,811 / 144,605; group changes from 27,982 / 127,221 to 28,117 / 127,835. Each route adds 135 tokens / 614 bytes (+0.426% direct, +0.482% group tokens): 404 bytes are the device-tool description and 210 are its generated declaration/schema; other provider-visible fields are unchanged. The correction was remeasured at the same serialized tool-fragment boundary because it is the only provider-visible field changed after the complete-request capture. The weekly automation instruction is loaded only for that scheduled occurrence, not these initial ordinary turns. Measurement-only instrumentation was removed.
 
 ## Product UX Walkthrough
@@ -94,5 +99,5 @@ Updated: 2026-08-25
 - Original requirement: keep one useful Garmin no-data check-in, avoid duplicate or misleading reconnect outreach, and let an authorized member extend the wait or turn it off.
 - First-reviewed versus current shape: both use one member-plus-provider preference row, the existing `murph.device` operation, the existing signed Web callback, and the existing mailbox/transcript/delivery owner. Review remediation added no owner or lifecycle; it clarified copy and tool scope, strengthened deletion and sender-authority proof, and preserves the optional operation through the existing hosted-runtime abort wrapper.
 - Churn: the current authored-source shape remains below the 2,000-line trigger. The round-three correction adds one optional forwarding branch to the existing wrapper plus one production-entrypoint regression; it introduces no mechanism that warrants redesign or splitting.
-- Repeated mechanism: none. The round-two and round-three findings were missed reuse of existing authority and cancellation boundaries, not evidence that the preference or delivery architecture needs another mechanism.
-- Decision: keep the corrections inside the existing input gate and abort-guard owners. Splitting or redesigning would add coordination without removing a source of truth or owner.
+- Repeated mechanism: none. The round-two and round-three findings were missed reuse of existing authority and cancellation boundaries; round four concerns the separate persisted-authority deployment floor. None requires another runtime mechanism.
+- Decision: keep runtime corrections inside the existing input gate and abort-guard owners, and express the distinct rollback constraint through the existing deployment-floor contract. Splitting, compatibility readers, dual writes, or reconciliation would add coordination without removing a source of truth or owner.
