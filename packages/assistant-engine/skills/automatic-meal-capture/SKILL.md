@@ -132,17 +132,31 @@ When enriching a captured meal:
    estimates. For mixed evidence, describe both and set confidence from the
    weakest material assumption. Preserve the meal's occurred-at time and
    source. Keep the photo until saved structure has been read back.
-6. Read the edited meal back before claiming it was logged.
+6. If the edit fails or the read-back does not prove the intended structure,
+   run one fresh bounded meal list for the capture date, re-identify the exact
+   photo-backed device meal from its returned id, source, occurred-at time, and
+   attachment, inspect it, and retry `meal edit` once with corrected arguments.
+   Never switch to `meal add`, guess a nearby record, or retry past that one
+   correction. If the retry or its read-back fails, keep the photo and report or
+   fail the unresolved work instead of claiming enrichment.
+7. Read the edited meal back before claiming it was logged.
 
 Do not run `meal add` for a captured photo that already has a meal id. The
 automatic import is the meal log; `meal edit` adds the useful structure. By
 default, save a bounded photo estimate without asking for confirmation on every
 meal. Retain provenance, uncertainty, and assumptions; a visible food or drink
 category with a defensible portion range is enough even when the exact recipe,
-ingredients, or serving is uncertain. Clarification is a last resort, not a
-confidence check: ask one narrow identity or portion question only when actual
-attachment inspection leaves identity or amount too indeterminate for any
-meaningful bounded estimate and the answer would materially help.
+ingredients, or serving is uncertain. If the photo cannot support a meaningful
+numeric estimate, do not leave a model-reviewed capture blank. When its note is
+empty, save a concise `--note` describing only the visible meal or food form and
+material uncertainty; never replace a member-written note. Add `--ingredient`
+values only for identities the photo supports. If even a broad food observation
+is not defensible and the note is empty, record only that the retained image was
+reviewed and the meal could not be identified. Read the preserved or new
+observation back. Clarification is a last resort, not a confidence check: ask
+one narrow identity or portion question only when actual attachment inspection
+leaves identity or amount too indeterminate for any meaningful bounded estimate
+and the answer would materially help.
 
 A recent device meal remains unresolved after its attachment becomes a privacy
 tombstone when its saved identity, amount or ingredients, and nutrition cannot
@@ -183,8 +197,13 @@ On a scheduled run:
 4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
    inspect the actual attachment for a photo-backed selection. For
    same-occurrence retry evidence, use only the already-saved structured fields
-   and uncertainty. Enrich the existing meal when supported and read it back.
-5. Run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
+   and uncertainty. Enrich the existing meal when supported, apply the bounded
+   re-identification and single-retry rule above after a failed edit, and read
+   the result back. When numeric nutrition is unsupported, save and read back
+   the evidence-based observation fallback above. A meal with neither saved
+   nutrition nor that observation is not ready for cleanup.
+5. Only after the read-back proves saved nutrition or the observation fallback,
+   run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
    This automatic-capture-only command preserves the structured meal and
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
@@ -275,13 +294,19 @@ uses the existing-meal recovery above.
    or copy its raw value into this fixed-unit card; on a scheduled occurrence,
    ask no question and use ordinary closeout text. Never infer a target from
    this day's meal total or one wearable day. A card-qualifying target must also
-   be an exact point: its selected-value comparator is `between` with identical
-   numeric `value` and `highValue`. A one-sided `<`, `<=`, `>`, or `>=`
-   threshold, non-identical range, or other shape remains authoritative but is
-   incompatible with this point-target card. Never expose, compare, copy, or
-   derive from its bound, and never create, replace, or remove a managed target
-   around it. On a scheduled occurrence, ask no question, perform no Goal or
-   measurement mutation, and use ordinary closeout text without a card.
+   be an exact point with comparator `between` and identical numeric `value` and
+   `highValue`. Accept `selected-value` evaluation normally. The complete
+   same-Goal historical `daily-*` set above may instead use the read-only
+   rolling-mean plus daily-aggregate-mean display compatibility in the shared
+   daily-card reference; preserve the Goal and do not extend that exception. A
+   mixed evaluation bundle or another rolling-window or daily-aggregate
+   statistic is incompatible. A one-sided `<`, `<=`, `>`, or `>=` threshold,
+   non-identical range, or other shape remains authoritative but is incompatible
+   with this point-target card.
+   Never expose, compare, copy, or derive from its bound, and never create,
+   replace, or remove a managed target around it. On a scheduled occurrence,
+   ask no question, perform no Goal or measurement mutation, and use ordinary
+   closeout text without a card.
 7. Only when the complete target-authority read in step 6 resolves one
    unambiguous card-authorizing bundle, run the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date

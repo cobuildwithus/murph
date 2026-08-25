@@ -59,8 +59,16 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   target cannot be collapsed into the card's scalar target; ask one narrow
   question or use ordinary text instead.
 - Comparator compatibility is part of target authority. This point-target card
-  and its managed derivation accept a selected-value target only when its
-  comparator is `between` and its numeric `value` and `highValue` are identical.
+  and its managed derivation normally accept a target only when its evaluation
+  is `selected-value`, its comparator is `between`, and its numeric `value` and
+  `highValue` are identical. The complete same-Goal historical `daily-*`
+  nutrition set below has one read-only display-compatibility path when every
+  target instead uses `evaluation.kind: rolling-window` with `statistic: mean`
+  plus `selectionPolicyOverride.kind: daily-aggregate` with `statistic: mean`.
+  Copy each unchanged point bound into the card for the selected `localDate`,
+  preserve the Goal, and never extend this exception to another target identity
+  or workflow. A mixed evaluation bundle or any other rolling-window or
+  daily-aggregate statistic is incompatible.
   A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between`
   range, or any other target shape remains authoritative canonical state but is
   incompatible with this workflow. Never translate its bound into a point:

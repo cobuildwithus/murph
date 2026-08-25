@@ -101,6 +101,24 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain('vault-cli meal edit <meal-id>')
     expect(compact(skill)).toContain(
+      'run one fresh bounded meal list for the capture date, re-identify the exact photo-backed device meal from its returned id, source, occurred-at time, and attachment',
+    )
+    expect(compact(skill)).toContain(
+      'retry `meal edit` once with corrected arguments.',
+    )
+    expect(compact(skill)).toContain(
+      'If the retry or its read-back fails, keep the photo',
+    )
+    expect(compact(skill)).toContain(
+      'do not leave a model-reviewed capture blank',
+    )
+    expect(compact(skill)).toContain(
+      'When its note is empty, save a concise `--note` describing only the visible meal or food form and material uncertainty',
+    )
+    expect(compact(skill)).toContain(
+      'never replace a member-written note.',
+    )
+    expect(compact(skill)).toContain(
       'A recent device meal remains unresolved after its attachment becomes a privacy tombstone',
     )
     expect(compact(skill)).toContain(
@@ -190,7 +208,16 @@ describe('assistant automatic meal capture skill', () => {
       'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
     )
     expect(compactSkill).toContain(
-      'A card-qualifying target must also be an exact point: its selected-value comparator is `between` with identical numeric `value` and `highValue`.',
+      'A card-qualifying target must also be an exact point with comparator `between` and identical numeric `value` and `highValue`.',
+    )
+    expect(compactSkill).toContain(
+      'Accept `selected-value` evaluation normally.',
+    )
+    expect(compactSkill).toContain(
+      'read-only rolling-mean plus daily-aggregate-mean display compatibility in the shared daily-card reference',
+    )
+    expect(compactSkill).toContain(
+      'A mixed evaluation bundle or another rolling-window or daily-aggregate statistic is incompatible.',
     )
     expect(compactSkill).toContain(
       'A one-sided `<`, `<=`, `>`, or `>=` threshold, non-identical range, or other shape remains authoritative but is incompatible with this point-target card.',
@@ -282,6 +309,15 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill.indexOf('vault-cli meal remove-photo <meal-id>')).toBeLessThan(
       skill.indexOf('vault-cli meal totals --from <date> --to'),
+    )
+    expect(skill.indexOf('retry `meal edit` once')).toBeLessThan(
+      skill.indexOf('vault-cli meal remove-photo <meal-id>'),
+    )
+    expect(skill.indexOf('save a concise `--note`')).toBeLessThan(
+      skill.indexOf('vault-cli meal remove-photo <meal-id>'),
+    )
+    expect(compactSkill).toContain(
+      'A meal with neither saved nutrition nor that observation is not ready for cleanup.',
     )
     const compactClarification = compactSkill.indexOf(
       'Before step 6, apply the estimation-eligibility rule above.',

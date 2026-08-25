@@ -8055,6 +8055,145 @@ describe('real Codex app-server cache usage e2e harness', () => {
   })
 })
 
+describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
+  it('recovers one automatic meal edit and retains unresolved photos', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+
+    try {
+      for (const retrySucceeds of [true, false]) {
+        const workingDirectory = await mkdtemp(
+          path.join(
+            tmpdir(),
+            `murph-automatic-meal-recovery-${retrySucceeds ? 'success' : 'failure'}-e2e-`,
+          ),
+        )
+
+        try {
+          const binDirectory = path.join(workingDirectory, 'bin')
+          const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+          const photoRelativePath = path.join(
+            'raw',
+            'meals',
+            '2026',
+            '08',
+            'meal_01K3J7F6XK5T2Y8Q9C4D6E7F8G',
+            'capture.jpg',
+          )
+          const photoPath = path.join(workingDirectory, photoRelativePath)
+          const skillsRoot = path.join(workingDirectory, 'skills')
+          const stateFile = path.join(workingDirectory, 'meal-state.txt')
+          await mkdir(path.dirname(photoPath), { recursive: true })
+          await Promise.all([
+            cp(
+              path.resolve(
+                path.dirname(fileURLToPath(import.meta.url)),
+                '../../../apps/web/public/meal-snap-2.jpg',
+              ),
+              photoPath,
+            ),
+            mkdir(skillsRoot, { recursive: true }),
+            ...(['automatic-meal-capture', 'food-journal'] as const).map(
+              (slug) => cp(
+                path.join(resolveAssistantSkillsRoot(), slug),
+                path.join(skillsRoot, slug),
+                { recursive: true },
+              ),
+            ),
+            materializeAutomaticMealCloseoutVaultCli({
+              binDirectory,
+              commandLogPath,
+              photoRelativePath,
+              retrySucceeds,
+              stateFile,
+            }),
+            writeFile(stateFile, 'initial\n', 'utf8'),
+          ])
+
+          await executeRealCodexAppServerTurn({
+            allowFinishWithoutReply: true,
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions:
+              buildAutomaticMealCloseoutDeveloperInstructions(),
+            dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+            env: {
+              ...config.env,
+              [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+              PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+            },
+            excludeResumeTurns: true,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: [
+              MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+              'Scheduled occurrence context:',
+              '- Occurrence local date: 2026-08-24.',
+              '- Scheduled occurrence instant: 2026-08-25T01:00:00.000Z.',
+              '- The controlled fixture contains one photo-backed device meal and no duplicate eating occasion.',
+              '- The member prefers nonnumeric meal tracking. Save only a concise photo-supported qualitative observation.',
+              '- Complete the closeout through the canonical vault CLI.',
+            ].join('\n\n'),
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+
+          const commands = (await readFile(commandLogPath, 'utf8'))
+            .trim()
+            .split('\n')
+          const firstEdit = commands.findIndex((command) =>
+            command.startsWith('meal edit ')
+          )
+          const retryList = commands.findIndex((command, index) =>
+            index > firstEdit
+            && command.startsWith('meal list ')
+            && command.includes('--from 2026-08-24')
+            && command.includes('--to 2026-08-24')
+          )
+          const retryShow = commands.findIndex((command, index) =>
+            index > retryList && command.startsWith('meal show ')
+          )
+          const secondEdit = commands.findIndex((command, index) =>
+            index > retryShow && command.startsWith('meal edit ')
+          )
+          const retryReadback = commands.findIndex((command, index) =>
+            index > secondEdit && command.startsWith('meal show ')
+          )
+          const removals = commands
+            .map((command, index) => ({ command, index }))
+            .filter(({ command }) => command.startsWith('meal remove-photo '))
+
+          expect(firstEdit, String(retrySucceeds)).toBeGreaterThanOrEqual(0)
+          expect(retryList, String(retrySucceeds)).toBeGreaterThan(firstEdit)
+          expect(retryShow, String(retrySucceeds)).toBeGreaterThan(retryList)
+          expect(secondEdit, String(retrySucceeds)).toBeGreaterThan(retryShow)
+          expect(
+            commands.filter((command) => command.startsWith('meal edit ')),
+            String(retrySucceeds),
+          ).toHaveLength(2)
+          if (retrySucceeds) {
+            expect(retryReadback).toBeGreaterThan(secondEdit)
+            expect(removals).toHaveLength(1)
+            expect(removals[0]?.index).toBeGreaterThan(retryReadback)
+          } else {
+            expect(removals).toHaveLength(0)
+          }
+        } finally {
+          await removeRealCodexTemporaryPath(workingDirectory)
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
   it('lets the model resolve legacy calories and recover only complete same-id safety records', {
     timeout: 1_800_000,
@@ -8075,6 +8214,47 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       })
       expect(legacy.progressUpdates).toEqual([])
       expect(readNutritionGoalMutationCommands(legacy.commands)).toEqual([])
+
+      const rollingLegacy = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'rolling-legacy',
+      })
+      expect(rollingLegacy.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+        localDate: '2026-07-30',
+        version: 2,
+      })
+      expect(rollingLegacy.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(rollingLegacy.commands),
+      ).toEqual([])
+
+      const mixedRollingLegacy = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'rolling-legacy-mixed',
+      })
+      expect(mixedRollingLegacy.card).toBeNull()
+      expect(mixedRollingLegacy.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(mixedRollingLegacy.commands),
+      ).toEqual([])
+
+      const incompatibleRollingStatistic =
+        await runRealNutritionCardAuthorityScenario({
+          config,
+          conditionRecovery: 'none',
+          goalScenario: 'rolling-legacy-incompatible-statistic',
+        })
+      expect(incompatibleRollingStatistic.card).toBeNull()
+      expect(incompatibleRollingStatistic.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(
+          incompatibleRollingStatistic.commands,
+        ),
+      ).toEqual([])
 
       const canonicalWithActivity = await runRealNutritionCardAuthorityScenario({
         config,
@@ -8153,6 +8333,143 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
     }
   })
 })
+
+async function materializeAutomaticMealCloseoutVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+  photoRelativePath: string
+  retrySucceeds: boolean
+  stateFile: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const mealId = 'meal_01K3J7F6XK5T2Y8Q9C4D6E7F8G'
+  const baseEntity = {
+    attachments: [{
+      kind: 'photo',
+      mediaType: 'image/jpeg',
+      originalFileName: 'capture.jpg',
+      relativePath: input.photoRelativePath,
+      role: 'photo',
+    }],
+    dayKey: '2026-08-24',
+    id: mealId,
+    kind: 'meal',
+    mealId,
+    occurredAt: '2026-08-24T18:30:00-04:00',
+    recordedAt: '2026-08-24T18:30:15-04:00',
+    source: 'device',
+    title: 'Captured meal',
+  }
+  const initialShow = {
+    entity: baseEntity,
+    vault: 'synthetic-vault',
+  }
+  const enrichedShow = {
+    entity: {
+      ...baseEntity,
+      ingredients: ['rice', 'chickpeas', 'avocado', 'leafy greens'],
+      note:
+        'Visible grain bowl with rice, chickpeas, avocado, greens, and roasted vegetables; portion sizes are uncertain.',
+    },
+    vault: 'synthetic-vault',
+  }
+  const removedShow = {
+    entity: {
+      ...enrichedShow.entity,
+      attachments: [],
+      photoRemoved: true,
+    },
+    vault: 'synthetic-vault',
+  }
+  const mealList = {
+    count: 1,
+    filters: {
+      from: '2026-08-24',
+      limit: 20,
+      to: '2026-08-24',
+    },
+    items: [baseEntity],
+    nextCursor: null,
+    vault: 'synthetic-vault',
+  }
+  const emptyGoalList = {
+    count: 0,
+    filters: { limit: 200, status: 'active' },
+    items: [],
+    nextCursor: null,
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  const retryBranch = input.retrySucceeds
+    ? [
+        `    printf '%s\\n' enriched > ${quoteNutritionShellLiteral(input.stateFile)}`,
+        `    ${emit(enrichedShow)}`,
+        '    exit 0',
+      ]
+    : [
+        `    printf '%s\\n' terminal-failure > ${quoteNutritionShellLiteral(input.stateFile)}`,
+        '    printf \'%s\\n\' \'meal edit retry rejected by controlled fixture\' >&2',
+        '    exit 2',
+      ]
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `state="$(cat ${quoteNutritionShellLiteral(input.stateFile)})"`,
+      'case "$*" in',
+      `  meal\\ closeout-work\\ *) ${emit(mealList)} ;;`,
+      `  meal\\ list\\ *) ${emit(mealList)} ;;`,
+      '  meal\\ show\\ *)',
+      '    if [ "$state" = "enriched" ]; then',
+      `      ${emit(enrichedShow)}`,
+      '    elif [ "$state" = "removed" ]; then',
+      `      ${emit(removedShow)}`,
+      '    else',
+      `      ${emit(initialShow)}`,
+      '    fi',
+      '    ;;',
+      '  meal\\ edit\\ *)',
+      '    if [ "$state" = "initial" ]; then',
+      `      printf '%s\\n' failed-once > ${quoteNutritionShellLiteral(input.stateFile)}`,
+      '      printf \'%s\\n\' \'meal edit rejected: refresh the canonical meal and correct the arguments once\' >&2',
+      '      exit 2',
+      '    fi',
+      ...retryBranch,
+      '    ;;',
+      '  meal\\ remove-photo\\ *)',
+      '    if [ "$state" != "enriched" ]; then',
+      '      printf \'%s\\n\' \'photo cleanup requires verified enrichment\' >&2',
+      '      exit 19',
+      '    fi',
+      `    printf '%s\\n' removed > ${quoteNutritionShellLiteral(input.stateFile)}`,
+      `    ${emit(removedShow)}`,
+      '    ;;',
+      `  goal\\ list\\ *) ${emit(emptyGoalList)} ;;`,
+      `  memory\\ show\\ *) ${emit({
+        document: {
+          records: [{
+            id: 'memory_nonnumeric_meals',
+            section: 'Preferences',
+            text: 'Prefers nonnumeric meal tracking.',
+            updatedAt: '2026-08-24T12:00:00.000Z',
+          }],
+        },
+        memory: null,
+        vault: 'synthetic-vault',
+      })} ;;`,
+      '  *) printf \'unsupported meal fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
 
 describeRealCodex('real Codex automatic meal clarification e2e', () => {
   it(
@@ -8518,6 +8835,9 @@ type NutritionGoalScenario =
   | 'activity-same-goal'
   | 'canonical-with-activity'
   | 'legacy'
+  | 'rolling-legacy'
+  | 'rolling-legacy-incompatible-statistic'
+  | 'rolling-legacy-mixed'
 
 async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
@@ -8667,6 +8987,74 @@ async function materializeNutritionCardVaultCli(input: {
     },
     vault: 'synthetic-vault',
   }
+  const rollingLegacyGoal = {
+    ...legacyGoal,
+    entity: {
+      ...legacyGoal.entity,
+      data: {
+        ...legacyGoal.entity.data,
+        metricTargets: legacyGoal.entity.data.metricTargets.map((target) =>
+          goalMetricTargetSchema.parse({
+            ...target,
+            evaluation: {
+              kind: 'rolling-window',
+              statistic: 'mean',
+              windowDays: 7,
+            },
+            selectionPolicyOverride: {
+              kind: 'daily-aggregate',
+              statistic: 'mean',
+            },
+          })),
+      },
+      id: 'goal_rolling_legacy_bundle',
+      kind: 'goal',
+      title: 'Rolling daily nutrition targets',
+    },
+  }
+  const mixedRollingLegacyGoal = {
+    ...rollingLegacyGoal,
+    entity: {
+      ...rollingLegacyGoal.entity,
+      data: {
+        ...rollingLegacyGoal.entity.data,
+        metricTargets: rollingLegacyGoal.entity.data.metricTargets.map(
+          (target, index) => index === 0
+            ? pointTarget(
+                target.targetId,
+                target.metricKey,
+                target.unit,
+                target.value,
+              )
+            : target,
+        ),
+      },
+      id: 'goal_mixed_rolling_legacy_bundle',
+      kind: 'goal',
+      title: 'Mixed daily nutrition targets',
+    },
+  }
+  const incompatibleRollingStatisticGoal = {
+    ...rollingLegacyGoal,
+    entity: {
+      ...rollingLegacyGoal.entity,
+      data: {
+        ...rollingLegacyGoal.entity.data,
+        metricTargets: rollingLegacyGoal.entity.data.metricTargets.map(
+          (target) => goalMetricTargetSchema.parse({
+            ...target,
+            selectionPolicyOverride: {
+              kind: 'daily-aggregate',
+              statistic: 'sum',
+            },
+          }),
+        ),
+      },
+      id: 'goal_rolling_legacy_incompatible_statistic',
+      kind: 'goal',
+      title: 'Incompatible rolling daily nutrition targets',
+    },
+  }
   const canonicalNutritionGoal = {
     ...legacyGoal,
     entity: {
@@ -8747,6 +9135,12 @@ async function materializeNutritionCardVaultCli(input: {
   }
   const activeGoals = input.goalScenario === 'legacy'
     ? [legacyGoal]
+    : input.goalScenario === 'rolling-legacy'
+      ? [rollingLegacyGoal]
+    : input.goalScenario === 'rolling-legacy-incompatible-statistic'
+      ? [incompatibleRollingStatisticGoal]
+    : input.goalScenario === 'rolling-legacy-mixed'
+      ? [mixedRollingLegacyGoal]
     : input.goalScenario === 'activity-same-goal'
       ? [activitySameGoal]
     : input.goalScenario === 'canonical-with-activity'
@@ -8851,6 +9245,9 @@ async function materializeNutritionCardVaultCli(input: {
       vault: 'synthetic-vault',
     })} ;;`,
     `  "goal show goal_legacy_bundle --format json") ${emit(legacyGoal)} ;;`,
+    `  "goal show goal_rolling_legacy_bundle --format json") ${emit(rollingLegacyGoal)} ;;`,
+    `  "goal show goal_rolling_legacy_incompatible_statistic --format json") ${emit(incompatibleRollingStatisticGoal)} ;;`,
+    `  "goal show goal_mixed_rolling_legacy_bundle --format json") ${emit(mixedRollingLegacyGoal)} ;;`,
     `  "goal show goal_canonical_nutrition --format json") ${emit(canonicalNutritionGoal)} ;;`,
     `  "goal show goal_activity_calories --format json") ${emit(activityCaloriesGoal)} ;;`,
     `  "goal show goal_activity_same_goal --format json") ${emit(activitySameGoal)} ;;`,
@@ -11379,6 +11776,29 @@ function buildWeeklyHealthInsightDeveloperInstructions(): string {
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
+  })
+}
+
+function buildAutomaticMealCloseoutDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-24',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    scheduledOccurrenceAt: '2026-08-25T01:00:00.000Z',
     turnTrigger: 'automation-cron',
   })
 }
