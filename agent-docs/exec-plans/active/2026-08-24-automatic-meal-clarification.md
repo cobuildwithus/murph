@@ -62,9 +62,9 @@ behavior.
 
 ## Tasks
 
-1. [ ] Add one unresolved-capture clarification rule to the automatic-capture
+1. [x] Add one unresolved-capture clarification rule to the automatic-capture
    skill and remove the conflicting managed-automation fallback.
-2. [ ] Add focused prompt and automation regression proof, including ordering
+2. [x] Add focused prompt and automation regression proof, including ordering
    and no-duplicate recovery requirements.
 3. [ ] Run focused tests, assistant-engine typecheck, provider-input
    measurement, diff/privacy review, and the required exact-head review gates.
@@ -80,3 +80,34 @@ behavior.
 - Assistant-engine typecheck, provider-input base/head measurement,
   `git diff --check`, privacy inspection, exact-head ReviewGPT specialist pass,
   required CI, and current-base merge-tree proof.
+
+Completed candidate proof:
+
+- The automatic-capture skill contract passed 4 tests; the focused managed
+  closeout seed regression passed 1 test.
+- Assistant-engine typecheck passed.
+- The public changelog fragment passed 57 focused fragment, registry, page, and
+  route tests; Hosted Web typecheck passed.
+- `git diff --check` and the scoped privacy/path scan passed.
+- Vercel ignored the changelog-only preview, the documented `agent-browser`
+  binary was unavailable, and the in-app browser exposed no browser instance.
+  The existing server-rendered archive tests are the available presentation
+  proof; current-branch browser proof remains an explicit review gap.
+- No live-provider model scenario has run. The current direct proof validates
+  prompt ownership, cleanup ordering, the no-duplicate continuation, and the
+  managed automation handoff rather than sampled model output.
+
+## Product UX walkthrough
+
+Result: Ready for exact-head specialist review.
+
+- Clear captures remain on the existing enrichment and card branch because the
+  new gate applies only after inspection cannot support an honest estimate.
+- An unresolved scheduled capture completes photo cleanup, asks one compact
+  clarification, and stops before Goal, totals, or card work. Focused ordering
+  assertions cover that path.
+- A later answer or blocked card request finds and edits the existing device
+  meal, reads it back, and uses fresh canonical totals. Prompt assertions cover
+  tombstoned attachments, narrow questions, and no replacement meal.
+- Existing intuitive-eating, eating-disorder-risk, number-sensitive, duplicate,
+  and nearby-meal safeguards are unchanged.
