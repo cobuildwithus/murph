@@ -107,6 +107,21 @@ describe("hosted page auth", () => {
     });
   });
 
+  it("returns an anonymous snapshot for Prisma P2024 checkout failures", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(
+      Object.assign(new Error("connection pool checkout failed"), {
+        code: "P2024",
+      }),
+    );
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      session: null,
+    });
+  });
+
   it("rethrows unexpected app-session failures", async () => {
     const error = new Error("session store unavailable");
     mocks.getHostedAppSession.mockRejectedValue(error);
