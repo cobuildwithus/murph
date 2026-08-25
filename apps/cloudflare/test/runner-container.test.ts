@@ -714,6 +714,97 @@ describe("RunnerContainer", () => {
     )).toBe(false);
   });
 
+  it("keeps a rejected wake unconfirmed when lifecycle stop ownership follows settlement", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const lifecycleDestroyStarted = createDeferred<void>();
+    const releaseLifecycleDestroy = createDeferred<void>();
+    const request = createRunnerRequest("evt_rejected_wake_before_lifecycle_stop");
+    let containerRef: RunnerContainer | null = null;
+    let destroyCallCount = 0;
+    const destroy = vi.fn(async () => {
+      destroyCallCount += 1;
+      if (destroyCallCount === 2) {
+        lifecycleDestroyStarted.resolve(undefined);
+        await releaseLifecycleDestroy.promise;
+      }
+      containerRef?.onStop({ exitCode: 0, reason: "exit" });
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState: vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      })),
+      initialStatus: "running",
+    });
+    containerRef = container;
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    const invocationFailure = expect(invocation).rejects.toThrow(
+      "workspace invocation container destroyed",
+    );
+    await runnerRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    const destroyResult = container.destroyInstance();
+    await lifecycleDestroyStarted.promise;
+
+    await invocationFailure;
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+
+    releaseLifecycleDestroy.resolve(undefined);
+    await expect(destroyResult).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a rejected wake unconfirmed when a successor invocation is queued", async () => {
     const activeRequestStarted = createDeferred<void>();
     const activeResponse = createDeferred<Response>();

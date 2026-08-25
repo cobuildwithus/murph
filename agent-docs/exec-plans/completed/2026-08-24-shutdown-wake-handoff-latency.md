@@ -1,6 +1,6 @@
 # Collapse Shutdown Wake Handoff Latency
 
-Status: active
+Status: completed
 Updated: 2026-08-24
 
 ## Goal
@@ -53,10 +53,17 @@ write fence, fail-closed cleanup, and current-version replacement.
 
 ## Verification
 
-- Focused runner-container regression: passed (213 tests).
+- Focused runner-container regression: passed (214 tests).
+- Post-settlement lifecycle regression: passed with the guard present and
+  failed with `no-active-child` when the guard was temporarily removed.
 - Hosted-local shutdown-checkpoint latency scenario: passed; replacement start
   remained below the 10-second bound and the restored reply remained singular.
 - Focused Cloudflare typecheck/test selection: passed.
 - Changelog fragment validation and Web typecheck: passed.
-- Preliminary and final ReviewGPT: pending.
-- Required exact-head CI: pending.
+- Preliminary ReviewGPT: Product UX, frontend, and coverage lenses resolved;
+  the accepted lifecycle-ordering coverage finding is fixed and verified.
+- Final ReviewGPT: passed with no qualifying findings.
+- Current-base merge-tree: clean; intervening base changes are unrelated.
+- Required exact-head CI: remains the Ready/merge gate for the final plan-only
+  closure head.
+Completed: 2026-08-24
