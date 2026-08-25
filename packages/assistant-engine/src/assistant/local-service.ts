@@ -192,7 +192,7 @@ const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
   'Additional group messages joined this turn.',
   'Replace the draft with one final result under the group turn rules.',
-  'The unsent draft does not answer any accepted human request.',
+  'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
   'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')
 
@@ -708,6 +708,7 @@ export async function sendAssistantMessageLocal(
       }
       let currentSession = resolved.session
       let deliverySupersededTypingIndicator = false
+      let providerRequestOrdinal = 0
 
       try {
         if (
@@ -1155,8 +1156,6 @@ export async function sendAssistantMessageLocal(
           : null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
-        let providerRequestOrdinal = 0
-        let groupReplyReconsidered = false
         let providerRequestDeliveryContextBaseOrdinal = 0
         let nextUsageRecordOrdinal = 0
         const heldGroupAcceptedTranscriptInputs: Array<{
@@ -1806,8 +1805,8 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
             const failedProviderResumeStateAction =
-              groupReplyReconsidered
-                ? 'clear'
+              providerRequestOrdinal === 1
+                ? 'preserve-existing'
                 : resolveAssistantProviderResumeStateAction({
                     codexThreadId: providerOutcome.codexThreadId ?? null,
                     threadScope,
@@ -2088,43 +2087,56 @@ export async function sendAssistantMessageLocal(
             signal: currentInput.abortSignal,
           })
           if (draftWindowOutcome.kind === 'review') {
-            groupReplyReconsidered = true
             providerRequestOrdinal = 1
-            const accepted = await acceptActiveTurnInput({
-              activeTurnInput: draftWindowOutcome.acceptedInput,
-              providerRequestAcceptedInputIds,
-              providerRequestOrdinal,
-              sessionId: currentSession.sessionId,
-            })
-            replyDeliveryContexts.push(
-              pickAssistantReplyDeliveryContext(currentInput),
-            )
-            providerRequestDeliveryContextBaseOrdinal =
-              replyDeliveryContexts.length - 1
-            acceptedInputIdsByDeliveryContextOrdinal[
-              providerRequestDeliveryContextBaseOrdinal
-            ] = accepted.acceptedInputItems.map((item) => item.id)
-            currentSession = applyAssistantProviderTurnResumeInMemory({
-              providerResult,
-              session: currentSession,
-            })
-            currentInput = {
-              ...currentInput,
-              turnContext: appendAssistantTurnContext(
-                currentInput.turnContext,
-                ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
-              ),
-            }
-            const reconsiderationRequest = await runCurrentProviderRequest({
-              allowFailedNoReplyRecovery: false,
-            })
-            if (reconsiderationRequest.kind === 'completed') {
-              throw new VaultCliError(
-                'ASSISTANT_GROUP_DRAFT_RECONSIDERATION_INVALID_RECOVERY',
-                'The group reply reconsideration unexpectedly completed through provider failure recovery.',
+            try {
+              const accepted = await acceptActiveTurnInput({
+                activeTurnInput: draftWindowOutcome.acceptedInput,
+                providerRequestAcceptedInputIds,
+                providerRequestOrdinal,
+                sessionId: currentSession.sessionId,
+              })
+              replyDeliveryContexts.push(
+                pickAssistantReplyDeliveryContext(currentInput),
               )
+              providerRequestDeliveryContextBaseOrdinal =
+                replyDeliveryContexts.length - 1
+              acceptedInputIdsByDeliveryContextOrdinal[
+                providerRequestDeliveryContextBaseOrdinal
+              ] = accepted.acceptedInputItems.map((item) => item.id)
+              currentSession = applyAssistantProviderTurnResumeInMemory({
+                providerResult,
+                session: currentSession,
+              })
+              currentInput = {
+                ...currentInput,
+                turnContext: appendAssistantTurnContext(
+                  currentInput.turnContext,
+                  ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
+                ),
+              }
+              const reconsiderationRequest = await runCurrentProviderRequest({
+                allowFailedNoReplyRecovery: false,
+              })
+              if (reconsiderationRequest.kind === 'completed') {
+                throw new VaultCliError(
+                  'ASSISTANT_GROUP_DRAFT_RECONSIDERATION_INVALID_RECOVERY',
+                  'The group reply reconsideration unexpectedly completed through provider failure recovery.',
+                )
+              }
+              providerResult = reconsiderationRequest.providerResult
+            } finally {
+              currentSession = {
+                ...currentSession,
+                codexResume: null,
+                resumeState: null,
+              }
+              await runAssistantTurnBestEffort(async () => {
+                currentSession = await clearAssistantSessionCodexResumeState({
+                  session: currentSession,
+                  vault: input.vault,
+                })
+              })
             }
-            providerResult = reconsiderationRequest.providerResult
           }
           providerResult = selectAssistantGroupProviderResult(providerResult)
         }
@@ -2235,18 +2247,12 @@ export async function sendAssistantMessageLocal(
           }) ?? response
         })
         const providerResumeStateAction =
-          groupReplyReconsidered
+          providerRequestOrdinal === 1
             ? 'clear'
             : resolveAssistantProviderResumeStateAction({
                 codexThreadId: providerResult.codexThreadId ?? null,
                 threadScope,
               })
-        if (providerResumeStateAction === 'clear') {
-          currentSession = await clearAssistantSessionCodexResumeState({
-            session: currentSession,
-            vault: input.vault,
-          })
-        }
         const noReplySelected = providerResult.finalAction?.kind === 'none'
         const rawFinalResponseText = noReplySelected
           ? null
@@ -2591,7 +2597,10 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
         })
 
-        if (failedSession !== currentSession) {
+        if (
+          providerRequestOrdinal === 1 ||
+          failedSession !== currentSession
+        ) {
           await runAssistantTurnBestEffort(() =>
             saveAssistantSession(input.vault, failedSession),
           )

@@ -139,12 +139,12 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
     const completeGroupReplyRule =
-      'Answer every request these rules assign to Murph across the accepted human messages in one reply.'
+      'Answer all still-relevant, unanswered requests that these rules assign to Murph across the accepted messages in one reply.'
     expect(groupPrompt.split(completeGroupReplyRule)).toHaveLength(2)
     expect(groupPrompt).toContain(
-      'Treat a request as resolved only when a later human message answers, withdraws, corrects, or replaces it, and only to the extent that message addresses it',
+      'A clear correction or replacement supersedes only what it changes',
     )
-    expect(groupPrompt).not.toContain('still-relevant, unanswered requests')
+    expect(groupPrompt).not.toContain('Treat a request as resolved only when')
     expect(groupPrompt).toContain('do not repeat completed effects')
     expect(groupPrompt).toContain(scopedSafety)
     expect(directPrompt).toContain(scopedSafety)
