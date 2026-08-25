@@ -9,6 +9,6 @@
     "summary": "Links can now open a specific connection on Murph's Connect Devices page.",
     "details": "The requested source opens in a focused dialog; sign-in and authorization still require the member's explicit action.",
     "relevanceTags": ["connections", "device-sync"],
-    "sourcePullRequests": [2261]
+    "sourcePullRequests": [2261, 2283]
   }
 }
