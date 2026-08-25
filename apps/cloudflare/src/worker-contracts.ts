@@ -203,6 +203,11 @@ export interface WorkerUserRunnerStubLike {
   recordRuntimeCompletionFromContainer?(
     input: WorkerRuntimeCompletionReceipt,
   ): Promise<{ completed: boolean }>;
+  revokeActiveRuntimePlatformAiUsage?(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<boolean>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;

@@ -70,7 +70,9 @@ reconstructing its checklist here:
   differ. If a material claim cannot be judged, return `INVALID`.
 - Coverage: `agent-docs/prompts/coverage-write.md`. Report only a realistic
   changed behavior or owner-boundary invariant lacking truthful proof at the
-  highest stable boundary. For database collection paths, apply
+  highest stable boundary. For cross-owner behavior, trace the complete
+  production composition and require stable composed or end-to-end proof when
+  separate seam tests cannot prove that the owners work together. For database collection paths, apply
   `docs/contracts/00-invariants.md` § Database Load And Collection Fanout.
 
 Prefer deletion and one clear rule over instruction machinery. Do not request

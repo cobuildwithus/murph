@@ -1534,6 +1534,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -1693,6 +1694,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeUsageRecordPort: {
         async recordUsage(record) {
           return {
+            platformAiUsageAllowedAfter: true,
             recorded: true,
             usageId: record.usageId,
           };
@@ -1720,6 +1722,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -1835,6 +1838,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -15664,6 +15668,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const deferredUsageRecords: AssistantUsageRecord[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       recordUsage: vi.fn(async (record) => ({
+        platformAiUsageAllowedAfter: true,
         recorded: true,
         usageId: record.usageId,
       })),

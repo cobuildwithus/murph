@@ -498,7 +498,7 @@ function isHostedUserInvokedDelegatedSystemMailboxItem(
   return isHostedGroupContextHandoffSystemMailboxItem(item);
 }
 
-function isHostedGroupContextHandoffSystemMailboxItem(
+export function isHostedGroupContextHandoffSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
   if (

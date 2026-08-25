@@ -190,6 +190,11 @@ export interface HostedAiUsageLimitNoticeCandidate {
   userNotice: HostedAiUsageLimitNotice;
 }
 
+export interface HostedAiUsageAllowanceSettlement {
+  limitNoticeCandidate: HostedAiUsageLimitNoticeCandidate | null;
+  platformAiUsageAllowedAfter: boolean;
+}
+
 type HostedAiUsageAllowancePricingModelSource =
   | "requested"
   | "served";
@@ -999,6 +1004,16 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+  const settlement = await settleHostedAiUsageForAllowanceTx(input);
+  return settlement.limitNoticeCandidate;
+}
+
+export async function settleHostedAiUsageForAllowanceTx(input: {
+  memberId: string;
+  now?: Date;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageAllowanceSettlement> {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
   await lockHostedAiUsageAllowanceBeneficiaryTx({
@@ -1078,7 +1093,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return null;
+    return {
+      limitNoticeCandidate: null,
+      platformAiUsageAllowedAfter: false,
+    };
   }
 
   const pricingDecision = resolveHostedAiUsageAllowancePricingDecision(input.record);
@@ -1093,7 +1111,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return null;
+    return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
   if (pricingDecision.kind === "unpriceable_openai_image") {
     return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
@@ -1124,7 +1142,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !priced.counted) {
-    return null;
+    return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
 
   return accountHostedAiUsageAllowancePeriodSpendTx({
@@ -1198,7 +1216,7 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+}): Promise<HostedAiUsageAllowanceSettlement> {
   const blockCostUsdMicros = input.decision.counted
     ? resolveHostedAiUsageAllowanceRemainingUsdMicros(input.period)
     : 0n;
@@ -1234,7 +1252,7 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !input.decision.counted) {
-    return null;
+    return buildHostedAiUsageAllowanceSettlementFromPeriod(input.period);
   }
 
   return accountHostedAiUsageAllowancePeriodSpendTx({
@@ -2259,7 +2277,7 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   recordOccurredAt: Date;
   sourceUsageId: string;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+}): Promise<HostedAiUsageAllowanceSettlement> {
   const baseRemainingUsdMicros = input.period.limitUsdMicros > input.period.spentUsdMicros
     ? input.period.limitUsdMicros - input.period.spentUsdMicros
     : 0n;
@@ -2309,13 +2327,14 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     throw new TypeError("Hosted AI usage allowance period spend lost its locked row.");
   }
 
+  const spentAfterUsdMicros = input.period.spentUsdMicros + input.costUsdMicros;
+  const baseRemainingAfterUsdMicros = input.period.limitUsdMicros > spentAfterUsdMicros
+    ? input.period.limitUsdMicros - spentAfterUsdMicros
+    : 0n;
+  const platformAiUsageAllowedAfter =
+    baseRemainingAfterUsdMicros + usageCreditBalanceUsdMicros > 0n;
+
   if (input.period.allowanceSource === "thread_container") {
-    const spentAfterUsdMicros =
-      input.period.spentUsdMicros + input.costUsdMicros;
-    const baseRemainingAfterUsdMicros =
-      input.period.limitUsdMicros > spentAfterUsdMicros
-        ? input.period.limitUsdMicros - spentAfterUsdMicros
-        : 0n;
     await admitHostedGroupSponsorshipRefillTx({
       beneficiaryMemberId: input.memberId,
       capacityState: classifyHostedGroupUsageCapacity({
@@ -2329,23 +2348,39 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   }
 
   if (!noticeEligible) {
-    return null;
+    return {
+      limitNoticeCandidate: null,
+      platformAiUsageAllowedAfter,
+    };
   }
 
   return {
-    crossedAt: input.period.blockedAt ?? input.now,
-    memberId: input.memberId,
-    periodEnd: input.period.periodEnd,
-    periodStart: input.period.periodStart,
-    planResetAt: input.period.planResetAt,
-    sourceUsageId: input.sourceUsageId,
-    usageCreditLedgerVersion,
-    userNotice: buildHostedAiUsageGateLimitNotice({
-      allowanceSource: input.period.allowanceSource,
-      billingPlanCode: input.period.billingPlanCode,
+    limitNoticeCandidate: {
+      crossedAt: input.period.blockedAt ?? input.now,
       memberId: input.memberId,
+      periodEnd: input.period.periodEnd,
       periodStart: input.period.periodStart,
-    }),
+      planResetAt: input.period.planResetAt,
+      sourceUsageId: input.sourceUsageId,
+      usageCreditLedgerVersion,
+      userNotice: buildHostedAiUsageGateLimitNotice({
+        allowanceSource: input.period.allowanceSource,
+        billingPlanCode: input.period.billingPlanCode,
+        memberId: input.memberId,
+        periodStart: input.period.periodStart,
+      }),
+    },
+    platformAiUsageAllowedAfter,
+  };
+}
+
+function buildHostedAiUsageAllowanceSettlementFromPeriod(
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>,
+): HostedAiUsageAllowanceSettlement {
+  return {
+    limitNoticeCandidate: null,
+    platformAiUsageAllowedAfter:
+      resolveHostedAiUsageAllowanceRemainingUsdMicros(period) > 0n,
   };
 }
 
