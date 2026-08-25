@@ -66,3 +66,9 @@ refreshes Browser Vault.
 - The Environment handoff, Environment execution/Browser Vault refresh, and
   existing provider-handoff runtime tests pass together.
 - Cloudflare and assistant-runtime package typechecks pass.
+- The required changelog fragment is privacy-safe and reuses the existing
+  archive; all 57 focused changelog tests and the prepared Web typecheck pass.
+- Live desktop/phone changelog inspection is blocked because this session has
+  no attached in-app browser; the existing archive/page render contracts are
+  covered by the focused test set, and the PR will link the preview route for
+  reviewer inspection.
