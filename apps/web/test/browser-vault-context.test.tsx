@@ -1716,7 +1716,7 @@ test("browser-vault provider preserves readable stale data when bounded observat
     keyId: "browser-vault-replica:e",
   });
   let currentReplicaPublished = false;
-  const fetchMock = vi.fn(() => {
+  const fetchMock = vi.fn<typeof fetch>(() => {
     if (fetchMock.mock.calls.length === 1) {
       return Promise.resolve(jsonResponse({
         encryptedReplica: createReplicaEnvelope(),
@@ -3744,7 +3744,7 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
 test("an admission-capable refresh waits behind an in-flight observation", async () => {
   const observationResponse = createDeferred<Response>();
   const admissionResponse = createDeferred<Response>();
-  const fetchMock = vi.fn()
+  const fetchMock = vi.fn<typeof fetch>()
     .mockImplementationOnce(() => observationResponse.promise)
     .mockImplementationOnce(() => admissionResponse.promise);
 
