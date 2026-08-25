@@ -1,8 +1,8 @@
 # Correlate assistant runtime issues with deploys and attempts
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -116,3 +116,4 @@ Updated: 2026-08-24
   runtime-state, and full Web typechecks passed. One broader assistant-runtime
   run completed 660 tests and hit one unrelated mixed-mailbox timing timeout;
   the changed export case passed independently.
+Completed: 2026-08-25
