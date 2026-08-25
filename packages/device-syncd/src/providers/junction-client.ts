@@ -30,6 +30,7 @@ import {
 } from "@murphai/importers/device-providers/junction-origin";
 
 import {
+  canonicalizeJunctionProviderSlug,
   normalizeJunctionProviderSlug,
   resolveJunctionDeviceConnectRouteByProviderSlug,
 } from "../config/connect-routes.ts";
@@ -579,7 +580,7 @@ export class JunctionClient {
   ): Promise<unknown[]> {
     const recordingId = normalizeString(input.recordingId);
     const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
-      input.sourceProviderSlug,
+      canonicalizeJunctionProviderSlug(input.sourceProviderSlug),
     );
     if (!recordingId || !sourceProviderSlug) {
       throw new TypeError(
@@ -1984,8 +1985,18 @@ function extractBoundElectrocardiogramVoltageRecords(
       if (!group || !Array.isArray(group.data)) {
         throw junctionElectrocardiogramBindingError("group_invalid");
       }
-      const origin = resolveJunctionOrigin(group, {
+      const unresolvedOrigin = resolveJunctionOrigin(group, {
         groupedSourceSlug: sourceSlug,
+      });
+      const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(
+        unresolvedOrigin.sourceProviderSlug,
+      );
+      const origin = resolveJunctionOrigin({
+        ...group,
+        sourceProviderSlug: canonicalSourceProviderSlug
+          ?? unresolvedOrigin.sourceProviderSlug,
+      }, {
+        groupedSourceSlug: canonicalSourceProviderSlug ?? sourceSlug,
       });
       if (
         normalizeJunctionSourceProviderSlug(origin.sourceProviderSlug)

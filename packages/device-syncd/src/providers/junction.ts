@@ -6197,7 +6197,15 @@ function selectJunctionElectrocardiogramRecordingCandidates(
       continue;
     }
 
-    const origin = resolveJunctionOrigin(summary);
+    const unresolvedOrigin = resolveJunctionOrigin(summary);
+    const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(
+      unresolvedOrigin.sourceProviderSlug,
+    );
+    const origin = resolveJunctionOrigin({
+      ...summary,
+      sourceProviderSlug: canonicalSourceProviderSlug
+        ?? unresolvedOrigin.sourceProviderSlug,
+    });
     const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
       origin.sourceProviderSlug,
     );
