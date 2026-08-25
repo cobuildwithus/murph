@@ -5197,6 +5197,20 @@ export function createJunctionDeviceSyncProvider(
       throw error;
     };
 
+    const eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
+      input.context,
+    );
+    if (eligibleSourceProviderSlugs.size === 0) {
+      return {
+        emptyTimestampArraySeen: workoutStreamEmptySeen,
+        historicalProviderRecordsSeen,
+        historicalRecordsSeen,
+        madeProgress,
+        workoutStreamCursor: null,
+        yieldedAt: null,
+      };
+    }
+
     let candidateListing: Awaited<ReturnType<typeof listJunctionWorkoutStreamCandidates>>;
     try {
       candidateListing = await listJunctionWorkoutStreamCandidates(
@@ -5211,6 +5225,7 @@ export function createJunctionDeviceSyncProvider(
           windowStart: input.windowStart,
         },
         true,
+        eligibleSourceProviderSlugs,
       );
     } catch (error) {
       return carryTerminalProgressOrThrow(error);
@@ -5252,10 +5267,8 @@ export function createJunctionDeviceSyncProvider(
           input.collectionWorkLimit,
         );
       } catch (error) {
-        const failure = classifyOptionalJunctionResourceFailure(
+        const failure = classifyOptionalJunctionWorkoutStreamCandidateFailure(
           error,
-          "timeseries",
-          "workout_stream",
           input.context.account.externalAccountId,
         );
         if (!failure) {
@@ -6032,6 +6045,7 @@ async function listJunctionWorkoutStreamCandidates(
   junctionClient: JunctionClient,
   input: JunctionWindowInput,
   strictSourceScope = false,
+  eligibleSourceProviderSlugs?: ReadonlySet<string>,
 ) {
   const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
     ?.maxRecordsPerWindow;
@@ -6056,8 +6070,21 @@ async function listJunctionWorkoutStreamCandidates(
     : indexRecords.map((record) =>
         withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
       );
+  const eligibleSummaries = eligibleSourceProviderSlugs === undefined
+    ? summaries
+    : summaries.filter((summary) => {
+        const summaryRecord = readPlainObject(summary);
+        if (!summaryRecord) {
+          return false;
+        }
+        const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+          resolveJunctionOrigin(summaryRecord).sourceProviderSlug,
+        );
+        return sourceProviderSlug !== null
+          && eligibleSourceProviderSlugs.has(sourceProviderSlug);
+      });
   return {
-    candidates: selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts),
+    candidates: selectJunctionWorkoutStreamCandidates(eligibleSummaries, maxWorkouts),
     providerRecordsSeen: indexRecords.length > 0,
   };
 }
@@ -6310,6 +6337,38 @@ function classifyOptionalJunctionResourceFailure(
     responseStatus: status,
     ...(responseDetail ? { responseDetail } : {}),
   };
+}
+
+function classifyOptionalJunctionWorkoutStreamCandidateFailure(
+  error: unknown,
+  accountExternalId: string,
+): JunctionOptionalResourceFailure | null {
+  const existing = classifyOptionalJunctionResourceFailure(
+    error,
+    "timeseries",
+    "workout_stream",
+    accountExternalId,
+  );
+  if (existing) {
+    return existing;
+  }
+  if (
+    !isDeviceSyncError(error)
+    || error.code !== "JUNCTION_API_REQUEST_FAILED"
+    || error.details?.status !== 400
+  ) {
+    return null;
+  }
+
+  const reason = classifyClearOptionalJunctionResourceFailureReason({
+    responseErrorCode: readJunctionDiagnosticString(error.details.responseErrorCode),
+    responseErrorDescription: readJunctionDiagnosticString(
+      error.details.responseErrorDescription,
+    ),
+  });
+  return reason === "unsupported"
+    ? { reason, responseStatus: 400 }
+    : null;
 }
 
 function isRetryableDeviceSyncFailure(error: unknown): error is DeviceSyncError {
@@ -9888,6 +9947,27 @@ function isJunctionResourceAvailableInSummary(
     normalizeJunctionResourceName(candidate) === normalizedResource
     && isJunctionResourceAdvertisedAvailable(availability)
   );
+}
+
+async function resolveJunctionWorkoutStreamEligibleSources(
+  context: ProviderJobContext,
+): Promise<ReadonlySet<string>> {
+  const sources = context.listConnectionSources
+    ? await context.listConnectionSources()
+    : [];
+  return new Set(sources.flatMap((source) => {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+      source.sourceProviderSlug,
+    );
+    return sourceProviderSlug
+        && source.status === "connected"
+        && isJunctionResourceAvailableInSummary(
+          source.resourceAvailabilitySummary,
+          "workout_stream",
+        )
+      ? [sourceProviderSlug]
+      : [];
+  }));
 }
 
 function isJunctionSourceResourceCurrentlyAvailable(input: {

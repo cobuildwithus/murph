@@ -253,6 +253,24 @@ function readJunctionWorkoutStreamImportId(input: {
   return typeof workoutId === "string" ? workoutId : null;
 }
 
+function admitJunctionWorkoutStreamSource(
+  store: SqliteDeviceSyncStore,
+  connectionId: string,
+): void {
+  store.upsertConnectionSource({
+    connectionId,
+    firstSeenAt: "2026-01-01T00:00:00.000Z",
+    lastSeenAt: "2030-04-03T12:00:00.000Z",
+    resourceAvailabilitySummary: {
+      workouts: true,
+      workout_stream: true,
+    },
+    sourceInstanceKey: "garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+  });
+}
+
 function assertJunctionWorkoutStreamRetryCoordinate(
   jobKind: JunctionWorkoutStreamServiceJobKind,
   job: DeviceSyncJobRecord,
@@ -2625,6 +2643,7 @@ test.each(["resource"] as const)(
         },
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
+      admitJunctionWorkoutStreamSource(store, account.id);
       const input = buildJunctionWorkoutStreamServiceJob(
         jobKind,
         JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW,
@@ -2801,6 +2820,7 @@ test("Junction workout-stream retry retains empty-day replay ownership in the st
       },
       connectedAt: "2030-04-03T00:00:00.000Z",
     });
+    admitJunctionWorkoutStreamSource(store, account.id);
     const activeJob = store.enqueueJob({
       ...buildJunctionWorkoutStreamServiceJob("resource"),
       accountId: account.id,
@@ -2903,6 +2923,7 @@ test.each(["resource"] as const)(
         },
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
+      admitJunctionWorkoutStreamSource(store, account.id);
       const input = buildJunctionWorkoutStreamServiceJob(
         jobKind,
         JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW,
@@ -3047,6 +3068,7 @@ test.each(["resource"] as const)(
         },
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
+      admitJunctionWorkoutStreamSource(store, account.id);
       const activeJob = store.enqueueJob({
         ...buildJunctionWorkoutStreamServiceJob(
           jobKind,
@@ -3181,6 +3203,7 @@ test("Junction workout-stream cooperative yield stays immediate without consumin
       },
       connectedAt: "2026-01-01T00:00:00.000Z",
     });
+    admitJunctionWorkoutStreamSource(store, account.id);
     const input = buildJunctionWorkoutStreamServiceJob("resource");
     const initial = store.enqueueJob({
       ...input,

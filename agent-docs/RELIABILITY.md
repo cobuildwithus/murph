@@ -1581,8 +1581,14 @@ Last verified: 2026-08-23
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
-  owner. One admitted workout index yields serial exact-workout SDK reads; each
-  response has an 8 MiB cap and reduces before import to one compact overall
+  owner. Before the workout index, the stored connected-source projection
+  admits only sources that advertise workout-stream capability. No eligible
+  source completes this optional resource without index or stream egress;
+  mixed-source indexes discard ineligible or unattributed workouts before
+  candidate progress is computed. An exact unsupported-workout response skips
+  only that candidate, while ambiguous request failures remain terminal. One
+  admitted workout index yields serial exact-workout SDK reads; each response
+  has an 8 MiB cap and reduces before import to one compact overall
   feature plus at most 64 fixed-distance splits. The stable workout/source
   identity and source update version form one authoritative facet set, so a
   newer correction withdraws omitted splits. Only reduced duration, distance,

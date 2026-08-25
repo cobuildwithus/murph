@@ -453,10 +453,11 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
 function createJunctionWorkoutSummary(
   workoutId: string,
   startAt = "2026-04-02T10:00:00.000Z",
+  sourceProviderSlug = "garmin",
 ): Record<string, unknown> {
   return {
     id: workoutId,
-    sourceProviderSlug: "garmin",
+    sourceProviderSlug,
     sourceType: "watch",
     sourceInstanceId: "watch-1",
     startAt,
@@ -498,6 +499,7 @@ function readJunctionWorkoutProgressIdentities(
 
 function createJunctionWorkoutStreamTestProvider(input: {
   listWorkoutIds(indexRequest: number): readonly string[];
+  listWorkoutSummaries?: (indexRequest: number) => readonly Record<string, unknown>[];
   listResponse?: (indexRequest: number) => Promise<Response> | Response;
   streamResponse?: (workoutId: string, streamRequest: number) => Promise<Response> | Response;
 }) {
@@ -520,9 +522,10 @@ function createJunctionWorkoutStreamTestProvider(input: {
         return input.listResponse(indexRequests);
       }
       return createJsonResponse({
-        data: input.listWorkoutIds(indexRequests).map((workoutId) =>
-          createJunctionWorkoutSummary(workoutId)
-        ),
+        data: input.listWorkoutSummaries?.(indexRequests)
+          ?? input.listWorkoutIds(indexRequests).map((workoutId) =>
+            createJunctionWorkoutSummary(workoutId)
+          ),
       });
     }
     if (parsed.pathname.startsWith("/v2/summary/")) {
@@ -551,6 +554,36 @@ function createJunctionWorkoutStreamTestProvider(input: {
     requestUrls,
     streamRequests,
   };
+}
+
+function createJunctionWorkoutStreamSource(
+  sourceProviderSlug = "garmin",
+  workoutStreamAvailable = true,
+): DeviceConnectionSourceRecord {
+  return createConnectionSource({
+    id: `src-${sourceProviderSlug}`,
+    resourceAvailabilitySummary: {
+      workouts: true,
+      workout_stream: workoutStreamAvailable,
+    },
+    sourceInstanceKey: `source-${sourceProviderSlug}`,
+    sourceProviderSlug,
+  });
+}
+
+function createJunctionWorkoutStreamJobContext(
+  overrides: Partial<ProviderJobContext> = {},
+): ProviderJobContext {
+  const account = overrides.account ?? createAccount();
+  const sources = account.sources ?? [createJunctionWorkoutStreamSource()];
+  return createJunctionJobContext({
+    account,
+    listConnectionSources: async (input = {}) => sources.filter((source) =>
+      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
+      && (!input.status || source.status === input.status)
+    ),
+    ...overrides,
+  });
 }
 
 function createJunctionWorkoutStreamResourceJob(
@@ -1253,7 +1286,7 @@ test("Junction direct workout_stream unit completes a three-page workout index",
 
   const result = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext(),
+    createJunctionWorkoutStreamJobContext(),
     createJob("reconcile", {
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
       timeseriesResourceCursor: "workout_stream",
@@ -21804,6 +21837,156 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(maximumActiveStreams, 1);
 });
 
+test("Junction workout_stream completes without provider egress when no connected source advertises it", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["unsupported-workout"],
+  });
+
+  const result = await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      listConnectionSources: async () => [
+        createJunctionWorkoutStreamSource("garmin", false),
+        {
+          ...createJunctionWorkoutStreamSource("polar", true),
+          status: "disconnected",
+        },
+      ],
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.equal(
+    harness.requestUrls.some((url) => url.includes("/v2/summary/workouts/")),
+    false,
+  );
+  assert.deepEqual(harness.streamRequests, []);
+  assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
+test("Junction workout_stream filters mixed-source candidates before stream progress", async () => {
+  const importedWorkoutIds: string[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => [],
+    listWorkoutSummaries: () => [
+      createJunctionWorkoutSummary("garmin-workout", undefined, "garmin"),
+      createJunctionWorkoutSummary("polar-workout", undefined, "polar"),
+      {
+        ...createJunctionWorkoutSummary("unknown-source-workout"),
+        sourceProviderSlug: undefined,
+      },
+    ],
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+        const feature = snapshot.timeseries?.workout_stream?.[0] as
+          | Record<string, unknown>
+          | undefined;
+        importedWorkoutIds.push(String(feature?.workoutId));
+        return { imported: true };
+      },
+      listConnectionSources: async () => [
+        createJunctionWorkoutStreamSource("garmin", true),
+        createJunctionWorkoutStreamSource("polar", false),
+      ],
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["garmin-workout"]);
+  assert.deepEqual(importedWorkoutIds, ["garmin-workout"]);
+});
+
+test("Junction workout_stream fails closed without a source-capability projection", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["unattributed-workout"],
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ listConnectionSources: undefined }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.equal(
+    harness.requestUrls.some((url) => url.includes("/v2/summary/workouts/")),
+    false,
+  );
+  assert.deepEqual(harness.streamRequests, []);
+});
+
+test("Junction workout_stream skips only an exact clear-unsupported HTTP 400 candidate", async () => {
+  const importedWorkoutIds: string[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["unsupported-workout", "supported-workout"],
+    streamResponse: (workoutId) => workoutId === "unsupported-workout"
+      ? createJsonResponse({ error: "unsupported_resource" }, 400)
+      : createJsonResponse({
+          time: [1_775_131_200],
+          heartrate: [120],
+        }),
+  });
+
+  const result = await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+        const feature = snapshot.timeseries?.workout_stream?.[0] as
+          | Record<string, unknown>
+          | undefined;
+        importedWorkoutIds.push(String(feature?.workoutId));
+        return { imported: true };
+      },
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual([...harness.streamRequests].sort(), [
+    "supported-workout",
+    "unsupported-workout",
+  ]);
+  assert.deepEqual(importedWorkoutIds, ["supported-workout"]);
+  assert.equal(result.metadataPatch?.junctionSkippedTimeseriesTotal, 1);
+});
+
+test.each([
+  {
+    body: { error: "invalid_request" },
+    label: "unknown",
+  },
+  {
+    body: {
+      error: "unsupported_resource",
+      message: "Invalid request parameters.",
+    },
+    label: "request-shape",
+  },
+])("Junction workout_stream keeps a $label HTTP 400 terminal", async ({ body }) => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["failed-workout"],
+    streamResponse: () => createJsonResponse(body, 400),
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionWorkoutStreamJobContext(),
+      createJunctionWorkoutStreamResourceJob(),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.retryable, false);
+      assert.equal(error.details?.status, 400);
+      return true;
+    },
+  );
+  assert.deepEqual(harness.streamRequests, ["failed-workout"]);
+});
+
 test("Junction workout_stream skips empty or malformed streams without blocking valid workouts", async () => {
   const importedSnapshots: unknown[] = [];
   const warningCodes: string[] = [];
@@ -21830,7 +22013,7 @@ test("Junction workout_stream skips empty or malformed streams without blocking 
 
   const initial = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({
+    createJunctionWorkoutStreamJobContext({
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
         return { imported: true };
@@ -21906,7 +22089,7 @@ test.each([
     importedSnapshots.push(snapshot);
     return { imported: true };
   };
-  const context = createJunctionJobContext({
+  const context = createJunctionWorkoutStreamJobContext({
     now: "2026-04-15T12:00:00.000Z",
     importSnapshot,
   });
@@ -21936,7 +22119,7 @@ test.each([
 
   const replayResult = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({
+    createJunctionWorkoutStreamJobContext({
       now: "2026-04-16T12:00:00.000Z",
       importSnapshot,
     }),
@@ -21958,7 +22141,7 @@ test("Junction workout_stream empty replay cannot schedule another delayed repla
     listWorkoutIds: () => ["workout-1", "workout-2"],
     streamResponse: () => createJsonResponse({ time: [] }),
   });
-  const context = createJunctionJobContext({ now: "2026-04-16T12:00:00.000Z" });
+  const context = createJunctionWorkoutStreamJobContext({ now: "2026-04-16T12:00:00.000Z" });
   const initial = await executeJunctionJob(
     harness.provider,
     context,
@@ -21971,7 +22154,7 @@ test("Junction workout_stream empty replay cannot schedule another delayed repla
 
   const replayResult = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({ now: "2026-04-17T12:00:00.000Z" }),
+    createJunctionWorkoutStreamJobContext({ now: "2026-04-17T12:00:00.000Z" }),
     createJobFromInput(replay),
   );
 
@@ -22017,7 +22200,7 @@ test("Junction workout_stream retains empty-day replay ownership across a retrya
   await assert.rejects(
     () => executeJunctionJob(
       harness.provider,
-      createJunctionJobContext({ importSnapshot }),
+      createJunctionWorkoutStreamJobContext({ importSnapshot }),
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
@@ -22032,7 +22215,7 @@ test("Junction workout_stream retains empty-day replay ownership across a retrya
 
   const result = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamJobContext({ importSnapshot }),
     createJunctionWorkoutStreamResourceJob({
       workoutStreamCursor: requireValue(progressCursor),
       workoutStreamEmptySeen: true,
@@ -22217,7 +22400,7 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
 
   const result = await executeJunctionJob(
     provider,
-    createJunctionJobContext({
+    createJunctionWorkoutStreamJobContext({
       now: "2026-04-03T12:00:00.000Z",
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
@@ -22334,7 +22517,7 @@ test("Junction scalar timeseries resource continuation fails closed before provi
     await assert.rejects(
       () => executeJunctionJob(
         provider,
-        createJunctionJobContext(),
+        createJunctionWorkoutStreamJobContext(),
         createJob("reconcile", {
           windowEnd: "2026-04-03T00:00:00.000Z",
           windowStart: "2026-04-02T00:00:00.000Z",
@@ -22377,7 +22560,7 @@ test("Junction full-job workout_stream retains exact progress in its direct cont
     importedWorkoutIds.push(workoutId);
     return { imported: true };
   };
-  const context = createJunctionJobContext({ importSnapshot });
+  const context = createJunctionWorkoutStreamJobContext({ importSnapshot });
   const initial = await executeJunctionJob(
     harness.provider,
     context,
@@ -22412,7 +22595,7 @@ test("Junction full-job workout_stream retains exact progress in its direct cont
   await assert.rejects(
     () => executeJunctionJob(
       harness.provider,
-      createJunctionJobContext({ importSnapshot }),
+      createJunctionWorkoutStreamJobContext({ importSnapshot }),
       createJobFromInput(continuation, 1),
     ),
     (error) => error === retryableFailure,
@@ -22421,7 +22604,7 @@ test("Junction full-job workout_stream retains exact progress in its direct cont
 
   const completed = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamJobContext({ importSnapshot }),
     createJobFromInput(continuation, 2),
   );
   assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2"]);
@@ -22453,7 +22636,7 @@ test("Junction workout_stream continuation metadata fails closed before provider
     await assert.rejects(
       () => executeJunctionJob(
         harness.provider,
-        createJunctionJobContext(),
+        createJunctionWorkoutStreamJobContext(),
         createJunctionWorkoutStreamResourceJob({ workoutStreamCursor }),
       ),
       (error) => {
@@ -22499,7 +22682,7 @@ test("Junction workout_stream exact progress survives comparator-adversarial ins
   await assert.rejects(
     () => executeJunctionJob(
       harness.provider,
-      createJunctionJobContext({ importSnapshot }),
+      createJunctionWorkoutStreamJobContext({ importSnapshot }),
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
@@ -22526,7 +22709,7 @@ test("Junction workout_stream exact progress survives comparator-adversarial ins
 
   const second = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamJobContext({ importSnapshot }),
     createJunctionWorkoutStreamResourceJob(progressPayload),
   );
 
@@ -22555,7 +22738,7 @@ test("Junction workout_stream retryable index failure carries the owning day wit
   await assert.rejects(
     () => executeJunctionJob(
       harness.provider,
-      createJunctionJobContext(),
+      createJunctionWorkoutStreamJobContext(),
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
@@ -22597,7 +22780,7 @@ test("Junction workout_stream retires first and middle optional 404/422 candidat
 
   const result = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({
+    createJunctionWorkoutStreamJobContext({
       importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
         const feature = snapshot.timeseries?.workout_stream?.[0] as
           | Record<string, unknown>
@@ -22624,7 +22807,7 @@ test("Junction workout_stream only creates a cooperative successor after exact p
   await assert.rejects(
     () => executeJunctionJob(
       beforeHarness.provider,
-      createJunctionJobContext({
+      createJunctionWorkoutStreamJobContext({
         importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
           const feature = snapshot.timeseries?.workout_stream?.[0] as
             | Record<string, unknown>
@@ -22664,7 +22847,7 @@ test("Junction workout_stream only creates a cooperative successor after exact p
   };
   const afterYield = await executeJunctionJob(
     afterHarness.provider,
-    createJunctionJobContext({
+    createJunctionWorkoutStreamJobContext({
       importSnapshot: importAfter,
       shouldYield: () => afterImported.length === 1,
     }),
@@ -22678,7 +22861,7 @@ test("Junction workout_stream only creates a cooperative successor after exact p
 
   const completed = await executeJunctionJob(
     afterHarness.provider,
-    createJunctionJobContext({ importSnapshot: importAfter }),
+    createJunctionWorkoutStreamJobContext({ importSnapshot: importAfter }),
     createJunctionWorkoutStreamResourceJob(afterContinuation.payload ?? {}),
   );
   assert.deepEqual(afterImported, ["workout-1", "workout-2"]);
@@ -22698,7 +22881,7 @@ test("Junction workout_stream carries the owning day when retryable failure prec
   await assert.rejects(
     () => executeJunctionJob(
       harness.provider,
-      createJunctionJobContext({
+      createJunctionWorkoutStreamJobContext({
         importSnapshot: async () => {
           throw failure;
         },
@@ -22742,7 +22925,7 @@ test("Junction workout_stream carries exact progress and bounded context with it
   await assert.rejects(
     () => executeJunctionJob(
       harness.provider,
-      createJunctionJobContext({
+      createJunctionWorkoutStreamJobContext({
         importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
           const feature = snapshot.timeseries?.workout_stream?.[0] as
             | Record<string, unknown>
@@ -22804,7 +22987,7 @@ test("Junction workout_stream carries terminal progress across cancellation", as
 
   const first = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({
+    createJunctionWorkoutStreamJobContext({
       importSnapshot,
       signal: abortController.signal,
     }),
@@ -22823,7 +23006,7 @@ test("Junction workout_stream carries terminal progress across cancellation", as
 
   const second = await executeJunctionJob(
     harness.provider,
-    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamJobContext({ importSnapshot }),
     createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
   );
   assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2", "workout-3"]);
