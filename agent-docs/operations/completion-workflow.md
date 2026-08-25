@@ -311,9 +311,16 @@ Every PR includes:
   production component on `/design?tab=components`, consent surface on
   `/design?tab=consent`, or composed page section/flow under
   `/screenshots/<category>`. Refresh an expired or inaccessible preview; use a
-  production link only when it already renders the changed state. Add or update
-  the catalog/study state only when no existing route and anchor render the
-  changed state. In a dedicated `## Design proof` section, include that
+  production link only when it already renders the changed state. The only
+  content-only exception is an authored changelog diff under
+  `apps/web/changelog/entries/**` plus optional
+  `apps/web/changelog/editions/**`: follow the review-proof route in
+  `apps/web/changelog/README.md` and do not create or refresh a branch preview
+  solely for design proof. Any changelog renderer, component, style, visual, or
+  interaction change still needs the normal current-branch representation. Add
+  or update the catalog/study state only when no existing route and anchor
+  render the changed state. In a
+  dedicated `## Design proof` section, include that
   `Design page:` link, `Evidence:` matched to the changed visual, state,
   interaction, and responsive risks, and `Coverage:` naming the states and
   viewports checked. A reasoned walkthrough is valid when an image adds no

@@ -15,7 +15,10 @@ Every PR also records non-obvious affected surfaces, a mechanically validated
 architecture/reuse summary, foreground reply-path impact, complete initial
 provider-input impact, and categorized added/deleted LOC. User-facing hosted
 Web UI changes additionally carry mechanically validated design-proof fields
-and dedicated risk-matched catalog/study evidence.
+and dedicated risk-matched catalog/study evidence. Content-only authored
+changelog entries plus optional edition metadata use the narrow changelog-owned
+no-preview proof route; renderer, component, style, visual, or interaction
+changes keep the normal current-branch proof rule.
 The contract and its proof are specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/references/testing-ci-map.md`.
