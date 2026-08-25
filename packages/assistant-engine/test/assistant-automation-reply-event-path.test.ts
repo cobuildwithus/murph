@@ -3453,10 +3453,14 @@ describe('assistant auto-reply event-first path', () => {
 
       const sendInput = readSentInput()
       const turnContext = sendInput.turnContext ?? ''
+      const exactSameSessionReply = sessionScope === 'same-session' &&
+        replyMode === 'native'
       const textProjected = presentation === 'text' &&
-        sessionScope === 'cross-session'
-      const contextExpected = hasReferences || textProjected
-      const claimExpected = contextExpected || replyMode === 'ordinary'
+        (sessionScope === 'cross-session' || exactSameSessionReply)
+      const contextExpected = hasReferences || textProjected ||
+        (exactSameSessionReply && presentation === 'media-only')
+      const claimExpected = !exactSameSessionReply &&
+        (contextExpected || replyMode === 'ordinary')
       expect(turnContext.includes(deliveryText)).toBe(textProjected)
       expect(turnContext.includes(referenceId)).toBe(hasReferences)
       expect(sendInput.trustedContextReferences).toEqual(
@@ -4855,6 +4859,74 @@ describe('assistant auto-reply event-first path', () => {
     }))
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
     expect(result.terminalLinqCleanup).toBeUndefined()
+  })
+
+  it('anchors a direct Linq native reply to an exact same-session message', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-same-session-target',
+        message: 'The exact earlier answer.',
+        providerMessageId: 'linq-msg-same-session-target',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-chat',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-newer-same-session-message',
+        message: 'A newer unrelated answer.',
+        providerMessageId: 'linq-msg-newer-same-session',
+        sentAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-inbound-native-reply',
+        threadId: 'thread-1',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-same-session-target',
+        service: 'iMessage',
+      },
+      text: 'Can you clarify this?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = readSentInput()
+    expect(sendInput.turnContext).toContain(
+      'Prior message 1 (native reply target):',
+    )
+    expect(sendInput.turnContext).toContain('The exact earlier answer.')
+    expect(sendInput.turnContext).not.toContain('A newer unrelated answer.')
+    expect(sendInput.receiptMetadata).not.toHaveProperty(
+      AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+    )
   })
 
   it('binds an attested same-session affirmative Linq reaction to the exact older target', async () => {
