@@ -1263,6 +1263,13 @@ describe("record service seams", () => {
       }
       return derivedSlug;
     });
+    const buildDailyFoodScheduledLogTitle = vi.fn((food: { title: string }) => {
+      const derivedTitle = `Auto-log ${food.title}`;
+      if (derivedTitle.length > 160) {
+        throw createInvalidSlugError();
+      }
+      return derivedTitle;
+    });
     const upsertFood = vi.fn();
     const upsertDailyFoodScheduledLog = vi.fn();
     const listFoods = vi.fn(async (): Promise<Array<{
@@ -1275,6 +1282,7 @@ describe("record service seams", () => {
     }>> => []);
     const core = {
       buildDailyFoodScheduledLogSlug,
+      buildDailyFoodScheduledLogTitle,
       listFoods,
       readFood: vi.fn(async () => {
         throw missingFoodError;
@@ -1313,6 +1321,26 @@ describe("record service seams", () => {
     );
     expect(buildDailyFoodScheduledLogSlug).toHaveBeenLastCalledWith({
       slug: "n".repeat(152),
+    });
+    expect(upsertFood).not.toHaveBeenCalled();
+    expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
+
+    await assert.rejects(
+      () => food.addDailyFoodRecord({
+        vault: "./vault",
+        title: "t".repeat(152),
+        slug: "short-food-slug",
+        time: "08:00",
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "contract_invalid" &&
+        error.message ===
+          "The generated daily food schedule title is too long. Retry food schedule with a shorter title.",
+    );
+    expect(buildDailyFoodScheduledLogTitle).toHaveBeenLastCalledWith({
+      title: "t".repeat(152),
     });
     expect(upsertFood).not.toHaveBeenCalled();
     expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();

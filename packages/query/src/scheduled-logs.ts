@@ -22,11 +22,30 @@ const SCHEDULED_LOGS_DIRECTORY = VAULT_LAYOUT.scheduledLogsDirectory;
 
 class ScheduledLogQueryError extends Error {
   readonly code = "VAULT_INVALID_SCHEDULED_LOG";
-  readonly details: Record<string, unknown> = {};
+  readonly details: Record<string, unknown>;
 
-  constructor() {
+  constructor(
+    issues: readonly {
+      code: string;
+      message: string;
+      path: readonly PropertyKey[];
+    }[] = [],
+  ) {
     super("Scheduled log registry document is invalid.");
     this.name = "VaultError";
+    this.details = issues.length > 0
+      ? {
+          issues: issues.map((issue) => ({
+            code: issue.code,
+            message: issue.message,
+            path: issue.path.map((segment) =>
+              typeof segment === "string" || typeof segment === "number"
+                ? segment
+                : "<field>"
+            ),
+          })),
+        }
+      : {};
   }
 }
 
@@ -78,7 +97,7 @@ function parseScheduledLogRecord(
   try {
     const parsedFrontmatter = scheduledLogFrontmatterSchema.safeParse(attributes);
     if (!parsedFrontmatter.success) {
-      throw new ScheduledLogQueryError();
+      throw new ScheduledLogQueryError(parsedFrontmatter.error.issues);
     }
     const frontmatter = parsedFrontmatter.data;
 

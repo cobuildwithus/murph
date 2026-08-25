@@ -910,6 +910,40 @@ test.sequential(
       assert.equal(JSON.stringify(rejected).includes(rejectedSlug), false)
       assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSchedule)
 
+      const titleBeforeRejectedSchedule = await snapshotVaultFiles(vaultRoot)
+      const longTitle = 't'.repeat(152)
+      const rejectedTitle = await runSliceCli([
+        'food',
+        'schedule',
+        longTitle,
+        '--time',
+        '09:00',
+        '--slug',
+        'short-food-slug',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(rejectedTitle.ok, false)
+      assert.equal(rejectedTitle.error.code, 'contract_invalid')
+      assert.equal(rejectedTitle.error.stage, 'validation')
+      assert.deepEqual(rejectedTitle.error.fieldErrors, [{
+        code: 'too_big',
+        expected: '',
+        message: 'This field is invalid.',
+        path: 'title',
+        received: 'invalid',
+      }])
+      assert.equal(
+        rejectedTitle.error.message,
+        'The generated daily food schedule title is too long. Retry food schedule with a shorter title.',
+      )
+      assert.equal(JSON.stringify(rejectedTitle).includes(longTitle), false)
+      assert.deepEqual(
+        await snapshotVaultFiles(vaultRoot),
+        titleBeforeRejectedSchedule,
+      )
+
       const corrected = await runSliceCli<{
         foodId: string
         jobId: string

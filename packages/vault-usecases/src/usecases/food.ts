@@ -52,6 +52,9 @@ interface FoodCoreRuntime {
   buildDailyFoodScheduledLogSlug(food: {
     slug: string
   }): string
+  buildDailyFoodScheduledLogTitle(food: {
+    title: string
+  }): string
   loadVault(input: {
     vaultRoot: string
   }): Promise<{
@@ -405,6 +408,7 @@ export async function addDailyFoodRecord(input: {
       existingFood: existingFood !== null,
       foodSlug: existingFood?.slug ?? slug ?? slugifyFoodLookup(title),
     })
+    validateDailyFoodScheduledLogTitle({ core, title })
     const persisted = await persistFoodRecord({
       core,
       vault: input.vault,
@@ -726,6 +730,31 @@ async function findFoodForDailyAdd(
 
   const foods = await core.listFoods(input.vault)
   return foods.find((food) => food.title === input.title) ?? null
+}
+
+function validateDailyFoodScheduledLogTitle(input: {
+  core: FoodCoreRuntime
+  title: string
+}) {
+  try {
+    input.core.buildDailyFoodScheduledLogTitle({ title: input.title })
+  } catch (error) {
+    if (readVaultErrorCode(error) !== 'VAULT_INVALID_INPUT') {
+      throw error
+    }
+
+    throw new VaultCliError(
+      'contract_invalid',
+      'The generated daily food schedule title is too long. Retry food schedule with a shorter title.',
+      {
+        issues: [{
+          code: 'too_big',
+          publicPath: ['title'],
+        }],
+        stage: 'validation',
+      },
+    )
+  }
 }
 
 function validateDailyFoodScheduledLogSlug(input: {

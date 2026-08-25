@@ -290,10 +290,29 @@ function buildScheduledLogMarkdown(record: ScheduledLogRecord): string {
   return stringifyFrontmatterDocument({ attributes: buildScheduledLogFrontmatter(record), body: record.body });
 }
 
-function invalidScheduledLogRegistry(): VaultError {
+function invalidScheduledLogRegistry(
+  issues: readonly {
+    code: string;
+    message: string;
+    path: readonly PropertyKey[];
+  }[] = [],
+): VaultError {
   return new VaultError(
     "VAULT_INVALID_SCHEDULED_LOG",
     "Scheduled log registry document is invalid.",
+    issues.length > 0
+      ? {
+          issues: issues.map((issue) => ({
+            code: issue.code,
+            message: issue.message,
+            path: issue.path.map((segment) =>
+              typeof segment === "string" || typeof segment === "number"
+                ? segment
+                : "<field>"
+            ),
+          })),
+        }
+      : {},
   );
 }
 
@@ -307,7 +326,7 @@ function parseScheduledLogRecord(attributes: FrontmatterObject, relativePath: st
 
   const parsedFrontmatter = scheduledLogFrontmatterSchema.safeParse(attributes);
   if (!parsedFrontmatter.success) {
-    throw invalidScheduledLogRegistry();
+    throw invalidScheduledLogRegistry(parsedFrontmatter.error.issues);
   }
 
   const frontmatter = parsedFrontmatter.data;
@@ -364,8 +383,8 @@ export function buildDailyFoodScheduledLogSlug(food: Pick<FoodRecord, "slug">): 
   return normalizeSlug(`auto-log-${food.slug}`, "slug");
 }
 
-function buildDailyFoodScheduledLogTitle(food: Pick<FoodRecord, "title">): string {
-  return `Auto-log ${food.title}`;
+export function buildDailyFoodScheduledLogTitle(food: Pick<FoodRecord, "title">): string {
+  return normalizeScheduledLogTitle(`Auto-log ${food.title}`);
 }
 
 function buildDailyFoodScheduledLogSummary(food: Pick<FoodRecord, "title">): string {
