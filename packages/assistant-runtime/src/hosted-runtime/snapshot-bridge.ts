@@ -483,17 +483,17 @@ async function createHostedWorkspaceV2Snapshot(
           },
           level:
             generatedDeliveryCleanupSkipped ||
-                generatedDeliveryActiveFilesMissing ||
-                generatedDeliveryNestedEntriesRetained
+            generatedDeliveryActiveFilesMissing ||
+            generatedDeliveryNestedEntriesRetained
               ? "warn"
               : "info",
           message: generatedDeliveryCleanupSkipped
             ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
             : generatedDeliveryActiveFilesMissing
               ? "Hosted workspace generated-delivery cleanup found active references without staging files."
-            : generatedDeliveryNestedEntriesRetained
-              ? "Hosted workspace generated-delivery cleanup retained legacy nested entries."
-            : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
+              : generatedDeliveryNestedEntriesRetained
+                ? "Hosted workspace generated-delivery cleanup retained legacy nested entries."
+                : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
           phase: "checkpoint",
           userId: input.userId,
         });
