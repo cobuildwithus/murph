@@ -3491,7 +3491,7 @@ test('sendAssistantNotificationLocal keeps a scheduled workout decision structur
     }),
   )
   expect(JSON.stringify(deliverMessage.mock.calls)).not.toMatch(
-    /privateSummary|Murph workout follow-up|evt_/u,
+    /privateSummary|evt_/u,
   )
 })
 

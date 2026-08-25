@@ -1627,6 +1627,7 @@ describe('Codex assistant registry helpers', () => {
                   commands,
                   count: commands.length,
                   failed: 0,
+                  vault: '/private/member/vault',
                 }),
                 command: 'vault-cli batch --compact --format json',
                 durationMs: commandCount,

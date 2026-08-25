@@ -8106,10 +8106,8 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('skips a visible workout follow-up echo when the provider timestamp precedes the transcript write', async () => {
-    const message =
-      'How many reps did you get?\n\n' +
-      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]'
+  it('skips an assistant echo when the provider timestamp precedes the transcript write', async () => {
+    const message = 'How many reps did you get?'
     replyMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
