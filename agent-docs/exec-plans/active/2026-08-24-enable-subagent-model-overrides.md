@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -31,7 +31,7 @@ Updated: 2026-08-24
 1. Risk: usage is attributed to the parent model after an explicit child override.
    Mitigation: retain the existing effective child-model evidence path and add focused explicit-model assertions.
 2. Risk: exposing the selector accidentally bypasses a member's model entitlement or a custom inference connection's single-model contract.
-   Mitigation: derive one boolean at Web's existing assistant-configuration owner, fail closed when absent, and let Codex's native runtime catalog validate the requested string. Add no Murph-owned router or model allowlist.
+   Mitigation: derive one boolean at Web's existing assistant-configuration owner, fail closed when absent, and narrow the existing production image catalog to exactly the product models so Codex's native validation rejects every other bundled model before provider traffic. Add no per-turn Murph router or duplicate validation layer.
 3. Risk: model selection widens child authority or blocks the foreground reply.
    Mitigation: leave the existing one-shot leaf, permission profile, concurrency ceiling, and background-only hints unchanged and prove their config remains present.
 
@@ -50,26 +50,27 @@ Updated: 2026-08-24
 - Treat a model named for one delegated task as `spawn_agent.model`; reserve `murph.assistant_configuration` for explicit conversation/room changes on future turns.
 - Integrate ReviewGPT's production flag and hosted-config assertions. Do not take its proposed rewrite of the late-child runtime test: that scenario intentionally has no parent lifecycle item, and adding one would weaken the regression proof for foreign-child discovery. Existing runtime and usage tests already prove effective-model attribution.
 - The pinned Codex 0.147.0 implementation already defaults `expose_spawn_agent_model_overrides` to `true`. Keep the explicit Murph setting anyway: it turns accidental upstream-default behavior into a stable hosted-runtime contract and prevents a future default change from silently hiding the selector.
+- Accept final ReviewGPT round 1's production-catalog finding: Web's authority boolean meant the full Murph product catalog, but the image still exposed additional bundled Codex models whose usage allowance has no price owner. Correct the existing image catalog in place to exactly Luna, Terra, and Sol, and keep native Codex validation as the only spawn-time model validator.
 
 ## Product UX walkthrough
 
 - Irreducible purpose: an eligible member can ask Murph to run bounded background work on a supported hosted model such as Luna without changing the foreground reply contract or saved conversation model.
-- Eligible managed path: Web confirms that the current runtime has the full product-model catalog, Cloudflare forwards that one decision, and generated Codex config exposes the native optional selector. The image-owned catalog owns string validation, and effective child metadata remains the billing source of truth.
+- Eligible managed path: Web confirms that the current runtime has the full product-model catalog, Cloudflare forwards that one decision, and generated Codex config exposes the native optional selector. The image-owned catalog contains exactly Luna, Terra, and Sol; it owns string validation, while effective child metadata remains the billing source of truth.
 - Inherited path: Murph writes no `default_subagent_model` or `default_subagent_reasoning_effort`, so omitting the option preserves Codex's parent-model inheritance.
 - Restricted personal path: when the member is not authorized for the full catalog, the selector is absent; ordinary inherited-model delegation remains available.
 - Custom inference path: the selector is absent because the active connection owns one verified model alias; ordinary inherited-model delegation remains available.
-- Unsupported value path: Murph adds no free-form router or silent fallback. Codex's native catalog/tool validation owns rejection when the selector is available.
+- Unsupported value path: Murph adds no free-form router or silent fallback. Codex's native catalog/tool validation rejects any non-product value before a child provider request.
 - Saved-setting path: a model named for one delegated task goes on `spawn_agent.model` and never through `murph.assistant_configuration`; only an explicit conversation/room request changes future turns.
 - Authority and timing: the root-plus-three ceiling, background-only guidance, one-shot leaf instruction, permission profiles, and no-nested-child boundary are unchanged.
 - Delivery path: the current background-result contract revisits late results only on a later ordinary inbound turn. This PR does not add a queue, wake, or notification owner and removes its member-facing changelog entry until that separate product journey exists.
-- Evidence target: focused tests cover eligible, restricted, missing-projection, and custom-inference config; explicit child-model selection and inheritance through the real scripted App Server; prompt scope; effective-model usage attribution; and unchanged concurrency/guidance.
-- Difference from plan: the explicit support pin is now authority-gated, and the changelog claim is removed. Verdict: `Implementing`.
+- Evidence target: focused tests cover eligible, restricted, missing-projection, and custom-inference config; the exact production image catalog; explicit supported and rejected child-model selection plus inheritance through the real scripted App Server; prompt scope; effective-model usage attribution; and unchanged concurrency/guidance.
+- Difference from plan: the explicit support pin is now authority-gated, the production catalog is product-only, and the changelog claim is removed. Verdict: `Implementing`.
 
 ## Deployment
 
 - No migration or persisted-state change is required. Deploy the Cloudflare/runtime consumer first: an old Web projection then disables the optional selector without affecting inherited delegation. Deploy the Web producer second to enable it for authorized managed runtimes.
 - Existing old runners retain the pinned Codex default until replacement, matching the pre-PR baseline. New runners fail closed on a missing authority projection, so rollback can temporarily remove explicit selection without blocking ordinary replies or inherited children.
-- Post-deploy, verify a newly started eligible managed run exposes the selector, a restricted or custom-inference run does not, and an explicit supported-model child is attributed to its effective model.
+- Post-deploy, verify a newly started eligible managed run exposes only Luna, Terra, and Sol, a restricted or custom-inference run does not expose the selector, a supported-model child is attributed to its effective model, and a non-product bundled model is rejected before provider traffic.
 
 ## Verification
 
@@ -81,8 +82,11 @@ Updated: 2026-08-24
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts` — passed, 4 tests.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-runtime.test.ts -t 'holds the workspace boundary'` — passed, 3 tests with 272 unrelated tests skipped.
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/hosted-runner-container-identity.test.ts` — passed, 23 tests.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/container-image-contract.test.ts` — passed, 11 tests; the image catalog contains exactly Luna, Terra, and Sol with Flex, and validation fails for either a missing product model or an added non-product model.
+- `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-scripted-runtime.test.ts -t 'carries a delayed V2 child completion|rejects a non-product child model|defers broad Murph schemas|keeps physical-note recovery deferred|keeps narrow group reads eager|sends flex service tier'` — passed, 7 tests with 95 unrelated tests skipped; the production-shaped catalog admits the Luna child, native Codex rejects `gpt-5.5` before any child provider request, and every existing catalog-backed App Server path remains green.
 - `pnpm --dir apps/web test:prepared hosted-runtime-internal-routes.test.ts` — passed, 64 tests.
 - `pnpm --dir packages/hosted-execution typecheck`, `pnpm --dir packages/assistant-runtime typecheck`, `pnpm --dir packages/assistant-engine typecheck`, `pnpm --dir apps/cloudflare typecheck`, and `pnpm --dir apps/web typecheck` — passed.
-- Pinned Codex 0.147.0 complete first-request capture with `gpt-tokenizer` 3.4.0 (`o200k_harmony`) — direct changed from 26,804 tokens / 122,494 bytes to 26,812 / 122,494 (+8, +0.0298%, +0 bytes); group changed from 24,069 / 110,012 to 24,062 / 110,035 (-7, -0.0291%, +23 bytes). Only the reviewed persistent-versus-one-task guidance changed; tool/schema/generated guidance and all other selected provider-visible fields were identical.
+- Pinned Codex 0.147.0 complete first-request capture with `gpt-tokenizer` 3.4.0 (`o200k_harmony`) — direct changed from 26,777 tokens / 122,618 bytes to 26,711 / 122,332 (-66, -0.2465%, -286 bytes); group changed from 24,046 / 110,136 to 23,965 / 109,873 (-81, -0.3369%, -263 bytes). Volatile local paths and UUIDs were normalized. The only provider-visible changes were the reviewed persistent-versus-one-task guidance and removal of the two non-product bundled models from native collaboration guidance; every other selected field was identical.
+- `pnpm docs:drift` — passed.
 - `git diff --check` and the task-scoped direct-identifier scan — passed.
 - Exact-head required CI remains pending until the PR candidate is pushed.
