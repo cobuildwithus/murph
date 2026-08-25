@@ -1826,15 +1826,15 @@ function renderHostedGroupJoinOfferScopeSentence(
   const useCategories = displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
   const shareScopeLabels = useCategories
     ? renderHostedGroupJoinOfferScopeCategories(projectionScopes)
-    : [
-        "Murph profile name",
-        ...displays.map((display) =>
-          formatHostedGroupJoinOfferShareScopeLabel(display.label)
-        ),
-      ];
+      : [
+          "Murph profile name",
+          ...displays.map((display) =>
+            formatHostedGroupJoinOfferShareScopeLabel(display.label)
+          ),
+        ];
   const sentence = `your ${formatHumanList(shareScopeLabels)}`;
   if (useCategories) {
-    return `${sentence} (${renderHostedGroupJoinOfferCompactDisclosure(projectionScopes)})`;
+    return sentence;
   }
   const disclosures: string[] = [];
   if (projectionScopes.some((scope) =>
@@ -1921,26 +1921,6 @@ function renderHostedGroupJoinOfferScopeCategories(
         : []
     ),
   ];
-}
-
-function renderHostedGroupJoinOfferCompactDisclosure(
-  projectionScopes: readonly HostedVaultShareProjectionScope[],
-): string {
-  const includedDetails = [
-    ...(projectionScopes.some((scope) =>
-      isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
-    ) ? ["source details"] : []),
-    ...(projectionScopes.some(isHostedGroupSleepStageProjectionScope)
-      ? ["sleep-stage times"]
-      : []),
-    ...(projectionScopes.some(isHostedGroupMealNutritionProjectionScope)
-      ? ["connected-app meals"]
-      : []),
-  ];
-  return [
-    "recent data covers the last 7 days",
-    `${formatHumanList(includedDetails)} ${includedDetails.length === 1 ? "is" : "are"} included`,
-  ].join("; ");
 }
 
 function isHostedGroupMealNutritionProjectionScope(
