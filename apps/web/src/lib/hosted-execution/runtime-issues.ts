@@ -48,6 +48,9 @@ export async function importHostedAssistantRuntimeIssues(input: {
         summary: record.summary,
         fingerprint: record.fingerprint,
         detailsJson: toPrismaJson(record.details),
+        releaseSha: record.releaseSha ?? null,
+        runtimeAttemptId: record.runtimeAttemptId ?? null,
+        runtimeName: record.runtimeName ?? null,
       })),
       skipDuplicates: true,
     });

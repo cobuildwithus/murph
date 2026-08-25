@@ -39,7 +39,9 @@ import { describe, expect, it } from 'vitest'
 import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
+  stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
+  waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
 import {
   executeReadOnlyAssistantAsk,
@@ -48,6 +50,7 @@ import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
@@ -96,6 +99,7 @@ import {
 } from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
+  AssistantHostedDeviceToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
@@ -137,6 +141,7 @@ import type {
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
+  AssistantProviderUsageDraft,
 } from '../src/assistant/providers/types.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
@@ -293,6 +298,77 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+
+describeRealCodex('real Codex child model selection e2e', () => {
+  it(
+    'runs a Luna child through native collaboration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig({
+        multiAgentV2: true,
+      })
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-codex-luna-child-e2e-'),
+      )
+      const childUsages: AssistantProviderUsageDraft[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          env: config.env,
+          excludeResumeTurns: true,
+          model: DEFAULT_REAL_CODEX_MODEL,
+          modelProvider: config.modelProvider,
+          onAdditionalUsage: async (usage) => {
+            childUsages.push(usage)
+          },
+          prompt: [
+            'Run one native collaboration child for this synthetic smoke check.',
+            'Call spawn_agent once with model gpt-5.6-luna and a small task that needs no tools.',
+            'Do not wait for the child; finish the parent response after launching it.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        expect(result.finalMessage.trim()).not.toBe('')
+        const parentUsage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+            model: DEFAULT_REAL_CODEX_MODEL,
+            modelProvider: config.modelProvider,
+            oss: false,
+          }),
+          rawEvents: result.jsonEvents,
+        })
+        expect(parentUsage.servedModel).not.toBeNull()
+        expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
+        await waitForWarmCodexBackgroundWork()
+        expect(childUsages).toHaveLength(1)
+        expect(childUsages[0]).toMatchObject({
+          provider: 'codex-cli',
+          providerRequestOutcome: 'succeeded',
+          usage: {
+            requestedModel: 'gpt-5.6-luna',
+            servedModel: 'gpt-5.6-luna',
+          },
+        })
+      } finally {
+        await stopWarmCodexAppServer('real-codex-luna-child-e2e-complete')
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
@@ -701,6 +777,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(started.transcriptMessage).toContain(
           `[Murph tracked workout source: ${finiteWorkout.id};`,
         )
+        expect(started.responseContextReferences).toEqual([{
+          entityId: finiteWorkout.id,
+          entityKind: 'activity_session',
+        }])
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
           name: 'Seated cable curl',
@@ -731,9 +811,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ].join(' '),
         })
 
-        expect(untrustedContext.transcriptMessage).not.toContain(
-          '[Murph workout follow-up:',
-        )
+        expect(untrustedContext.responseContextReferences).toBeUndefined()
 
         const untrustedReply = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -750,28 +828,66 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(unchangedAfterUntrustedReply.exercises[0]?.sets[7]?.reps)
           .toBeUndefined()
 
-        const followUp = await executeRealCodexAppServerTurn({
+        const commandCountBeforeLegacyMarker = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .length
+        const legacyMarkerReply = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            `The immediately preceding durable assistant transcript is: ${started.transcriptMessage}`,
+            'The immediately preceding visible assistant transcript ended with this retired text-only marker:',
+            `[Murph workout follow-up: ${finiteWorkout.id}; exercise=Seated cable curl; set=8]`,
+            'There are no host-preserved contextReferences for this reply.',
+            'The current member message is exactly: "Set done."',
+          ].join('\n'),
+        })
+        const unchangedAfterLegacyMarker = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
+        )
+        const legacyMarkerCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .slice(commandCountBeforeLegacyMarker)
+
+        expect(legacyMarkerReply.responseCard).toBeNull()
+        expect(legacyMarkerReply.responseContextReferences).toBeUndefined()
+        expect(legacyMarkerReply.finalMessage).toMatch(/\?/u)
+        expect(legacyMarkerReply.finalMessage).toMatch(/which|what|workout|exercise|set/iu)
+        expect(legacyMarkerReply.finalMessage).not.toMatch(/already|logged|recorded/iu)
+        expect(legacyMarkerCommands.join('\n')).not.toMatch(
+          /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u,
+        )
+        expect(unchangedAfterLegacyMarker.exercises[0]?.sets[7]?.reps)
+          .toBeUndefined()
+
+        const followUp = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          trustedContextReferences: started.responseContextReferences,
+          prompt: [
+            `Host-preserved contextReferences: ${JSON.stringify(started.responseContextReferences)}`,
             'The current member message is exactly: "I am doing set 8 now. Ask me how it went when I finish."',
           ].join(' '),
         })
 
         expect(followUp.responseCard).toBeNull()
         expect(followUp.finalMessage).toMatch(/set 8|how.*went|reps/iu)
-        expect(followUp.finalMessage).toContain(
-          `[Murph workout follow-up: ${finiteWorkout.id}]`,
-        )
+        expect(followUp.finalMessage).not.toContain('[Murph workout follow-up:')
         expect(followUp.transcriptMessage).toBe(followUp.finalMessage)
+        expect(followUp.responseContextReferences).toEqual([{
+          entityId: finiteWorkout.id,
+          entityKind: 'activity_session',
+        }])
 
         // Deliberately do not resume the provider session. The member's terse
-        // message carries no id; Murph's preceding transcript supplies the
-        // exact workout id, while the exercise prescription remains canonical.
+        // message carries no id; the runtime-owned delivery relationship
+        // supplies the exact workout id while the prescription stays canonical.
         const finalSet = await executeRealCodexAppServerTurn({
           ...commonInput,
+          trustedContextReferences: followUp.responseContextReferences,
           prompt: [
-            `The immediately preceding durable assistant transcript is: ${followUp.transcriptMessage}`,
+            `Host-preserved contextReferences: ${JSON.stringify(followUp.responseContextReferences)}`,
             'The current member message is exactly: "Repeated set 8 done for today\'s routine."',
           ].join(' '),
         })
@@ -3824,6 +3940,310 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
       }
     },
     720_000,
+  )
+})
+
+describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
+  it(
+    'maps private preferences and keeps unsupported, group, and stale-only turns quiet',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      )
+      if (!weeklyHealthDigest) {
+        throw new Error('Expected the managed weekly health digest automation.')
+      }
+      const checkIn = [
+        'Fresh Garmin data hasn\'t come through lately.',
+        'Can you open Garmin Connect and check the Garmin device\'s battery and sync?',
+        'If this gap is expected, tell me to wait 5–30 days or stop these check-ins.',
+      ].join(' ')
+      const probes = [
+        {
+          conversationScope: 'direct',
+          kind: 'wait-ten-days',
+          prompt: [
+            `The exact prior assistant message was: "${checkIn}"`,
+            'The current private member message is: "Wait ten days."',
+            'Honor that preference and briefly confirm the saved result.',
+          ].join('\n'),
+          scheduled: false,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'stop-checking',
+          prompt: [
+            `The exact prior assistant message was: "${checkIn}"`,
+            'The current private member message is: "Stop checking."',
+            'Honor that preference and briefly confirm the saved result.',
+          ].join('\n'),
+          scheduled: false,
+        },
+        {
+          conversationScope: 'group',
+          kind: 'group-preference',
+          prompt:
+            'A group member says: "I take my Garmin off sometimes, so wait ten days before checking in." Respond safely in this group.',
+          scheduled: false,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'unsupported-provider',
+          prompt:
+            'My Fitbit is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Fitbit.',
+          scheduled: false,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'scheduled-stale-only',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Garmin account status is active and authorization is healthy.',
+            '- Its source is active but its lastDate is six days ago; ordinary missing data is the only issue.',
+            '- The week is otherwise ordinary, with no notable behavior, experiment movement, or manual logs.',
+            '- Complete the terminal scheduled decision.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'scheduled-reauthorization',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Garmin account status is reauthorization_required.',
+            '- There is no digest-worthy behavior or experiment movement.',
+            '- Complete the required reconnect action and terminal scheduled decision.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
+      ] as const
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-adaptive-wearable-${probe.kind}-e2e-`),
+          )
+          const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+          const deviceTool: NonNullable<
+            AssistantHostedToolContext['deviceTool']
+          > = {
+            async request(request) {
+              deviceRequests.push(request)
+              if (request.action === 'list_accounts') {
+                return {
+                  accounts: [{
+                    accountId: 'device-account-garmin',
+                    displayName: 'Garmin',
+                    lastErrorCode:
+                      probe.kind === 'scheduled-reauthorization'
+                        ? 'TOKEN_REFRESH_FAILED'
+                        : null,
+                    lastSyncCompletedAt: '2026-08-19T12:00:00.000Z',
+                    provider: 'garmin',
+                    status:
+                      probe.kind === 'scheduled-reauthorization'
+                        ? 'reauthorization_required'
+                        : 'active',
+                  }],
+                  action: 'list_accounts',
+                  provider: request.provider ?? null,
+                  sourceProvider: request.sourceProvider ?? null,
+                }
+              }
+              if (request.action === 'connect') {
+                return {
+                  action: 'connect',
+                  link: {
+                    authorizationUrl:
+                      'https://connect.example.test/garmin/authorize',
+                    connectUrl: 'https://connect.example.test/garmin',
+                    expiresAt: '2026-08-25T12:05:00.000Z',
+                    provider: 'garmin',
+                    providerLabel: 'Garmin',
+                  },
+                }
+              }
+              if (request.action === 'reconcile') {
+                return {
+                  accountId: request.accountId,
+                  action: 'reconcile',
+                  occurredAt: '2026-08-25T12:00:00.000Z',
+                  status: 'queued',
+                }
+              }
+              if (request.sourceProvider !== 'garmin') {
+                throw new Error('Unsupported no-data outreach source.')
+              }
+              return {
+                action: 'configure_no_data_outreach',
+                effectiveAfterDays:
+                  request.mode === 'after_days'
+                    ? request.afterDays
+                    : request.mode === 'default'
+                      ? 5
+                      : null,
+                setting:
+                  request.mode === 'after_days'
+                    ? 'custom'
+                    : request.mode,
+                sourceProvider: request.sourceProvider,
+                status: 'saved',
+              }
+            },
+          }
+
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              allowFinishWithoutReply: probe.scheduled,
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildAdaptiveWearableDeveloperInstructions({
+                  conversationScope: probe.conversationScope,
+                  scheduled: probe.scheduled,
+                }),
+              dynamicTools: [
+                MURPH_DEVICE_TOOL,
+                ...(probe.scheduled ? [MURPH_FINISH_WITHOUT_REPLY_TOOL] : []),
+              ],
+              env: config.env,
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => null,
+                currentHostedMailboxItemIds: () => [],
+                currentInvocationScope: () =>
+                  probe.scheduled
+                    ? {
+                        conversationScope: 'direct',
+                        origin: {
+                          automationId:
+                            MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+                          kind: 'automation_occurrence',
+                          occurrenceAt: '2026-08-25T12:00:00.000Z',
+                        },
+                        originSessionId: 'session-adaptive-wearable',
+                      }
+                    : {
+                        conversationScope: probe.conversationScope,
+                        origin: {
+                          assistantInputId:
+                            'ain_00000000000000000000000000000025',
+                          kind: 'accepted_input',
+                          sessionId: 'session-adaptive-wearable',
+                        },
+                        originSessionId: 'session-adaptive-wearable',
+                      },
+                deviceTool,
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const deviceActions = actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_DEVICE_TOOL.name
+            )
+            const configureActions = deviceActions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.argumentsValue.action
+                === 'configure_no_data_outreach'
+            )
+            const connectActions = deviceActions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.argumentsValue.action === 'connect'
+            )
+
+            if (probe.kind === 'wait-ten-days') {
+              expect(configureActions).toHaveLength(1)
+              expect(configureActions[0]).toMatchObject({
+                argumentsValue: {
+                  action: 'configure_no_data_outreach',
+                  afterDays: 10,
+                  mode: 'after_days',
+                  sourceProvider: 'garmin',
+                },
+              })
+              expect(deviceRequests).toEqual([{
+                action: 'configure_no_data_outreach',
+                afterDays: 10,
+                mode: 'after_days',
+                sourceProvider: 'garmin',
+              }])
+              expect(result.finalMessage).toMatch(/10|ten/iu)
+              expect(result.finalMessage).toMatch(/day|wait|check-in/iu)
+            } else if (probe.kind === 'stop-checking') {
+              expect(configureActions).toHaveLength(1)
+              expect(configureActions[0]).toMatchObject({
+                argumentsValue: {
+                  action: 'configure_no_data_outreach',
+                  mode: 'off',
+                  sourceProvider: 'garmin',
+                },
+              })
+              expect(deviceRequests).toEqual([{
+                action: 'configure_no_data_outreach',
+                mode: 'off',
+                sourceProvider: 'garmin',
+              }])
+              expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
+            } else if (
+              probe.kind === 'group-preference'
+              || probe.kind === 'unsupported-provider'
+            ) {
+              expect(deviceActions, probe.kind).toHaveLength(0)
+              expect(deviceRequests, probe.kind).toHaveLength(0)
+            } else if (probe.kind === 'scheduled-stale-only') {
+              expect(connectActions).toHaveLength(0)
+              expect(configureActions).toHaveLength(0)
+              const finishActions = actions.filter((action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+              )
+              expect(finishActions.length).toBeLessThanOrEqual(1)
+              if (result.finalMessage !== '') {
+                expect(JSON.parse(result.finalMessage.trim())).toEqual({
+                  kind: 'skip',
+                  privateSummary:
+                    'No weekly digest cleared the memorability bar.',
+                })
+              }
+            } else {
+              expect(connectActions).toHaveLength(1)
+              expect(connectActions[0]).toMatchObject({
+                argumentsValue: {
+                  action: 'connect',
+                  provider: 'garmin',
+                },
+              })
+              expect(result.finalMessage).toMatch(/connect|authorization/iu)
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    900_000,
   )
 })
 
@@ -7963,6 +8383,22 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('[model_providers.openai-env]')
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
+    expect(configToml).not.toContain('[features.multi_agent_v2]')
+
+    const multiAgentConfigToml = buildRealCodexConfigToml({
+      apiKeyEnv: 'PROVIDER_KEY',
+      model: 'gpt-5.6-terra',
+      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+      multiAgentV2: true,
+    })
+    expect(multiAgentConfigToml).toContain('[features.multi_agent_v2]')
+    expect(multiAgentConfigToml).toContain('enabled = true')
+    expect(multiAgentConfigToml).toContain(
+      'expose_spawn_agent_model_overrides = true',
+    )
+    expect(multiAgentConfigToml).toContain(
+      'max_concurrent_threads_per_session = 4',
+    )
   })
 
   it('sanitizes live provider failures before Vitest prints them', () => {
@@ -11758,6 +12194,37 @@ function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
   })
 }
 
+function buildAdaptiveWearableDeveloperInstructions(input: {
+  conversationScope: 'direct' | 'group'
+  scheduled: boolean
+}): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: true,
+    assistantHostedDeviceConnectProviders: [
+      { label: 'Garmin', provider: 'garmin' },
+    ],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: input.conversationScope,
+    currentLocalDate: '2026-08-25',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: !input.scheduled,
+    scheduledOccurrenceAt: input.scheduled
+      ? '2026-08-25T12:00:00.000Z'
+      : undefined,
+    turnTrigger: input.scheduled ? 'automation-cron' : null,
+  })
+}
+
 function buildWeeklyHealthInsightDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -12389,7 +12856,9 @@ function summarizeCodexEventSequence(
   })
 }
 
-async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
+async function resolveRealCodexE2eConfig(
+  input: { multiAgentV2?: boolean } = {},
+): Promise<RealCodexE2eConfig> {
   const model =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
@@ -12449,6 +12918,7 @@ async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
       apiKeyEnv,
       model,
       modelProvider,
+      multiAgentV2: input.multiAgentV2,
     }),
     {
       encoding: 'utf8',
@@ -12483,6 +12953,7 @@ function buildRealCodexConfigToml(input: {
   apiKeyEnv: string
   model: string
   modelProvider: string
+  multiAgentV2?: boolean
 }): string {
   const baseUrl =
     input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
@@ -12517,6 +12988,15 @@ function buildRealCodexConfigToml(input: {
     'stream_max_retries = 5',
     'supports_websockets = false',
     '',
+    ...(input.multiAgentV2
+      ? [
+          '[features.multi_agent_v2]',
+          'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
+          'max_concurrent_threads_per_session = 4',
+          '',
+        ]
+      : []),
   ].join('\n')
 }
 

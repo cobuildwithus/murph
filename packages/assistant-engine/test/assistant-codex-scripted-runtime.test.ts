@@ -12,6 +12,10 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+} from '@murphai/hosted-execution/assistant-model'
+import { goalMetricTargetSchema } from '@murphai/contracts'
+import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
 } from '@murphai/runtime-state/node'
@@ -3370,6 +3374,10 @@ text(result.output);
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
+      const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+      })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
       const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
@@ -3380,6 +3388,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
+              model: 'gpt-5.6-luna',
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3406,6 +3415,10 @@ text(result.output);
       const first = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: firstPrompt,
       })
@@ -3426,6 +3439,9 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
+      expect(
+        scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
+      ).toContain('gpt-5.6-luna')
       await delay(100)
 
       scenario.stub.queue({
@@ -3437,6 +3453,10 @@ text(result.output);
       })
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
@@ -3447,6 +3467,55 @@ text(result.output);
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )
+
+  it('rejects a non-product child model before a provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      multiAgentV2: true,
+    })
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            fork_turns: 'none',
+            message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
+            model: 'gpt-5.5',
+            task_name: 'non_product_child',
+          },
+          name: 'spawn_agent',
+          namespace: 'collaboration',
+        },
+      },
+      { text: 'NON_PRODUCT_CHILD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Try to spawn the requested non-product child model.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(result.finalMessage).toBe('NON_PRODUCT_CHILD_REJECTED')
+    expect(summaries.map(({ model }) => model)).toEqual([
+      SCRIPTED_MODEL,
+      SCRIPTED_MODEL,
+    ])
+    expect(summaries.flatMap(
+      (summary) => summary.functionCallOutputs ?? [],
+    )).toEqual([
+      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+    ])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
 
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
@@ -3558,7 +3627,7 @@ text(result.output);
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -7804,7 +7873,7 @@ if (!tool) {
       : null
 
     const ordinaryScenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: ordinaryScenario.turnInput.codexCommand,
       directory: ordinaryScenario.turnInput.codexHome,
     })
@@ -7916,7 +7985,7 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -8036,7 +8105,10 @@ text(JSON.stringify(result));
       turnTrigger: null,
     })
     expect(groupDeveloperInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(groupDeveloperInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(groupDeveloperInstructions).not.toContain(
       'Do not use or offer `murph.assistant_configuration` here',
@@ -8149,7 +8221,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -9712,7 +9784,7 @@ async function prepareScriptedTurnScenario(
   }
 }
 
-async function writeOpenAiFlexModelCatalogJson(input: {
+async function writeHostedOpenAiFlexModelCatalogJson(input: {
   codexCommand: string
   directory: string
 }): Promise<string> {
@@ -9725,30 +9797,37 @@ async function writeOpenAiFlexModelCatalogJson(input: {
     },
   )
   const catalog = readRecord(JSON.parse(stdout))
-  const models = Array.isArray(catalog?.models) ? catalog.models : []
-  const targetModel = models
-    .map(readRecord)
-    .find((model) => model?.slug === SCRIPTED_MODEL)
-  if (!targetModel) {
-    throw new Error(`Bundled Codex model catalog did not include ${SCRIPTED_MODEL}.`)
+  if (!catalog) {
+    throw new Error('Bundled Codex model catalog was not an object.')
   }
-
-  const serviceTiers = Array.isArray(targetModel.service_tiers)
-    ? targetModel.service_tiers
+  const bundledModels = Array.isArray(catalog.models)
+    ? catalog.models.map(readRecord)
     : []
-  const hasFlex = serviceTiers
-    .map(readRecord)
-    .some((tier) => tier?.id === 'flex')
-  if (!hasFlex) {
-    targetModel.service_tiers = [
-      ...serviceTiers,
-      {
-        description: 'Lower-cost flexible processing',
-        id: 'flex',
-        name: 'Flex',
-      },
-    ]
-  }
+  const productModels = HOSTED_ASSISTANT_PRODUCT_MODELS.map((slug) => {
+    const model = bundledModels.find((candidate) => candidate?.slug === slug)
+    if (!model) {
+      throw new Error(`Bundled Codex model catalog did not include ${slug}.`)
+    }
+
+    const serviceTiers = Array.isArray(model.service_tiers)
+      ? model.service_tiers
+      : []
+    const hasFlex = serviceTiers
+      .map(readRecord)
+      .some((tier) => tier?.id === 'flex')
+    if (!hasFlex) {
+      model.service_tiers = [
+        ...serviceTiers,
+        {
+          description: 'Lower-cost flexible processing',
+          id: 'flex',
+          name: 'Flex',
+        },
+      ]
+    }
+    return model
+  })
+  catalog.models = productModels
 
   const modelCatalogJson = path.join(
     input.directory,
@@ -9794,6 +9873,7 @@ function buildScriptedCodexConfigToml(
       ? [
           '[features.multi_agent_v2]',
           'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
           'max_concurrent_threads_per_session = 4',
           '',
         ]

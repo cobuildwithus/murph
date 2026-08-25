@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertPreparedDeployArtifacts,
   assertPreparedRunnerBundle,
+  resolvePublicRunnerReleaseSha,
   runnerBundleManifestFileName,
   writeRunnerBundleManifest,
   type RunnerBundleManifest,
@@ -23,6 +25,7 @@ import {
 } from "../scripts/runner-bundle-contract.js";
 
 const healthCommonsPackageName = "@murphai/health-commons";
+const testPublicReleaseSha = "0123456789abcdef0123456789abcdef01234567";
 const finnishDrySaunaProtocol = {
   attribution: {
     ownerType: "murph",
@@ -123,10 +126,76 @@ const requiredHostedCryptoWorkerVars = {
 } as const;
 
 describe("deploy artifact validation", () => {
+  it("emits release provenance only for a clean public checkout", async () => {
+    const repoRoot = await mkdtemp(path.join(os.tmpdir(), "murph-runner-release-"));
+    try {
+      runGit(repoRoot, ["init", "--quiet"]);
+      await writeFile(path.join(repoRoot, "release-source.txt"), "committed\n", "utf8");
+      runGit(repoRoot, ["add", "release-source.txt"]);
+      runGit(repoRoot, [
+        "-c",
+        "user.name=Murph Test",
+        "-c",
+        "user.email=murph-test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--no-gpg-sign",
+        "--no-verify",
+        "--quiet",
+        "-m",
+        "test release",
+      ]);
+
+      expect(resolvePublicRunnerReleaseSha(repoRoot)).toMatch(/^[a-f0-9]{40}$/u);
+
+      await writeFile(path.join(repoRoot, "release-source.txt"), "dirty\n", "utf8");
+      expect(resolvePublicRunnerReleaseSha(repoRoot)).toBeNull();
+    } finally {
+      await rm(repoRoot, { force: true, recursive: true });
+    }
+  });
+
   it("accepts a complete freshly assembled deploy artifact set", async () => {
     const fixture = await createDeployArtifactFixture();
 
+    expect(fixture.manifest).toMatchObject({
+      releaseSha: testPublicReleaseSha,
+      schemaVersion: 3,
+    });
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
+  it("rejects a runner bundle whose release provenance is not a public commit SHA", async () => {
+    const fixture = await createDeployArtifactFixture();
+    await writeFile(
+      path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
+      `${JSON.stringify({
+        ...fixture.manifest,
+        releaseSha: "cloudflare-version-uuid",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Runner bundle manifest is incomplete or invalid.",
+    );
+  });
+
+  it("rejects a production runner bundle assembled from a dirty checkout", async () => {
+    const fixture = await createDeployArtifactFixture();
+    await writeFile(
+      path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
+      `${JSON.stringify({
+        ...fixture.manifest,
+        releaseSha: null,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Runner bundle manifest is incomplete or invalid.",
+    );
   });
 
   it("accepts runner dependencies installed through pnpm's virtual store", async () => {
@@ -952,6 +1021,7 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
     const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
       now: () => new Date(future.getTime() + 1_000),
+      releaseSha: fixture.manifest.releaseSha,
     };
 
     if (fixture.appDir) {
@@ -1196,6 +1266,7 @@ async function createDeployArtifactFixture(input: {
   const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
     buildSkipped: input.buildSkipped === true,
     includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
+    releaseSha: testPublicReleaseSha,
   };
 
   if (input.appDir) {
@@ -1243,7 +1314,9 @@ async function rewriteRunnerBundleManifest(fixture: {
   repoRoot?: string;
   runnerBundleDir: string;
 }): Promise<RunnerBundleManifest> {
-  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {};
+  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {
+    releaseSha: testPublicReleaseSha,
+  };
 
   if (fixture.appDir) {
     input.appDir = fixture.appDir;
@@ -1461,4 +1534,15 @@ function selectRunnerDependencyPackageName(packageNames: readonly string[]): str
   }
 
   return packageName;
+}
+
+function runGit(repoRoot: string, args: readonly string[]): void {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error("Git fixture command failed.");
+  }
 }

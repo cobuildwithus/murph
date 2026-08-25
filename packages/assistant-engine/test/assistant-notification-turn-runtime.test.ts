@@ -3664,7 +3664,7 @@ test('sendAssistantNotificationLocal keeps a scheduled workout decision structur
     }),
   )
   expect(JSON.stringify(deliverMessage.mock.calls)).not.toMatch(
-    /privateSummary|Murph workout follow-up|evt_/u,
+    /privateSummary|evt_/u,
   )
 })
 
@@ -3917,21 +3917,18 @@ test.each(['linq', 'telegram', 'email'] as const)(
   },
 )
 
-test('sendAssistantNotificationLocal maps context handoff to a conversation-shaped output-only turn', async () => {
+test('sendAssistantNotificationLocal delivers ordinary context handoff text through the existing output-only path', async () => {
+  const response = 'The final round stayed controlled. Nice work.'
   const providerResult = createProviderResult({
-    response: JSON.stringify({
-      kind: 'send_message',
-      privateSummary: 'Share the bounded context in the room.',
-      text: 'Sunny just pulled 405. Huge day.',
-    }),
+    response,
   })
-  const { mocks, sendAssistantNotificationLocal } =
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
     await loadNotificationTurnHarness({
       providerResult,
       turnId: 'turn-context-handoff',
     })
 
-  await sendAssistantNotificationLocal({
+  const result = await sendAssistantNotificationLocal({
     executionContext: { hosted: null },
     instructions: 'Use the bounded handoff context in this group.',
     notificationPromptProfile: 'context-handoff',
@@ -3940,8 +3937,17 @@ test('sendAssistantNotificationLocal maps context handoff to a conversation-shap
     vault: '/vaults/context-handoff',
   })
 
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Required context handoff message.',
+      text: response,
+    },
+    response,
+  })
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
+      allowFinishWithoutReply: false,
       profile: {
         nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
@@ -3950,6 +3956,77 @@ test('sendAssistantNotificationLocal maps context handoff to a conversation-shap
       },
     }),
   )
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: response,
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({ assistantTranscriptText: response }),
+  )
+  expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
+  expect(mocks.recordAdditionalAssistantUsageEvents).toHaveBeenCalledTimes(1)
+})
+
+test('sendAssistantNotificationLocal does not interpret context handoff text as a skip decision', async () => {
+  const response = JSON.stringify({
+    kind: 'skip',
+    privateSummary: 'Do not post an update.',
+  })
+  const providerResult = createProviderResult({ response })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-context-handoff-skip-shaped-text',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Use the bounded handoff context in this group.',
+    notificationPromptProfile: 'context-handoff',
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/context-handoff-skip-shaped-text',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Required context handoff message.',
+      text: response,
+    },
+    response,
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: response,
+    }),
+  )
+})
+
+test('sendAssistantNotificationLocal rejects an empty context handoff response before delivery', async () => {
+  const providerResult = createProviderResult({ response: '   ' })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-context-handoff-empty-response',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Use the bounded handoff context in this group.',
+    notificationPromptProfile: 'context-handoff',
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/context-handoff-empty-response',
+  })).rejects.toMatchObject({
+    code: 'invalid_payload',
+    context: { retryable: false },
+    message: 'notification response must be a non-empty string.',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
 })
 
 test.each([
@@ -5442,7 +5519,7 @@ function isTraceEventWithRawType(
   )
 }
 
-test('sendAssistantNotificationLocal treats a background skip as an ordinary notification decision', async () => {
+test('sendAssistantNotificationLocal keeps generic background skip decision parsing unchanged', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completion-'))
   try {
     const providerResult = createProviderResult({
@@ -5472,6 +5549,7 @@ test('sendAssistantNotificationLocal treats a background skip as an ordinary not
     })).resolves.toMatchObject({
       decision: {
         kind: 'skip',
+        privateSummary: 'Onboarding completion was attempted.',
       },
       response: null,
     })

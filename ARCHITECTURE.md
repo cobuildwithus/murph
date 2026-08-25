@@ -1235,9 +1235,17 @@ only the synthetic room member's model from an authenticated, accepted Linq or
 Telegram group turn; it never reads or changes a participant's private
 configuration.
 
-Model and reasoning
-changes remain exclusively owned by `murph.assistant_configuration`. The
-runtime may request an update only from eligible user input in the active
+Persistent core-reply model and reasoning
+changes remain exclusively owned by `murph.assistant_configuration`. A model
+named only for one bounded delegated task stays invocation-local on Codex's
+native `spawn_agent.model` field and never mutates that saved configuration.
+Web exposes the native field only when its existing assistant-configuration
+resolution confirms that the current managed runtime is authorized for the
+full product-model catalog; missing authority and custom inference fail closed.
+The production image gives Codex a catalog containing exactly Luna, Terra, and
+Sol, so Codex's native spawn validation rejects other bundled models before a
+provider request.
+The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
 web binds that input id to the callback member and one live conversation
@@ -1343,7 +1351,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/setup-cli`: workspace-private CLI-only onboarding and host-setup surface that owns the setup wizard, host provisioning helpers, and assistant/channel/wearable onboarding flows
 - `packages/gateway-core`: published transport-neutral gateway boundary package that owns the shared gateway contracts, route helpers, projection/snapshot logic, opaque ids, and event-log helpers used by hosted and future transport adapters
 - `packages/assistantd`: workspace-private local assistant daemon package with a bearer-authenticated loopback-only control plane bound to one vault; it fronts steady-state local assistant session/message/status/automation entrypoints directly through `@murphai/assistant-engine` and no longer exposes a local gateway projection/control API
-- `packages/assistant-runtime`: workspace-private headless hosted assistant execution surface that exposes one-shot inbox/bootstrap/assistant/outbox/device-sync runtime behavior behind explicit runtime context, owns the canonical hosted runtime launch spec for semantic env splitting, forwarded env profiles, platform-only runtime config, typed resolved config, typed parser toolchain validation, commit timeout, runtime-env projection, and hosted runner executable PATH entries, consumes `@murphai/assistant-engine` and explicit `@murphai/operator-config/*` owner subpaths instead of the umbrella config root, now treats the durable operator `hostedAssistant` config as the only persisted hosted assistant source of truth, consumes shared messaging ingress contracts from `@murphai/messaging-ingress` rather than defining provider semantics itself, stages hosted conversation mailbox input into `AssistantInputEvent` records, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground assistant phase once before the idle floor without publishing a snapshot, and keeps dirty hosted runtime state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, exports sanitized pending assistant-runtime issue records through the injected runtime platform instead of persisting raw hosted diagnostics in Cloudflare, and expects hosted semantic behavior such as channel readiness and device-sync enablement to arrive as typed runtime config rather than being rediscovered from ambient env in lower layers while Cloudflare's container runner binds image-owned native parser paths inside the container
+- `packages/assistant-runtime`: workspace-private headless hosted assistant execution surface that exposes one-shot inbox/bootstrap/assistant/outbox/device-sync runtime behavior behind explicit runtime context, owns the canonical hosted runtime launch spec for semantic env splitting, forwarded env profiles, platform-only runtime config, typed resolved config, typed parser toolchain validation, commit timeout, runtime-env projection, and hosted runner executable PATH entries, consumes `@murphai/assistant-engine` and explicit `@murphai/operator-config/*` owner subpaths instead of the umbrella config root, now treats the durable operator `hostedAssistant` config as the only persisted hosted assistant source of truth, consumes shared messaging ingress contracts from `@murphai/messaging-ingress` rather than defining provider semantics itself, stages hosted conversation mailbox input into `AssistantInputEvent` records, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground assistant phase once before the idle floor without publishing a snapshot, and keeps dirty hosted runtime state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds. It stamps sanitized pending assistant-runtime issues at occurrence with the authenticated invocation attempt, stable `cloudflare-hosted-runner` identity, and public release SHA embedded in the runner bundle, then exports those records through the injected runtime platform instead of persisting raw hosted diagnostics in Cloudflare; a later export retry never replaces the occurrence attempt. Hosted semantic behavior such as channel readiness and device-sync enablement arrives as typed runtime config rather than being rediscovered from ambient env in lower layers while Cloudflare's container runner binds image-owned native parser paths inside the container.
 - `apps/web`: hosted Next.js integration control plane for Vercel-style
   deployments, backed by Postgres/Prisma for device OAuth sessions, short-lived
   hosted device connect intents, opaque public device-connection ids plus
@@ -1618,11 +1626,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   prevents a later context update from restoring it. The email labels the
   network location as approximate. It uses member creation time in UTC and
   labels an exact fallback as the activation surface when no request context
-  exists. Unreadable optional context or email enrichment degrades to that
-  context-free fallback instead of suppressing the one allowed notification
-  attempt; batch activation omits the source when it lacks per-member
-  provenance. The email excludes member and provider event identifiers. A
-  welcome-only or later paid-billing event is not signup evidence. Later
+  exists. It does not read or include member email addresses or phone numbers.
+  Unreadable optional context degrades to that context-free fallback instead of
+  suppressing the one allowed notification attempt; batch activation omits the
+  source when it lacks per-member provenance. The email excludes member and
+  provider event identifiers. A welcome-only or later paid-billing event is not
+  signup evidence. Later
   successful payments and accepted-invite replays must not repeat activation
   side effects, and email paths must not persist provider payloads or expose
   recipients in logs.
@@ -2322,7 +2331,7 @@ URLs are delivery capabilities, not valid private-media storage
 representations.
 
 Provider-native thread continuity is not a delivery ledger. Preserve a resumable Codex thread even when `finish_without_reply` or delivery-context filtering means its internal history differs slightly from the durable semantic transcript, and preserve it after authenticated private reads. Runtime-owned capability URLs belong only to the ephemeral delivery response: do not put them in the durable assistant transcript, fresh-thread replay, stale-resume fallback, or provider-native turn. Do not clear or abandon provider continuity as a privacy or delivery-reconciliation mechanism; enforce privacy at authority, output, logging, and snapshot boundaries instead.
-Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints. Every warm or cold runner must report those exact fingerprints before a user workspace invocation is admitted, so a stale warm shell is replaced and a stale cold shell fails closed even before post-deploy smoke completes.
+Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints, while a clean-checkout bundle manifest embeds the exact public Murph checkout SHA used for release correlation. Dirty-checkout assembly writes null release provenance and production deploy validation rejects that manifest. Every warm or cold runner must report the exact fingerprints before a user workspace invocation is admitted, and deploy smoke also compares the public release SHA, so a stale warm shell is replaced and a stale cold shell fails closed even before post-deploy smoke completes.
 
 The hosted pending-input v2 index persists a capped exact-ack batch cursor in
 the same workspace snapshot. It rotates later idle checkpoints without

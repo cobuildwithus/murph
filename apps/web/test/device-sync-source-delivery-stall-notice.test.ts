@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
   findDeviceConnectionSource: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
+  readHostedSourceNoDataOutreachPolicy: vi.fn(),
   resolveHostedAssistantNotificationDestination: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
@@ -33,6 +34,10 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
     mocks.resolveHostedAssistantNotificationDestination,
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
+vi.mock("@/src/lib/device-sync/source-no-data-outreach-policy", () => ({
+  readHostedSourceNoDataOutreachPolicy:
+    mocks.readHostedSourceNoDataOutreachPolicy,
+}));
 
 import {
   buildHostedSourceDeliveryStallNoticeKey,
@@ -44,7 +49,7 @@ const BASE_INPUT = {
   connectionId: "connection-1",
   lastDataAt: "2026-08-20T00:00:00.000Z",
   lifecycleEpoch: 4,
-  now: "2026-08-23T00:00:00.000Z",
+  now: "2026-08-25T00:00:00.000Z",
   sourceId: "dcs_abcdefghijklmnop",
   sourceInstanceKey: "source-1",
   sourceProviderSlug: "garmin",
@@ -101,6 +106,12 @@ beforeEach(() => {
   });
   mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
   mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
+  mocks.readHostedSourceNoDataOutreachPolicy.mockResolvedValue({
+    afterDays: 5,
+    enabled: true,
+    setting: "default",
+    silentHours: 120,
+  });
   mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(
     DIRECT_LINQ_DESTINATION,
   );
@@ -126,7 +137,7 @@ describe("hosted source delivery-stall notice identity", () => {
     });
     expect(resolveHostedSourceDeliveryStallNoticeCandidate({
       ...BASE_INPUT,
-      now: "2026-08-22T23:59:59.999Z",
+      now: "2026-08-24T23:59:59.999Z",
     })).toBeNull();
     expect(resolveHostedSourceDeliveryStallNoticeCandidate({
       ...BASE_INPUT,
@@ -183,7 +194,9 @@ describe("hosted source delivery-stall notice materialization", () => {
         deliveryIdempotencyKey: notificationKey,
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: expect.stringMatching(/Garmin Connect/u),
+          text: expect.stringMatching(
+            /Garmin Connect.*wait 5–30 days or stop these check-ins/su,
+          ),
         },
         route: DIRECT_LINQ_DESTINATION.route,
       },
@@ -239,6 +252,22 @@ describe("hosted source delivery-stall notice materialization", () => {
   });
 
   it.each([
+    {
+      name: "the member requested a longer wait",
+      prepare: () => mocks.readHostedSourceNoDataOutreachPolicy.mockResolvedValue({
+        afterDays: 10,
+        enabled: true,
+        setting: "custom",
+        silentHours: 240,
+      }),
+    },
+    {
+      name: "the member disabled no-data checks",
+      prepare: () => mocks.readHostedSourceNoDataOutreachPolicy.mockResolvedValue({
+        enabled: false,
+        setting: "off",
+      }),
+    },
     {
       name: "recent Linq activity is absent",
       prepare: () => mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false),

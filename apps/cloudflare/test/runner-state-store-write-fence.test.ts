@@ -172,6 +172,77 @@ describe("RunnerStateStore write-fence state", () => {
     });
   });
 
+  it("revokes managed AI only for the exact live write fence", async () => {
+    const { store } = createHarness();
+    await store.bindUser("member_123");
+    const first = await store.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    const pinnedFirst = await store.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope: null,
+      platformAiUsageAllowed: true,
+      token: first,
+      workspaceVersion: "9",
+    });
+
+    await expect(store.revokeActiveRuntimePlatformAiUsage({
+      attemptId: first.attemptId,
+      generation: String(Number(first.generation) + 1),
+      userId: "member_123",
+    })).resolves.toBe(false);
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: first.providerEgressToken ?? "",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: true,
+    });
+
+    await expect(store.revokeActiveRuntimePlatformAiUsage({
+      attemptId: first.attemptId,
+      generation: first.generation,
+      userId: "member_123",
+    })).resolves.toBe(true);
+    await expect(store.revokeActiveRuntimePlatformAiUsage({
+      attemptId: first.attemptId,
+      generation: first.generation,
+      userId: "member_123",
+    })).resolves.toBe(true);
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: first.providerEgressToken ?? "",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
+
+    await store.clearWriteFenceAfterCompletion({ token: pinnedFirst });
+    const second = await store.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    await store.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope: null,
+      platformAiUsageAllowed: true,
+      token: second,
+      workspaceVersion: "10",
+    });
+
+    await expect(store.revokeActiveRuntimePlatformAiUsage({
+      attemptId: first.attemptId,
+      generation: first.generation,
+      userId: "member_123",
+    })).resolves.toBe(false);
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: second.providerEgressToken ?? "",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: true,
+    });
+  });
+
   it("clears replacement fences by identity and records the failure", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));

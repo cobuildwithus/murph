@@ -867,12 +867,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      requestAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
+      },
+    }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
           memberId: "member_synthetic_phase",
+          releaseSha: "0123456789abcdef0123456789abcdef01234567",
+          runtimeAttemptId:
+            "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+          runtimeName: "cloudflare-hosted-runner",
           userEnvKeys: [],
         }),
       },
@@ -886,6 +896,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
             defaultTarget: hostedDefaultTarget,
+            releaseSha: "0123456789abcdef0123456789abcdef01234567",
+            runtimeAttemptId:
+              "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+            runtimeName: "cloudflare-hosted-runner",
           }),
         }),
       }),
@@ -1534,6 +1548,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -1693,6 +1708,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeUsageRecordPort: {
         async recordUsage(record) {
           return {
+            platformAiUsageAllowedAfter: true,
             recorded: true,
             usageId: record.usageId,
           };
@@ -1720,6 +1736,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -1835,6 +1852,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -8858,6 +8876,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("exposes safe hosted device list, connect, and reconcile actions from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
+    const noDataOutreachRequests: Array<
+      Parameters<NonNullable<RuntimeDeviceSyncPort["configureNoDataOutreach"]>>[0]
+    > = [];
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -8912,6 +8933,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expiresAt: "2026-04-29T00:05:00.000Z",
           provider: request.connectTarget,
           providerLabel: "WHOOP",
+        };
+      },
+      async configureNoDataOutreach(request) {
+        noDataOutreachRequests.push(request);
+        return {
+          action: "configure_no_data_outreach" as const,
+          effectiveAfterDays: request.mode === "off"
+            ? null
+            : request.mode === "after_days"
+              ? request.afterDays
+              : 5,
+          setting: request.mode === "off"
+            ? "off" as const
+            : request.mode === "after_days"
+              ? "custom" as const
+              : "default" as const,
+          sourceProviderSlug: request.sourceProviderSlug,
+          status: "saved" as const,
         };
       },
       async fetchSnapshot(request) {
@@ -9041,6 +9080,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(reconcileRequests).toEqual([{
       connectionId: "conn_synthetic_whoop",
       signal: abortController.signal,
+    }]);
+    await expect(deviceTool.request({
+      action: "configure_no_data_outreach",
+      afterDays: 10,
+      mode: "after_days",
+      sourceProvider: "garmin",
+    })).rejects.toThrow("current private member input");
+    await expect(deviceTool.request({
+      action: "configure_no_data_outreach",
+      afterDays: 10,
+      mode: "after_days",
+      sourceProvider: "garmin",
+    }, {
+      acceptedInputAuthority: {
+        assistantInputId: "ain_00000000000000000000000000000001",
+      },
+      signal: abortController.signal,
+    })).resolves.toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 10,
+      setting: "custom",
+      sourceProvider: "garmin",
+      status: "saved",
+    });
+    expect(noDataOutreachRequests).toEqual([{
+      afterDays: 10,
+      assistantInputId: "ain_00000000000000000000000000000001",
+      mode: "after_days",
+      signal: abortController.signal,
+      sourceProviderSlug: "garmin",
     }]);
     await expect(deviceTool.request({
       action: "connect",
@@ -15664,6 +15733,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const deferredUsageRecords: AssistantUsageRecord[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       recordUsage: vi.fn(async (record) => ({
+        platformAiUsageAllowedAfter: true,
         recorded: true,
         usageId: record.usageId,
       })),
@@ -15738,9 +15808,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => "2026-04-27T00:03:00.000Z",
+      requestAttemptId:
+        "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
         return Promise.resolve();
+      },
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
       },
       runtimeUsageRecordPort: usageRecordPort,
     });
@@ -15762,6 +15838,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           executionContext: {
             hosted: expect.objectContaining({
               memberId: "member_synthetic_phase",
+              releaseSha: "0123456789abcdef0123456789abcdef01234567",
+              runtimeAttemptId:
+                "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+              runtimeName: "cloudflare-hosted-runner",
               usageRecorder: {
                 recordUsage: expect.any(Function),
               },
@@ -20240,6 +20320,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"]
   >;
   runtimeEnv?: Record<string, string>;
+  runtimeIssueProvenance?: HostedWorkspaceRuntimeAssistantPhaseInput["runtimeIssueProvenance"];
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   signal?: HostedWorkspaceRuntimeAssistantPhaseInput["signal"];
@@ -20254,6 +20335,7 @@ function createPhaseInput(input: {
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
+  requestAttemptId?: string;
   vaultRoot?: string;
   workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
@@ -20349,7 +20431,7 @@ function createPhaseInput(input: {
         : {}),
     },
     request: {
-      attemptId: "attempt_synthetic_phase",
+      attemptId: input.requestAttemptId ?? "attempt_synthetic_phase",
       leaseGeneration: "3",
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
@@ -20446,6 +20528,7 @@ function createPhaseInput(input: {
       userEnv: input.runtimeUserEnv ?? {},
     },
     runtimeEnv: input.runtimeEnv ?? {},
+    runtimeIssueProvenance: input.runtimeIssueProvenance,
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     signal: input.signal,
     workspace: input.workspace ?? null,

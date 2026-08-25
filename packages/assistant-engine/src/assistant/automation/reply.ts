@@ -231,6 +231,7 @@ interface AssistantAutoReplyReplyDecision {
   providerStartCriticalPath: AssistantProviderStartCriticalPathContext | null
   sessionId: string | null
   turnContext: string | null
+  trustedContextReferences: readonly AutomationContextReference[]
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
 
@@ -841,6 +842,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     source: context.firstItem.summary.source,
     turnEnvironment: input.turnEnvironment ?? null,
     turnContext: decision.turnContext,
+    trustedContextReferences: decision.trustedContextReferences,
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
@@ -1622,6 +1624,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ),
       groupRunningBit: readCurrentHostedGroupRunningBit(input.group.items),
     }),
+    trustedContextReferences:
+      resolveAssistantAutoReplyTrustedContextReferences(
+        outboxContext.deliveries,
+      ),
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -2220,6 +2226,7 @@ async function executeAssistantAutoReply(input: {
   source: string
   turnEnvironment?: AssistantTurnEnvironment | null
   turnContext: string | null
+  trustedContextReferences: readonly AutomationContextReference[]
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
@@ -2295,6 +2302,7 @@ async function executeAssistantAutoReply(input: {
       ...(input.turnContext === null
         ? {}
         : { turnContext: input.turnContext }),
+      trustedContextReferences: input.trustedContextReferences,
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
@@ -4706,7 +4714,11 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
         matchingDeliveries,
         replyToMessageId,
       )
-  const contextEligible = matchingDeliveries
+  const orderedMatchingDeliveries = [...matchingDeliveries]
+    .sort((left, right) =>
+      compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
+    )
+  const contextEligible = orderedMatchingDeliveries
     .flatMap((delivery) => {
       const projected = projectAssistantAutoReplyPriorDelivery({
         delivery,
@@ -4714,9 +4726,6 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
       })
       return projected === null ? [] : [projected]
     })
-    .sort((left, right) =>
-      compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
-    )
   const inputRoute = resolveAssistantAutoReplyInputExactRoute({
     conversation: input.input.conversation,
     deliveryTarget,
@@ -4783,7 +4792,7 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     }
   }
 
-  const fresh = contextEligible.filter(
+  const fresh = orderedMatchingDeliveries.filter(
     (delivery) => delivery.sentAtMs <= causalUpperBoundMs,
   )
   if (
@@ -4820,6 +4829,20 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
       ) > 0,
     )
     const selected = deliveries.at(-1) ?? null
+    const projectedDeliveries = selected === null
+      ? []
+      : deliveries.flatMap((delivery) => {
+          const projected = projectAssistantAutoReplyPriorDelivery({
+            delivery: delivery.intentId === selected.intentId
+              ? delivery
+              : {
+                  ...delivery,
+                  automationContextReferences: [],
+                },
+            sessionId: input.session?.sessionId ?? null,
+          })
+          return projected === null ? [] : [projected]
+        })
     return {
       claim: selected === null
         ? null
@@ -4830,7 +4853,7 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
             routeDigest: inputRoute.digest,
           },
       deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
-        deliveries,
+        deliveries: projectedDeliveries,
         exactReplyTargetIntentId: null,
       }),
       replyTargetDelivery,
@@ -5415,6 +5438,23 @@ function buildAssistantAutoReplyPriorDeliveryContexts(input: {
       ? left.intentId.localeCompare(right.intentId)
       : leftDelivery.sentAtMs - rightDelivery.sentAtMs
   })
+}
+
+function resolveAssistantAutoReplyTrustedContextReferences(
+  deliveries: readonly AssistantAutoReplyPriorDeliveryContext[],
+): readonly AutomationContextReference[] {
+  const exactReplyTargets = deliveries.filter((delivery) =>
+    delivery.exactReplyTarget
+  )
+  const selected = exactReplyTargets.length === 1
+    ? exactReplyTargets[0]
+    : exactReplyTargets.length === 0
+      ? deliveries.at(-1)
+      : null
+  return selected?.automationContextReferences.map((reference) => ({
+    entityId: reference.entityId,
+    entityKind: reference.entityKind,
+  })) ?? []
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {

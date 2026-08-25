@@ -214,6 +214,21 @@ Prefer a forward fix. A temporary Web-only rollback with the new runner retained
 is safety preserving but degrades legacy connection-scoped work and may fail
 old-Web apply parsing, so restore the compatible Web release promptly.
 
+## Wearable no-data outreach preference rollout
+
+Apply the additive preference-table migration, deploy the preference-aware Web,
+and only then deploy the Worker/runtime operation that can write a member's
+Garmin no-data outreach preference. Before that operation is exposed, an older
+Web remains a valid rollback target because no preference row can exist.
+
+Once the operation can produce its first durable row, the preference-aware Web
+is the hard rollback floor. Disable or roll back the Worker/runtime caller first,
+but keep Web at that floor or move it forward to another compatible build. A
+preference-unaware Web is not a valid rollback target while preference rows may
+exist: it would ignore stored off or longer-wait authority, and account deletion
+could leave the foreign-key-free preference row orphaned. Recovery is a forward
+deploy of a compatible Web; the additive table and rows may remain in place.
+
 Hosted E2E orchestration helpers live under `apps/web/test/support`, not
 `apps/web/src`. Application source should expose production runtime seams such
 as client factories and dependency-bearing functions; the testkit owns smoke-env

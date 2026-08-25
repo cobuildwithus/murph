@@ -89,7 +89,7 @@ unchanged.
 
 ## Results
 
-- The full notification runtime file passes with 77 tests, including card-only
+- The full notification runtime file passes with 79 tests, including card-only
   private delivery, full deterministic recovery, strict append-only handling,
   and every currently supported authenticated group-card combination.
 - Focused outbox tests pass for supported Telegram and Linq group cards and
