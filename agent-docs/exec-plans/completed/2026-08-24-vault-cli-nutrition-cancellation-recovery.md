@@ -1,6 +1,6 @@
 # Vault CLI nutrition cancellation recovery
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-25
 
@@ -170,3 +170,9 @@ Updated: 2026-08-25
   9,493,848 of 9,510,683 bytes, with an 805-byte entry and 25,155-byte static
   startup closure. The runner is 11,321,071 of 11,393,617 bytes, with a
   1,748,948-byte entry and 8,641,800-byte static boot closure.
+- ReviewGPT substantive round 4 completed a valid sensitive full-snapshot audit
+  of `140665f47d87327f6d84ed8105ba2b666651fddd` and returned
+  `ROUND_OUTCOME: PASS` with no qualifying finding.
+
+Completed: 2026-08-25
+Completed: 2026-08-25
