@@ -1316,9 +1316,10 @@ Last verified: 2026-08-23
   code. Ordinary idle checkpoint construction remains foreground-interruptible
   before canonical publication. A shutdown-signal checkpoint instead preserves
   dirty retiring-container state; its wake endpoint reports the shutdown
-  rejection explicitly and UserRunner retries the durable wake after one second
-  rather than the generic fifteen-second delay. A mixed rollout is additive:
-  old containers omit the header and continue using the prior fallback.
+  rejection explicitly, UserRunner returns a one-second `retry_later`, and the
+  existing caller-owned continuation performs the retry rather than waiting for
+  the generic fifteen-second delay. A mixed rollout is additive: old containers
+  omit the header and continue using the prior fallback.
 - A successful hosted checkpoint gets one best-effort, wake-raced vault-share
   projection opportunity before device-sync dirty acknowledgement or the next
   complete device-sync-only maintenance prefix. A conversation wake preempts
