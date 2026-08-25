@@ -1,6 +1,6 @@
 # Preserve every accepted group request during reply reconsideration
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -73,10 +73,17 @@ Updated: 2026-08-25
 
 ## Verification
 
-- Commands to run: focused Vitest cases for local-service, model behavior, and
-  finalizer/planning; Assistant Engine typecheck; authenticated two-turn
-  GPT-5.6 Sol probe; required ReviewGPT/CI; protected Cloudflare deploy smoke.
-- Expected outcomes: both independent answers survive reconsideration, only the
-  selected final response is committed/delivered, later planning contains no
-  provisional/internal content, all checks pass, and production serves the
-  exact merged source revision.
+- Passed focused Vitest cases for the held-group controller, ordinary no-thread
+  cleanup, model behavior, and finalizer/planning history reconstruction.
+- Passed Assistant Engine typecheck and an authenticated same-thread GPT-5.6
+  Sol probe covering both independent requests and a human-owned silent beat.
+- Passed exact-head required GitHub checks, including the broad Assistant
+  Engine coverage shard that caught and then verified the ordinal-0 cleanup
+  preservation fix.
+- Passed the final full-patch ReviewGPT correction audit with no qualifying
+  finding. The audit confirmed cumulative input, single-owner request-1
+  cleanup, preserved quiet-turn continuity, and no new queue, state machine,
+  dependency, or durable owner.
+- Passed a clean current-base merge-tree proof. The protected Cloudflare
+  production workflow and live smoke remain the post-merge execution step.
+Completed: 2026-08-25
