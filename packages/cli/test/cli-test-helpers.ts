@@ -27,8 +27,18 @@ export interface CliErrorEnvelope {
   ok: false
   error: {
     code?: string
+    fieldErrors?: Array<{
+      code?: string
+      expected: string
+      message: string
+      missing?: boolean
+      path: string
+      received: string
+    }>
+    hint?: string
     message?: string
     retryable?: boolean
+    stage?: string
   }
   meta: {
     cta?: {

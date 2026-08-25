@@ -175,7 +175,6 @@ async function geocodeRoutePoint(
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: `${input.role} geocoding`,
   })
   const feature = payload.features?.[0]
 
@@ -216,7 +215,6 @@ async function searchBoxRoutePoint(
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: `${input.role} search box`,
   })
   const feature = payload.features?.[0]
 

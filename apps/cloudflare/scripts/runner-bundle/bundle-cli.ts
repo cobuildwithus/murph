@@ -145,7 +145,12 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_497_803;
+// Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
+// shared Incur serialization removed duplicate transport branches. The entry
+// and static-startup budgets remain unchanged because error projection is lazy.
+// Compose that measured delta with the current exact-workout graph and retain
+// the existing allowances; the two changes do not alter startup topology.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_500_655;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
