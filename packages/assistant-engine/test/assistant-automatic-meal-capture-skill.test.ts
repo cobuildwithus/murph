@@ -59,7 +59,10 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'On every requested daily nutrition card, first read automatic-meal-capture and food-journal, then run their bounded meal list/show recovery before any totals read or card call. Do not claim nutrition data or the card is unavailable until those reads and recovery have been attempted. Import itself does not start a model turn.',
+      'For a requested daily nutrition card, never answer unavailable from inference: first read `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` and `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md`, then run bounded `vault-cli meal list` and `vault-cli meal show` recovery before totals or the card tool.',
+    )
+    expect(prompt).toContain(
+      'Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.',
     )
   })
 
