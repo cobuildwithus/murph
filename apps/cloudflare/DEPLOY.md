@@ -354,7 +354,7 @@ forward fix. Retaining the new runner while Web is rolled back is safety
 preserving but intentionally fail-closed for legacy connection-scoped hints and
 may reject old-Web apply parsing, so restore compatible Web promptly.
 
-## Device-Sync Failure Telemetry Rollout
+## Device-Sync Runtime Telemetry Rollout
 
 This cutover is Web-first. The shared `@murphai/device-syncd` and
 `@murphai/hosted-execution` packages are build inputs compiled into the Web and
@@ -366,7 +366,10 @@ compatibility reader. That Web release accepts
 and `assistant.device_activity_automation_failed`, persists canonical device
 failure state without translating it into another job-attempt event, and still
 accepts and ignores the legacy optional `failureDiagnostic` apply field from an
-older runner. Then deploy Cloudflare and the runner bundle with
+older runner. It also allowlists the bounded
+`deviceSyncJobTimingSummaries` object array on the existing
+`device-sync.pass_finished` event before any runner emits that field. Then deploy
+Cloudflare and the runner bundle with
 `container_rollout=immediate`. Require managed-container smoke to report the
 exact new bundle fingerprint and verify stale warm runners have been recycled
 before declaring convergence.
@@ -378,6 +381,13 @@ runner can still send `failureDiagnostic`, and remove it only in a later
 contracting release. During rollout, confirm a bounded failed-attempt sample
 produces one event per attempt, no duplicate Web-owned event, and no strict
 runtime-log parse failures.
+
+For job-timing changes, confirm `device-sync.pass_finished` reports the observed
+timing count, sample limit, truncation state, and slowest-job summaries. Verify
+the summaries contain only provider/job/resource classification, disposition,
+durable-progress presence, and bounded phase counts/durations. A timeout-yielded
+job must remain queued and report `durableProgressCommitted=false`; a completed
+job must report committed progress without exposing its identity or payload.
 
 If rollback is required, reverse the deploy order: roll back Cloudflare and the
 runner first, verify the exact old runner fingerprint across the fleet, and

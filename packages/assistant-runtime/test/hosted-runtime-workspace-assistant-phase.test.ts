@@ -2266,7 +2266,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           workspaceVersion: "8",
         },
         skipDirtyPendingFetch: false,
-        timeoutMs: 90_000,
+        timeoutMs: 120_000,
       }),
     );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(

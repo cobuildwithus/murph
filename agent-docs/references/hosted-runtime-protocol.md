@@ -2271,13 +2271,23 @@ payloads or become the device-sync queue. Active foreground wake handling stays
 conversation-focused; system-lane work runs through normal invocation and
 reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
-pass. A device-sync pass has its own 90-second budget, independent of the shared
+pass. A device-sync pass has its own 120-second budget, independent of the shared
 Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
 may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
 45-second admission cap, and any admitted canonical write finishes its existing
 atomic safety boundary before yielding. Do not add a separate system-lane
 active-wake import path unless measured latency or product behavior proves the
 simpler split is insufficient.
+
+The paired `device-sync.pass_finished` runtime-log marker includes a bounded
+sample of the 16 slowest claimed jobs in that pass. Each summary identifies only
+the provider, job kind, optional code-owned resource class, outcome, attempt/job
+counts, durable-progress presence, and timings for total execution, provider
+execution, unattributed provider work, connection-source reads, credential refreshes,
+and canonical imports. It omits member/account/job identifiers, payloads,
+cursors, provider responses, health values, and raw errors. The marker declares
+the total observed count, sample limit, and truncation state. The Web parser must
+accept the object-array field before a runner capable of emitting it is deployed.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
