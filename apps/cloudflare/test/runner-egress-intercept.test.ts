@@ -9588,6 +9588,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         usageId: "usage_1",
       }));
     vi.stubGlobal("fetch", fetchMock);
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({
@@ -9601,6 +9602,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
             transcription_info: { duration: 2.94, language: "en" },
           })),
         },
+        revokeActiveRuntimePlatformAiUsage,
       }),
       // Production containers proxy through a ctx without waitUntil; a
       // floating recording promise would be canceled with the invocation.
@@ -9612,6 +9614,100 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       "https://web.example.test/api/internal/hosted-execution/usage/record",
     );
+    expect(revokeActiveRuntimePlatformAiUsage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "an explicit denial",
+      respond: async () => Response.json({
+        platformAiUsageAllowedAfter: false,
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      label: "a malformed successful response",
+      respond: async () => Response.json({
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      label: "a non-success response",
+      respond: async () => new Response("usage settlement unavailable", { status: 503 }),
+    },
+    {
+      label: "a transport failure",
+      respond: async (): Promise<Response> => {
+        throw new Error("usage settlement transport failed");
+      },
+    },
+  ])("revokes direct transcription usage after $label before another paid call", async ({
+    respond,
+  }) => {
+    let platformAiUsageAllowed = true;
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => {
+      platformAiUsageAllowed = false;
+      return true;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async () => await respond());
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createTranscribeInterceptEnv({
+      AI: {
+        run: vi.fn(async () => ({
+          text: "transcript",
+          transcription_info: { duration: 2.94, language: "en" },
+        })),
+      },
+      OPENAI_API_KEY: "synthetic-platform-secret",
+      revokeActiveRuntimePlatformAiUsage,
+      validateRuntimeProviderEgressCredential: vi.fn(async (input) => ({
+        ...createProviderEgressCredentialValidationResult(input),
+        platformAiUsageAllowed,
+      })),
+      validateRuntimeProviderEgressToken: vi.fn(async (input) => ({
+        ...createProviderEgressTokenValidationResult(input),
+        platformAiUsageAllowed,
+      })),
+    });
+
+    const transcriptResponse = await hostedRunnerIntercept(
+      await createAuthorizedTranscribeRequest({
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(transcriptResponse.status).toBe(200);
+    expect(revokeActiveRuntimePlatformAiUsage).toHaveBeenCalledExactlyOnceWith({
+      attemptId: "attempt_provider_egress_credential",
+      generation: "7",
+      userId: "member_123",
+    });
+
+    const deniedResponse = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "automatic retry",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(deniedResponse.status).toBe(402);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
   });
 
   it("rejects unknown transcribe paths and non-POST methods before authorization", async () => {
