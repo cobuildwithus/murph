@@ -1,8 +1,8 @@
 # Stop unsupported Junction workout-stream retries
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -76,3 +76,4 @@ This is a Cloudflare hosted-runner bundle change only. Existing Web contracts,
 database schema, queued job payloads, and persisted cursors remain compatible.
 Old warm runners may retain the previous behavior until recycled; rollback does
 not require data repair.
+Completed: 2026-08-25
