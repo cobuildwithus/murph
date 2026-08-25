@@ -8923,15 +8923,12 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         process.stdout.write(
           `[interactive-nutrition-card-recovery-e2e] ${JSON.stringify({
             commands: result.commands,
-            firstActions: result.firstActions,
             firstCardAttached: result.firstCard !== null,
             firstMessage: result.firstMessage,
             firstProviderActionCount: result.firstProviderActionCount,
             followupCardAttached: result.card !== null,
-            followupActions: result.followupActions,
             followupMessage: result.followupMessage,
             followupProviderActionCount: result.followupProviderActionCount,
-            savedCalories: result.savedCalories,
           })}\n`,
         )
         expect(result.firstCard).toBeNull()
@@ -9120,16 +9117,13 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   card: unknown
   commands: string[]
   firstCard: unknown
-  firstActions: ReturnType<typeof summarizeMealRecoveryActions>
   firstCommands: string[]
   firstMessage: string
   firstProviderActionCount: number
   followupCommands: string[]
-  followupActions: ReturnType<typeof summarizeMealRecoveryActions>
   followupMessage: string
   followupProviderActionCount: number
   mealId: string
-  savedCalories: number | null
 }> {
   const workingRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-interactive-nutrition-card-recovery-e2e-'),
@@ -9279,49 +9273,21 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
     })
     const allCommandText = (await readFile(commandLog, 'utf8')).trim()
     const commands = allCommandText === '' ? [] : allCommandText.split('\n')
-    const saved = await readAutomaticMealClarificationState({
-      mealId: meal.mealId,
-      vaultRoot,
-    })
-
     return {
       card: followup.responseCard,
       commands,
       firstCard: first.responseCard,
-      firstActions: summarizeMealRecoveryActions(first.jsonEvents),
       firstCommands,
       firstMessage: first.finalMessage,
       firstProviderActionCount: first.providerActionCount,
       followupCommands: commands.slice(firstCommands.length),
-      followupActions: summarizeMealRecoveryActions(followup.jsonEvents),
       followupMessage: followup.finalMessage,
       followupProviderActionCount: followup.providerActionCount,
       mealId: meal.mealId,
-      savedCalories: saved.savedCalories,
     }
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)
   }
-}
-
-function summarizeMealRecoveryActions(events: readonly unknown[]): Array<{
-  action: string
-  argumentsValue?: Record<string, unknown>
-  outputTail?: string
-}> {
-  return readCapabilityRoutingActions(events).map((action) =>
-    action.kind === 'command'
-      ? {
-          action: action.command,
-          ...(action.output === ''
-            ? {}
-            : { outputTail: action.output.slice(-500) }),
-        }
-      : {
-          action: action.tool,
-          argumentsValue: action.argumentsValue,
-        }
-  )
 }
 
 function recordedVaultCommandStartsWith(
