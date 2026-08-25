@@ -321,7 +321,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
           codexHome: config.codexHome,
           env: config.env,
           excludeResumeTurns: true,
-          model: config.model,
+          model: DEFAULT_REAL_CODEX_MODEL,
           modelProvider: config.modelProvider,
           onAdditionalUsage: async (usage) => {
             childUsages.push(usage)
@@ -337,6 +337,17 @@ describeRealCodex('real Codex child model selection e2e', () => {
         })
 
         expect(result.finalMessage.trim()).not.toBe('')
+        const parentUsage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+            model: DEFAULT_REAL_CODEX_MODEL,
+            modelProvider: config.modelProvider,
+            oss: false,
+          }),
+          rawEvents: result.jsonEvents,
+        })
+        expect(parentUsage.servedModel).not.toBeNull()
+        expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
         await waitForWarmCodexBackgroundWork()
         expect(childUsages).toHaveLength(1)
         expect(childUsages[0]).toMatchObject({
