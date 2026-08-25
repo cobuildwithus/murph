@@ -2308,7 +2308,8 @@ describe("runHostedDeviceSyncPass", () => {
     });
   });
 
-  it("hydrates Junction provider config from hosted runtime platform env", async () => {
+  it("hydrates Junction provider config without emitting retired environment telemetry", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
@@ -2364,8 +2365,17 @@ describe("runHostedDeviceSyncPass", () => {
       45_000,
       {
         platformEnv,
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              return { loggedCount: request.entries.length };
+            },
+          },
+        },
       },
     );
+    await drainHostedRuntimeLogWritesBestEffort();
 
     assert.deepEqual(result, {
       nextWakeAt: null,
@@ -2383,6 +2393,9 @@ describe("runHostedDeviceSyncPass", () => {
         registry: expect.anything(),
       }),
     );
+    expect(
+      logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode),
+    ).not.toContain("device-sync.legacy_platform_env_present");
     expect(close).toHaveBeenCalledTimes(1);
   });
 

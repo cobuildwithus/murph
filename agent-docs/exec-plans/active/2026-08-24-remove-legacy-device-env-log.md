@@ -68,11 +68,11 @@ Updated: 2026-08-24
   fires on every healthy pass. Retain read-side acceptance for old warm bundles.
 - Changelog is not applicable because members cannot observe a telemetry-only
   deletion and device behavior is unchanged.
-- Product UX, prompt, and frontend lenses are not applicable. The preliminary
-  coverage lens is applicable because executable logging behavior and tests
-  change. No cross-cutting final gate is selected because the diff deletes one
-  non-authoritative info event without altering secrets, auth, persistence,
-  retries, ordering, provider egress, or runtime/deploy interfaces.
+- Product UX and frontend lenses are not applicable. The preliminary prompt
+  lens applies to this operative plan, and the coverage lens applies because
+  executable logging behavior and tests change. The hosted-runtime/deployment
+  surface requires the normal final ReviewGPT gate; no local deep-review pass
+  will run for the same completed change.
 
 ## Verification
 
@@ -83,5 +83,11 @@ Updated: 2026-08-24
   event code remains only in the compatibility reader contract and this plan.
 - Passed: an explicit request-parser regression proves the old event remains
   accepted from warm runners while the current emitter is absent.
-- Pending: exact-head preliminary ReviewGPT, required GitHub checks, and
-  current-base merge-tree proof.
+- Preliminary ReviewGPT returned two accepted findings: correct final-gate
+  routing in this plan and add direct no-emission proof. Both were confined to
+  this plan and focused tests under the Non-Production Remediation exception.
+- Passed after remediation: focused no-emission test (1 passed), complete
+  maintenance test (94 passed), assistant-runtime typecheck, and
+  `git diff --check`.
+- Pending: final exact-head ReviewGPT, required GitHub checks, and current-base
+  merge-tree proof.
