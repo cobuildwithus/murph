@@ -13,9 +13,10 @@ Success criteria:
   and the existing first-contact classifier then run in parallel.
 - Web sends at most one answer for the exact first inbound through the existing
   Linq delivery and idempotency lifecycle.
-- Provider acceptance consumes the original conversation mailbox item and
-  durably hands the exact provider-accepted assistant text to the runtime as an
-  already-completed turn.
+- Provider acceptance records the ordinary self-authored Linq echo. The
+  runtime imports that echo against its exact replied-to inbound, preserves the
+  pair in the ordinary assistant transcript, and writes terminal suppression
+  evidence before it can consider a competing reply.
 - Temporal and Cloudflare receive pointers only; raw conversation content stays
   in the existing encrypted mailbox boundary.
 - The completed-turn wake never invokes the runtime model or sends a second
@@ -36,9 +37,10 @@ Success criteria:
   and runtime transcript owners.
 - Keep the fast responder tool-free and first-contact-only. It must not claim
   account, health-data, scheduling, or other tool effects it cannot perform.
-- Run the bounded reply model with high reasoning, priority service, and an
-  18-second hard deadline; retain the strict 600-character reply schema and
-  fall back to the ordinary runtime when generation does not complete.
+- Run the bounded reply model with high reasoning, the provider's standard
+  service tier, and an 18-second hard deadline; retain the strict 600-character
+  reply schema and fall back to the ordinary runtime when generation does not
+  complete.
 - Preserve the classifier as the admission authority; a speculative response
   may not be sent before exact model-source allowance, activation, current
   same-line routing, and access all succeed.
@@ -70,12 +72,13 @@ Web sent.
    package welcome for greetings/identity openers and a structured answer for
    every concrete plain-text request.
 3. On a reply outcome, preserve ordinary activation and same-line routing,
-   send through the existing Linq delivery lifecycle, and atomically project
-   provider acceptance into original-mailbox consumption plus one encrypted
-   completed-turn handoff.
-4. Wake the existing runtime with only the durable outbound pointer. The
-   existing consumed-conversation importer restores the user and Web-authored
-   assistant exchange in order with no reply obligation.
+   send through the existing Linq delivery lifecycle, and retain the accepted
+   outbound in the ordinary conversation mailbox path.
+4. When Linq echoes that accepted self-authored reply, the existing mailbox
+   importer matches its reply reference to the exact pending inbound. Using
+   the invocation's already-prepared assistant target, it appends the user and
+   Web-authored assistant messages to the ordinary session transcript before
+   writing terminal suppression evidence for the inbound.
 5. On generation failure or pre-accept provider failure, use the existing
    original-conversation signal and runtime reply path. Once the provider
    accepts the Web send, persist that exact exchange as canonical context and
@@ -115,13 +118,11 @@ Web sent.
   smoke, and production build; Cloudflare passes 156 files and 2,678 tests.
   Workspace boundaries and the provider, logging, crypto, and Temporal guards
   pass.
-- The production request-shape test proves the high-reasoning, priority,
-  tool-free request with no explicit output-token budget and the strict
-  welcome-or-answer schema; direct generation keeps one 18-second hard
-  deadline. The real-model
-  matrix is intentionally opt-in and
-  skipped locally because no provider credential is configured; it has no Linq
-  call or destination.
+- The production request-shape test proves the high-reasoning, standard-tier,
+  tool-free request with no explicit output-token budget or service-tier
+  override and the strict welcome-or-answer schema; direct generation keeps one
+  18-second hard deadline. The real-model matrix is intentionally opt-in and
+  has no Linq call or destination.
 - Public changelog fragment validation passes 7 tests, and the Web typecheck
   passes with source PR 2173 included.
 - The round-11 correction passes 20 instant-turn, 149 delivery-store, 52
@@ -133,14 +134,29 @@ Web sent.
   reliability, security, and runtime-protocol readback pass.
 - Required exact-head PR CI and preliminary Product UX, prompt, and coverage
   specialist review, plus the cross-cutting final ReviewGPT gate.
+- The opt-in full local-stack E2E passes against an isolated PostgreSQL
+  database, real Web admission and Luna requests, local Linq, Temporal,
+  Cloudflare, the compiled runner/container bundle, and a deterministic runtime
+  provider. It proves one canonical Web welcome, zero runtime model calls for
+  that first inbound, exactly one runtime model call for the next inbound, both
+  sides of the Web exchange in that request, and exactly two total Linq replies.
 
 ## State
 
-Active. The round-11 replay correction is implemented on the simplified
-provider-acceptance design. The existing delivery ledger and chat lock now
-derive exact-event cleanup without request-local generation state; absence is a
-no-op and no synthetic skipped row is created. Focused proof, ReviewGPT,
-exact-head gates, and completion remain.
+Active. Standard-tier Luna generation and the full local-stack continuity proof
+are implemented. The runtime reuses its mailbox importer, pending-input
+terminal evidence, prepared assistant target, and transcript owner; no new
+handoff store or process exists. Focused proof passes. Exact-head CI, the next
+ReviewGPT round, and completion remain.
+
+## ReviewGPT round 12 disposition
+
+The finding was rejected. It proposed handling a direct Linq chat changing to
+a group while retaining the same provider chat id. Linq's documented direct to
+group transition creates a new chat, so the proposed same-id audience mutation
+is not a supported provider transition. Adding another audience lifecycle for
+that hypothetical state would add complexity without protecting a reachable
+path. Existing route and audience checks still apply to every actual inbound.
 
 ## ReviewGPT round 11 disposition
 

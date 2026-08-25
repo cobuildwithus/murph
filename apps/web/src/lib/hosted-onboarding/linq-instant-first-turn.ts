@@ -698,7 +698,6 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
     instructions: HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS,
     model: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
     reasoning: { effort: "high" },
-    service_tier: "priority",
     store: false,
     text: {
       format: {
@@ -793,30 +792,10 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
         "Hosted Linq instant first-turn acceptance was not persisted.",
       );
     }
-    const appended = await appendPreparedHostedMailboxEnvelopeTx({
+    await appendPreparedHostedMailboxEnvelopeTx({
       prepared,
       tx,
     });
-    const consumed = await tx.hostedMailboxItem.updateMany({
-      data: { consumedAt: input.acceptedAt },
-      where: {
-        consumedAt: null,
-        id: {
-          in: [
-            input.wakeHandoff.mailboxItemId,
-            appended.mailboxItemId,
-          ],
-        },
-        kind: "conversation.message",
-        lane: "conversation",
-        userId: input.wakeHandoff.userId,
-      },
-    });
-    if (consumed.count !== 2) {
-      throw new Error(
-        "Hosted Linq instant first-turn continuity rows were not both consumed.",
-      );
-    }
     const cleared = await tx.hostedLinqDelivery.updateMany({
       data: {
         payloadCiphertext: null,
@@ -862,7 +841,7 @@ async function readCompletedHostedLinqInstantFirstTurn(input: {
       error,
     );
   }
-  if (!item?.consumedAt) {
+  if (!item) {
     throw buildHostedLinqInstantFirstTurnRetryError(
       "accepted-context-unavailable",
     );

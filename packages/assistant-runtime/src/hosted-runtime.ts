@@ -96,6 +96,9 @@ import {
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
 } from "@murphai/operator-config/assistant/target-runtime";
+import type {
+  AssistantModelTarget,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import {
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   runHostedIdleCheckpointMaintenance,
@@ -782,6 +785,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  assistantTarget?: AssistantModelTarget | null;
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
   onConversationInputStaged?: ((
@@ -1356,6 +1360,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let startCodexProcessPreparationForConversation:
     | ((channel: HostedExecutionConversationMessageChannel) => void)
     | null = null;
+  let invocationAssistantTarget: AssistantModelTarget | null = null;
   const settleCodexProcessPreparation = async (): Promise<void> => {
     startCodexProcessPreparationForConversation = null;
     const started = codexProcessPreparationStart ?? Promise.resolve(null);
@@ -1535,6 +1540,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
+      ...(invocationAssistantTarget
+        ? { assistantTarget: invocationAssistantTarget }
+        : {}),
       ...(context?.assistantAskRequestTargetKind
         ? { assistantAskRequestTargetKind: context.assistantAskRequestTargetKind }
         : {}),
@@ -1999,6 +2007,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     if (!systemMailboxProcessingMode && !environmentInterviewProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
+      invocationAssistantTarget = await readHostedAssistantExecutionDefaultTarget({
+        homeDirectory: restored.operatorHomeRoot,
+        runtimeEnv: hostedCodexRuntime.runtimeEnv,
+      });
     }
     assertRuntimeNotAborted();
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
@@ -2022,10 +2034,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         codexProcessPreparationStart = (async () => {
           try {
-            const target = await readHostedAssistantExecutionDefaultTarget({
-              homeDirectory: restored.operatorHomeRoot,
-              runtimeEnv: preparedHostedCodexRuntime.runtimeEnv,
-            });
+            const target = invocationAssistantTarget;
             assertRuntimeNotAborted();
             if (!target) {
               return null;

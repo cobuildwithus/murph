@@ -285,7 +285,7 @@ describe("hosted Linq instant first turn", () => {
       mailboxItemId: "mailbox_outbound",
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
-      consumedAt: new Date("2026-08-22T21:00:01.000Z"),
+      consumedAt: null,
       id: "mailbox_outbound",
       lane: "conversation",
       laneSeq: "2",
@@ -464,7 +464,6 @@ describe("hosted Linq instant first turn", () => {
       input: [{ content: REQUEST.text, role: "user" }],
       model: "gpt-5.6-luna",
       reasoning: { effort: "high" },
-      service_tier: "priority",
       store: false,
       text: {
         format: {
@@ -475,6 +474,7 @@ describe("hosted Linq instant first turn", () => {
       },
     });
     expect(body).not.toHaveProperty("max_output_tokens");
+    expect(body).not.toHaveProperty("service_tier");
     expect(body.instructions).toContain("cannot see account history");
     expect(body.instructions).toContain("Return kind \"welcome\"");
     expect(body.instructions).not.toContain("Luna");
@@ -532,9 +532,9 @@ describe("hosted Linq instant first turn", () => {
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(requestBody).toMatchObject({
       reasoning: { effort: "high" },
-      service_tier: "priority",
     });
     expect(requestBody).not.toHaveProperty("max_output_tokens");
+    expect(requestBody).not.toHaveProperty("service_tier");
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
       .toHaveBeenNthCalledWith(1, expect.objectContaining({
         sourceRef: REQUEST.eventId,
@@ -554,12 +554,7 @@ describe("hosted Linq instant first turn", () => {
         }),
       }),
     );
-    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
-      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
-      where: expect.objectContaining({
-        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
-      }),
-    });
+    expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(completion).toEqual({
       kind: "accepted",
       wakeHandoff: {
@@ -585,7 +580,7 @@ describe("hosted Linq instant first turn", () => {
     })).resolves.toEqual({ kind: "unavailable" });
   });
 
-  it("delivers the accepted reply and wakes through two consumed conversation rows", async () => {
+  it("delivers the accepted reply and leaves both conversation rows for runtime import", async () => {
     const prisma = createPrisma();
     const result = await completeHostedLinqInstantFirstTurn({
       generation: {
@@ -614,12 +609,7 @@ describe("hosted Linq instant first turn", () => {
       message: "Hey! What would you like help with?",
       replyToMessageId: "inbound_message_123",
     });
-    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
-      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
-      where: expect.objectContaining({
-        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
-      }),
-    });
+    expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(result).toEqual({
       kind: "accepted",
       wakeHandoff: {
@@ -793,12 +783,7 @@ describe("hosted Linq instant first turn", () => {
     });
 
     expect(mocks.appendPreparedHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
-    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
-      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
-      where: expect.objectContaining({
-        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
-      }),
-    });
+    expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(mocks.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
@@ -814,8 +799,8 @@ describe("hosted Linq instant first turn", () => {
     expect(clearData).not.toHaveProperty("skipReason");
   });
 
-  it("retries instead of exposing a partial continuity handoff", async () => {
-    mocks.hostedMailboxItemUpdateMany.mockResolvedValueOnce({ count: 1 });
+  it("retries instead of exposing a missing continuity handoff", async () => {
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(null);
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
@@ -841,7 +826,7 @@ describe("hosted Linq instant first turn", () => {
       retryable: true,
     });
 
-    expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledOnce();
   });
 
   it("reuses the encrypted outbox body without another model request", async () => {
