@@ -1,6 +1,6 @@
 # Reduce Android hosted E2E queue latency
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-24
 
@@ -102,3 +102,15 @@ Updated: 2026-08-24
     rejects `automation@example.invalid`. Existing Frog entry
     `20260817182716-privacy-hook-rejects` already owns that unrelated friction.
     Exact-head CI remains the broad clean-runner proof.
+  - The preliminary coverage specialist found two missing deployment owners;
+    the first correction proved the manual-list mechanism was still incomplete.
+    Final ReviewGPT round 2 required a retrospective after finding two more
+    direct build owners. The PR records the decision to replace that mechanism
+    with structural owner boundaries rather than add literals or revert the
+    queue-latency outcome.
+  - The structural correction passes the Android contract 23/23 and the shared
+    iOS contract 48/48. Final ReviewGPT round 3 independently traced all 16
+    companion routes, found no repository dependency outside the admitted
+    boundaries, and returned `ROUND_OUTCOME: PASS` with no findings on exact
+    pushed head `b7c0aa847e1cf96ca546bffd06b7ef9287ec67df`.
+Completed: 2026-08-24
