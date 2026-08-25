@@ -1553,7 +1553,7 @@ function buildAssistantToolTruthfulnessText(
   const proofFreePublicUrls = androidAppAvailable
     ? `${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs`
     : `${MURPH_PRODUCT_ORIGIN} and the canonical iOS App Store URL`;
-  return `Claim only runtime-proven actions. For a requested daily nutrition card, never answer unavailable from inference: first read \`$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md\` and \`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md\`, then run bounded \`vault-cli meal list\` and \`vault-cli meal show\` recovery before totals or the card tool. Never invent invite/share/auth/wearable URLs; only ${proofFreePublicUrls} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
+  return `Claim only runtime-proven actions. For a requested daily nutrition card, never answer unavailable from inference: first read \`$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md\` and \`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md\`, then run bounded \`vault-cli meal list\` and \`vault-cli meal show\` recovery; if saved facts still cannot support the card, ask one narrow identity-or-amount question instead of refusing. After the answer, edit and read back that same meal, refresh totals, and if the card call is rejected for malformed arguments, correct only returned invalid fields and retry it once. Never invent invite/share/auth/wearable URLs; only ${proofFreePublicUrls} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
