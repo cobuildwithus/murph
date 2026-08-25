@@ -21986,6 +21986,67 @@ test("Junction workout_stream filters mixed-source candidates before stream prog
   assert.deepEqual(importedWorkoutIds, ["garmin-workout"]);
 });
 
+test("Junction workout_stream applies the workout cap after source eligibility", async () => {
+  const importedWorkoutIds: string[] = [];
+  const eligibleWorkoutId = "eligible-after-ineligible-index";
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listProviders: () => [
+      createJunctionWorkoutStreamProviderConnection("garmin", true),
+      createJunctionWorkoutStreamProviderConnection("polar", false),
+    ],
+    listWorkoutIds: () => [],
+    listWorkoutSummaries: () => [
+      ...Array.from({ length: 33 }, (_, index) =>
+        createJunctionWorkoutSummary(`ineligible-${index}`, undefined, "polar")
+      ),
+      createJunctionWorkoutSummary(eligibleWorkoutId, undefined, "garmin"),
+    ],
+  });
+  const context = createJunctionWorkoutStreamJobContext({
+    importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+      const feature = snapshot.timeseries?.workout_stream?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      if (feature) {
+        importedWorkoutIds.push(String(feature.workoutId));
+      }
+      return { imported: true };
+    },
+    listConnectionSources: async () => [
+      createJunctionWorkoutStreamSource("garmin", true),
+      createJunctionWorkoutStreamSource("polar", true),
+    ],
+  });
+
+  const initial = await executeJunctionJob(
+    harness.provider,
+    context,
+    createJob("reconcile", {
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  const continuation = requireValue(
+    initial.scheduledJobs?.[0],
+    "The setup pass should schedule workout_stream directly.",
+  );
+
+  await executeJunctionJob(
+    harness.provider,
+    context,
+    createJobFromInput(continuation),
+  );
+
+  assert.equal(
+    harness.requestUrls.filter((url) =>
+      new URL(url).pathname === "/v2/summary/workouts/junction-user-1"
+    ).length,
+    2,
+  );
+  assert.deepEqual(harness.streamRequests, [eligibleWorkoutId]);
+  assert.deepEqual(importedWorkoutIds, [eligibleWorkoutId]);
+});
+
 test.each([{
   label: "uses live capability before Web projection catches up",
   source: {

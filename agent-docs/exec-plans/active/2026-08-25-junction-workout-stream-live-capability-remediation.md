@@ -79,6 +79,10 @@ Updated: 2026-08-25
   contradicted the existing non-disconnected import owner during historical
   reconnect recovery. Reuse that owner so disconnect fences remain terminal
   while authorized current ingestion continues.
+- Accepted the preliminary specialist finding that the raw workout-index cap
+  ran before source eligibility. Delete that premature override so existing
+  generic collection safety remains separate from the existing 32-eligible
+  candidate selector.
 
 ## Verification
 

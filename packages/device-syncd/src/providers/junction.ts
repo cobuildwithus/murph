@@ -6078,7 +6078,6 @@ async function listJunctionWorkoutStreamCandidates(
     userId: input.userId,
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
-    maxRecords: maxWorkouts + 1,
   });
   const summaries = strictSourceScope
     ? scopeJunctionRecordsToSourceProvider(
