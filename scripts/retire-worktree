@@ -75,7 +75,6 @@ target_count="${#target_worktrees[@]}"
 target_worktree=''
 target_label=''
 batch_primary_worktree=''
-primary_package_link_snapshot=''
 
 select_target() {
   target_worktree="${target_worktrees[$1]}"
@@ -372,11 +371,11 @@ verify_no_process_cwd() {
   (( accessible > 0 )) || refuse 'process working directories could not be inspected'
 }
 
-snapshot_primary_package_links() {
+verify_primary_package_links() {
   local inspection_output inspection_status
   command -v node >/dev/null 2>&1 || refuse 'Node.js is unavailable'
 
-  if inspection_output="$(PRIMARY_WORKTREE="$batch_primary_worktree" node - "${target_worktrees[@]}" <<'NODE'
+  if inspection_output="$(PRIMARY_WORKTREE="$batch_primary_worktree" node - "$@" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -386,15 +385,13 @@ if (!primary || targets.length === 0 || targets.some((target) => !path.isAbsolut
   process.exit(12);
 }
 
-const references = targets.map((target) => ({ target, link: null }));
 const nodeModules = path.join(primary, 'node_modules');
 const insideTarget = (candidate, target) =>
   candidate === target || candidate.startsWith(target + path.sep);
 try {
   if (fs.existsSync(nodeModules)) {
     const pending = [nodeModules];
-    let unresolvedTargets = references.length;
-    scan: while (pending.length > 0) {
+    while (pending.length > 0) {
       const directory = pending.pop();
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         const entryPath = path.join(directory, entry.name);
@@ -410,71 +407,17 @@ try {
         } catch {
           // A dangling link still carries enough lexical evidence to block.
         }
-        for (const reference of references) {
-          if (reference.link !== null) continue;
-          const target = reference.target;
-          if (insideTarget(lexicalTarget, target) || insideTarget(resolvedTarget, target)) {
-            reference.link = path.relative(primary, entryPath);
-            unresolvedTargets -= 1;
-          }
+        if (targets.some(
+          (target) => insideTarget(lexicalTarget, target) || insideTarget(resolvedTarget, target),
+        )) {
+          process.stdout.write(path.relative(primary, entryPath));
+          process.exit(10);
         }
-        if (unresolvedTargets === 0) break scan;
       }
     }
   }
-  process.stdout.write(JSON.stringify(references));
 } catch {
   process.exit(12);
-}
-NODE
-)"; then
-    inspection_status=0
-  else
-    inspection_status=$?
-  fi
-  case "$inspection_status" in
-    0) primary_package_link_snapshot="$inspection_output" ;;
-    *) refuse 'primary dependency links could not be inspected' ;;
-  esac
-}
-
-verify_primary_package_links() {
-  local target_index="$1" inspection_output inspection_status
-  if inspection_output="$(PRIMARY_PACKAGE_LINK_SNAPSHOT="$primary_package_link_snapshot" \
-    TARGET_COUNT="$target_count" TARGET_INDEX="$target_index" TARGET_WORKTREE="$target_worktree" \
-    node <<'NODE'
-let snapshot;
-try {
-  snapshot = JSON.parse(process.env.PRIMARY_PACKAGE_LINK_SNAPSHOT ?? '');
-} catch {
-  process.exit(12);
-}
-
-const count = Number(process.env.TARGET_COUNT);
-const indexText = process.env.TARGET_INDEX ?? '';
-const target = process.env.TARGET_WORKTREE;
-if (
-  !Array.isArray(snapshot) ||
-  !Number.isInteger(count) ||
-  snapshot.length !== count ||
-  !/^(0|[1-9][0-9]*)$/.test(indexText) ||
-  !target
-) {
-  process.exit(12);
-}
-
-const index = Number(indexText);
-const reference = snapshot[index];
-if (
-  !reference ||
-  reference.target !== target ||
-  (reference.link !== null && typeof reference.link !== 'string')
-) {
-  process.exit(12);
-}
-if (reference.link !== null) {
-  process.stdout.write(reference.link);
-  process.exit(10);
 }
 NODE
 )"; then
@@ -535,11 +478,7 @@ for ((target_index = 0; target_index < target_count; target_index += 1)); do
   preflight_branch_refs[$target_index]="$target_branch_ref"
 done
 
-snapshot_primary_package_links
-for ((target_index = 0; target_index < target_count; target_index += 1)); do
-  select_target "$target_index"
-  verify_primary_package_links "$target_index"
-done
+verify_primary_package_links "${target_worktrees[@]}"
 
 if [[ "$dry_run" == true ]]; then
   if [[ "$target_count" -eq 1 ]]; then
@@ -557,15 +496,10 @@ if [[ "$dry_run" == true ]]; then
   exit 0
 fi
 
-# Revalidate each exact target immediately before its destructive boundary. The
-# primary dependency tree is scanned once for this phase, then each target is
-# checked explicitly against that shared evidence immediately before quarantine.
+# Revalidate each exact target immediately before its destructive boundary.
 for ((target_index = 0; target_index < target_count; target_index += 1)); do
   select_target "$target_index"
   verify_target_gates
-  if [[ "$target_index" -eq 0 ]]; then
-    snapshot_primary_package_links
-  fi
-  verify_primary_package_links "$target_index"
+  verify_primary_package_links "$target_worktree"
   retire_selected_target
 done

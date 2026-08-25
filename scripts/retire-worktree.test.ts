@@ -401,7 +401,7 @@ if [[ -f "\${RETIRE_TEST_GH_CALL_COUNT:?}" ]]; then
 fi
 call_count=$((call_count + 1))
 printf '%s\n' "$call_count" > "\${RETIRE_TEST_GH_CALL_COUNT}"
-if [[ "$call_count" -eq 4 ]]; then
+if [[ "$call_count" -eq 5 ]]; then
   ln -s "\${RETIRE_TEST_LINK_TARGET:?}" "\${RETIRE_TEST_LINK_PATH:?}"
 fi
 printf '%s\n' "\${RETIRE_TEST_PR_JSON:?}"
@@ -427,59 +427,6 @@ printf '%s\n' "\${RETIRE_TEST_PR_JSON:?}"
       expect(existsSync(harness.target)).toBe(false)
       expect(existsSync(second.target)).toBe(true)
       expect(existsSync(third.target)).toBe(true)
-    } finally {
-      rmSync(harness.root, { recursive: true, force: true })
-    }
-  })
-
-  it('scans the primary dependency tree a constant number of times for a batch', () => {
-    const harness = createHarness()
-    try {
-      const second = addTaskWorktree(
-        harness,
-        'second-task-worktree',
-        'codex/batch-scan-second',
-      )
-      const third = addTaskWorktree(
-        harness,
-        'third-task-worktree',
-        'codex/batch-scan-third',
-      )
-      const scanCount = path.join(harness.root, 'primary-link-scan-count')
-      writeExecutable(
-        path.join(harness.fakeBin, 'node'),
-        `#!/usr/bin/env bash
-set -euo pipefail
-if [[ "\${1:-}" == '-' && -n "\${PRIMARY_WORKTREE:-}" ]]; then
-  count=0
-  if [[ -f "\${RETIRE_TEST_PRIMARY_SCAN_COUNT:?}" ]]; then
-    read -r count < "\${RETIRE_TEST_PRIMARY_SCAN_COUNT}"
-  fi
-  printf '%s\n' "$((count + 1))" > "\${RETIRE_TEST_PRIMARY_SCAN_COUNT}"
-fi
-exec "\${RETIRE_TEST_REAL_NODE:?}" "$@"
-`,
-      )
-
-      const result = runRetirement(
-        harness,
-        [
-          terminalPullRequest(harness),
-          terminalPullRequest(second),
-          terminalPullRequest(third),
-        ],
-        [harness.target, second.target, third.target],
-        {
-          RETIRE_TEST_PRIMARY_SCAN_COUNT: scanCount,
-          RETIRE_TEST_REAL_NODE: process.execPath,
-        },
-      )
-
-      expect(result.status, result.stderr).toBe(0)
-      expect(readFileSync(scanCount, 'utf8').trim()).toBe('2')
-      expect(existsSync(harness.target)).toBe(false)
-      expect(existsSync(second.target)).toBe(false)
-      expect(existsSync(third.target)).toBe(false)
     } finally {
       rmSync(harness.root, { recursive: true, force: true })
     }
