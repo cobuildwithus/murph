@@ -36,6 +36,19 @@ retry, empty-stream, and canonical-import owners.
   request-shape 400s remain terminal.
 - Add no state, queue, service, lifecycle, or retry owner.
 
+## Product UX
+
+- Effort: Patch.
+- Outcome: members with one or several connected workout sources keep receiving
+  supported workout detail when another source does not provide streams.
+- Reaches: the existing background connected-health workout reconciliation;
+  there is no new member action, audience, or surface.
+- Proof: provider-shaped tests cover unavailable-only, mixed-source,
+  unattributed, exact unsupported, ambiguous failure, continuation, and import
+  outcomes.
+- Walkthrough: Ready. Incapable sources keep their existing workout facts,
+  capable siblings continue importing, and ambiguous failures stay visible.
+
 ## Tasks
 
 1. [x] Add focused failing regressions for unsupported-only, mixed-source,
@@ -44,7 +57,7 @@ retry, empty-stream, and canonical-import owners.
    Junction provider/context boundary.
 3. [x] Run focused tests, package typecheck, diff/privacy inspection, and
    direct behavior proof.
-4. [ ] Add the smallest truthful public changelog item after the draft PR has
+4. [x] Add the smallest truthful public changelog item after the draft PR has
    assigned its source number.
 5. [ ] Commit, push, open a draft PR, and run the required preliminary and
    final ReviewGPT gates against one exact candidate head.
