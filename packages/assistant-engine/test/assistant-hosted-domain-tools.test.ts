@@ -87,13 +87,16 @@ describe('hosted domain dynamic tools', () => {
       'raw exact ISO schedule.at is not accepted on generic save or patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Generic save is create-only',
+      'An ordinary save is create-only: omit slug',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'always creates a new automation with a host-generated automationId',
+      'Only when the current loaded skill defines an exact stable recipe key',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'never infer identity from a title',
+      'never derive a slug from a title or invent one',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'patch never changes the recipe key',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
@@ -107,6 +110,27 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
+  })
+
+  it('admits the documented group newsletter stable recipe through the parser', () => {
+    expect(readToolRequest('automation', {
+      action: 'save',
+      continuityPolicy: 'fresh',
+      instructions: 'Open and follow the group newsletter skill.',
+      schedule: {
+        expression: '0 9 * * 0',
+        kind: 'cron',
+        timeZone: 'America/New_York',
+      },
+      slug: 'group-health-newsletter',
+      title: 'Weekly health',
+    })).toMatchObject({
+      kind: 'automation',
+      request: {
+        action: 'save',
+        slug: 'group-health-newsletter',
+      },
+    })
   })
 
   it('anchors relative one-shot days to accepted input across a named-zone midnight', () => {
@@ -1304,7 +1328,7 @@ describe('hosted domain dynamic tools', () => {
     })).toMatchObject({ kind: 'invalid-device-arguments' })
   })
 
-  it('executes automation through the injected port and returns verified timing fields', async () => {
+  it('passes a stable skill recipe key through the parser and injected port', async () => {
     const abortController = new AbortController()
     const automationTool = {
       request: vi.fn(async () => ({
@@ -1348,6 +1372,7 @@ describe('hosted domain dynamic tools', () => {
         localTime: '22:30',
         timeZone: 'America/Chicago',
       },
+      slug: 'experiment-session-support-evening-session-1',
       status: 'paused',
       title: 'Evening wind-down',
     })
@@ -1379,6 +1404,7 @@ describe('hosted domain dynamic tools', () => {
         localTime: '22:30',
         timeZone: 'America/Chicago',
       },
+      slug: 'experiment-session-support-evening-session-1',
       status: 'paused',
       title: 'Evening wind-down',
     }, { signal: abortController.signal })

@@ -192,11 +192,15 @@ describe('automation model input schema', () => {
     })).toBe(true)
     expect(advertisesRootShape(schema, {
       action: 'save',
-      instructions: 'A useful reminder.',
-      schedule: { kind: 'every', everyMs: 3_600_000 },
-      slug: 'useful-reminder',
-      title: 'Useful reminder',
-    })).toBe(false)
+      instructions: 'Open and follow the group newsletter skill.',
+      schedule: {
+        expression: '0 9 * * 0',
+        kind: 'cron',
+        timeZone: 'America/New_York',
+      },
+      slug: 'group-health-newsletter',
+      title: 'Weekly health',
+    })).toBe(true)
     expect(advertisesRootShape(schema, {
       action: 'patch',
       expectedUpdatedAt: '2026-08-21T10:00:00.000Z',
