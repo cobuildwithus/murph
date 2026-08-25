@@ -92,13 +92,16 @@ Updated: 2026-08-25
   response-card image suite passed (24 tests), and the affected operator-config
   suites passed (29 tests).
 - Static proof: Web and operator-config typechecks passed; affected Web ESLint
-  paths and `git diff --check` passed.
+  paths and `git diff --check` passed. Changelog generation and its nine-test
+  page suite also passed after adding the member-visible entry.
 - Browser-catalog capture: the existing design study now includes the synthetic
   comparison at desktop and mobile scales. Two local Playwright launches were
   unable to reach the repo health endpoint after Next reported ready, so the
   current-branch preview remains the reviewer-openable browser proof.
-- Remaining gates: candidate commit, changelog, preliminary ReviewGPT, final
-  ReviewGPT, exact-head CI, final parent review, and current-base merge-tree.
+- Candidate: draft PR #2285 is open with the implementation commit and
+  member-visible changelog item.
+- Remaining gates: preliminary ReviewGPT, final ReviewGPT, exact-head CI, final
+  parent review, plan closure, and current-base merge-tree.
 
 ## Product UX walkthrough
 
