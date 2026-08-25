@@ -1,6 +1,6 @@
 # Preserve workout identity across adjacent replies
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-25
 
@@ -100,6 +100,9 @@ logging sequence stays on one exact live workout.
   the Node heap in the unrelated local-service runtime worker before Vitest
   produced a suite result; the focused command is the next-best validation for
   this prompt-and-test-only correction.
+- Exact-head ReviewGPT round 2 passed on `75a9db4dafd6` with the accepted
+  stale-marker finding resolved and no remaining qualifying issue. GitHub's
+  pull-request evidence check also passed on that head.
 
 ## Architecture decision
 
@@ -108,3 +111,4 @@ or preserved it. It is neither conversation-global state nor a prompt-visible
 marker. Reusing the existing outbox context-reference channel keeps persistence,
 trust, and native-resume projection in their current owners while the new
 tracker remains a bounded, response-local reducer over validated CLI results.
+Completed: 2026-08-25
