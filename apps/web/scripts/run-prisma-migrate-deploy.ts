@@ -516,9 +516,21 @@ function findQuotedSqlTokenEnd(
   start: number,
   quote: "'" | '"',
 ): number {
+  const prefix = sql[start - 1];
+  const characterBeforePrefix = sql[start - 2];
+  const usesBackslashEscapes =
+    quote === "'"
+    && (prefix === "E" || prefix === "e")
+    && (characterBeforePrefix === undefined
+      || !/[A-Za-z0-9_$]/u.test(characterBeforePrefix));
   let index = start + 1;
 
   while (index < sql.length) {
+    if (usesBackslashEscapes && sql[index] === "\\") {
+      index += 2;
+      continue;
+    }
+
     if (sql[index] !== quote) {
       index += 1;
       continue;

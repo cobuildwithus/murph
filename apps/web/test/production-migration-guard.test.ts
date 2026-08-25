@@ -371,6 +371,10 @@ describe("hosted web production migration guard", () => {
       "ALTER TABLE \"hosted_member\" ADD COLUMN \"required_value\" TEXT DEFAULT 'still;one statement' NOT NULL;",
     ],
     [
+      "escape-string values",
+      "ALTER TABLE \"hosted_member\" ADD COLUMN \"required_value\" TEXT DEFAULT E'escaped\\';still one statement' NOT NULL;",
+    ],
+    [
       "quoted identifiers",
       'ALTER TABLE "hosted;member" ADD COLUMN "required;value" TEXT NOT NULL;',
     ],
