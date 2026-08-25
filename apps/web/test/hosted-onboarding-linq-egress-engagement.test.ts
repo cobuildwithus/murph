@@ -1707,11 +1707,12 @@ describe("hosted Linq egress authority", () => {
   });
 
   it.each([
-    { expectedStatus: 200, recovered: false },
-    { expectedStatus: 409, recovered: true },
+    { expectedStatus: 200, recovered: false, reminderAfterDays: undefined },
+    { expectedStatus: 409, recovered: true, reminderAfterDays: undefined },
+    { expectedStatus: 409, recovered: false, reminderAfterDays: 30 },
   ])(
-    "revalidates a queued wearable silence episode at provider entry (recovered=$recovered)",
-    async ({ expectedStatus, recovered }) => {
+    "revalidates a queued wearable silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
+    async ({ expectedStatus, recovered, reminderAfterDays }) => {
       const sourceId = "dcs_abcdefghijklmnop";
       const originalLastDataAt = "2026-08-01T00:00:00.000Z";
       const notificationKey = buildHostedSourceDeliveryStallNoticeKey({
@@ -1736,6 +1737,9 @@ describe("hosted Linq egress authority", () => {
         sourceProviderSlug: "garmin",
         status: "connected",
       });
+      prisma.deviceSourceNoDataOutreachPreference.findUnique.mockResolvedValue(
+        reminderAfterDays === undefined ? null : { reminderAfterDays },
+      );
       mockPersistedLinqInbound({
         chatId: "chat-home",
         dedupeKey: "linq-event-wearable-recovery",
@@ -1761,7 +1765,7 @@ describe("hosted Linq egress authority", () => {
       );
 
       expect(response.status).toBe(expectedStatus);
-      if (recovered) {
+      if (expectedStatus === 409) {
         await expect(response.json()).resolves.toMatchObject({
           error: {
             code: "HOSTED_DEVICE_DELIVERY_STALL_EPISODE_SUPERSEDED",
@@ -1969,6 +1973,9 @@ function createPrismaStub(input: {
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
     deviceConnectionSource: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    deviceSourceNoDataOutreachPreference: {
       findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMember: {

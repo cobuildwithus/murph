@@ -8858,6 +8858,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("exposes safe hosted device list, connect, and reconcile actions from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
+    const noDataOutreachRequests: Array<
+      Parameters<NonNullable<RuntimeDeviceSyncPort["configureNoDataOutreach"]>>[0]
+    > = [];
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -8912,6 +8915,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expiresAt: "2026-04-29T00:05:00.000Z",
           provider: request.connectTarget,
           providerLabel: "WHOOP",
+        };
+      },
+      async configureNoDataOutreach(request) {
+        noDataOutreachRequests.push(request);
+        return {
+          action: "configure_no_data_outreach" as const,
+          effectiveAfterDays: request.mode === "off"
+            ? null
+            : request.mode === "after_days"
+              ? request.afterDays
+              : 5,
+          setting: request.mode === "off"
+            ? "off" as const
+            : request.mode === "after_days"
+              ? "custom" as const
+              : "default" as const,
+          sourceProviderSlug: request.sourceProviderSlug,
+          status: "saved" as const,
         };
       },
       async fetchSnapshot(request) {
@@ -9041,6 +9062,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(reconcileRequests).toEqual([{
       connectionId: "conn_synthetic_whoop",
       signal: abortController.signal,
+    }]);
+    await expect(deviceTool.request({
+      action: "configure_no_data_outreach",
+      afterDays: 10,
+      mode: "after_days",
+      sourceProvider: "garmin",
+    })).rejects.toThrow("current private member input");
+    await expect(deviceTool.request({
+      action: "configure_no_data_outreach",
+      afterDays: 10,
+      mode: "after_days",
+      sourceProvider: "garmin",
+    }, {
+      acceptedInputAuthority: {
+        assistantInputId: "ain_00000000000000000000000000000001",
+      },
+      signal: abortController.signal,
+    })).resolves.toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 10,
+      setting: "custom",
+      sourceProvider: "garmin",
+      status: "saved",
+    });
+    expect(noDataOutreachRequests).toEqual([{
+      afterDays: 10,
+      assistantInputId: "ain_00000000000000000000000000000001",
+      mode: "after_days",
+      signal: abortController.signal,
+      sourceProviderSlug: "garmin",
     }]);
     await expect(deviceTool.request({
       action: "connect",

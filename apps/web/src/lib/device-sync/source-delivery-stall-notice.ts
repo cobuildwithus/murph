@@ -27,6 +27,7 @@ import {
   buildHostedSourceDeliveryStallNoticeKey,
   type HostedSourceDeliveryStallNoticeCandidate,
 } from "./source-delivery-stall-episode";
+import { readHostedSourceNoDataOutreachPolicy } from "./source-no-data-outreach-policy";
 
 export {
   buildHostedSourceDeliveryStallNoticeKey,
@@ -100,6 +101,13 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
           },
         },
       });
+      const outreachPolicy = source
+        ? await readHostedSourceNoDataOutreachPolicy({
+            memberId: input.userId,
+            prisma: tx,
+            sourceProviderSlug: source.sourceProviderSlug,
+          })
+        : null;
       if (
         !source
         || source.connection.userId !== input.userId
@@ -107,9 +115,11 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         || source.lifecycleEpoch !== input.candidate.lifecycleEpoch
         || source.lastDataAt?.toISOString() !== input.candidate.lastDataAt
         || source.sourceProviderSlug !== input.candidate.sourceProviderSlug
+        || !outreachPolicy?.enabled
         || !isPushPrimarySourceRecoveryNoticeEligible({
           lastDataAt: source.lastDataAt?.toISOString() ?? null,
           now: input.now,
+          silentHours: outreachPolicy.silentHours,
           sourceProviderSlug: source.sourceProviderSlug,
           status: source.status,
         })
@@ -140,7 +150,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
       if (!policy) {
         return null;
       }
-      const text = renderUserFacingMessage({
+      const checkIn = renderUserFacingMessage({
         context: {
           companionAppName: policy.companionAppName,
           deviceDisplayName: policy.deviceDisplayName,
@@ -149,6 +159,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         key: "linq.device_delivery_stalled",
         seed: notificationKey,
       }).text;
+      const text = `${checkIn} If this gap is expected, tell me how long you'd like me to wait before checking again.`;
       return appendHostedMailboxEnvelopeWithPreparedCryptoTx({
         envelope: buildHostedExecutionAssistantNotificationRequestedWake({
           eventId: dedupeKey,

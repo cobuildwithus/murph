@@ -9288,6 +9288,40 @@ function resolveHostedWorkspaceDeviceTool(input: {
         };
       }
 
+      if (request.action === "configure_no_data_outreach") {
+        if (
+          !deviceSyncPort.configureNoDataOutreach
+          || !context?.acceptedInputAuthority
+        ) {
+          throw new VaultCliError(
+            "device_no_data_outreach_unavailable",
+            "No-data outreach can only be changed from current private member input.",
+          );
+        }
+        const common = {
+          assistantInputId: context.acceptedInputAuthority.assistantInputId,
+          signal: context.signal ?? null,
+          sourceProviderSlug: request.sourceProvider,
+        };
+        const result = request.mode === "after_days"
+          ? await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              afterDays: request.afterDays,
+              mode: request.mode,
+            })
+          : await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              mode: request.mode,
+            });
+        return {
+          action: request.action,
+          effectiveAfterDays: result.effectiveAfterDays,
+          setting: result.setting,
+          sourceProvider: result.sourceProviderSlug,
+          status: result.status,
+        };
+      }
+
       const provider = resolveHostedDeviceToolConnectProvider({
         configuredProviders: input.deviceConnectProviders,
         requestedProvider: request.provider,
