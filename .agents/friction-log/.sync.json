@@ -429,8 +429,36 @@
       "path": ".agents/friction-log/20260820095405-reviewgpt-replayable-wake/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2116",
+      "path": ".agents/friction-log/20260821113348-production-migration-guard/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2124",
+      "path": ".agents/friction-log/20260821050736-hosted-local-doctor/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2141",
+      "path": ".agents/friction-log/20260821194229-typecheck-exits-zero/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2149",
+      "path": ".agents/friction-log/20260821173334-prebuilt-vercel-output/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2167",
+      "path": ".agents/friction-log/20260822141634-fresh-worktree-focused/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2169",
       "path": ".agents/friction-log/20260822030752-hosted-runtime-triage/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2176",
+      "path": ".agents/friction-log/20260822030145-provider-guard-classifies/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2178",
+      "path": ".agents/friction-log/20260822152746-finish-task-retains/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2180",
@@ -447,6 +475,10 @@
     {
       "issue": "cobuildwithus/murph#2191",
       "path": ".agents/friction-log/20260823193431-reviewgpt-complete-marker-missed/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2192",
+      "path": ".agents/friction-log/20260823204401-pr-draft-reset-permission/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2197",
@@ -469,8 +501,20 @@
       "path": ".agents/friction-log/20260823233210-deep-review-skill/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2222",
+      "path": ".agents/friction-log/20260824093757-friction/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2223",
       "path": ".agents/friction-log/20260824113043-runner-bundle-budget/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2245",
+      "path": ".agents/friction-log/20260824235937-batch-worktree-retirement/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2252",
+      "path": ".agents/friction-log/20260824234256-changelog-only-pr/friction.md"
     }
   ],
   "version": 1

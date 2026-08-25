@@ -5,20 +5,30 @@ on:
     workflows: ["Pull Request Head Change"]
     types: [completed]
 
-permissions:
-  pull-requests: write
+permissions: {}
 
 jobs:
   return-to-draft:
     name: Return synchronized pull request to draft
+    environment:
+      name: frog-reconciliation
+      deployment: false
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Mint draft-reset pull request token
+        id: frog-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+
       - name: Convert the exact synchronized head to draft
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
         shell: bash

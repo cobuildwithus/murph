@@ -7,11 +7,46 @@ import {
   buildHostedWebVitestArgs,
   resolveHostedWebVitestProject,
 } from "../scripts/run-hosted-web-vitest.mjs";
+import {
+  createHostedWebVitestConfig,
+  hostedWebVitestProjects,
+} from "../vitest.workspace";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const webTestFile = "imessage-nutrition-card-image.test.tsx";
 
 describe("hosted Web Vitest entrypoint", () => {
+  it("generates a missing Prisma client before returning Web test projects", () => {
+    const events: string[] = [];
+
+    const config = createHostedWebVitestConfig(
+      () => {
+        events.push("probe");
+        return false;
+      },
+      () => {
+        events.push("generate");
+      },
+    );
+    events.push("config-returned");
+
+    expect(events).toEqual(["probe", "generate", "config-returned"]);
+    expect(config.test.projects).toBe(hostedWebVitestProjects);
+  });
+
+  it("reuses an already resolvable Prisma client", () => {
+    let generated = false;
+
+    createHostedWebVitestConfig(
+      () => true,
+      () => {
+        generated = true;
+      },
+    );
+
+    expect(generated).toBe(false);
+  });
+
   it.each([
     webTestFile,
     `test/${webTestFile}`,

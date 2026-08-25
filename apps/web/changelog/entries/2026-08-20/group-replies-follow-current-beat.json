@@ -6,9 +6,9 @@
     "kind": "improvement",
     "priority": 4,
     "title": "Group replies follow the current beat",
-    "summary": "In active iMessage and Telegram groups, Murph now briefly holds an answer and reconsiders it when another message arrives before send.",
-    "details": "Murph sends only the final response for that moment, or stays quiet when the room has moved on. Completed actions are not repeated.",
+    "summary": "In active iMessage and Telegram groups, Murph now combines rapid still-relevant requests into one complete reply.",
+    "details": "A clear correction replaces only what it changes; if the room has moved on, Murph can stay quiet. Completed actions are not repeated.",
     "relevanceTags": ["assistant", "groups", "messaging"],
-    "sourcePullRequests": [2107]
+    "sourcePullRequests": [2107, 2232]
   }
 }
