@@ -27,6 +27,10 @@ shared error projector and no partial writes or submitted-value echo.
 - Canonical runner assembly passes all eight parity probes. The Vault CLI is
   9,501,363 bytes against a 9,508,867-byte budget; the runner is 11,334,389
   bytes against an 11,393,617-byte budget.
+- Round three found that the current-main integration preserved only primitive
+  types for correctly typed semantic failures. The finding is accepted: the
+  existing finite sample mapper will retain fixed value-free constraints while
+  the shared projector remains unchanged.
 
 ## Design
 

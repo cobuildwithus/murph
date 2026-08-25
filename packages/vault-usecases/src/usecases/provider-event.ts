@@ -750,7 +750,7 @@ export async function addSampleRecords(input: {
       batchProvenance,
     })
   } catch (error) {
-    throw toSampleImportCliError(error)
+    throw toSampleImportCliError(error, stream)
   }
 
   return {
@@ -835,7 +835,7 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
   return samples
 }
 
-function toSampleImportCliError(error: unknown): unknown {
+function toSampleImportCliError(error: unknown, stream: string): unknown {
   const cliError = toVaultCliError(error)
   if (!(cliError instanceof VaultCliError)) {
     return cliError
@@ -870,10 +870,11 @@ function toSampleImportCliError(error: unknown): unknown {
     return cliError
   }
 
-  const issue = sampleImportIssue(sampleField)
+  const issue = sampleImportIssue(sampleField, stream)
   if (!issue) {
     return cliError
   }
+  const { hint, ...fieldIssue } = issue
   const publicPath = sampleField === 'unit'
     ? ['unit']
     : ['samples', sampleIndex, sampleField]
@@ -885,29 +886,79 @@ function toSampleImportCliError(error: unknown): unknown {
       issues: [
         {
           publicPath,
-          ...issue,
+          ...fieldIssue,
         },
       ],
       stage: 'validation',
+      ...(hint ? { hint } : {}),
     },
   )
 }
 
-function sampleImportIssue(field: string): {
+const SAMPLE_CANONICAL_UNITS: Readonly<Record<string, string>> = Object.freeze({
+  glucose: 'mg_dL',
+  heart_rate: 'bpm',
+  hrv: 'ms',
+  respiratory_rate: 'breaths_per_minute',
+  sleep_stage: 'stage',
+  spo2: '%',
+  steps: 'count',
+  temperature: 'celsius',
+})
+
+function sampleImportIssue(field: string, stream: string): {
   code: 'invalid_type'
   expected: 'number' | 'object' | 'string'
+  hint?: string
 } | null {
   if (field === 'recordedAt' || field === 'startAt' || field === 'endAt') {
-    return { code: 'invalid_type', expected: 'string' }
+    return {
+      code: 'invalid_type',
+      expected: 'string',
+      hint: 'Use an ISO 8601 timestamp.',
+    }
   }
-  if (field === 'value' || field === 'durationMinutes') {
-    return { code: 'invalid_type', expected: 'number' }
+  if (field === 'value') {
+    const hint = stream === 'heart_rate' || stream === 'steps'
+      ? 'Use a non-negative integer.'
+      : stream === 'temperature'
+        ? 'Use a finite number.'
+        : 'Use a non-negative finite number.'
+    return { code: 'invalid_type', expected: 'number', hint }
+  }
+  if (field === 'durationMinutes') {
+    return {
+      code: 'invalid_type',
+      expected: 'number',
+      hint: 'Use a positive integer number of minutes.',
+    }
   }
   if (field === 'dataOrigin' || field === 'externalRef') {
     return { code: 'invalid_type', expected: 'object' }
   }
-  if (field === 'stage' || field === 'timeZone' || field === 'unit') {
-    return { code: 'invalid_type', expected: 'string' }
+  if (field === 'stage') {
+    return {
+      code: 'invalid_type',
+      expected: 'string',
+      hint: 'Use one of: awake, light, deep, rem.',
+    }
+  }
+  if (field === 'timeZone') {
+    return {
+      code: 'invalid_type',
+      expected: 'string',
+      hint: 'Use a valid IANA time zone.',
+    }
+  }
+  if (field === 'unit') {
+    const unit = SAMPLE_CANONICAL_UNITS[stream]
+    return {
+      code: 'invalid_type',
+      expected: 'string',
+      hint: unit
+        ? `Use "${unit}" for ${stream}.`
+        : 'Use the canonical unit for the selected stream.',
+    }
   }
   return null
 }

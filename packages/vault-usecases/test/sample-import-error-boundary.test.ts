@@ -17,16 +17,16 @@ const SAMPLE_PAYLOAD = {
 
 test("sample import error projection preserves every supported field mapping", async () => {
   const mappings = [
-    ["recordedAt", "samples.2.recordedAt", "string"],
-    ["startAt", "samples.2.startAt", "string"],
-    ["endAt", "samples.2.endAt", "string"],
-    ["timeZone", "samples.2.timeZone", "string"],
-    ["unit", "unit", "string"],
-    ["externalRef", "samples.2.externalRef", "object"],
-    ["dataOrigin", "samples.2.dataOrigin", "object"],
-    ["value", "samples.2.value", "number"],
-    ["durationMinutes", "samples.2.durationMinutes", "number"],
-    ["stage", "samples.2.stage", "string"],
+    ["recordedAt", "samples.2.recordedAt", "string", "Use an ISO 8601 timestamp."],
+    ["startAt", "samples.2.startAt", "string", "Use an ISO 8601 timestamp."],
+    ["endAt", "samples.2.endAt", "string", "Use an ISO 8601 timestamp."],
+    ["timeZone", "samples.2.timeZone", "string", "Use a valid IANA time zone."],
+    ["unit", "unit", "string", 'Use "bpm" for heart_rate.'],
+    ["externalRef", "samples.2.externalRef", "object", undefined],
+    ["dataOrigin", "samples.2.dataOrigin", "object", undefined],
+    ["value", "samples.2.value", "number", "Use a non-negative integer."],
+    ["durationMinutes", "samples.2.durationMinutes", "number", "Use a positive integer number of minutes."],
+    ["stage", "samples.2.stage", "string", "Use one of: awake, light, deep, rem."],
   ] as const;
   let sampleField: string = mappings[0][0];
   const importSamples = vi.fn(async () => {
@@ -48,7 +48,7 @@ test("sample import error projection preserves every supported field mapping", a
     ),
   });
 
-  for (const [field, expectedPath, expectedType] of mappings) {
+  for (const [field, expectedPath, expectedType, expectedHint] of mappings) {
     sampleField = field;
     await assert.rejects(
       () => provider.addSampleRecords({ vault: "./vault", payload: SAMPLE_PAYLOAD }),
@@ -70,6 +70,7 @@ test("sample import error projection preserves every supported field mapping", a
           path: expectedPath,
           received: "invalid",
         }]);
+        assert.equal(projection.hint, expectedHint);
         return true;
       },
     );
