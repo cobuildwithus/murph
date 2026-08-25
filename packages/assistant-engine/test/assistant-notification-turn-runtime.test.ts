@@ -3445,6 +3445,52 @@ test.each(['linq', 'telegram', 'email'] as const)(
   },
 )
 
+test('sendAssistantNotificationLocal delivers a scheduled fitting card without a companion decision', async () => {
+  const renderedText = renderAssistantResponseCardText(DAILY_NUTRITION_CARD)
+  const providerResult = createProviderResult({
+    providerAuthoredResponse: '',
+    response: renderedText,
+    responseCard: DAILY_NUTRITION_CARD,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-daily-nutrition-card-only',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryTarget: 'direct-nutrition-card-only',
+    instructions: 'Complete the automatic meal closeout.',
+    scheduledInvocationAuthority: {
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/daily-nutrition-card-only',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      text: renderedText,
+    },
+    response: renderedText,
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    card: DAILY_NUTRITION_CARD,
+    channel: 'linq',
+    media: [],
+    message: renderedText,
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: renderedText,
+    }),
+  )
+})
+
 test('sendAssistantNotificationLocal keeps a scheduled workout decision structured and delivers only its text', async () => {
   const decision = JSON.stringify({
     kind: 'send_message',
@@ -3651,7 +3697,7 @@ test.each([
 )
 
 test.each(['linq', 'telegram', 'email'] as const)(
-  'sendAssistantNotificationLocal rejects a $channel skip after cardless recovery',
+  'sendAssistantNotificationLocal delivers a $channel cardless recovery despite a superseded skip',
   async (channel) => {
     const providerResult = createProviderResult({
       providerAuthoredResponse: JSON.stringify({
@@ -3663,13 +3709,13 @@ test.each(['linq', 'telegram', 'email'] as const)(
         'Full workout recovery\n\nFirst exercise\nLast exercise\n\n' +
         '[Murph tracked workout source: evt_test; snapshot: 2026-08-09T19:45:00.000Z]',
     })
-    const { deliverMessage, sendAssistantNotificationLocal } =
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
       await loadNotificationTurnHarness({
         providerResult,
         turnId: 'turn-scheduled-workout-overflow-skip',
       })
 
-    await expect(sendAssistantNotificationLocal({
+    const result = await sendAssistantNotificationLocal({
       channel,
       instructions: 'Send the complete current tracked workout.',
       scheduledInvocationAuthority: {
@@ -3678,10 +3724,31 @@ test.each(['linq', 'telegram', 'email'] as const)(
       },
       threadIsDirect: true,
       vault: '/vaults/scheduled-workout-overflow-skip',
-    })).rejects.toMatchObject({
-      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
     })
-    expect(deliverMessage).not.toHaveBeenCalled()
+
+    const expectedText = 'Full workout recovery\n\nFirst exercise\nLast exercise'
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Delivered the runtime-owned notification presentation.',
+        text: expectedText,
+      },
+      response: expectedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      channel,
+      message: expectedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantTranscriptText:
+          `${expectedText}\n\n` +
+          '[Murph tracked workout source: evt_test; snapshot: 2026-08-09T19:45:00.000Z]',
+      }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'Nothing to send.',
+    )
   },
 )
 

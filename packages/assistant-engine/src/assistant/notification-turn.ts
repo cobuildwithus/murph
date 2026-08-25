@@ -643,15 +643,11 @@ export async function sendAssistantNotificationLocal(
                 kind: 'skip',
                 privateSummary: 'Group email effect completed.',
               }
-            : parseAssistantNotificationDecision(
+            : resolveAssistantNotificationDecision({
                 providerAuthoredResponse,
-              )
-          if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
-            throw new VaultCliError(
-              'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-              'A runtime-owned notification presentation requires a send_message decision.',
-            )
-          }
+                runtimeOwnsFinalPresentation,
+                runtimeResponse: providerResult.response,
+              })
         } catch (error) {
           throw annotateAssistantNotificationError(
             error,
@@ -961,6 +957,7 @@ function resolveAssistantNotificationPresentation(input: {
       input.providerResult.responseCard === undefined) &&
     authoredResponse.length > 0 &&
     runtimeResponse !== authoredResponse &&
+    input.decision.text !== runtimeResponse &&
     runtimeResponse.startsWith(authoredResponse)
   if (hasAppendOnlyRuntimePresentation) {
     const responseText = normalizeRequiredText(
@@ -2004,6 +2001,41 @@ export function parseAssistantNotificationDecision(
         'Assistant notification turn returned an invalid decision object.',
       )
     }
+  }
+}
+
+function resolveAssistantNotificationDecision(input: {
+  providerAuthoredResponse: string
+  runtimeOwnsFinalPresentation: boolean
+  runtimeResponse: string
+}): AssistantNotificationDecision {
+  if (!input.runtimeOwnsFinalPresentation) {
+    return parseAssistantNotificationDecision(input.providerAuthoredResponse)
+  }
+
+  try {
+    const providerDecision = parseAssistantNotificationDecision(
+      input.providerAuthoredResponse,
+    )
+    if (providerDecision.kind === 'send_message') {
+      return providerDecision
+    }
+  } catch (error) {
+    if (
+      !(error instanceof VaultCliError) ||
+      error.code !== 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE'
+    ) {
+      throw error
+    }
+  }
+
+  return {
+    kind: 'send_message',
+    privateSummary: 'Delivered the runtime-owned notification presentation.',
+    text: normalizeRequiredText(
+      input.runtimeResponse,
+      'runtime-owned notification response',
+    ),
   }
 }
 
