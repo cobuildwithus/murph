@@ -8923,10 +8923,12 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         process.stdout.write(
           `[interactive-nutrition-card-recovery-e2e] ${JSON.stringify({
             commands: result.commands,
+            firstActions: result.firstActions,
             firstCardAttached: result.firstCard !== null,
             firstMessage: result.firstMessage,
             firstProviderActionCount: result.firstProviderActionCount,
             followupCardAttached: result.card !== null,
+            followupActions: result.followupActions,
             followupProviderActionCount: result.followupProviderActionCount,
             savedCalories: result.savedCalories,
           })}\n`,
@@ -9112,10 +9114,12 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   card: unknown
   commands: string[]
   firstCard: unknown
+  firstActions: CapabilityRoutingAction[]
   firstCommands: string[]
   firstMessage: string
   firstProviderActionCount: number
   followupCommands: string[]
+  followupActions: CapabilityRoutingAction[]
   followupProviderActionCount: number
   mealId: string
   savedCalories: number | null
@@ -9277,10 +9281,12 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       card: followup.responseCard,
       commands,
       firstCard: first.responseCard,
+      firstActions: readCapabilityRoutingActions(first.jsonEvents),
       firstCommands,
       firstMessage: first.finalMessage,
       firstProviderActionCount: first.providerActionCount,
       followupCommands: commands.slice(firstCommands.length),
+      followupActions: readCapabilityRoutingActions(followup.jsonEvents),
       followupProviderActionCount: followup.providerActionCount,
       mealId: meal.mealId,
       savedCalories: saved.savedCalories,
