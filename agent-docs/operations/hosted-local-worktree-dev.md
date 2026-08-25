@@ -186,6 +186,54 @@ pnpm dev -- --hostname 127.0.0.1 --port 3101
 For hosted runner/container proof, stop the main stack or wait for the
 `worktree` profile helper.
 
+### Interactive HTTPS preview
+
+When a person must use the preview after the agent turn, run both long-lived
+processes in Orca-managed terminals for that worktree. Do not leave the Web
+server in a tool-owned exec session, `nohup`, or `screen`. Those processes can
+end while the browser keeps a stale page open.
+
+Use the standard local HTTPS origin only when that exact origin is configured
+for the development Privy client. Start the Web server with one public origin:
+
+```bash
+cd apps/web
+vercel env run -- env \
+  DEVICE_SYNC_PUBLIC_BASE_URL='https://local.withmurph.ai:3443/api/device-sync' \
+  HOSTED_ONBOARDING_PUBLIC_BASE_URL='https://local.withmurph.ai:3443' \
+  HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='https://local.withmurph.ai:3443' \
+  HOSTED_WEB_BASE_URL='https://local.withmurph.ai:3443' \
+  NEXT_DIST_DIR_MODE=smoke \
+  NEXT_DIST_DIR_SUFFIX='<slug>' \
+  pnpm dev:local-env -- --hostname 127.0.0.1 --port <web-port>
+```
+
+Run the HTTPS proxy in a second Orca-managed terminal:
+
+```bash
+caddy reverse-proxy \
+  --from https://local.withmurph.ai:3443 \
+  --to http://127.0.0.1:<web-port> \
+  --internal-certs \
+  --disable-redirects
+```
+
+Preserve the browser's `Host`, `Origin`, and `Referer` headers. Do not rewrite
+them to `localhost`, because hosted mutation and auth checks use the public
+origin.
+
+Before handoff, prove all of the following:
+
+1. The direct Web port is listening.
+2. `https://local.withmurph.ai:3443/<route>` returns HTTP 200.
+3. The Orca browser can reload the route after both terminals are active.
+4. The auth dialog reaches its usable phone or email form.
+5. Both terminals remain running after the browser check.
+
+Opening the auth dialog alone does not prove login. If it shows `Invalid
+request`, check the proxy response first. A live proxy with a stopped Web
+server returns 502 and can leave a stale auth panel visible.
+
 ## Auth And Secret Sources
 
 Do not copy secret values into committed files, examples, shell history, or
