@@ -15,6 +15,11 @@ Current responsibilities:
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
 - keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
+- prune assistant-generated delivery staging before snapshot construction when
+  the outbox inventory is trusted: existing active files remain protected, a
+  missing active reference is counted without blocking safe cleanup of other
+  regular files, and structural uncertainty fails closed with a bounded error
+  code; checkpoint logs report counts and byte totals without paths or names
 - admit only joined-group Assistant Ask requests and legacy joined-group completions through the pre-checkpoint-safe system prefix; keep consented requests and reviewed completions checkpoint-gated, order a legacy completion against older personal input through the read-only pending index, and deliver typed `cannot_answer` with fixed exact copy instead of another provider turn
 - before provider execution for a direct user-action turn, compare the resident session with the session ids restored from the published snapshot; when absent, including a session created earlier in the same invocation by deterministic welcome output, stop foreground mailbox watching and pause detached work while the existing full `idle_shutdown` checkpoint makes the origin durable
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot

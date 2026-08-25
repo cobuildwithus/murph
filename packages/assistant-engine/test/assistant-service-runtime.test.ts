@@ -2093,6 +2093,72 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
+  it("preserves, replaces, and clears per-delivery context references", async () => {
+    const session = createAssistantSession();
+    const reminderReferences = [{
+      entityId: "wfmt_current",
+      entityKind: "workout_format",
+    }];
+    const workoutReferences = [{
+      entityId: "evt_current",
+      entityKind: "activity_session",
+    }];
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment-context-reference",
+        messageLength: 10,
+        providerMessageId: "provider-segment-context-reference",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: { intentId: "intent-segment-context-reference" },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Inherited reminder context.",
+        },
+        {
+          contextReferences: workoutReferences,
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Replaced with workout context.",
+        },
+        {
+          contextReferences: [],
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Cleared context.",
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segment-context-references",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(
+        (call) => call[0]?.automationContextReferences,
+      ),
+    ).toEqual([reminderReferences, workoutReferences, []]);
+  });
+
   it("derives preceding segment keys from an explicit delivery idempotency key", async () => {
     const session = createAssistantSession();
     runtimeState.outbox.deliverMessage.mockResolvedValue({
