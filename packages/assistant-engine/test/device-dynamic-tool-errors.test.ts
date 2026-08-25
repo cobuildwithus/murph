@@ -69,6 +69,71 @@ async function executeDeviceFailure(
 }
 
 describe('hosted device dynamic tool recovery', () => {
+  for (const testCase of [
+    {
+      action: 'list_accounts',
+      expectedHint: 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.',
+      retryable: true,
+      response: {
+        action: 'connect',
+        link: {
+          authorizationUrl: `https://example.invalid/${PRIVATE_HOSTED_DEVICE_SENTINEL}`,
+          connectUrl: `https://example.invalid/${PRIVATE_HOSTED_DEVICE_SENTINEL}`,
+          expiresAt: '2026-08-24T01:00:00.000Z',
+          provider: 'synthetic-provider',
+          providerLabel: PRIVATE_HOSTED_DEVICE_SENTINEL,
+        },
+      },
+    },
+    {
+      action: 'connect',
+      expectedHint: 'Run list_accounts and inspect the current account state before deciding whether to retry connect.',
+      retryable: false,
+      response: {
+        accountId: PRIVATE_HOSTED_DEVICE_SENTINEL,
+        action: 'reconcile',
+        occurredAt: '2026-08-24T00:00:00.000Z',
+        status: 'queued',
+      },
+    },
+    {
+      action: 'reconcile',
+      expectedHint: 'Run list_accounts and inspect the current account state before deciding whether to retry reconcile.',
+      retryable: false,
+      response: {
+        accounts: [],
+        action: 'list_accounts',
+        provider: null,
+        sourceProvider: null,
+      },
+    },
+  ] as const) {
+    it(`identifies a mismatched response to ${testCase.action}`, async () => {
+      const request = testCase.action === 'connect'
+        ? { action: 'connect' as const, provider: 'synthetic-provider' }
+        : testCase.action === 'reconcile'
+          ? { accountId: 'synthetic-account', action: 'reconcile' as const }
+          : { action: 'list_accounts' as const }
+      const result = await executeDeviceDynamicTool({
+        deviceTool: {
+          request: vi.fn(async () => testCase.response),
+        },
+        request: { kind: 'device', request },
+      })
+
+      const { parsed, text } = readToolError(result)
+      expect(result.rpcResult.success).toBe(false)
+      expect(parsed.error).toEqual({
+        code: 'device_response_mismatch',
+        hint: testCase.expectedHint,
+        message: 'The device response action did not match the requested action.',
+        retryable: testCase.retryable,
+        stage: `device-${testCase.action.replace(/_/gu, '-')}`,
+      })
+      expect(text).not.toContain(PRIVATE_HOSTED_DEVICE_SENTINEL)
+    })
+  }
+
   it('projects an allowlisted provider failure without echoing raw error context', async () => {
     const privateDetail = 'private-provider-response in /private/workspace/device.json'
     const result = await executeDeviceDynamicTool({
@@ -348,31 +413,6 @@ describe('hosted device dynamic tool recovery', () => {
       stage: 'device-list-accounts',
     })
     expect(text).not.toContain(privateDetail)
-  })
-
-  it('requires state inspection after an unexpected reconcile response', async () => {
-    const result = await executeDeviceDynamicTool({
-      deviceTool: {
-        request: vi.fn(async () => ({
-          accounts: [],
-          action: 'list_accounts' as const,
-          provider: null,
-          sourceProvider: null,
-        })),
-      },
-      request: {
-        kind: 'device',
-        request: { accountId: 'synthetic-account', action: 'reconcile' },
-      },
-    })
-
-    expect(readToolError(result).parsed.error).toEqual({
-      code: 'device_operation_outcome_unknown',
-      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry reconcile.',
-      message: 'The device operation completion could not be confirmed.',
-      retryable: false,
-      stage: 'device-reconcile',
-    })
   })
 
   it('tells the model how to narrow an oversized account list', async () => {

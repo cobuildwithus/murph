@@ -94,10 +94,7 @@ export async function executeDeviceDynamicTool(input: {
       return deviceTextResult(
         false,
         serializeDeviceToolError(
-          projectUnclassifiedDeviceToolFailure(
-            input.request.request.action,
-            false,
-          ),
+          projectDeviceResponseMismatch(input.request.request.action),
         ),
       )
     }
@@ -137,6 +134,20 @@ interface DeviceToolErrorProjection {
   message: string
   retryable: boolean
   stage: string
+}
+
+function projectDeviceResponseMismatch(
+  action: AssistantHostedDeviceToolRequest['action'],
+): DeviceToolErrorProjection {
+  return {
+    code: 'device_response_mismatch',
+    message: 'The device response action did not match the requested action.',
+    retryable: action === 'list_accounts',
+    stage: deviceToolStage(action),
+    hint: action === 'list_accounts'
+      ? 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.'
+      : `Run list_accounts and inspect the current account state before deciding whether to retry ${action}.`,
+  }
 }
 
 function projectDeviceToolError(
