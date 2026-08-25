@@ -6,7 +6,7 @@ Updated: 2026-08-25
 
 ## Goal
 
-Ensure an exact scheduled notification that successfully attaches a private
+Ensure an exact scheduled notification that successfully attaches a supported
 response card reaches the existing outbox even when the model does not also
 return the redundant structured `send_message` envelope.
 
@@ -39,17 +39,21 @@ or deterministic card recovery.
 - Outcome: A completed scheduled card reaches the member instead of retrying
   and expiring because a redundant companion decision is absent.
 - Reaches: Existing private scheduled-card delivery through Linq, Telegram,
-  and email; no audience, timing, permission, or product meaning changes.
+  and email, plus already-authorized Linq challenge standings and Telegram
+  routine or rich-content group cards. No new audience, timing, permission, or
+  product meaning is introduced.
 - Proof: The notification runtime regression exercises the card-only Linq path
   through delivery and transcript persistence, while the supported-channel
   matrix covers fitting cards and complete text recovery.
 
 Walkthrough result: `Ready`. A private Linq automatic meal closeout with a
 finished card now reaches the existing destination and persists the rendered
-transcript. Linq, Telegram, and email also deliver the existing complete text
-fallback when a rich card cannot fit. Ordinary model-owned send-or-skip
-notifications remain on their strict parser path. No difference from the
-planned patch was found, and no visual proof is needed because presentation is
+transcript. Authenticated Linq and Telegram group routes deliver only their
+currently supported card kinds through the same owner, while existing outbox
+validation rejects unsupported audience or channel combinations. Linq,
+Telegram, and email also deliver the existing complete text fallback when a
+rich card cannot fit. Ordinary model-owned send-or-skip notifications remain
+on their strict parser path. No visual proof is needed because presentation is
 unchanged.
 
 ## Tasks
@@ -62,6 +66,9 @@ unchanged.
    recovery reaches delivery rather than retrying the occurrence.
 4. Run focused notification tests, assistant-engine typecheck, diff hygiene,
    Product UX walkthrough, and the required PR review gates.
+5. Prove the same runtime-owned card rule for every currently supported
+   authenticated group card route and retain the existing negative audience
+   validation proof.
 
 ## Constraints
 

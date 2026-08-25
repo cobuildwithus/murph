@@ -108,6 +108,62 @@ const DAILY_NUTRITION_CARD: AssistantResponseCard = {
   },
 }
 
+const SCHEDULED_GROUP_CARD_CASES = [
+  {
+    card: {
+      entries: [{
+        coverage: 'complete',
+        detail: null,
+        label: 'Member A',
+        points: 120,
+      }],
+      footer: null,
+      format: 'individual',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: 'Day 4 of 7',
+      title: 'Weekly challenge',
+      version: 1,
+    } satisfies AssistantResponseCard,
+    channel: 'linq' as const,
+  },
+  {
+    card: {
+      exercises: [{
+        dose: '8 repetitions',
+        estimatedSeconds: 45,
+        images: [],
+        instructions: ['Move slowly.'],
+        name: 'Shoulder circles',
+      }],
+      footer: null,
+      intensity: 'Easy',
+      kind: 'exercise_routine',
+      labels: {
+        dose: 'Dose',
+        exercise: 'Exercise',
+        time: 'Time',
+        visualGuide: 'Visual guide',
+      },
+      safety: 'Stop if pain increases.',
+      subtitle: null,
+      title: 'Short reset',
+      totalSeconds: 60,
+      transitionSeconds: 15,
+      version: 1,
+    } satisfies AssistantResponseCard,
+    channel: 'telegram' as const,
+  },
+  {
+    card: {
+      html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol>',
+      kind: 'telegram_rich_content',
+      version: 1,
+    } satisfies AssistantResponseCard,
+    channel: 'telegram' as const,
+  },
+] as const
+
 const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
   kind: 'compact_table',
   version: 1,
@@ -3490,6 +3546,77 @@ test('sendAssistantNotificationLocal delivers a scheduled fitting card without a
     }),
   )
 })
+
+test.each(SCHEDULED_GROUP_CARD_CASES)(
+  'sendAssistantNotificationLocal delivers a scheduled $channel $card.kind group card after a superseded skip',
+  async ({ card, channel }) => {
+    const providerAuthoredResponse = JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'The completed card is the response.',
+    })
+    const renderedText = renderAssistantResponseCardText(card)
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: renderedText,
+      responseCard: card,
+    })
+    const target = `${channel}-${card.kind}-group`
+    const sharedPlan = createSharedPlan()
+    sharedPlan.conversationPolicy.audience = {
+      actorId: null,
+      bindingDelivery: null,
+      channel,
+      deliveryPolicy: 'not-requested',
+      effectiveThreadIsDirect: false,
+      explicitTarget: target,
+      identityId: null,
+      replyToMessageId: null,
+      threadId: target,
+      threadIsDirect: false,
+    }
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        sharedPlan,
+        turnId: `turn-${target}`,
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel,
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: target,
+      instructions: 'Send the scheduled group card.',
+      scheduledInvocationAuthority: {
+        automationId: `scheduled-${card.kind}`,
+        occurrenceAt: '2026-08-25T09:00:00.000-04:00',
+      },
+      threadIsDirect: false,
+      vault: `/vaults/${target}`,
+    })
+
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        text: renderedText,
+      },
+      response: renderedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      card,
+      channel,
+      explicitTarget: target,
+      message: renderedText,
+      threadId: target,
+      threadIsDirect: false,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantTranscriptText: renderedText }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      providerAuthoredResponse,
+    )
+  },
+)
 
 test('sendAssistantNotificationLocal keeps a scheduled workout decision structured and delivers only its text', async () => {
   const decision = JSON.stringify({
