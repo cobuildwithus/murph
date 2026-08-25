@@ -57,9 +57,15 @@ describe("foods query helpers", () => {
     );
     expect(liveRolloutSql.match(/CREATE INDEX CONCURRENTLY IF NOT EXISTS/gu))
       .toHaveLength(3);
-    expect(liveRolloutSql).toContain("foods_name_rank_idx");
-    expect(liveRolloutSql).toContain("foods_name_exact_rank_idx");
-    expect(liveRolloutSql).toContain("foods_canonical_rank_idx");
+    expect(liveRolloutSql).toMatch(
+      /CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_rank_idx\s+ON foods\s+USING GIST \(name gist_trgm_ops\);/u,
+    );
+    expect(liveRolloutSql).toMatch(
+      /CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_exact_rank_idx\s+ON foods \(lower\(name\), data_origin_priority, id\);/u,
+    );
+    expect(liveRolloutSql).toMatch(
+      /CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_canonical_rank_idx\s+ON foods \(canonical_key, data_origin_priority, id\);/u,
+    );
   });
 
   it("projects meal nutrition and bounded contaminant evidence without unrelated payloads", () => {

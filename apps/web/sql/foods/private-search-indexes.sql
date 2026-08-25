@@ -3,6 +3,10 @@
 -- Run this file directly with psql. CREATE INDEX CONCURRENTLY cannot run
 -- inside a transaction, so deployment must complete these statements before
 -- the Web build-time product-label preflight is allowed to pass.
+-- IF NOT EXISTS deliberately preserves an already-correct live index. If the
+-- preflight reports `not_live` or `wrong_definition`, follow the fixed-name
+-- concurrent drop procedure in apps/web/README.md for only the reported index,
+-- then rerun this file.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_rank_idx
   ON foods
   USING GIST (name gist_trgm_ops);

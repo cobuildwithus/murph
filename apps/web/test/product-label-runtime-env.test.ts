@@ -2,13 +2,95 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertProductLabelRuntimeEnv,
+  findProductLabelSearchIndexProblems,
   listProductLabelRuntimeEnvErrors,
   PRODUCT_LABEL_RUNTIME_ENV_REQUIRED_MESSAGE,
   PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE,
   PRODUCT_LABEL_RUNTIME_SCHEMA_VERIFY_FAILED_MESSAGE,
 } from "../scripts/check-product-label-runtime-env";
 
+const liveFoodSearchIndexes = [
+  {
+    definition:
+      "CREATE INDEX foods_name_rank_idx ON public.foods USING gist (name gist_trgm_ops)",
+    indexName: "foods_name_rank_idx",
+    isLive: true,
+    isReady: true,
+    isValid: true,
+  },
+  {
+    definition:
+      "CREATE INDEX foods_name_exact_rank_idx ON public.foods USING btree (lower(name), data_origin_priority, id)",
+    indexName: "foods_name_exact_rank_idx",
+    isLive: true,
+    isReady: true,
+    isValid: true,
+  },
+  {
+    definition:
+      "CREATE INDEX foods_canonical_rank_idx ON public.foods USING btree (canonical_key, data_origin_priority, id)",
+    indexName: "foods_canonical_rank_idx",
+    isLive: true,
+    isReady: true,
+    isValid: true,
+  },
+] as const;
+
 describe("product label runtime env preflight", () => {
+  it("classifies the exact food-search catalog contract", () => {
+    expect(findProductLabelSearchIndexProblems(liveFoodSearchIndexes)).toEqual([]);
+
+    for (const state of ["isLive", "isReady", "isValid"] as const) {
+      expect(findProductLabelSearchIndexProblems([
+        { ...liveFoodSearchIndexes[0], [state]: false },
+        ...liveFoodSearchIndexes.slice(1),
+      ])).toEqual([{
+        kind: "index",
+        name: "foods_name_rank_idx",
+        reason: "not_live",
+      }]);
+    }
+
+    expect(findProductLabelSearchIndexProblems([
+      ...liveFoodSearchIndexes.slice(0, 1),
+      { ...liveFoodSearchIndexes[1], isReady: false },
+      {
+        ...liveFoodSearchIndexes[2],
+        definition:
+          "CREATE INDEX foods_canonical_rank_idx ON public.foods USING btree (canonical_key, id)",
+      },
+    ])).toEqual([
+      {
+        kind: "index",
+        name: "foods_name_exact_rank_idx",
+        reason: "not_live",
+      },
+      {
+        kind: "index",
+        name: "foods_canonical_rank_idx",
+        reason: "wrong_definition",
+      },
+    ]);
+
+    expect(findProductLabelSearchIndexProblems([])).toEqual([
+      {
+        kind: "index",
+        name: "foods_name_rank_idx",
+        reason: "missing",
+      },
+      {
+        kind: "index",
+        name: "foods_name_exact_rank_idx",
+        reason: "missing",
+      },
+      {
+        kind: "index",
+        name: "foods_canonical_rank_idx",
+        reason: "missing",
+      },
+    ]);
+  });
+
   it("fails production builds without the shared labels database URL", async () => {
     await expect(
       assertProductLabelRuntimeEnv({

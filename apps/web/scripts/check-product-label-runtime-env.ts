@@ -81,7 +81,7 @@ type ProductLabelSchemaColumnRow = {
   tableName: string;
   columnName: string;
 };
-type ProductLabelSchemaIndexRow = {
+export type ProductLabelSchemaIndexRow = {
   definition: string | null;
   indexName: string;
   isLive: boolean | null;
@@ -255,7 +255,7 @@ async function readRequiredProductLabelSchemaProblems(
   }
 }
 
-function findProductLabelSearchIndexProblems(
+export function findProductLabelSearchIndexProblems(
   rows: readonly ProductLabelSchemaIndexRow[],
 ): ProductLabelSchemaProblem[] {
   const rowsByName = new Map(rows.map((row) => [row.indexName, row]));
