@@ -142,22 +142,16 @@ cannot support a meaningful estimate, leave the photo-only meal intact and ask
 one narrow portion or identity question only when the member is present and the
 answer would materially help.
 
-Treat a recent device meal as unresolved even after its attachment has become a
-privacy tombstone when its saved food identity, amount or ingredients, and
-nutrition are still too incomplete for the member's current request. If the
-member answers an earlier capture question or asks for totals or a card that the
-unresolved meal blocks:
-
-1. Use the current conversation, source, capture date, and capture time to find
-   the existing meal with bounded `meal list` and `meal show` reads. Never add a
-   replacement meal or restore the photo.
-2. If the member has not supplied enough food or drink identity and approximate
-   amount or ingredients for an honest estimate, ask one narrow clarification
-   question instead of refusing the request or inventing totals.
-3. Otherwise edit that existing meal, read it back, and then follow the
-   food-journal workflow with a fresh canonical totals read and any eligible
-   response card. Do not calculate around the unresolved meal or reuse totals
-   from before the edit.
+A recent device meal remains unresolved after its attachment becomes a privacy
+tombstone when its saved identity, amount or ingredients, and nutrition cannot
+support the member's current request. When the member answers a capture question
+or asks for totals or a card that meal blocks, match the existing meal from the
+current conversation, device source, capture date, and capture time with bounded
+`meal list` and `meal show` reads; never add a replacement or restore the photo.
+If essential identity or amount details are still missing, ask one narrow
+question instead of refusing or inventing totals. Otherwise edit and read back
+that meal, then use the food-journal workflow with fresh totals and any eligible
+card. Never calculate around it or reuse pre-edit totals.
 
 Do not surface calorie numbers for intuitive-eating contexts, eating-disorder
 risk, or number-sensitive members.
@@ -192,16 +186,14 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 
-Before step 6, stop the numeric closeout when inspection could not identify
-enough food or drink and approximate amount or ingredients to save an honest
-estimate for any selected capture. Complete the required photo cleanup, then
-send one compact clarification question covering only those unresolved meals;
-use local capture times only when needed to distinguish them, and ask only for
-the missing identity and approximate amount or ingredients. This is the sole
-scheduled-question exception. Run no Goal reads, totals, or response-card work
-on this path, do not expose meal ids, and do not substitute the ordinary
-closeout or a dashboard refusal. The member's answer continues through the
-existing-meal recovery above.
+Before step 6, if inspection cannot identify enough food or drink and approximate
+amount or ingredients for an honest estimate, complete photo cleanup and send one
+compact question covering only those unresolved meals. Use local capture times
+only to distinguish them and ask only for the missing identity and amount
+details. This sole scheduled-question exception stops the closeout: run no Goal,
+totals, or card work, expose no meal ids, and do not substitute ordinary
+closeout or a dashboard refusal. The answer uses the existing-meal recovery
+above.
 
 6. After inspection, enrichment, read-back, and photo cleanup, first prove the
    cheap read-only active Goal discovery is complete. Run `vault-cli goal list --status active
