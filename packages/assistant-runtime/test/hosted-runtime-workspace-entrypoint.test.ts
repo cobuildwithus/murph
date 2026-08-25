@@ -3103,12 +3103,14 @@ describe("hosted workspace runtime entrypoint", () => {
   test("uses invocation workspace state without a startup workspace-port read", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const suppliedWorkspace = createWorkspaceState({ version: "0" });
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const attemptId = "attempt_synthetic_invocation_workspace";
 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_invocation_workspace",
+            attemptId,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspace: suppliedWorkspace,
@@ -3123,6 +3125,7 @@ describe("hosted workspace runtime entrypoint", () => {
             throw new Error("Invocation workspace state test should not import mailbox items.");
           },
           platform: createPlatform({
+            logRequests,
             mailboxPort: createMailboxPort({ events: [], items: [] }),
             workspacePort: {
               async read() {
@@ -3136,9 +3139,18 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.equal(result.status, "idle");
+      assert.deepEqual(
+        logRequests.flatMap((request) => request.entries).filter((entry) =>
+          entry.attemptId === attemptId
+          && entry.eventCode === "runtime.invocation_finished"
+        ).map((entry) => entry.redactedJson),
+        [{ processingMode: "default" }],
+      );
     } finally {
+      await drainHostedRuntimeLogWritesBestEffort();
       await removeTempRoot(vaultRoot);
     }
   });
