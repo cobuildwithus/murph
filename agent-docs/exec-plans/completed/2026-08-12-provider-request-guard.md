@@ -1,8 +1,8 @@
 # Simplify the external provider request guard
 
-Status: active
+Status: completed
 Created: 2026-08-12
-Updated: 2026-08-18
+Updated: 2026-08-25
 
 ## Goal
 
@@ -123,3 +123,4 @@ restoring the old provenance engine.
   90-second CLI test timeouts under shared-host contention. The run was stopped
   after 25 minutes because those existing failures made a local aggregate pass
   impossible; exact-head CI remains authoritative.
+Completed: 2026-08-25
