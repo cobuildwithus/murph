@@ -41,6 +41,7 @@ import type {
 } from "./vault-share-projection.ts";
 import {
   findNextHostedSystemMailboxQueueItem,
+  isHostedGroupContextHandoffSystemMailboxItem,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedSystemMailboxModelFreeNotificationFrontier,
   readHostedSystemMailboxState,
@@ -73,6 +74,7 @@ import {
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
+const HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS = 2;
 const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE =
   "HOSTED_VAULT_SHARE_PROJECTION_DEFERRED";
 const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS = 5 * 60_000;
@@ -119,6 +121,16 @@ export type HostedSystemMailboxCheckpointPreparation =
       item: HostedSystemMailboxPendingItem;
       itemId: string;
       status: "recording";
+    };
+
+type HostedSystemMailboxPreparationSelection =
+  | {
+      disposition: "attempt_limit";
+      item: HostedSystemMailboxPendingItem;
+    }
+  | {
+      disposition: "prepared";
+      item: HostedSystemMailboxPendingItem;
     };
 
 export async function claimHostedSystemMailboxItem(input: {
@@ -291,7 +303,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   );
   const assistantAskCompletionOccurredBefore =
     input.assistantAskCompletionOccurredBefore ?? null;
-  const prepared = await updateHostedSystemMailboxState(
+  const selection = await updateHostedSystemMailboxState<
+    HostedSystemMailboxPreparationSelection | null
+  >(
     input.vaultRoot,
     (state) => {
       const notificationProjectedState =
@@ -353,6 +367,25 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         selected: pending,
       });
 
+      if (
+        collapsed.selected.status !== "recording"
+        && isHostedGroupContextHandoffSystemMailboxItem(collapsed.selected)
+        && collapsed.selected.attemptCount
+          >= HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS
+      ) {
+        return {
+          result: {
+            disposition: "attempt_limit",
+            item: collapsed.selected,
+          },
+          state: {
+            pending: collapsed.pending.filter((item) =>
+              item.itemId !== collapsed.selected.itemId
+            ),
+          },
+        };
+      }
+
       const nextItem: HostedSystemMailboxPendingItem = {
         ...collapsed.selected,
         attemptCount: collapsed.selected.attemptCount + 1,
@@ -365,7 +398,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           : "sending",
       };
       return {
-        result: nextItem,
+        result: {
+          disposition: "prepared",
+          item: nextItem,
+        },
         state: {
           pending: collapsed.pending.map((item) =>
             item.itemId === collapsed.selected.itemId ? nextItem : item
@@ -374,8 +410,18 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       };
     },
   );
-  if (!prepared) {
+  if (!selection) {
     return null;
+  }
+
+  const prepared = selection.item;
+  if (selection.disposition === "attempt_limit") {
+    return {
+      item: prepared,
+      itemId: prepared.itemId,
+      metrics: createHostedGroupContextHandoffTerminalMetrics(),
+      status: "processed",
+    };
   }
 
   if (prepared.status === "recording") {
@@ -455,6 +501,23 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     const normalized = normalizeHostedSystemMailboxError(error);
+    if (
+      shouldStopHostedGroupContextHandoffRetry({
+        error,
+        item: prepared,
+      })
+    ) {
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: prepared,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        item: prepared,
+        itemId: prepared.itemId,
+        metrics: createHostedGroupContextHandoffTerminalMetrics(),
+        status: "processed",
+      };
+    }
     const nextWakeAt = new Date(
       Date.parse(startedAt) + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
     ).toISOString();
@@ -495,6 +558,49 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       wakeKind: prepared.wake.kind,
     };
   }
+}
+
+function shouldStopHostedGroupContextHandoffRetry(input: {
+  error: unknown;
+  item: HostedSystemMailboxPendingItem;
+}): boolean {
+  if (!isHostedGroupContextHandoffSystemMailboxItem(input.item)) {
+    return false;
+  }
+  return input.item.attemptCount >= HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS
+    || input.error instanceof TypeError
+    || readHostedSystemMailboxErrorRetryable(input.error) === false;
+}
+
+function readHostedSystemMailboxErrorRetryable(error: unknown): boolean | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  if ("retryable" in error && typeof error.retryable === "boolean") {
+    return error.retryable;
+  }
+  if (
+    "context" in error
+    && error.context
+    && typeof error.context === "object"
+    && "retryable" in error.context
+    && typeof error.context.retryable === "boolean"
+  ) {
+    return error.context.retryable;
+  }
+  return null;
+}
+
+function createHostedGroupContextHandoffTerminalMetrics(): HostedMailboxExecutionMetrics {
+  return {
+    bootstrapResult: null,
+    conversationMetrics: null,
+    deliveryIntentIds: [],
+    mailboxLane: "assistant-notification",
+    nextWakeAt: null,
+    postCheckpointRecord: null,
+    redactedLogEntries: [],
+  };
 }
 
 function resolveHostedSystemMailboxPreparedItemRetryWakeReason(

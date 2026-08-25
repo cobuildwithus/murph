@@ -1881,7 +1881,7 @@ describe("hosted workspace runtime entrypoint", () => {
             usageRecordPort: {
               async recordUsage(record) {
                 events.push("usage.record");
-                return { recorded: true, usageId: record.usageId };
+                return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
               },
             },
           },
@@ -21922,6 +21922,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("usage.record:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22067,6 +22068,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("first.usage:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22232,6 +22234,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 await releaseUsageRecord.promise;
                 events.push("usage.record:done");
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22363,6 +22366,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 await releaseUsageRecord.promise;
                 events.push("usage.record:done");
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22481,6 +22485,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("usage.record:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22595,6 +22600,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   assert.fail(`Unexpected usage record ${record.usageId}`);
                 }
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22746,6 +22752,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("usage.record:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };

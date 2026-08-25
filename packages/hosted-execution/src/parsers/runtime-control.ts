@@ -884,6 +884,10 @@ export function parseHostedRuntimeUsageRecordResponse(
   const record = requireObject(value, "Hosted runtime usage record response");
 
   return {
+    platformAiUsageAllowedAfter: requireBoolean(
+      record.platformAiUsageAllowedAfter,
+      "Hosted runtime usage record response platformAiUsageAllowedAfter",
+    ),
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
   };

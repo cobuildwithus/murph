@@ -1222,9 +1222,11 @@ describe("hosted runtime control contracts", () => {
       usage,
     });
     expect(parseHostedRuntimeUsageRecordResponse({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: usage.usageId,
     })).toEqual({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: usage.usageId,
     });
@@ -1274,13 +1276,19 @@ describe("hosted runtime control contracts", () => {
       ],
     })).toThrow(/issueId/u);
     expect(() => parseHostedRuntimeUsageRecordResponse({
+      platformAiUsageAllowedAfter: true,
       recorded: -1,
       usageId: usage.usageId,
     })).toThrow(/boolean/u);
     expect(() => parseHostedRuntimeUsageRecordResponse({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: "",
     })).toThrow(/non-empty string/u);
+    expect(() => parseHostedRuntimeUsageRecordResponse({
+      recorded: true,
+      usageId: usage.usageId,
+    })).toThrow(/platformAiUsageAllowedAfter/u);
   });
 
   it("parses hosted Codex auth updates with exact bounded callback shapes", () => {

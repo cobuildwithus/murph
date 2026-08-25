@@ -926,6 +926,7 @@ export interface HostedRuntimeUsageRecordRequest {
 }
 
 export interface HostedRuntimeUsageRecordResponse {
+  platformAiUsageAllowedAfter: boolean;
   recorded: boolean;
   usageId: string;
 }

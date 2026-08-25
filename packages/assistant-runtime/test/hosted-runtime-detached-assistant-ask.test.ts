@@ -408,7 +408,7 @@ describe("hosted detached assistant ask controller", () => {
         usageRecordPort: {
           async recordUsage(record) {
             usageRecords.push(record);
-            return { recorded: true, usageId: record.usageId };
+            return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
           },
         },
         userEnvKeys: ["OPENAI_API_KEY"],
@@ -548,7 +548,7 @@ describe("hosted detached assistant ask controller", () => {
     const usageRecordPort = {
       async recordUsage(record: AssistantUsageRecord) {
         usageRecords.push(record);
-        return { recorded: true, usageId: record.usageId };
+        return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
       },
     };
 
