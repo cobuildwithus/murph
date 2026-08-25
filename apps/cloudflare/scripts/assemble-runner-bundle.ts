@@ -53,6 +53,7 @@ const shouldSkipBundleOnlyDependencies = process.argv.includes(
 const shouldSkipPackPreflights =
   process.argv.includes("--skip-pack-preflights") ||
   process.env.MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS === "1";
+const expectedReleaseSha = process.env.MURPH_RUNNER_BUNDLE_EXPECTED_RELEASE_SHA;
 
 rerunUnderWorkspaceArtifactLockIfNeeded();
 
@@ -107,7 +108,7 @@ async function assembleRunnerBundle(): Promise<void> {
     includeBundleOnlyDependencies,
   });
   const packedWorkspacePackageNames = [...hostedRunnerWorkspacePackageNames].sort();
-  const releaseSha = resolvePublicRunnerReleaseSha(repoRoot);
+  const releaseSha = resolvePublicRunnerReleaseSha(repoRoot, expectedReleaseSha);
 
   try {
     if (!shouldSkipBuild) {

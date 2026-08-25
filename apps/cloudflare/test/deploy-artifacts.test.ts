@@ -147,10 +147,15 @@ describe("deploy artifact validation", () => {
         "test release",
       ]);
 
-      expect(resolvePublicRunnerReleaseSha(repoRoot)).toMatch(/^[a-f0-9]{40}$/u);
+      const releaseSha = resolvePublicRunnerReleaseSha(repoRoot);
+      expect(releaseSha).toMatch(/^[a-f0-9]{40}$/u);
 
       await writeFile(path.join(repoRoot, "release-source.txt"), "dirty\n", "utf8");
       expect(resolvePublicRunnerReleaseSha(repoRoot)).toBeNull();
+      expect(resolvePublicRunnerReleaseSha(repoRoot, releaseSha ?? undefined)).toBe(releaseSha);
+      expect(() => resolvePublicRunnerReleaseSha(repoRoot, "f".repeat(40))).toThrow(
+        "Public Murph checkout does not match the expected runner bundle release SHA.",
+      );
     } finally {
       await rm(repoRoot, { force: true, recursive: true });
     }

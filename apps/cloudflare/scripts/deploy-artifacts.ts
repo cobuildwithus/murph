@@ -313,6 +313,7 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
 
 export function resolvePublicRunnerReleaseSha(
   repoRoot: string = defaultRepoRoot,
+  expectedReleaseSha?: string,
 ): string | null {
   const releaseResult = spawnSync(
     "git",
@@ -330,6 +331,17 @@ export function resolvePublicRunnerReleaseSha(
     || !publicReleaseShaPattern.test(releaseSha)
   ) {
     throw new Error("Could not resolve the public Murph release SHA for the runner bundle.");
+  }
+
+  if (expectedReleaseSha !== undefined) {
+    const normalizedExpectedReleaseSha = expectedReleaseSha.trim().toLowerCase();
+    if (!publicReleaseShaPattern.test(normalizedExpectedReleaseSha)) {
+      throw new Error("Expected runner bundle release SHA must be a full public Git commit SHA.");
+    }
+    if (releaseSha !== normalizedExpectedReleaseSha) {
+      throw new Error("Public Murph checkout does not match the expected runner bundle release SHA.");
+    }
+    return releaseSha;
   }
 
   const statusResult = spawnSync(
