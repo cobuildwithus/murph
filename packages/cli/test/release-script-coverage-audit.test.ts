@@ -1112,6 +1112,119 @@ function writeHarnessFile(
   }
 }
 
+function runFinishTaskHarnessGit(harnessRoot: string, ...command: string[]) {
+  const result = spawnSync('git', command, {
+    cwd: harnessRoot,
+    encoding: 'utf8',
+    env: withoutNodeV8Coverage(),
+  })
+
+  if (result.status !== 0) {
+    throw new Error(
+      `Harness git command failed (${command.join(' ')}):\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    )
+  }
+
+  return result.stdout.trim()
+}
+
+function createFinishTaskHarness(baselineFiles: Record<string, string>) {
+  const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
+
+  try {
+    writeHarnessFile(
+      harnessRoot,
+      'node_modules/@cobuild/repo-tools/src/consumer-shell.sh',
+      `#!/usr/bin/env bash
+repo_tools_join_lines() {
+  local var_name="$1"
+  shift
+  local joined=""
+  local item
+  for item in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined+=$'\\n'
+    fi
+    joined+="$item"
+  done
+  printf -v "$var_name" '%s' "$joined"
+  export "$var_name"
+}
+
+cobuild_repo_tool_bin() {
+  printf '%s\\n' "$COBUILD_REPO_ROOT/.fake-tools/$1"
+}
+`,
+      true,
+    )
+
+    for (const relativePath of [
+      'scripts/repo-tools.config.sh',
+      'scripts/finish-task',
+      'scripts/close-exec-plan.sh',
+      'scripts/committer',
+    ]) {
+      writeHarnessFile(
+        harnessRoot,
+        relativePath,
+        readFileSync(path.join(repoRoot, relativePath), 'utf8'),
+        true,
+      )
+    }
+
+    writeHarnessFile(
+      harnessRoot,
+      'scripts/install-git-hooks',
+      `#!/usr/bin/env bash
+set -euo pipefail
+touch .fake-tools/install-git-hooks.called
+`,
+      true,
+    )
+    writeHarnessFile(
+      harnessRoot,
+      '.fake-tools/cobuild-close-exec-plan',
+      `#!/usr/bin/env bash
+set -euo pipefail
+plan_path="$1"
+completed_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
+mkdir -p "$(dirname "$completed_path")"
+mv "$plan_path" "$completed_path"
+printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
+`,
+      true,
+    )
+    writeHarnessFile(
+      harnessRoot,
+      '.fake-tools/cobuild-committer',
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$@" > .fake-tools/committer.args
+`,
+      true,
+    )
+
+    for (const [relativePath, contents] of Object.entries(baselineFiles)) {
+      writeHarnessFile(harnessRoot, relativePath, contents)
+    }
+
+    for (const command of [
+      ['init'],
+      ['config', 'user.name', 'Harness'],
+      ['config', 'user.email', '123456+murph-harness@users.noreply.github.com'],
+      ['add', '.'],
+      ['commit', '-m', 'baseline'],
+    ]) {
+      runFinishTaskHarnessGit(harnessRoot, ...command)
+    }
+
+    return harnessRoot
+  } catch (error) {
+    rmSync(harnessRoot, { recursive: true, force: true })
+    throw error
+  }
+}
+
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
@@ -4111,114 +4224,18 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
   })
 
   it('archives the active plan before invoking committer', () => {
-    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
-
-    try {
-      writeHarnessFile(
-        harnessRoot,
-        'node_modules/@cobuild/repo-tools/src/consumer-shell.sh',
-        `#!/usr/bin/env bash
-repo_tools_join_lines() {
-  local var_name="$1"
-  shift
-  local joined=""
-  local item
-  for item in "$@"; do
-    if [[ -n "$joined" ]]; then
-      joined+=$'\\n'
-    fi
-    joined+="$item"
-  done
-  printf -v "$var_name" '%s' "$joined"
-  export "$var_name"
-}
-
-cobuild_repo_tool_bin() {
-  printf '%s\\n' "$COBUILD_REPO_ROOT/.fake-tools/$1"
-}
-`,
-        true,
-      )
-
-      for (const relativePath of [
-        'scripts/repo-tools.config.sh',
-        'scripts/finish-task',
-        'scripts/close-exec-plan.sh',
-        'scripts/committer',
-      ]) {
-        writeHarnessFile(
-          harnessRoot,
-          relativePath,
-          readFileSync(path.join(repoRoot, relativePath), 'utf8'),
-          true,
-        )
-      }
-
-      writeHarnessFile(
-        harnessRoot,
-        'scripts/install-git-hooks',
-        `#!/usr/bin/env bash
-set -euo pipefail
-touch .fake-tools/install-git-hooks.called
-`,
-        true,
-      )
-
-      writeHarnessFile(
-        harnessRoot,
-        '.fake-tools/cobuild-close-exec-plan',
-        `#!/usr/bin/env bash
-set -euo pipefail
-plan_path="$1"
-completed_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
-mkdir -p "$(dirname "$completed_path")"
-mv "$plan_path" "$completed_path"
-printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
-`,
-        true,
-      )
-      writeHarnessFile(
-        harnessRoot,
-        '.fake-tools/cobuild-committer',
-        `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$@" > .fake-tools/committer.args
-`,
-        true,
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/exec-plans/active/2026-04-24-harness.md',
-        `# Harness Plan
+    const harnessRoot = createFinishTaskHarness({
+      'agent-docs/exec-plans/active/2026-04-24-harness.md': `# Harness Plan
 
 Status: active
 Created: 2026-04-24
 Updated: 2026-04-24
 `,
-      )
-      writeHarnessFile(harnessRoot, 'agent-docs/exec-plans/completed/README.md', '# Completed\n')
-      writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n')
+      'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+      'docs/touched.md': '# Before\n',
+    })
 
-      for (const command of [
-        ['init'],
-        ['config', 'user.name', 'Harness'],
-        ['config', 'user.email', '123456+murph-harness@users.noreply.github.com'],
-        ['add', '.'],
-        ['commit', '-m', 'baseline'],
-      ]) {
-        const result = spawnSync('git', command, {
-          cwd: harnessRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(),
-        })
-
-        if (result.status !== 0) {
-          throw new Error(
-            `Harness git command failed (${command.join(' ')}):\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
-          )
-        }
-      }
-
+    try {
       writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n\nAfter\n')
 
       const result = spawnSync(
@@ -4243,7 +4260,6 @@ Updated: 2026-04-24
       }
 
       expect(existsSync(path.join(harnessRoot, '.fake-tools/install-git-hooks.called'))).toBe(true)
-
       expect(
         existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/2026-04-24-harness.md')),
       ).toBe(false)
@@ -4282,6 +4298,123 @@ Updated: 2026-04-24
       expect(commitArgs).not.toContain(
         'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
       )
+    } finally {
+      rmSync(harnessRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('omits an untracked active plan found while expanding a task directory', () => {
+    const planPath = 'agent-docs/exec-plans/active/2026-04-24-untracked.md'
+    const completedPlanPath = 'agent-docs/exec-plans/completed/2026-04-24-untracked.md'
+    const taskPath = 'agent-docs/task-note.md'
+    const harnessRoot = createFinishTaskHarness({
+      'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+      [taskPath]: '# Before\n',
+    })
+
+    try {
+      writeHarnessFile(harnessRoot, planPath, '# Harness Plan\n')
+      writeHarnessFile(harnessRoot, taskPath, '# Before\n\nAfter\n')
+
+      const result = spawnSync(
+        'bash',
+        ['scripts/finish-task', planPath, 'close untracked harness plan', 'agent-docs'],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+
+      if (result.status !== 0) {
+        throw new Error(
+          `finish-task untracked-plan harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+        )
+      }
+
+      const commitArgs = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'committer.args'),
+        'utf8',
+      )
+        .trim()
+        .split(/\r?\n/u)
+
+      expect(existsSync(path.join(harnessRoot, planPath))).toBe(false)
+      expect(existsSync(path.join(harnessRoot, completedPlanPath))).toBe(true)
+      expect(commitArgs).toEqual([
+        'close untracked harness plan',
+        completedPlanPath,
+        taskPath,
+      ])
+    } finally {
+      rmSync(harnessRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts a locally proven branch deletion without forwarding the missing path', () => {
+    const planPath = 'agent-docs/exec-plans/active/2026-04-24-delete.md'
+    const completedPlanPath = 'agent-docs/exec-plans/completed/2026-04-24-delete.md'
+    const deletedPath = 'docs/delete-me.md'
+    const harnessRoot = createFinishTaskHarness({
+      [planPath]: '# Harness Plan\n',
+      'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+      [deletedPath]: '# Delete me\n',
+    })
+
+    try {
+      const baseHead = runFinishTaskHarnessGit(harnessRoot, 'rev-parse', 'HEAD')
+      runFinishTaskHarnessGit(harnessRoot, 'checkout', '-b', 'task')
+      runFinishTaskHarnessGit(harnessRoot, 'rm', deletedPath)
+      runFinishTaskHarnessGit(harnessRoot, 'commit', '-m', 'delete task path')
+      writeHarnessFile(harnessRoot, planPath, '# Harness Plan\n\nStatus: complete\n')
+
+      const withoutDefaultRef = spawnSync(
+        'bash',
+        ['scripts/finish-task', planPath, 'close deleted harness path', deletedPath],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+      expect(withoutDefaultRef.status).not.toBe(0)
+      expect(withoutDefaultRef.stderr).toContain(`Commit path not found: ${deletedPath}`)
+      expect(existsSync(path.join(harnessRoot, planPath))).toBe(true)
+
+      runFinishTaskHarnessGit(harnessRoot, 'update-ref', 'refs/remotes/origin/main', baseHead)
+
+      const result = spawnSync(
+        'bash',
+        ['scripts/finish-task', planPath, 'close deleted harness path', deletedPath],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+
+      if (result.status !== 0) {
+        throw new Error(
+          `finish-task deleted-path harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+        )
+      }
+
+      const commitArgs = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'committer.args'),
+        'utf8',
+      )
+        .trim()
+        .split(/\r?\n/u)
+
+      expect(result.stdout).toContain(
+        'finish-task: commit includes closed plan plus 0 resolved task path(s)',
+      )
+      expect(commitArgs).toEqual([
+        'close deleted harness path',
+        planPath,
+        completedPlanPath,
+      ])
+      expect(commitArgs).not.toContain(deletedPath)
     } finally {
       rmSync(harnessRoot, { recursive: true, force: true })
     }
