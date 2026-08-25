@@ -1,8 +1,8 @@
 # Automatic meal clarification
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -31,16 +31,21 @@ logging.
 
 - A clear photo follows the current enrichment, cleanup, totals, and card path
   unchanged.
-- When one or more selected photos cannot support an honest estimate, Murph
-  completes privacy cleanup and sends one compact question, using capture time
-  only when needed to distinguish meals. The question requests only food or
-  drink identity and the approximate amount or ingredients needed to estimate.
+- Murph estimates conservatively whenever the photo supports a recognizable
+  food or drink category and defensible portion range. Ordinary visual
+  uncertainty does not trigger a question.
+- When one or more selected photos are genuinely too indeterminate for any
+  meaningful bounded estimate, Murph completes privacy cleanup and sends one
+  compact question. It uses time on the occurrence date and date plus time for
+  historical or multi-date captures. The question requests only the food or
+  drink identity and approximate amount needed to estimate.
 - A later answer or card request reuses the current conversation and canonical
   capture time to find the existing device meal. Murph asks one narrow question
   if essential facts are still missing; otherwise it edits and reads back that
   meal before obtaining fresh totals or attaching a card.
 - Intuitive-eating, eating-disorder-risk, and number-sensitive behavior remains
-  non-numeric. Duplicate and uncertain-nearby-meal safeguards remain unchanged.
+  non-numeric and receives no estimate-enabling clarification. Duplicate and
+  uncertain-nearby-meal safeguards remain unchanged.
 - Several unresolved captures produce one compact, time-labeled clarification
   rather than several messages. No reply leaves the canonical meals unchanged;
   a later eligible interactive turn can recover them.
@@ -66,9 +71,9 @@ behavior.
    skill and remove the conflicting managed-automation fallback.
 2. [x] Add focused prompt and automation regression proof, including ordering
    and no-duplicate recovery requirements.
-3. [ ] Run focused tests, assistant-engine typecheck, provider-input
+3. [x] Run focused tests, assistant-engine typecheck, provider-input
    measurement, diff/privacy review, and the required exact-head review gates.
-4. [ ] Replay the Product UX journeys, resolve accepted findings, close this
+4. [x] Replay the Product UX journeys, resolve accepted findings, close this
    plan, and prepare the final PR candidate.
 
 ## Verification
@@ -93,21 +98,49 @@ Completed candidate proof:
   binary was unavailable, and the in-app browser exposed no browser instance.
   The existing server-rendered archive tests are the available presentation
   proof; current-branch browser proof remains an explicit review gap.
-- No live-provider model scenario has run. The current direct proof validates
-  prompt ownership, cleanup ordering, the no-duplicate continuation, and the
-  managed automation handoff rather than sampled model output.
+- The preliminary specialist review returned three accepted findings: inherit
+  protected-context estimation eligibility, disambiguate historical captures
+  by date and time, and add production-shaped two-turn model proof. The prompt
+  and tests now implement all three corrections without new runtime state.
+- The real-Codex test module compiles and now contains the scheduled
+  cleanup/question/stop, reply/edit/readback/fresh-totals journey plus the
+  protected-context suppression branch. No supported provider credential is
+  present locally, so the paid model call remains skipped under the repository's
+  documented opt-in gate.
+- The deferred skill is 4,750 `o200k_harmony` tokens / 21,940 UTF-8 bytes,
+  +383 / +1,864 from `origin/main`. Ordinary private and group provider inputs
+  remain unchanged because this skill is deferred.
 
 ## Product UX walkthrough
 
-Result: Ready for exact-head specialist review.
+Result: Ready for final exact-head CI.
 
 - Clear captures remain on the existing enrichment and card branch because the
-  new gate applies only after inspection cannot support an honest estimate.
+  new gate treats a recognizable category and defensible portion range as
+  enough for a bounded estimate; ordinary uncertainty does not ask a question.
 - An unresolved scheduled capture completes photo cleanup, asks one compact
   clarification, and stops before Goal, totals, or card work. Focused ordering
   assertions cover that path.
 - A later answer or blocked card request finds and edits the existing device
   meal, reads it back, and uses fresh canonical totals. Prompt assertions cover
   tombstoned attachments, narrow questions, and no replacement meal.
-- Existing intuitive-eating, eating-disorder-risk, number-sensitive, duplicate,
+- Intuitive-eating, eating-disorder-risk, and number-sensitive contexts clean
+  the photo and stop without an estimate-enabling question, Goal read, totals,
+  or card. Historical and multi-date questions include date and time. Duplicate
   and nearby-meal safeguards are unchanged.
+
+## Parent final review
+
+- All three accepted specialist findings are resolved at the existing skill and
+  proof owners; the preliminary pass returned no patch artifact and is not
+  rerun under the one-pass rule.
+- The final diff retains one meal owner, one privacy-cleanup boundary, and the
+  existing conversation continuation. It adds no production state, service,
+  queue, dependency, or tool contract.
+- Focused prompt and automation tests pass, assistant-engine typecheck passes,
+  the real-Codex scenario compiles under its documented credential gate, and
+  `git diff --check` plus the scoped privacy scan pass.
+- Remaining proof gap: the opt-in live-provider scenario could not run locally
+  because neither supported provider credential is present. Exact-head CI owns
+  the broad deterministic suite.
+Completed: 2026-08-25

@@ -137,10 +137,12 @@ When enriching a captured meal:
 Do not run `meal add` for a captured photo that already has a meal id. The
 automatic import is the meal log; `meal edit` adds the useful structure. By
 default, save a bounded photo estimate without asking for confirmation on every
-meal, but the estimate must retain provenance and uncertainty. If the photo
-cannot support a meaningful estimate, leave the photo-only meal intact and ask
-one narrow portion or identity question only when the member is present and the
-answer would materially help.
+meal. Retain provenance, uncertainty, and assumptions; a visible food or drink
+category with a defensible portion range is enough even when the exact recipe,
+ingredients, or serving is uncertain. Clarification is a last resort, not a
+confidence check: ask one narrow identity or portion question only when actual
+attachment inspection leaves identity or amount too indeterminate for any
+meaningful bounded estimate and the answer would materially help.
 
 A recent device meal remains unresolved after its attachment becomes a privacy
 tombstone when its saved identity, amount or ingredients, and nutrition cannot
@@ -148,10 +150,12 @@ support the member's current request. When the member answers a capture question
 or asks for totals or a card that meal blocks, match the existing meal from the
 current conversation, device source, capture date, and capture time with bounded
 `meal list` and `meal show` reads; never add a replacement or restore the photo.
-If essential identity or amount details are still missing, ask one narrow
-question instead of refusing or inventing totals. Otherwise edit and read back
-that meal, then use the food-journal workflow with fresh totals and any eligible
-card. Never calculate around it or reuse pre-edit totals.
+Apply the estimation-eligibility rule above before recovery. When estimation is
+skipped, do not ask for identity or amount merely to enable nutrition estimates.
+Otherwise, ask instead of refusing or inventing totals only when the saved facts
+still fail that last-resort threshold. With enough facts, edit and read back the
+existing meal, then use fresh food-journal totals and any eligible card. Never
+calculate around it or reuse pre-edit totals.
 
 Do not surface calorie numbers for intuitive-eating contexts, eating-disorder
 risk, or number-sensitive members.
@@ -186,14 +190,16 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 
-Before step 6, if inspection cannot identify enough food or drink and approximate
-amount or ingredients for an honest estimate, complete photo cleanup and send one
-compact question covering only those unresolved meals. Use local capture times
-only to distinguish them and ask only for the missing identity and amount
-details. This sole scheduled-question exception stops the closeout: run no Goal,
-totals, or card work, expose no meal ids, and do not substitute ordinary
-closeout or a dashboard refusal. The answer uses the existing-meal recovery
-above.
+Before step 6, apply the estimation-eligibility rule above. When estimation is
+skipped, complete photo cleanup and stop with the established non-numeric
+closeout: ask no estimate-enabling question and run no Goal, totals, or card
+work. Otherwise, after cleaning each capture that still fails the last-resort
+threshold, send one compact question for only those meals and stop before Goal,
+totals, or card work. Use local time when all share the occurrence date; include
+date and time for any historical or multi-date set. Ask only for missing identity
+and amount, expose no meal ids, and do not substitute ordinary closeout or a
+dashboard refusal. This is the sole scheduled-question exception; its answer
+uses the existing-meal recovery above.
 
 6. After inspection, enrichment, read-back, and photo cleanup, first prove the
    cheap read-only active Goal discovery is complete. Run `vault-cli goal list --status active

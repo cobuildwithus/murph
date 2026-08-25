@@ -107,10 +107,19 @@ describe('assistant automatic meal capture skill', () => {
       'never add a replacement or restore the photo.',
     )
     expect(compact(skill)).toContain(
-      'ask one narrow question instead of refusing or inventing totals.',
+      'ask instead of refusing or inventing totals only when the saved facts still fail that last-resort threshold.',
     )
     expect(compact(skill)).toContain(
-      'edit and read back that meal, then use the food-journal workflow with fresh totals and any eligible card.',
+      'With enough facts, edit and read back the existing meal, then use fresh food-journal totals and any eligible card.',
+    )
+    expect(compact(skill)).toContain(
+      'Clarification is a last resort, not a confidence check:',
+    )
+    expect(compact(skill)).toContain(
+      'a visible food or drink category with a defensible portion range is enough',
+    )
+    expect(compact(skill)).toContain(
+      'When estimation is skipped, do not ask for identity or amount merely to enable nutrition estimates.',
     )
     expect(skill).toContain('## Run the automatic 9pm closeout')
     expect(skill).toContain(
@@ -275,7 +284,7 @@ describe('assistant automatic meal capture skill', () => {
       skill.indexOf('vault-cli meal totals --from <date> --to'),
     )
     const compactClarification = compactSkill.indexOf(
-      'Before step 6, if inspection cannot identify enough',
+      'Before step 6, apply the estimation-eligibility rule above.',
     )
     expect(compactClarification).toBeGreaterThan(
       compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
@@ -284,10 +293,16 @@ describe('assistant automatic meal capture skill', () => {
       compactSkill.indexOf('vault-cli goal list --status active'),
     )
     expect(compactSkill).toContain(
-      'This sole scheduled-question exception stops the closeout',
+      'This is the sole scheduled-question exception',
     )
     expect(compactSkill).toContain(
-      'run no Goal, totals, or card work, expose no meal ids, and do not substitute ordinary closeout or a dashboard refusal.',
+      'When estimation is skipped, complete photo cleanup and stop with the established non-numeric closeout: ask no estimate-enabling question and run no Goal, totals, or card work.',
+    )
+    expect(compactSkill).toContain(
+      'Use local time when all share the occurrence date; include date and time for any historical or multi-date set.',
+    )
+    expect(compactSkill).toContain(
+      'Ask only for missing identity and amount, expose no meal ids, and do not substitute ordinary closeout or a dashboard refusal.',
     )
     const attachCardIndex = compactSkill.indexOf(
       'call `murph.attach_response_card` with this exact mapping',
