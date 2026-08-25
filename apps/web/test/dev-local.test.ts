@@ -9,6 +9,7 @@ import {
   assertHostedWebDevRequiredEnv,
   buildHostedWebDevArgv,
   clearConflictingNextDevLock,
+  loadHostedWebDevCryptoState,
   loadHostedWebDevLocalEnv,
   removeHostedWebDevServerLockIfOwned,
   resolveHostedWebDevCacheLimitBytes,
@@ -64,6 +65,31 @@ test("hosted web dev loads local env before checking required database config", 
 
     assert.equal(process.env.DATABASE_URL, "postgresql://user:pass@example.com/db?sslmode=require");
     assert.doesNotThrow(() => assertHostedWebDevRequiredEnv(process.env));
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("hosted web dev uses the exact crypto state shared with the local Worker", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-crypto-"));
+  const statePath = path.join(tempDir, "hosted-local-crypto-state.dev.vars");
+  const environment = createEnv({
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: "stale-value-with-whitespace\n",
+  });
+
+  try {
+    await writeFile(
+      statePath,
+      'HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK="exact-shared-value"\n',
+      "utf8",
+    );
+
+    loadHostedWebDevCryptoState(tempDir, environment, statePath);
+
+    assert.equal(
+      environment.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK,
+      "exact-shared-value",
+    );
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }

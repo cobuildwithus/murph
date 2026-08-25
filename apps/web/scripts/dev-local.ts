@@ -2,8 +2,14 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseEnv } from "node:util";
 
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+
+import {
+  HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
+  HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 
 import { resolveHostedWebDistDir } from "../next-artifacts";
 import { assertHostedWebDatabaseUrlConfigured } from "../src/lib/hosted-web/database-env";
@@ -108,6 +114,33 @@ export function loadHostedWebDevLocalEnv(packageDir: string): void {
   }
 }
 
+export function loadHostedWebDevCryptoState(
+  packageDir: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  statePath: string = resolveHostedWebDevCryptoStatePath(packageDir, environment),
+): void {
+  if (!existsSync(statePath)) {
+    return;
+  }
+
+  const state = parseEnv(readFileSync(statePath, "utf8"));
+  for (const name of HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES) {
+    const value = state[name];
+    if (value !== undefined) {
+      environment[name] = value;
+    }
+  }
+}
+
+function resolveHostedWebDevCryptoStatePath(
+  packageDir: string,
+  environment: NodeJS.ProcessEnv,
+): string {
+  const repoRoot = path.resolve(packageDir, "../..");
+  const configuredPath = environment.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH?.trim();
+  return path.resolve(repoRoot, configuredPath || HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE);
+}
+
 export function resolveHostedWebDevRuntimePaths(
   packageDir: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -132,6 +165,7 @@ async function main(): Promise<void> {
   const runtimePaths = resolveHostedWebDevRuntimePaths(packageDir, process.env);
 
   loadHostedWebDevLocalEnv(packageDir);
+  loadHostedWebDevCryptoState(packageDir, process.env);
   assertHostedWebDevRequiredEnv(process.env);
   process.chdir(packageDir);
   const releaseLock = await acquireHostedWebDevServerLock(

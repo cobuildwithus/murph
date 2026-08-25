@@ -212,7 +212,10 @@ vercel env run -- env \
 
 The Worker uses that direct Web address for signed internal callbacks. The port
 must match the Web process below. Wait for the harness to report the Worker
-ready on `127.0.0.1:8787`. Then start the Web server with one public origin:
+ready on `127.0.0.1:8787`. The Worker also writes the shared local crypto state.
+The Web dev wrapper loads that exact state before it starts. This keeps local
+authentication keys identical even when provider environment values contain
+formatting whitespace. Then start the Web server with one public origin:
 
 ```bash
 cd apps/web
