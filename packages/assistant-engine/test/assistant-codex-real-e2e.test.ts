@@ -8925,7 +8925,9 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
             commands: result.commands,
             firstCardAttached: result.firstCard !== null,
             firstMessage: result.firstMessage,
+            firstProviderActionCount: result.firstProviderActionCount,
             followupCardAttached: result.card !== null,
+            followupProviderActionCount: result.followupProviderActionCount,
             savedCalories: result.savedCalories,
           })}\n`,
         )
@@ -9112,7 +9114,9 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   firstCard: unknown
   firstCommands: string[]
   firstMessage: string
+  firstProviderActionCount: number
   followupCommands: string[]
+  followupProviderActionCount: number
   mealId: string
   savedCalories: number | null
 }> {
@@ -9275,7 +9279,9 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       firstCard: first.responseCard,
       firstCommands,
       firstMessage: first.finalMessage,
+      firstProviderActionCount: first.providerActionCount,
       followupCommands: commands.slice(firstCommands.length),
+      followupProviderActionCount: followup.providerActionCount,
       mealId: meal.mealId,
       savedCalories: saved.savedCalories,
     }
