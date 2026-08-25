@@ -9300,6 +9300,7 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
 
 function summarizeMealRecoveryActions(events: readonly unknown[]): Array<{
   action: string
+  argumentsValue?: Record<string, unknown>
   outputTail?: string
 }> {
   return readCapabilityRoutingActions(events).map((action) =>
@@ -9310,7 +9311,10 @@ function summarizeMealRecoveryActions(events: readonly unknown[]): Array<{
             ? {}
             : { outputTail: action.output.slice(-500) }),
         }
-      : { action: action.tool }
+      : {
+          action: action.tool,
+          argumentsValue: action.argumentsValue,
+        }
   )
 }
 
@@ -9510,13 +9514,17 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const tsxLoaderPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+    '../tsx/dist/loader.mjs',
+  )
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
-      `exec ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_BIN)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
