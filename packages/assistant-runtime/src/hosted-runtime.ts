@@ -659,6 +659,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
+  hasEnvironmentInterviewWake: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -739,6 +740,9 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
+    hasEnvironmentInterviewWake: systemItems.some((item) =>
+      item.kind === "environment-interview.completed"
+    ),
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -1862,6 +1866,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const assistantConfigurationToolPort =
       guardedRuntime.platform.assistantConfigurationToolPort ?? null;
     let assistantProviderHandoffRequested = false;
+    let environmentInterviewHandoffRequested = false;
+    const runtimeOwnerHandoffRequested = (): boolean =>
+      assistantProviderHandoffRequested || environmentInterviewHandoffRequested;
     const invocationAssistantConfigurationToolPort: HostedRuntimePlatform[
       "assistantConfigurationToolPort"
     ] = assistantConfigurationToolPort
@@ -3811,7 +3818,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       setIdleCheckpointStartBy(
-        Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
+        Date.now() + (runtimeOwnerHandoffRequested() ? 0 : idleCheckpointDelayMs),
       );
     };
     if (runtimeStateDirty) {
@@ -5285,6 +5292,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 initialMailboxPrefetch,
               )
             : null;
+        if (preCheckpointSystemPrefetch?.hasEnvironmentInterviewWake === true) {
+          // The durable row, not the payloadless wake, authorizes this handoff.
+          environmentInterviewHandoffRequested = true;
+          markIdleCheckpointTimerAfterDirtyWork();
+        }
         const hasForegroundConversationWork =
           hostedAssistantInputBatchHasWork(
             invocationLocalAssistantInputBatch,
@@ -5724,7 +5736,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
         const idleMaintenancePendingWork =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested()
           || pendingDurableCheckpointEffects.length > 0
           || durableCheckpointFollowUpPending
           || invocationStatus === "budget_exhausted"
@@ -6031,7 +6043,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         resumeDetachedAssistantAskAfterWorkspaceBoundary();
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
-          && options.shutdownSignal?.aborted !== true;
+          && options.shutdownSignal?.aborted !== true
+          && !runtimeOwnerHandoffRequested();
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
@@ -6382,7 +6395,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           idleMaintenance.nextWakeReason === "inbox_media_retention"
           && idleMaintenance.nextWakeAt !== null;
         const immediateRecheckCandidate =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested()
           || immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
@@ -6398,7 +6411,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
         ]);
         const immediateRecheckRequested =
-          assistantProviderHandoffRequested
+          runtimeOwnerHandoffRequested()
           || (
             immediateRecheckCandidate
             && !isHostedRuntimeFutureMailboxContinuation({

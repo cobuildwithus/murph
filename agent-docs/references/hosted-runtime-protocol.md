@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Decision
 
@@ -779,6 +779,16 @@ ordinary controller path after the system child releases its fence. Other
 system items remain pending for their default owner. A system-mailbox request
 behind an active default runtime remains deferred and cannot broaden that
 child's admission authority.
+An `environment_interview` request behind an active default runtime is the
+narrow exception: UserRunner wakes the exact default child but returns
+`retry_later`, because that child accepted only a wake, not Environment-mode
+ownership. The dirty default runtime preserves fresh conversation priority,
+classifies the durable mailbox prefix, and, when it sees an Environment item,
+shortens its existing idle checkpoint window to zero. It skips optional
+compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
+leaves the Environment row pending for the dedicated model-free invocation.
+This handoff never aborts a foreground turn and adds no queue, scheduler, or
+persisted mode state.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
