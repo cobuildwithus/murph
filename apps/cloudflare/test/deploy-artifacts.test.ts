@@ -126,7 +126,7 @@ const requiredHostedCryptoWorkerVars = {
 } as const;
 
 describe("deploy artifact validation", () => {
-  it("emits release provenance only for a clean public checkout", async () => {
+  it("keeps the public base release when private composition changes the checkout", async () => {
     const repoRoot = await mkdtemp(path.join(os.tmpdir(), "murph-runner-release-"));
     try {
       runGit(repoRoot, ["init", "--quiet"]);
@@ -147,10 +147,11 @@ describe("deploy artifact validation", () => {
         "test release",
       ]);
 
-      expect(resolvePublicRunnerReleaseSha(repoRoot)).toMatch(/^[a-f0-9]{40}$/u);
+      const releaseSha = resolvePublicRunnerReleaseSha(repoRoot);
+      expect(releaseSha).toMatch(/^[a-f0-9]{40}$/u);
 
       await writeFile(path.join(repoRoot, "release-source.txt"), "dirty\n", "utf8");
-      expect(resolvePublicRunnerReleaseSha(repoRoot)).toBeNull();
+      expect(resolvePublicRunnerReleaseSha(repoRoot)).toBe(releaseSha);
     } finally {
       await rm(repoRoot, { force: true, recursive: true });
     }
@@ -182,7 +183,7 @@ describe("deploy artifact validation", () => {
     );
   });
 
-  it("rejects a production runner bundle assembled from a dirty checkout", async () => {
+  it("rejects a runner bundle without public base release provenance", async () => {
     const fixture = await createDeployArtifactFixture();
     await writeFile(
       path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
