@@ -1,6 +1,6 @@
 # Junction workout stream live capability remediation
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -114,3 +114,4 @@ Updated: 2026-08-25
   streams despite an empty Web capability summary; disconnected or live-
   incapable sources make zero workout egress; all required checks and reviews
   resolve on the exact pushed head.
+Completed: 2026-08-25
