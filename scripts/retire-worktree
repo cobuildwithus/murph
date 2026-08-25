@@ -3,11 +3,11 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: retire-worktree [--dry-run] [--inactive-no-pr] [--contained-detached] <target-worktree>
+Usage: retire-worktree [--dry-run] [--inactive-no-pr] [--contained-detached] <target-worktree> [<target-worktree> ...]
 
-Retires one clean, inactive task worktree after its exact PR head is confirmed
-merged or closed, or its HEAD is already contained in origin/main. Run this
-command from a different checkout of the same repo. The task branch is preserved.
+Retires one or more clean, inactive task worktrees after each exact PR head is
+confirmed merged or closed, or its HEAD is already contained in origin/main. Run
+this command from a different checkout of the same repo. Task branches are preserved.
 Use --inactive-no-pr only when the current user explicitly authorizes retiring
 clean inactive branches that have no open PR; all other safety gates still apply.
 Use --contained-detached only for a clean detached checkout whose exact HEAD is
@@ -34,7 +34,7 @@ while [[ "${1:-}" == --* ]]; do
   shift
 done
 
-if [[ $# -ne 1 ]]; then
+if [[ $# -lt 1 ]]; then
   usage
 fi
 
@@ -42,24 +42,45 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root_dir"
 current_worktree="$(pwd -P)"
 
-if [[ ! -d "$1" ]]; then
-  refuse 'target directory is missing'
-fi
-target_worktree="$(cd "$1" 2>/dev/null && pwd -P)" \
-  || refuse 'target directory cannot be resolved'
-target_label="$(basename "$target_worktree")"
-
 current_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
   || refuse 'current checkout is not a Git worktree'
-target_common_dir="$(git -C "$target_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-  || refuse 'target is not a Git worktree'
 current_common_dir="$(cd "$current_common_dir" 2>/dev/null && pwd -P)" \
   || refuse 'current Git metadata cannot be resolved'
-target_common_dir="$(cd "$target_common_dir" 2>/dev/null && pwd -P)" \
-  || refuse 'target Git metadata cannot be resolved'
-if [[ "$current_common_dir" != "$target_common_dir" ]]; then
-  refuse 'target belongs to a different repository'
-fi
+
+target_worktrees=()
+for target_argument in "$@"; do
+  if [[ ! -d "$target_argument" ]]; then
+    refuse 'target directory is missing'
+  fi
+  canonical_target="$(cd "$target_argument" 2>/dev/null && pwd -P)" \
+    || refuse 'target directory cannot be resolved'
+  target_common_dir="$(git -C "$canonical_target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || refuse 'target is not a Git worktree'
+  target_common_dir="$(cd "$target_common_dir" 2>/dev/null && pwd -P)" \
+    || refuse 'target Git metadata cannot be resolved'
+  if [[ "$current_common_dir" != "$target_common_dir" ]]; then
+    refuse 'target belongs to a different repository'
+  fi
+  if (( ${#target_worktrees[@]} > 0 )); then
+    for existing_target in "${target_worktrees[@]}"; do
+      if [[ "$canonical_target" == "$existing_target" ]]; then
+        refuse 'duplicate canonical target worktree'
+      fi
+    done
+  fi
+  target_worktrees+=("$canonical_target")
+done
+
+target_count="${#target_worktrees[@]}"
+target_worktree=''
+target_label=''
+batch_primary_worktree=''
+primary_package_link_snapshot=''
+
+select_target() {
+  target_worktree="${target_worktrees[$1]}"
+  target_label="$(basename "$target_worktree")"
+}
 
 target_registered=false
 target_head=''
@@ -142,6 +163,15 @@ verify_registry_state() {
   current_head="$(git -C "$target_worktree" rev-parse HEAD 2>/dev/null)" \
     || refuse 'target HEAD cannot be resolved'
   [[ "$target_head" == "$current_head" ]] || refuse 'target registry HEAD is stale'
+}
+
+verify_primary_worktree_identity() {
+  if [[ -z "$batch_primary_worktree" ]]; then
+    batch_primary_worktree="$primary_worktree"
+    return
+  fi
+  [[ "$primary_worktree" == "$batch_primary_worktree" ]] \
+    || refuse 'primary worktree changed during retirement'
 }
 
 verify_clean() {
@@ -342,45 +372,109 @@ verify_no_process_cwd() {
   (( accessible > 0 )) || refuse 'process working directories could not be inspected'
 }
 
-verify_primary_package_links() {
+snapshot_primary_package_links() {
   local inspection_output inspection_status
-  if inspection_output="$(PRIMARY_WORKTREE="$primary_worktree" TARGET_WORKTREE="$target_worktree" node <<'NODE'
+  command -v node >/dev/null 2>&1 || refuse 'Node.js is unavailable'
+
+  if inspection_output="$(PRIMARY_WORKTREE="$batch_primary_worktree" node - "${target_worktrees[@]}" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 
 const primary = process.env.PRIMARY_WORKTREE;
-const target = process.env.TARGET_WORKTREE;
-if (!primary || !target) process.exit(12);
-const nodeModules = path.join(primary, 'node_modules');
-if (!fs.existsSync(nodeModules)) process.exit(0);
+const targets = process.argv.slice(2);
+if (!primary || targets.length === 0 || targets.some((target) => !path.isAbsolute(target))) {
+  process.exit(12);
+}
 
-const insideTarget = (candidate) => candidate === target || candidate.startsWith(target + path.sep);
-const pending = [nodeModules];
+const references = targets.map((target) => ({ target, link: null }));
+const nodeModules = path.join(primary, 'node_modules');
+const insideTarget = (candidate, target) =>
+  candidate === target || candidate.startsWith(target + path.sep);
 try {
-  while (pending.length > 0) {
-    const directory = pending.pop();
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(entryPath);
-        continue;
-      }
-      if (!entry.isSymbolicLink()) continue;
-      const lexicalTarget = path.resolve(path.dirname(entryPath), fs.readlinkSync(entryPath));
-      let resolvedTarget = lexicalTarget;
-      try {
-        resolvedTarget = fs.realpathSync(entryPath);
-      } catch {
-        // A dangling link still carries enough lexical evidence to block.
-      }
-      if (insideTarget(lexicalTarget) || insideTarget(resolvedTarget)) {
-        process.stdout.write(path.relative(primary, entryPath));
-        process.exit(10);
+  if (fs.existsSync(nodeModules)) {
+    const pending = [nodeModules];
+    let unresolvedTargets = references.length;
+    scan: while (pending.length > 0) {
+      const directory = pending.pop();
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          pending.push(entryPath);
+          continue;
+        }
+        if (!entry.isSymbolicLink()) continue;
+        const lexicalTarget = path.resolve(path.dirname(entryPath), fs.readlinkSync(entryPath));
+        let resolvedTarget = lexicalTarget;
+        try {
+          resolvedTarget = fs.realpathSync(entryPath);
+        } catch {
+          // A dangling link still carries enough lexical evidence to block.
+        }
+        for (const reference of references) {
+          if (reference.link !== null) continue;
+          const target = reference.target;
+          if (insideTarget(lexicalTarget, target) || insideTarget(resolvedTarget, target)) {
+            reference.link = path.relative(primary, entryPath);
+            unresolvedTargets -= 1;
+          }
+        }
+        if (unresolvedTargets === 0) break scan;
       }
     }
   }
+  process.stdout.write(JSON.stringify(references));
 } catch {
   process.exit(12);
+}
+NODE
+)"; then
+    inspection_status=0
+  else
+    inspection_status=$?
+  fi
+  case "$inspection_status" in
+    0) primary_package_link_snapshot="$inspection_output" ;;
+    *) refuse 'primary dependency links could not be inspected' ;;
+  esac
+}
+
+verify_primary_package_links() {
+  local target_index="$1" inspection_output inspection_status
+  if inspection_output="$(PRIMARY_PACKAGE_LINK_SNAPSHOT="$primary_package_link_snapshot" \
+    TARGET_COUNT="$target_count" TARGET_INDEX="$target_index" TARGET_WORKTREE="$target_worktree" \
+    node <<'NODE'
+let snapshot;
+try {
+  snapshot = JSON.parse(process.env.PRIMARY_PACKAGE_LINK_SNAPSHOT ?? '');
+} catch {
+  process.exit(12);
+}
+
+const count = Number(process.env.TARGET_COUNT);
+const indexText = process.env.TARGET_INDEX ?? '';
+const target = process.env.TARGET_WORKTREE;
+if (
+  !Array.isArray(snapshot) ||
+  !Number.isInteger(count) ||
+  snapshot.length !== count ||
+  !/^(0|[1-9][0-9]*)$/.test(indexText) ||
+  !target
+) {
+  process.exit(12);
+}
+
+const index = Number(indexText);
+const reference = snapshot[index];
+if (
+  !reference ||
+  reference.target !== target ||
+  (reference.link !== null && typeof reference.link !== 'string')
+) {
+  process.exit(12);
+}
+if (reference.link !== null) {
+  process.stdout.write(reference.link);
+  process.exit(10);
 }
 NODE
 )"; then
@@ -395,41 +489,83 @@ NODE
   esac
 }
 
-verify_all_gates() {
+verify_target_gates() {
   verify_registry_state
+  verify_primary_worktree_identity
   verify_clean
   verify_no_active_task_reference
   verify_terminal_history
   verify_no_process_cwd
-  verify_primary_package_links
 }
 
-verify_all_gates
+retire_selected_target() {
+  local retired_worktree="$target_worktree"
+  local quarantine_worktree="${target_worktree}.retiring-${target_head:0:12}"
+  [[ ! -e "$quarantine_worktree" && ! -L "$quarantine_worktree" ]] \
+    || refuse 'worktree quarantine path already exists'
+  if ! git worktree move -- "$target_worktree" "$quarantine_worktree" >/dev/null 2>&1; then
+    refuse 'worktree could not be moved into retirement quarantine'
+  fi
+  target_worktree="$quarantine_worktree"
+  if ! git worktree remove -- "$target_worktree" >/dev/null 2>&1; then
+    refuse "non-force Git worktree removal did not finish; the registered checkout remains visibly quarantined as $(basename "$target_worktree")"
+  fi
+
+  if [[ "$target_branch_ref" == refs/heads/* ]]; then
+    local branch_name="${target_branch_ref#refs/heads/}"
+    if ! git show-ref --verify --quiet "refs/heads/$branch_name"; then
+      refuse 'worktree was removed but branch preservation could not be proved'
+    fi
+    if [[ "$target_count" -eq 1 ]]; then
+      printf 'retire-worktree: retired one task worktree; branch preserved\n'
+    else
+      printf 'retire-worktree: retired task worktree %s; branch preserved\n' "$retired_worktree"
+    fi
+  elif [[ "$target_count" -eq 1 ]]; then
+    printf 'retire-worktree: retired one contained detached worktree; no branch changed\n'
+  else
+    printf 'retire-worktree: retired contained detached worktree %s; no branch changed\n' "$retired_worktree"
+  fi
+}
+
+preflight_branch_refs=()
+for ((target_index = 0; target_index < target_count; target_index += 1)); do
+  select_target "$target_index"
+  verify_target_gates
+  preflight_branch_refs[$target_index]="$target_branch_ref"
+done
+
+snapshot_primary_package_links
+for ((target_index = 0; target_index < target_count; target_index += 1)); do
+  select_target "$target_index"
+  verify_primary_package_links "$target_index"
+done
 
 if [[ "$dry_run" == true ]]; then
-  printf 'retire-worktree: eligible; branch will be preserved\n'
+  if [[ "$target_count" -eq 1 ]]; then
+    printf 'retire-worktree: eligible; branch will be preserved\n'
+  else
+    for ((target_index = 0; target_index < target_count; target_index += 1)); do
+      select_target "$target_index"
+      if [[ "${preflight_branch_refs[$target_index]}" == refs/heads/* ]]; then
+        printf 'retire-worktree: eligible task worktree %s; branch will be preserved\n' "$target_worktree"
+      else
+        printf 'retire-worktree: eligible contained detached worktree %s; no branch will be changed\n' "$target_worktree"
+      fi
+    done
+  fi
   exit 0
 fi
 
-# Revalidate immediately before the destructive phase to narrow race windows.
-verify_all_gates
-quarantine_worktree="${target_worktree}.retiring-${target_head:0:12}"
-[[ ! -e "$quarantine_worktree" && ! -L "$quarantine_worktree" ]] \
-  || refuse 'worktree quarantine path already exists'
-if ! git worktree move -- "$target_worktree" "$quarantine_worktree" >/dev/null 2>&1; then
-  refuse 'worktree could not be moved into retirement quarantine'
-fi
-target_worktree="$quarantine_worktree"
-if ! git worktree remove -- "$target_worktree" >/dev/null 2>&1; then
-  refuse "non-force Git worktree removal did not finish; the registered checkout remains visibly quarantined as $(basename "$target_worktree")"
-fi
-
-if [[ "$target_branch_ref" == refs/heads/* ]]; then
-  target_branch_ref="${target_branch_ref#refs/heads/}"
-  if ! git show-ref --verify --quiet "refs/heads/$target_branch_ref"; then
-    refuse 'worktree was removed but branch preservation could not be proved'
+# Revalidate each exact target immediately before its destructive boundary. The
+# primary dependency tree is scanned once for this phase, then each target is
+# checked explicitly against that shared evidence immediately before quarantine.
+for ((target_index = 0; target_index < target_count; target_index += 1)); do
+  select_target "$target_index"
+  verify_target_gates
+  if [[ "$target_index" -eq 0 ]]; then
+    snapshot_primary_package_links
   fi
-  printf 'retire-worktree: retired one task worktree; branch preserved\n'
-else
-  printf 'retire-worktree: retired one contained detached worktree; no branch changed\n'
-fi
+  verify_primary_package_links "$target_index"
+  retire_selected_target
+done
