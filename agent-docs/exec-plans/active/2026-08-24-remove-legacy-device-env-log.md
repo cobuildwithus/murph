@@ -76,9 +76,11 @@ Updated: 2026-08-24
 ## Verification
 
 - Passed: assistant-runtime hosted maintenance test (94 tests), hosted provider
-  config test (3 tests), hosted-execution runtime-control test (32 tests), and
+  config test (3 tests), hosted-execution runtime-control test (33 tests), and
   both affected package typechecks.
 - Passed: writer-specific stale-reference search and `git diff --check`; the
   event code remains only in the compatibility reader contract and this plan.
+- Passed: an explicit request-parser regression proves the old event remains
+  accepted from warm runners while the current emitter is absent.
 - Pending: exact-head preliminary ReviewGPT, required GitHub checks, and
   current-base merge-tree proof.
