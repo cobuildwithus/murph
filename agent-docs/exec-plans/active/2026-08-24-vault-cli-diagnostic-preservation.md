@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -92,3 +92,18 @@ generic error.
 - Production bundle assembly and all eight parity probes pass after the review
   fix. Vault CLI is 9,457,933 of 9,467,648 bytes; the runner is 11,271,843 of
   11,393,617 bytes.
+- ReviewGPT round 3 found that hosted-label ownership stopped after HTTP status
+  classification, so successful-response body and schema failures fell back to
+  generic projection. The finding was accepted and remediated by replacing the
+  raw `Response` handoff and separate parsers with one typed request owner that
+  fetches, checks status, reads the body, and validates the provider schema.
+  Response-body transport failures are retryable; malformed or schema-invalid
+  successful responses are explicit terminal provider-response failures.
+- Focused source proof now passes 60 active food, supplement, and shared
+  provider-recovery tests (29 prepared-runtime cases skipped), plus seven
+  assistant guidance tests; affected CLI and assistant-engine typechecks pass.
+- Prepared-runtime construction, the 60-case compiled provider battery, CLI
+  package shape, docs, workspace boundaries, and package-cycle checks pass.
+  Production bundle assembly and all eight parity probes pass; Vault CLI is
+  9,459,926 of 9,467,648 bytes and the runner is 11,271,843 of 11,393,617
+  bytes.

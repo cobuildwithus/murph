@@ -29,6 +29,53 @@ interface ReadOnlyProviderCase {
   transportCode: string
 }
 
+interface LabelProviderCase extends ReadOnlyProviderCase {
+  batchArgs: string[]
+  invalidResponseCode: string
+  responseBodyFailedCode: string
+  responseBodyTimedOutCode: string
+}
+
+const labelProviderCases: LabelProviderCase[] = [
+  {
+    args: ['food', 'search-labels', 'private-food-query'],
+    batchArgs: ['food', 'search-labels-batch', '--query', 'private-food-query'],
+    cancelledCode: 'food_labels_api_request_cancelled',
+    httpCode: status => status === 401 || status === 403
+      ? 'food_labels_api_auth_failed'
+      : status === 503
+        ? 'food_labels_api_service_unavailable'
+        : 'food_labels_api_response_failed',
+    invalidResponseCode: 'food_labels_api_invalid_response',
+    name: 'food label search',
+    responseBodyFailedCode: 'food_labels_api_response_body_failed',
+    responseBodyTimedOutCode: 'food_labels_api_response_body_timed_out',
+    timeoutCode: 'food_labels_api_request_timed_out',
+    transportCode: 'food_labels_api_request_failed',
+  },
+  {
+    args: ['supplement', 'search-labels', 'private-supplement-query'],
+    batchArgs: [
+      'supplement',
+      'search-labels-batch',
+      '--query',
+      'private-supplement-query',
+    ],
+    cancelledCode: 'supplement_labels_api_request_cancelled',
+    httpCode: status => status === 401 || status === 403
+      ? 'supplement_labels_api_auth_failed'
+      : status === 503
+        ? 'supplement_labels_api_service_unavailable'
+        : 'supplement_labels_api_response_failed',
+    invalidResponseCode: 'supplement_labels_api_invalid_response',
+    name: 'supplement label search',
+    responseBodyFailedCode: 'supplement_labels_api_response_body_failed',
+    responseBodyTimedOutCode: 'supplement_labels_api_response_body_timed_out',
+    timeoutCode: 'supplement_labels_api_request_timed_out',
+    transportCode: 'supplement_labels_api_request_failed',
+  },
+]
+
 const readOnlyProviderCases: ReadOnlyProviderCase[] = [
   {
     args: ['route', 'estimate', '11.1234,22.2345', '33.3456,44.4567'],
@@ -42,30 +89,7 @@ const readOnlyProviderCases: ReadOnlyProviderCase[] = [
     timeoutCode: 'route_mapbox_timeout',
     transportCode: 'route_mapbox_unavailable',
   },
-  {
-    args: ['food', 'search-labels', 'private-food-query'],
-    cancelledCode: 'food_labels_api_request_cancelled',
-    httpCode: status => status === 401 || status === 403
-      ? 'food_labels_api_auth_failed'
-      : status === 503
-        ? 'food_labels_api_service_unavailable'
-        : 'food_labels_api_response_failed',
-    name: 'food label search',
-    timeoutCode: 'food_labels_api_request_timed_out',
-    transportCode: 'food_labels_api_request_failed',
-  },
-  {
-    args: ['supplement', 'search-labels', 'private-supplement-query'],
-    cancelledCode: 'supplement_labels_api_request_cancelled',
-    httpCode: status => status === 401 || status === 403
-      ? 'supplement_labels_api_auth_failed'
-      : status === 503
-        ? 'supplement_labels_api_service_unavailable'
-        : 'supplement_labels_api_response_failed',
-    name: 'supplement label search',
-    timeoutCode: 'supplement_labels_api_request_timed_out',
-    transportCode: 'supplement_labels_api_request_failed',
-  },
+  ...labelProviderCases,
 ]
 
 afterEach(() => {
@@ -190,6 +214,105 @@ describe('read-only provider recovery envelopes', () => {
       assert.equal(serialized.includes('private cancellation detail'), false)
     })
   }
+
+  for (const providerCase of labelProviderCases) {
+    it(`${providerCase.name} classifies a response-body failure as retryable`, async () => {
+      configureProviderEnvironment()
+      const response = new Response('{}', { status: 200 })
+      const rawCause = 'private response body failure'
+      vi.spyOn(response, 'json').mockRejectedValue(new TypeError(rawCause))
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response)
+      vi.stubGlobal('fetch', fetchMock)
+
+      const serialized = await expectErrorEnvelope({
+        args: providerCase.args,
+        code: providerCase.responseBodyFailedCode,
+        retryable: true,
+        stage: 'response',
+      })
+
+      assert.equal(fetchMock.mock.calls.length, 1)
+      assert.equal(serialized.includes(rawCause), false)
+    })
+
+    it(`${providerCase.name} classifies a response-body timeout as retryable`, async () => {
+      configureProviderEnvironment()
+      const response = new Response('{}', { status: 200 })
+      const rawCause = 'private response body timeout'
+      vi.spyOn(response, 'json').mockRejectedValue(
+        new DOMException(rawCause, 'TimeoutError'),
+      )
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response)
+      vi.stubGlobal('fetch', fetchMock)
+
+      const serialized = await expectErrorEnvelope({
+        args: providerCase.args,
+        code: providerCase.responseBodyTimedOutCode,
+        retryable: true,
+        stage: 'response',
+      })
+
+      assert.equal(fetchMock.mock.calls.length, 1)
+      assert.equal(serialized.includes(rawCause), false)
+    })
+
+    it(`${providerCase.name} keeps malformed JSON terminal`, async () => {
+      configureProviderEnvironment()
+      const providerBody = 'private malformed provider body'
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(`{${providerBody}`, { status: 200 }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const serialized = await expectErrorEnvelope({
+        args: providerCase.args,
+        code: providerCase.invalidResponseCode,
+        retryable: false,
+        stage: 'response',
+      })
+
+      assert.equal(fetchMock.mock.calls.length, 1)
+      assert.equal(serialized.includes(providerBody), false)
+    })
+
+    it(`${providerCase.name} keeps schema-invalid provider output terminal`, async () => {
+      configureProviderEnvironment()
+      const providerBody = 'private schema-invalid provider body'
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ items: providerBody }), { status: 200 }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const serialized = await expectErrorEnvelope({
+        args: providerCase.args,
+        code: providerCase.invalidResponseCode,
+        retryable: false,
+        stage: 'response',
+      })
+
+      assert.equal(fetchMock.mock.calls.length, 1)
+      assert.equal(serialized.includes(providerBody), false)
+    })
+
+    it(`${providerCase.name} shares response-body recovery with batch reads`, async () => {
+      configureProviderEnvironment()
+      const response = new Response('{}', { status: 200 })
+      const rawCause = 'private batch response body failure'
+      vi.spyOn(response, 'json').mockRejectedValue(new TypeError(rawCause))
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response)
+      vi.stubGlobal('fetch', fetchMock)
+
+      const serialized = await expectErrorEnvelope({
+        args: providerCase.batchArgs,
+        code: providerCase.responseBodyFailedCode,
+        retryable: true,
+        stage: 'response',
+      })
+
+      assert.equal(fetchMock.mock.calls.length, 1)
+      assert.equal(serialized.includes(rawCause), false)
+    })
+  }
 })
 
 const BUILT_PROVIDER_FETCH_HOOK = [
@@ -198,6 +321,18 @@ const BUILT_PROVIDER_FETCH_HOOK = [
   "  if (mode === 'transport') throw new TypeError('private built transport detail')",
   "  if (mode === 'timeout') throw new DOMException('private built timeout detail', 'TimeoutError')",
   "  if (mode === 'cancel') throw new DOMException('private built cancellation detail', 'AbortError')",
+  "  if (mode === 'body-failed') {",
+  "    const response = new Response('{}', { status: 200 })",
+  "    response.json = async () => { throw new TypeError('private built response body detail') }",
+  "    return response",
+  "  }",
+  "  if (mode === 'body-timeout') {",
+  "    const response = new Response('{}', { status: 200 })",
+  "    response.json = async () => { throw new DOMException('private built body timeout detail', 'TimeoutError') }",
+  "    return response",
+  "  }",
+  "  if (mode === 'invalid-json') return new Response('{private-built-provider-body', { status: 200 })",
+  "  if (mode === 'invalid-schema') return new Response(JSON.stringify({ items: 'private-built-provider-body' }), { status: 200 })",
   "  const status = Number.parseInt(mode ?? '', 10)",
   "  return new Response(JSON.stringify({ error: 'private-built-provider-body' }), { status })",
   "}",
@@ -266,6 +401,48 @@ describe.skipIf(!preparedRuntime)('prepared built read-only provider recovery', 
         assert.equal(envelope.error.code, failure.code)
         assert.equal(envelope.error.retryable, failure.retryable)
         assert.equal(envelope.error.stage, failure.stage)
+        assert.doesNotMatch(
+          JSON.stringify(envelope),
+          /private built|private-built|private-mapbox-token|private-data-api-credential/u,
+        )
+      })
+    }
+  }
+
+  for (const providerCase of labelProviderCases) {
+    for (const failure of [
+      {
+        code: providerCase.responseBodyFailedCode,
+        mode: 'body-failed',
+        retryable: true,
+      },
+      {
+        code: providerCase.responseBodyTimedOutCode,
+        mode: 'body-timeout',
+        retryable: true,
+      },
+      {
+        code: providerCase.invalidResponseCode,
+        mode: 'invalid-json',
+        retryable: false,
+      },
+      {
+        code: providerCase.invalidResponseCode,
+        mode: 'invalid-schema',
+        retryable: false,
+      },
+    ] as const) {
+      it(`${providerCase.name} exposes ${failure.mode} from the built CLI without writing`, async () => {
+        const envelope = await runBuiltProviderCommand({
+          args: providerCase.args,
+          hookPath,
+          mode: failure.mode,
+          probeHome,
+        })
+
+        assert.equal(envelope.error.code, failure.code)
+        assert.equal(envelope.error.retryable, failure.retryable)
+        assert.equal(envelope.error.stage, 'response')
         assert.doesNotMatch(
           JSON.stringify(envelope),
           /private built|private-built|private-mapbox-token|private-data-api-credential/u,
