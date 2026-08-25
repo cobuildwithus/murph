@@ -159,7 +159,6 @@ function isRunnerRuntimeWakeUnknownReason(
   value: string,
 ): value is Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"] {
   return value === "active-child-rejected"
-    || value === "container-shutting-down"
     || value === "container-rpc-error"
     || value === "container-rpc-timeout"
     || value === "missing-container-binding"

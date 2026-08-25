@@ -5370,42 +5370,6 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("promptly rechecks a shutting-down child without replacing its active fence", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => ({
-        kind: "wake-unconfirmed" as const,
-        reason: "container-shutting-down" as const,
-      }),
-    );
-    const { invoke, runner, sql } = createRunnerHarness({
-      ensureProcessing,
-      workspace: createWorkspaceState({ version: "7" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
-      workspaceVersion: "7",
-    });
-
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-shutting-down",
-      userId: TEST_USER_ID,
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-04-27T00:00:01.000Z",
-    });
-
-    expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token.attemptId,
-      active_expires_at: null,
-      backoff_until: null,
-      wake_at: null,
-    });
-  });
-
   it("does not replace an old runtime write fence while an active child is wake-unconfirmed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

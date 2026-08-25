@@ -124,12 +124,6 @@ imports do not create that wake or another checkpoint. Runtime/parser handling
 for an old web deployment's `foreground_pending` response remains rollout
 compatibility only.
 
-Ordinary idle checkpoint construction keeps its existing foreground abort path
-before canonical publication. A shutdown-signal checkpoint deliberately does
-not accept a local wake at that point because abandoning it can lose dirty state
-that exists only in the retiring container. The host must preserve that
-checkpoint and promptly retry the durable wake against the replacement runner.
-
 Invocation results may include the positive-only
 `immediateRecheckRequested: true` edge when this invocation produced a default
 or retention schedule, committed it, and did not service it. The runtime tracks

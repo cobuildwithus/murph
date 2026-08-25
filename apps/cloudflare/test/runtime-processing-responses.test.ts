@@ -4,9 +4,6 @@ import {
   createRuntimeProcessingRetryLater,
   HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
 } from "../src/user-runner/runtime-processing-responses.ts";
-import {
-  mapRunnerProcessingRetryReason,
-} from "../src/user-runner/diagnostics.ts";
 
 describe("runtime processing retry telemetry", () => {
   afterEach(() => {
@@ -65,23 +62,6 @@ describe("runtime processing retry telemetry", () => {
     })).toEqual({
       kind: "retry_later",
       retryAt: "2026-08-06T12:00:30.000Z",
-    });
-  });
-
-  it("rechecks a retiring container promptly without bypassing its fence", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
-
-    const retryReason = mapRunnerProcessingRetryReason(
-      "container-shutting-down",
-    );
-    expect(retryReason).toBe("container_shutting_down");
-    expect(createRuntimeProcessingRetryLater({
-      reason: retryReason,
-      userId: "member_123",
-    })).toEqual({
-      kind: "retry_later",
-      retryAt: "2026-08-06T12:00:01.000Z",
     });
   });
 });

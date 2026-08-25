@@ -516,7 +516,6 @@ export type RunnerRuntimeWakeResult =
       kind: "unknown";
       reason:
         | "active-child-rejected"
-        | "container-shutting-down"
         | "container-rpc-error"
         | "container-rpc-timeout"
         | "missing-container-binding"
@@ -1286,8 +1285,6 @@ export class RunnerContainer extends Container {
       const accepted = acceptedHeader === "1";
       const explicitlyRejected = acceptedHeader === "0";
       const absent = response.headers.get("x-runtime-wake-absent") === "1";
-      const shuttingDown =
-        response.headers.get("x-runtime-wake-shutting-down") === "1";
       const identityChecked =
         response.headers.get("x-runtime-wake-identity-checked") === "1";
       const mismatch = response.headers.get("x-runtime-wake-mismatch") === "1";
@@ -1322,7 +1319,6 @@ export class RunnerContainer extends Container {
             runtimeWakeIdentityChecked: identityChecked,
             runtimeWakeLegacyNoActiveChild: legacyNoActiveChild,
             runtimeWakeMismatch: mismatch,
-            runtimeWakeRejectedByShutdown: shuttingDown,
             runtimeWakeStatus: response.status,
             workspaceAttemptId: input.attemptId,
           },
@@ -1367,9 +1363,6 @@ export class RunnerContainer extends Container {
           return { kind: "unknown", reason: "active-child-rejected" };
         }
         return { kind: "not-wakeable", reason: "no-active-child" };
-      }
-      if (response.ok && shuttingDown) {
-        return { kind: "unknown", reason: "container-shutting-down" };
       }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {

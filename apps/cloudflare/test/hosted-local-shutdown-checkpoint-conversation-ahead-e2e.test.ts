@@ -41,9 +41,6 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
-  ensureProcessingAfterSyntheticMailboxAppendForTest,
-} from "./helpers/hosted-local-wake.js";
-import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -63,6 +60,10 @@ const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.6-terra";
 const idleCheckpointDelayMs = 180_000;
 const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
+
+const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
+const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const generatedDeliveryResidueContents = [
   "synthetic completed delivery one\n",
   "synthetic completed delivery two\n",
@@ -73,10 +74,6 @@ const generatedDeliveryResidueBytes = generatedDeliveryResidueContents.reduce(
   (total, contents) => total + Buffer.byteLength(contents),
   0,
 );
-
-const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
-const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
-const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
 const cleanupPaths: string[] = [];
 let linqStub: HostedLocalLinqStub | null = null;
@@ -229,12 +226,6 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     ).resolves.toEqual({ ok: true, released: true });
     await expect(gracefulStopPromise).resolves.toEqual({ ok: true });
     gracefulStopPromise = null;
-    await expect(ensureProcessingAfterSyntheticMailboxAppendForTest({
-      harness: requireScenario().harness,
-      userId,
-    })).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
     await expect(
       requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(userId),
     ).resolves.toEqual({ state: "unarmed" });

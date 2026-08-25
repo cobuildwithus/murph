@@ -23,7 +23,6 @@ export function readRuntimeProcessingRetryDelayMs(
   reason: RuntimeProcessingRetryReason,
 ): number {
   return reason === "checkpoint_handoff_pending" ? 1_000 :
-    reason === "container_shutting_down" ? 1_000 :
     reason === "starting_fence_preserved" ? 3_000 :
     reason === "container_busy" ? 5_000 :
     reason === "command_budget_exhausted" ? 10_000 :

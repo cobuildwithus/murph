@@ -21,7 +21,6 @@ export type RuntimeProcessingRetryReason =
   | "container_busy"
   | "container_rpc_error"
   | "container_rpc_timeout"
-  | "container_shutting_down"
   | "command_budget_exhausted"
   | "missing_container_binding"
   | "starting_fence_preserved";
@@ -248,8 +247,6 @@ export function mapRunnerProcessingRetryReason(
       return "container_rpc_error";
     case "container-rpc-timeout":
       return "container_rpc_timeout";
-    case "container-shutting-down":
-      return "container_shutting_down";
     case "missing-container-binding":
       return "missing_container_binding";
     case "missing-wake-method":
