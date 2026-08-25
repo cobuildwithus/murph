@@ -7,7 +7,6 @@ import { CategoryFilter } from "@/src/components/experiments/category-filter";
 import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
 import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
@@ -29,7 +28,7 @@ interface ExperimentsPageClientProps {
 export function ExperimentsPageClient({ protocols }: ExperimentsPageClientProps) {
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState("");
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, error, status } = useBrowserVault();
   const trackedExperiments = useMemo(
     () => client ? selectBrowserVaultTrackedExperiments(client) : [],
     [client],
@@ -80,16 +79,9 @@ export function ExperimentsPageClient({ protocols }: ExperimentsPageClientProps)
         <Alert>
           <AlertTitle>Your experiments couldn&apos;t be refreshed</AlertTitle>
           <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                {error ?? "We couldn't unlock your private experiment list right now."}
-                {" "}
-                The public experiment library is still available below.
-              </span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
+            {error ?? "We couldn't unlock your private experiment list right now."}
+            {" "}
+            The public experiment library is still available below.
           </AlertDescription>
         </Alert>
       ) : null}

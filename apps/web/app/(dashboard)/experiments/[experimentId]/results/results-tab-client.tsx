@@ -74,7 +74,6 @@ export function ResultsTabClient({
       experiment={experiment}
       privateRunError={browserVault.error}
       privateRunStatus={privateRunStatus}
-      onPrivateRunRetry={browserVault.refresh}
       startAction={startAction}
     />
   );

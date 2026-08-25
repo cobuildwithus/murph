@@ -140,7 +140,7 @@ export function EnvironmentProgressStudy() {
         />
       </StudyState>
       <StudyState label="Private report · Preparing and bounded recovery">
-        <EnvironmentReportSkeleton onRetry={() => {}} />
+        <EnvironmentReportSkeleton />
       </StudyState>
       <StudyState label="Populated report · Shared dashboard width">
         <div id="environment-populated-dashboard-shell">

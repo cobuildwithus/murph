@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 4,
     "title": "Clearer dashboard refresh recovery",
-    "summary": "Overview and History now keep readable data during refresh problems and show a clear Retry state when dashboard data is not yet available.",
-    "details": "Passive checks stop after a bounded wait instead of restarting the same failed work, leaving another attempt under your control.",
+    "summary": "Overview and History now keep readable data during refresh problems and show a clear unavailable state when dashboard data is not yet ready.",
+    "details": "Background checks stay bounded and the dashboard updates when a later snapshot becomes available, without asking you to manage repeated attempts.",
     "relevanceTags": ["dashboard", "reliability", "recovery"],
     "sourcePullRequests": [2226]
   }

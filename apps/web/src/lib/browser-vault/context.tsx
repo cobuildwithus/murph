@@ -391,9 +391,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     (outcome: BrowserVaultWarmLoadOutcome, options: {
       authorityPathname?: string;
       background: boolean;
+      refreshObservationOnly: boolean;
       requiredDemand: boolean;
     }) => {
-      const { authorityPathname, background, requiredDemand } = options;
+      const {
+        authorityPathname,
+        background,
+        refreshObservationOnly,
+        requiredDemand,
+      } = options;
       if (outcome.status === "superseded") {
         return;
       }
@@ -430,6 +436,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         return;
       }
       if (outcome.status === "empty") {
+        // Passive checks may discover a later publication, but an empty
+        // observation is not authorized to replace the provider's stable
+        // ready or error state.
+        if (refreshObservationOnly && authorityPathname === undefined) {
+          return;
+        }
         commitEmpty(outcome.metadata);
         if (authorityPathname !== undefined) {
           setAdmittedPathname(authorityPathname);
@@ -623,6 +635,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       applyOutcome(outcome, {
         authorityPathname,
         background,
+        refreshObservationOnly,
         requiredDemand,
       });
       return outcome;

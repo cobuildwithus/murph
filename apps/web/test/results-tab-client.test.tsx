@@ -23,7 +23,6 @@ import type {
 
 type ResultsTabMockProps = {
   experiment: ResultsTabExperiment;
-  onPrivateRunRetry?: () => unknown;
   privateRunError: string | null;
   privateRunStatus: string;
 };
@@ -89,7 +88,7 @@ beforeEach(() => {
   } satisfies BrowserVaultContextValue);
 });
 
-test("passes browser-vault loading errors and retry ownership to the results view", () => {
+test("passes browser-vault loading errors to the results view", () => {
   const protocol = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
   assert.ok(protocol);
   mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(false);
@@ -101,7 +100,6 @@ test("passes browser-vault loading errors and retry ownership to the results vie
   assert.equal(markup, "<div>error|Browser vault failed|no-private</div>");
   assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.privateRunStatus, "error");
   assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.privateRunError, "Browser vault failed");
-  assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.onPrivateRunRetry, mocks.refresh);
   assert.equal(mocks.resolveBrowserVaultExperimentRun.mock.calls[0]?.[0]?.client, null);
 });
 

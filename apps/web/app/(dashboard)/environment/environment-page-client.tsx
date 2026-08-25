@@ -303,7 +303,7 @@ export default function EnvironmentPageClient({
   if (status === "loading") {
     return (
       <EnvironmentShell>
-        <EnvironmentReportSkeleton onRetry={() => refresh()} />
+        <EnvironmentReportSkeleton />
       </EnvironmentShell>
     );
   }
@@ -314,19 +314,8 @@ export default function EnvironmentPageClient({
         <Alert variant="destructive">
           <AlertTitle>Could not load your environment</AlertTitle>
           <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                {error ??
-                  "Murph could not unlock your private Habitat records right now."}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void refresh()}
-              >
-                Retry
-              </Button>
-            </div>
+            {error ??
+              "Murph could not unlock your private Habitat records right now."}
           </AlertDescription>
         </Alert>
       </EnvironmentShell>

@@ -1621,7 +1621,7 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   await rendered.cleanup();
 });
 
-test("a missing replica leaves Overview and History in their recoverable unavailable state", async () => {
+test("a missing replica leaves Overview and History in a stable unavailable state without Retry controls", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
     encryptedReplica: null,
@@ -1663,8 +1663,22 @@ test("a missing replica leaves Overview and History in their recoverable unavail
     [...rendered.container.querySelectorAll("button")].filter(
       (button) => button.textContent === "Retry",
     ).length,
-    2,
+    0,
   );
+
+  const fetchCountBeforeFocus = fetchMock.mock.calls.length;
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === fetchCountBeforeFocus + 1,
+    "terminal-state focus observation",
+  );
+
+  assert.equal(rendered.container.textContent?.includes("Could not load your overview"), true);
+  assert.equal(rendered.container.textContent?.includes("Could not load history"), true);
+  assert.equal(rendered.container.textContent?.includes("Preparing your dashboard"), false);
+  assert.equal(rendered.container.textContent?.includes("Preparing your timeline"), false);
 
   await rendered.cleanup();
 });
@@ -1702,7 +1716,7 @@ test("browser-vault provider preserves readable stale data when bounded observat
     keyId: "browser-vault-replica:e",
   });
   let currentReplicaPublished = false;
-  const fetchMock = vi.fn((_url: RequestInfo | URL, _init?: RequestInit) => {
+  const fetchMock = vi.fn(() => {
     if (fetchMock.mock.calls.length === 1) {
       return Promise.resolve(jsonResponse({
         encryptedReplica: createReplicaEnvelope(),
@@ -3727,6 +3741,58 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
   await rendered.cleanup();
 });
 
+test("an admission-capable refresh waits behind an in-flight observation", async () => {
+  const observationResponse = createDeferred<Response>();
+  const admissionResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(() => observationResponse.promise)
+    .mockImplementationOnce(() => admissionResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const observation = startBrowserVaultWarmLoad({
+    refreshObservationOnly: true,
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 1,
+    "passive browser-vault observation",
+  );
+  const admission = startBrowserVaultWarmLoad();
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  observationResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+  }));
+  assert.equal((await observation).status, "empty");
+
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "admission after passive observation",
+  );
+  const observationBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+  const admissionBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.equal(observationBody.refreshObservationOnly, true);
+  assert.equal(admissionBody.refreshObservationOnly, undefined);
+
+  admissionResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+  }));
+  assert.equal((await admission).status, "empty");
+});
+
 test("a background refresh keeps the admitted vault visible while it checks for changes", async () => {
   const ref = createReplicaRef();
   const backgroundResponse = createDeferred<Response>();
@@ -4039,7 +4105,7 @@ test("browser-vault provider keeps ready stale data when a background revalidati
   await rendered.cleanup();
 });
 
-test("browser-vault provider clears the client when a background revalidation returns empty", async () => {
+test("browser-vault provider keeps ready data when a passive observation returns empty", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
@@ -4083,8 +4149,9 @@ test("browser-vault provider clears the client when a background revalidation re
   await act(async () => {
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
-  await waitForText(rendered.container, "empty:none");
-  assert.equal(getBrowserVaultReadySnapshot(), null);
+  await waitForCondition(() => fetchMock.mock.calls.length === 3, "focus observation");
+  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+  assert.equal(getBrowserVaultReadySnapshot()?.ref.dataVersion, ref.dataVersion);
 
   await rendered.cleanup();
 });

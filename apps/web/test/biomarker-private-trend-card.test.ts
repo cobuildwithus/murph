@@ -9,7 +9,7 @@ import {
   type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
-import { act, createElement, type ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
@@ -36,7 +36,7 @@ beforeEach(() => {
   mocks.useBrowserVaultMetricKeyDemand.mockReturnValue(true);
 });
 
-test("renders and retries a required bucket error instead of leaving the trend loading", async () => {
+test("renders a stable required bucket error instead of leaving the trend loading", async () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
   const refresh = vi.fn(async () => {});
@@ -59,14 +59,13 @@ test("renders and retries a required bucket error instead of leaving the trend l
   try {
     assert.match(rendered.container.textContent ?? "", /Browser vault failed/u);
     assert.doesNotMatch(rendered.container.innerHTML, /animate-pulse/u);
-    const retry = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry private trend",
+    assert.equal(
+      [...rendered.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry private trend",
+      ),
+      false,
     );
-    assert.ok(retry);
-    await act(async () => {
-      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    assert.equal(refresh.mock.calls.length, 1);
+    assert.equal(refresh.mock.calls.length, 0);
   } finally {
     await rendered.cleanup();
   }
