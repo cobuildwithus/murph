@@ -668,7 +668,9 @@ describe('searchFoodLabels', () => {
       assert.equal(error.code, code)
       assert.equal(error.context?.failureStage, 'response')
       assert.equal(error.context?.retryable, retryable)
+      assert.equal(error.context?.stage, 'response')
       assert.equal(error.context?.status, status)
+      assert.match(error.message, new RegExp(`HTTP ${status}`, 'u'))
       assert.equal(error.context?.timedOut, status === 408 ? true : undefined)
       assert.equal('repair' in error, false)
       assert.doesNotMatch(
@@ -697,8 +699,13 @@ describe('searchFoodLabels', () => {
     assert.equal(error.code, 'food_labels_api_request_failed')
     assert.equal(error.context?.failureStage, 'request')
     assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.stage, 'transport')
     assert.equal(error.context?.transportErrorName, 'TypeError')
     assert.equal(error.context?.transportErrorCode, 'UND_ERR_CONNECT_TIMEOUT')
+    assert.match(
+      error.message,
+      /Transport classification: name=TypeError, code=UND_ERR_CONNECT_TIMEOUT/u,
+    )
     assert.equal('repair' in error, false)
     assert.doesNotMatch(
       JSON.stringify({ context: error.context, message: error.message }),
@@ -721,6 +728,7 @@ describe('searchFoodLabels', () => {
     assert.ok(error instanceof VaultCliError)
     assert.equal(error.code, 'food_labels_api_request_timed_out')
     assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.stage, 'transport')
     assert.equal(error.context?.timedOut, true)
     assert.equal(error.context?.transportErrorName, 'TimeoutError')
     assert.equal('repair' in error, false)
@@ -745,6 +753,7 @@ describe('searchFoodLabels', () => {
     assert.equal(error.code, 'food_labels_api_response_body_timed_out')
     assert.equal(error.context?.failureStage, 'response_body')
     assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.stage, 'response')
     assert.equal(error.context?.status, 200)
     assert.equal(error.context?.timedOut, true)
     assert.equal(error.context?.transportErrorName, 'AbortError')
@@ -775,7 +784,9 @@ describe('searchFoodLabels', () => {
     assert.equal(error.code, 'food_labels_api_invalid_response')
     assert.equal(error.context?.failureStage, 'response_validation')
     assert.equal(error.context?.retryable, false)
+    assert.equal(error.context?.stage, 'response')
     assert.equal(error.context?.validationErrorName, 'SyntaxError')
+    assert.match(error.message, /not valid JSON \(HTTP 200\)/u)
     assert.equal('repair' in error, false)
     assert.doesNotMatch(
       JSON.stringify({ context: error.context, message: error.message }),
@@ -1019,6 +1030,7 @@ describe('searchFoodLabelsBatch', () => {
     assert.equal(error.code, 'food_labels_api_response_body_failed')
     assert.equal(error.context?.failureStage, 'response_body')
     assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.stage, 'response')
     assert.equal(error.context?.timedOut, false)
     assert.equal(error.context?.transportErrorName, 'TypeError')
     assert.equal(error.context?.transportErrorCode, 'UND_ERR_SOCKET')

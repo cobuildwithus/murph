@@ -13,6 +13,7 @@ export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH = 256
 const MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES = 32 * 1024
 const DEFAULT_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 10_000
 const MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 30_000
+const MAX_HOSTED_DATA_API_LABEL_RESPONSE_ISSUES = 12
 const HOSTED_DATA_API_LABELS_BASE_URL = 'http://murph-data-api.worker'
 
 export const hostedDataApiLabelSearchInputSchema = z.object({
@@ -349,7 +350,12 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     }
 
     const response = await fetchLabelsApi(config, fetchImpl, url, env)
-    const payload = await parseLabelsResponsePayload(config, response, apiResponseSchema)
+    const payload = await parseLabelsResponsePayload(
+      config,
+      response,
+      apiResponseSchema,
+      'items',
+    )
 
     return searchResultSchema.parse({
       source: config.resultSource,
@@ -400,6 +406,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       config,
       response,
       batchApiResponseSchema,
+      'results',
     )
 
     return batchSearchResultSchema.parse({
@@ -516,6 +523,7 @@ async function parseLabelsResponsePayload<TPayload>(
   config: HostedDataApiLabelsClientConfig<string>,
   response: Response,
   responseSchema: z.ZodType<TPayload>,
+  publicResponsePath: 'items' | 'results',
 ): Promise<TPayload> {
   let payload: unknown
 
@@ -526,12 +534,18 @@ async function parseLabelsResponsePayload<TPayload>(
       throw createLabelsResponseBodyTransportError(config, response.status, error)
     }
 
-    throw createLabelsInvalidResponseError(config, response.status, error)
+    throw createLabelsInvalidResponseError(config, response.status, error, {
+      responseKind: 'json',
+    })
   }
 
   const parsed = responseSchema.safeParse(payload)
   if (!parsed.success) {
-    throw createLabelsInvalidResponseError(config, response.status, parsed.error)
+    throw createLabelsInvalidResponseError(config, response.status, parsed.error, {
+      responseKind: 'schema',
+      issues: parsed.error.issues,
+      publicResponsePath,
+    })
   }
 
   return parsed.data
@@ -567,17 +581,23 @@ function createLabelsTransportError<TSource extends string>(
   const transportErrorCode = readSafeErrorCode(error)
   const timedOut = transportErrorName === 'TimeoutError'
     || transportErrorName === 'AbortError'
+  const message = timedOut
+    ? `${config.searchDescription} request timed out.`
+    : `${config.searchDescription} request failed before receiving a response.`
 
   return new VaultCliError(
     timedOut
       ? `${config.errorCodePrefix}_request_timed_out`
       : `${config.errorCodePrefix}_request_failed`,
-    timedOut
-      ? `${config.searchDescription} request timed out.`
-      : `${config.searchDescription} request failed before receiving a response.`,
+    appendLabelsTransportClassification(
+      message,
+      transportErrorName,
+      transportErrorCode,
+    ),
     {
       failureStage: 'request',
       retryable: true,
+      stage: 'transport',
       timedOut,
       transportErrorName,
       transportErrorCode,
@@ -594,17 +614,23 @@ function createLabelsResponseBodyTransportError<TSource extends string>(
   const transportErrorCode = readSafeErrorCode(error)
   const timedOut = transportErrorName === 'TimeoutError'
     || transportErrorName === 'AbortError'
+  const message = timedOut
+    ? `${config.searchDescription} response body timed out (HTTP ${status}).`
+    : `${config.searchDescription} received a response whose body could not be read (HTTP ${status}).`
 
   return new VaultCliError(
     timedOut
       ? `${config.errorCodePrefix}_response_body_timed_out`
       : `${config.errorCodePrefix}_response_body_failed`,
-    timedOut
-      ? `${config.searchDescription} response body timed out.`
-      : `${config.searchDescription} received a response whose body could not be read.`,
+    appendLabelsTransportClassification(
+      message,
+      transportErrorName,
+      transportErrorCode,
+    ),
     {
       failureStage: 'response_body',
       retryable: true,
+      stage: 'response',
       status,
       timedOut,
       transportErrorName,
@@ -625,6 +651,7 @@ function createLabelsHttpError<TSource extends string>(
     {
       failureStage: 'response',
       retryable: failure.retryable,
+      stage: 'response',
       status,
       ...(failure.timedOut === true ? { timedOut: true } : {}),
     },
@@ -645,7 +672,7 @@ function classifyLabelsHttpFailure(
   if (status === 401 || status === 403) {
     return {
       codeSuffix: 'auth_failed',
-      message: `${searchDescription} authorization was rejected by the hosted data API.`,
+      message: `${searchDescription} authorization was rejected by the hosted data API (HTTP ${status}).`,
       retryable: false,
     }
   }
@@ -653,7 +680,7 @@ function classifyLabelsHttpFailure(
   if (status === 429) {
     return {
       codeSuffix: 'rate_limited',
-      message: `${searchDescription} was rate limited by the hosted data API.`,
+      message: `${searchDescription} was rate limited by the hosted data API (HTTP ${status}).`,
       retryable: true,
     }
   }
@@ -661,7 +688,7 @@ function classifyLabelsHttpFailure(
   if (status === 408) {
     return {
       codeSuffix: 'request_timed_out',
-      message: `${searchDescription} request timed out at the hosted data API.`,
+      message: `${searchDescription} request timed out at the hosted data API (HTTP ${status}).`,
       retryable: true,
       timedOut: true,
     }
@@ -670,7 +697,7 @@ function classifyLabelsHttpFailure(
   if (status >= 500 && status <= 599) {
     return {
       codeSuffix: 'service_unavailable',
-      message: `${searchDescription} is temporarily unavailable.`,
+      message: `${searchDescription} is temporarily unavailable (HTTP ${status}).`,
       retryable: true,
     }
   }
@@ -686,17 +713,52 @@ function createLabelsInvalidResponseError<TSource extends string>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   status: number,
   error: unknown,
+  details: {
+    issues?: readonly { code: string }[]
+    publicResponsePath?: 'items' | 'results'
+    responseKind: 'json' | 'schema'
+  },
 ): VaultCliError {
+  const issues = details.publicResponsePath === undefined
+    ? undefined
+    : details.issues
+      ?.slice(0, MAX_HOSTED_DATA_API_LABEL_RESPONSE_ISSUES)
+      .map(issue => ({
+        code: issue.code,
+        publicPath: [details.publicResponsePath],
+      }))
+
   return new VaultCliError(
     `${config.errorCodePrefix}_invalid_response`,
-    `${config.searchDescription} received an invalid successful response.`,
+    details.responseKind === 'json'
+      ? `${config.searchDescription} received a successful response that was not valid JSON (HTTP ${status}).`
+      : `${config.searchDescription} received a successful response that did not match the expected label schema (HTTP ${status}).`,
     {
       failureStage: 'response_validation',
+      ...(issues && issues.length > 0 ? { issues } : {}),
       retryable: false,
+      stage: 'response',
       status,
       validationErrorName: readSafeErrorName(error),
     },
   )
+}
+
+function appendLabelsTransportClassification(
+  message: string,
+  errorName: string | undefined,
+  errorCode: string | undefined,
+): string {
+  const classification = [
+    errorName ? `name=${errorName}` : undefined,
+    errorCode ? `code=${errorCode}` : undefined,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(', ')
+
+  return classification
+    ? `${message} Transport classification: ${classification}.`
+    : message
 }
 
 function readSafeErrorName(error: unknown): string | undefined {

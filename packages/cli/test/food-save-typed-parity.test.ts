@@ -505,13 +505,52 @@ test('food label provider classification survives the final machine envelope wit
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, 'food_labels_api_rate_limited')
       assert.equal(result.envelope.error.retryable, true)
-      assert.equal(result.envelope.error.stage, undefined)
+      assert.equal(result.envelope.error.stage, 'response')
+      assert.match(result.envelope.error.message ?? '', /HTTP 429/u)
       assert.equal(result.envelope.error.hint, undefined)
     }
     const serialized = JSON.stringify(result.envelope)
     assert.doesNotMatch(
       serialized,
       /private-provider-response-body|private-submitted-food-query|signed-murph-data-api-credential/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food label transport classification survives the final machine envelope without echoes', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const submittedQuery = 'private-transport-food-query'
+  const fetchMock = vi.fn<typeof fetch>(async () => {
+    throw Object.assign(new TypeError('private transport cause'), {
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_request_failed')
+      assert.equal(result.envelope.error.retryable, true)
+      assert.equal(result.envelope.error.stage, 'transport')
+      assert.match(
+        result.envelope.error.message ?? '',
+        /Transport classification: name=TypeError, code=UND_ERR_CONNECT_TIMEOUT/u,
+      )
+    }
+    assert.doesNotMatch(
+      JSON.stringify(result.envelope),
+      /private transport cause|private-transport-food-query|signed-murph-data-api-credential/u,
     )
   } finally {
     vi.unstubAllGlobals()
@@ -542,12 +581,61 @@ test('food label response-body transport recovery survives the final machine env
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, 'food_labels_api_response_body_failed')
       assert.equal(result.envelope.error.retryable, true)
-      assert.equal(result.envelope.error.stage, undefined)
+      assert.equal(result.envelope.error.stage, 'response')
+      assert.match(
+        result.envelope.error.message ?? '',
+        /HTTP 200.*Transport classification: name=TypeError, code=UND_ERR_SOCKET/u,
+      )
       assert.equal(result.envelope.error.hint, undefined)
     }
     assert.doesNotMatch(
       JSON.stringify(result.envelope),
       /private response body transport cause|private-response-body-food-query/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food label schema failures expose a static repair field without echoes', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const providerBody = 'private-schema-provider-body'
+  const submittedQuery = 'private-schema-food-query'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+    JSON.stringify({ items: providerBody }),
+    { status: 200 },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_invalid_response')
+      assert.equal(result.envelope.error.retryable, false)
+      assert.equal(result.envelope.error.stage, 'response')
+      assert.match(
+        result.envelope.error.message ?? '',
+        /expected label schema.*HTTP 200/u,
+      )
+      assert.deepEqual(result.envelope.error.fieldErrors, [{
+        code: 'invalid_type',
+        expected: '',
+        message: 'This field is invalid.',
+        path: 'items',
+        received: 'invalid',
+      }])
+    }
+    assert.doesNotMatch(
+      JSON.stringify(result.envelope),
+      /private-schema-provider-body|private-schema-food-query|signed-murph-data-api-credential/u,
     )
   } finally {
     vi.unstubAllGlobals()
