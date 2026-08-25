@@ -929,6 +929,65 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
+    'answers every still-relevant request after same-thread reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: config.env,
+          excludeResumeTurns: true,
+          model: 'gpt-5.6-sol',
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 13 plus 8?',
+        })
+        expect(first.finalMessage).toMatch(/\b21\b/u)
+
+        const reconsiderationInstruction = [
+          'New messages arrived before delivery.',
+          'Re-evaluate all accepted messages under the group turn rules and return one final result.',
+          'Do not mention this review or repeat completed effects.',
+        ].join(' ')
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: `${reconsiderationInstruction}\n\nMurph, what is 7 times 6?`,
+          resumeSessionId: first.sessionId,
+        })
+
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(second.finalMessage).toMatch(/\b21\b/u)
+        expect(second.finalMessage).toMatch(/\b42\b/u)
+        expect(second.finalMessage).not.toMatch(
+          /held|not sent|previous response|re-?evaluat|review/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
     'prefers grounded group-chat actions while respecting collective human ownership',
     async () => {
       const config = await resolveRealCodexE2eConfig()

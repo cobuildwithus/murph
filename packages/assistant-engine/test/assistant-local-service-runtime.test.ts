@@ -6986,6 +6986,7 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
 })
 
 test('sendAssistantMessageLocal keeps every group prompt accepted before provider start', async () => {
+  const initialImage = Buffer.from('synthetic-image-input')
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -7066,6 +7067,17 @@ test('sendAssistantMessageLocal keeps every group prompt accepted before provide
     deliverResponse: true,
     prompt: 'What time does the venue open?',
     turnTrigger: 'automation-auto-reply',
+    userMessageContent: [
+      {
+        image: initialImage,
+        mediaType: 'image/png',
+        type: 'image',
+      },
+      {
+        text: 'What time does the venue open?',
+        type: 'text',
+      },
+    ],
     vault: '/vaults/test',
   })
   await firstDraftReady.promise
@@ -7075,6 +7087,24 @@ test('sendAssistantMessageLocal keeps every group prompt accepted before provide
   ).toBe(
     'What time does the venue open?\n\nAlso share the walking time.',
   )
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input
+      .userMessageContent,
+  ).toEqual([
+    {
+      image: initialImage,
+      mediaType: 'image/png',
+      type: 'image',
+    },
+    {
+      text: 'What time does the venue open?',
+      type: 'text',
+    },
+    {
+      text: 'Also share the walking time.',
+      type: 'text',
+    },
+  ])
   await vi.advanceTimersByTimeAsync(4_000)
   await expect(resultPromise).resolves.toMatchObject({
     response: 'The venue opens at nine, and the walk takes ten minutes.',

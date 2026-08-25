@@ -1313,6 +1313,10 @@ export async function sendAssistantMessageLocal(
               ? {
                   ...nextInput,
                   prompt: `${previousInput.prompt}\n\n${nextInput.prompt}`,
+                  userMessageContent: [
+                    ...(previousInput.userMessageContent ?? []),
+                    ...(acceptanceInput.activeTurnInput.userMessageContent ?? []),
+                  ],
                 }
               : nextInput
           acceptedInputIdsForProviderRequest = acceptedInputJournal.inputIds
