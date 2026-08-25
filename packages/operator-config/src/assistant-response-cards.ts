@@ -1255,25 +1255,25 @@ function createAssistantResponseCardJsonSchema() {
     },
     required: ['target', 'status'],
   } as const)
+  const workoutTrackingProperties = {
+    kind: { const: 'workout' },
+    entityId: {
+      type: 'string',
+      maxLength: 30,
+      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+    },
+  } as const
   const tracking = {
     type: ['object', 'null'],
     additionalProperties: false,
-    properties: {
-      kind: { const: 'workout' },
-      entityId: {
-        type: 'string',
-        maxLength: 30,
-        pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
-      },
-      snapshotAt: {
-        type: 'string',
-        minLength: 24,
-        maxLength: 24,
-        pattern:
-          '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$',
-      },
-    },
-    required: ['kind', 'entityId', 'snapshotAt'],
+    properties: workoutTrackingProperties,
+    required: ['kind', 'entityId'],
+  } as const
+  const workoutTracking = {
+    type: 'object',
+    additionalProperties: false,
+    properties: workoutTrackingProperties,
+    required: ['kind', 'entityId'],
   } as const
   const workoutSet = {
     type: 'object',
@@ -1409,18 +1409,24 @@ function createAssistantResponseCardJsonSchema() {
       'goals',
     ],
   } as const
-  const compactTableFields = {
+  const compactTableProperties = {
+    kind: { const: 'compact_table' },
+    version: { const: 1 },
+    title: responseCardTextSchema(
+      compactTableCardV1Bounds.title,
+    ),
+    subtitle: responseCardNullableTextSchema(
+      compactTableCardV1Bounds.subtitle,
+    ),
+    footer: responseCardNullableTextSchema(
+      compactTableCardV1Bounds.footer,
+    ),
+  } as const
+  const compactTableGeneric = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      kind: { const: 'compact_table' },
-      version: { const: 1 },
-      title: responseCardTextSchema(
-        compactTableCardV1Bounds.title,
-      ),
-      subtitle: responseCardNullableTextSchema(
-        compactTableCardV1Bounds.subtitle,
-      ),
+      ...compactTableProperties,
       rowHeader: responseCardTextSchema(
         compactTableCardV1Bounds.rowHeader,
       ),
@@ -1438,10 +1444,27 @@ function createAssistantResponseCardJsonSchema() {
         maxItems: compactTableCardV1Bounds.rows,
         items: row,
       },
-      footer: responseCardNullableTextSchema(
-        compactTableCardV1Bounds.footer,
-      ),
       tracking,
+    },
+    required: [
+      'kind',
+      'version',
+      'title',
+      'subtitle',
+      'rowHeader',
+      'columns',
+      'rows',
+      'footer',
+      'tracking',
+    ],
+  } as const
+  const compactTableWorkout = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      ...compactTableProperties,
+      subtitle: { type: 'null' },
+      tracking: workoutTracking,
       workout,
     },
     required: [
@@ -1451,35 +1474,13 @@ function createAssistantResponseCardJsonSchema() {
       'subtitle',
       'footer',
       'tracking',
-    ],
-  } as const
-  const compactTable = {
-    allOf: [
-      compactTableFields,
-      {
-        oneOf: [
-          {
-            properties: { workout: false },
-            required: ['rowHeader', 'columns', 'rows'],
-          },
-          {
-            properties: {
-              columns: false,
-              rowHeader: false,
-              rows: false,
-              subtitle: { type: 'null' },
-              tracking: { type: 'object' },
-            },
-            required: ['workout'],
-          },
-        ],
-      },
+      'workout',
     ],
   } as const
 
   return {
     description:
       'Author daily_nutrition V2, generic compact_table V1, or compact_table workout V1.',
-    anyOf: [nutrition, compactTable],
+    anyOf: [nutrition, compactTableGeneric, compactTableWorkout],
   } as const
 }
