@@ -1,6 +1,6 @@
 # Hosted runtime normal-completion marker
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -74,9 +74,12 @@ Updated: 2026-08-25
 
 ## Verification
 
-- Commands to run: focused assistant-runtime entrypoint test, hosted-execution
-  runtime-control test, both affected package typechecks, `git diff --check`,
-  privacy scan, required exact-head ReviewGPT gates, and required GitHub checks.
-- Expected outcomes: exactly one typed terminal event on successful empty system
-  processing, none on thrown/aborted execution, unchanged invocation result and
-  passing affected package contracts.
+- Focused assistant-runtime proof passed for successful empty system processing,
+  default-mode normalization, and no terminal event on abort.
+- The hosted-execution registry test and both affected package typechecks passed.
+- `git diff --check`, the added-line privacy scan, final ReviewGPT round 1, and
+  the required GitHub checks passed on the immutable reviewed candidate.
+- Preliminary specialist review found one isolated default-mode coverage gap;
+  the accepted test-only correction passed its focused test and package
+  typecheck without changing production behavior.
+Completed: 2026-08-25
