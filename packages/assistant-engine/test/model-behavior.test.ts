@@ -3267,7 +3267,10 @@ describe('assistant conversation scope', () => {
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(
-      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+      'For an ordinary save, omit `slug`; it creates a new automation with a host-generated `automationId`, even when another automation has the same title.',
+    )
+    expect(prompt).toContain(
+      'Only when the current loaded skill defines an exact stable recipe key may save include that exact value as `slug`; never derive one from a title or invent one.',
     )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
@@ -3404,7 +3407,7 @@ describe('assistant conversation scope', () => {
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(
-      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+      'For an ordinary save, omit `slug`; it creates a new automation with a host-generated `automationId`, even when another automation has the same title.',
     )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',

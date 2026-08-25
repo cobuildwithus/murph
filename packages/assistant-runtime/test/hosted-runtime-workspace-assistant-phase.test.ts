@@ -5392,6 +5392,77 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             routeBinding: "preserved",
             status: "paused",
           }));
+
+          const reminderRoot = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Send the synthetic mobility reminder.",
+            schedule: { kind: "dailyLocal", localTime: "08:00" },
+            title: "Mobility reminder",
+          });
+          if (!reminderRoot || reminderRoot.action !== "save") {
+            throw new Error("Expected root reminder save.");
+          }
+          await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: reminderRoot.updatedAt,
+            lookup: reminderRoot.automationId,
+            status: "archived",
+          });
+          const repeatedTitleReminder =
+            await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Send the new mobility reminder.",
+            schedule: { kind: "dailyLocal", localTime: "08:15" },
+            title: "Mobility reminder",
+          });
+          if (
+            !repeatedTitleReminder
+            || repeatedTitleReminder.action !== "save"
+          ) {
+            throw new Error("Expected repeated-title reminder save.");
+          }
+          expect(repeatedTitleReminder).toEqual(expect.objectContaining({
+            created: true,
+            lookupId: repeatedTitleReminder.automationId
+              .toLowerCase()
+              .replace("_", "-"),
+            status: "active",
+          }));
+          expect(repeatedTitleReminder.automationId).not.toBe(
+            reminderRoot.automationId,
+          );
+          const reservedTitleReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              instructions: "Send this ordinary synthetic reminder.",
+              schedule: { kind: "dailyLocal", localTime: "08:30" },
+              title: "Onboarding first personal read",
+            });
+          expect(reservedTitleReminder).toEqual(expect.objectContaining({
+            action: "save",
+            created: true,
+            status: "active",
+          }));
+          if (!reservedTitleReminder || reservedTitleReminder.action !== "save") {
+            throw new Error("Expected ordinary reserved-title reminder save.");
+          }
+          expect(reservedTitleReminder.automationId).not.toBe(
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          );
+          const archivedReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "inspect",
+              lookup: reminderRoot.automationId,
+            });
+          if (!archivedReminder || archivedReminder.action !== "inspect") {
+            throw new Error("Expected archived reminder inspection.");
+          }
+          expect(archivedReminder).toEqual(expect.objectContaining({
+            automationId: reminderRoot.automationId,
+            lookupId: reminderRoot.automationId.toLowerCase().replace("_", "-"),
+            status: "archived",
+          }));
+
           const stale = await executionContext.hosted?.automationTool?.request({
             action: "save",
             instructions: "Archive this stale group check-in.",
@@ -6842,7 +6913,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         buildOnboardingFirstPersonalReadAutomationSaveRequest({
           now: new Date("2026-08-06T21:00:00.000Z"),
         });
-      const genericFixedTargetRequests = [
+      const genericFixedIdentityRequests = [
         {
           action: "save" as const,
           automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -6863,17 +6934,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
           title: "Replacement by slug",
         },
-        {
-          action: "save" as const,
-          instructions: "Replace the fixed first-read policy.",
-          schedule: {
-            at: "2026-08-06T21:02:00.000Z",
-            kind: "at" as const,
-          },
-          title: "Onboarding___first / personal read",
-        },
       ];
-      for (const request of genericFixedTargetRequests) {
+      for (const request of genericFixedIdentityRequests) {
         await expect(operationScope.runAutoReplyGroup({
           executionContext: laneInput.executionContext,
           inputIds: [inputId],
@@ -6897,7 +6959,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
-          return await automationTool.request(genericFixedTargetRequests[0], {
+          return await automationTool.request(genericFixedIdentityRequests[0], {
             onboardingFirstReadCompletionTransition: true,
           });
         },
