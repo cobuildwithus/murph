@@ -1,6 +1,6 @@
 # Simplify specialist ReviewGPT review
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -47,11 +47,11 @@ Updated: 2026-08-25
 
 ## Tasks
 
-1. Define one coverage applicability and finding threshold.
-2. Remove the coverage patch artifact contract from live owners.
-3. Update affected prompt packaging/tests without compatibility machinery.
-4. Run focused verification and inspect the final diff for privacy and scope.
-5. Commit, push, run required ReviewGPT/CI gates, and prepare the PR.
+1. [x] Define one coverage applicability and finding threshold.
+2. [x] Remove the coverage patch artifact contract from live owners.
+3. [x] Update affected prompt packaging/tests without compatibility machinery.
+4. [x] Run focused verification and inspect the final diff for privacy and scope.
+5. [x] Commit, push, run required ReviewGPT gates, and prepare the PR for CI.
 
 ## Decisions
 
@@ -64,6 +64,9 @@ Updated: 2026-08-25
   alias.
 - Align the Frog specialist-response validator with the preset's canonical
   `Product UX lens` field while deleting the patch-artifact field.
+- Accept the preliminary and final ReviewGPT findings that the release audit
+  still encoded the retired patch contract. Delete those stale references in
+  the workflow owner and CLI fixtures; do not introduce replacement machinery.
 
 ## Verification
 
@@ -72,9 +75,16 @@ Updated: 2026-08-25
 - Focused Frog autofix and ReviewGPT config tests: 61 passed after isolating
   nested Git fixtures from inherited global hooks.
 - `pnpm docs:drift`: passed. `pnpm docs:gardening`: passed with zero issues.
+- CLI release-flow and package-concurrency tests: 50 passed and 1 intentionally
+  skipped after the ReviewGPT-requested stale-contract cleanup.
+- `pnpm --filter @murphai/murph typecheck`: passed.
 - Diff-aware lane: syntax, architecture/privacy guards, repo-tool typecheck,
   dependency policy, and 680 repository-tool tests passed. Five unrelated
   worktree-storage tests exceeded fixed timeouts under broad-shard contention;
   the complete file passed 64 of 64 when rerun alone.
-- Remaining: exact diff/privacy review, scoped candidate commit, preliminary
-  ReviewGPT prompt lens, exact-head CI, plan closure, and final handoff.
+- Preliminary specialist ReviewGPT and final ReviewGPT round 1 each found the
+  same obsolete live contract. The accepted non-production remediation is
+  covered by focused tests and does not require either review to rerun.
+- Final exact-diff/privacy inspection, shell syntax, docs drift, and docs
+  gardening passed. Remaining remote proof is required exact-head CI.
+Completed: 2026-08-25

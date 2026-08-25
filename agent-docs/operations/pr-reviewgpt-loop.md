@@ -117,17 +117,17 @@ concrete code or path evidence, current user or operational harm, and the
 smallest justified fix with its complexity cost.
 
 A preliminary specialist result does not end the active task turn. After the
-parent reports the result and dispositions as a progress update, it may inspect
-an attached coverage artifact and remediate accepted findings within the
-existing task authority without asking for separate user permission. This
-continuation does not authorize a scope expansion, destructive action, or
-external action that otherwise requires approval.
+parent reports the result and dispositions as a progress update, it may
+remediate accepted findings within the existing task authority without asking
+for separate user permission. This continuation does not authorize a scope
+expansion, destructive action, or external action that otherwise requires
+approval.
 
 A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
 and dispositions, then wait for the user to resume before mutating the
-candidate, downloading or applying an artifact, launching another review, or
-merging. If a concurrent final stage returns `FINDINGS`, that stricter pause
-also blocks pending specialist-driven mutation. A validated final
+candidate, launching another review, or merging. If a concurrent final stage
+returns `FINDINGS`, that stricter pause also blocks pending specialist-driven
+mutation. A validated final
 `ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
 the remaining parent review and merge checks without a user-resume pause.
 
