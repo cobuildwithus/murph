@@ -28,6 +28,20 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Hosted Runtime Terminal-Event Rollout
+
+When the runner adds a strict hosted runtime event code, deploy Web's shared
+hosted-execution reader first. Next deploy the Cloudflare runner bundle with
+immediate convergence and let older containers drain. A new runner must not
+write the event to an older Web reader because the older strict registry can
+reject the bounded runtime-log batch.
+
+Roll back the runner writer first and let the newer event drain before rolling
+back Web. After deployment, use a bounded time window to compare aggregate
+empty `mailbox.imported` attempts with `runtime.invocation_finished` attempts
+and confirm the Web ingest-rejection aggregate remains zero. Keep the proof
+deidentified: report only aggregate counts, not attempt IDs or row payloads.
+
 ## Gemini Video Analysis Rollout
 
 Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
