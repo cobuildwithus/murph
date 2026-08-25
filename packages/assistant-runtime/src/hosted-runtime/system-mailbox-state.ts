@@ -181,12 +181,20 @@ export async function updateHostedSystemMailboxState<TResult = void>(
   ) =>
     | HostedSystemMailboxState
     | { result: TResult; state: HostedSystemMailboxState }
-    | Promise<HostedSystemMailboxState | { result: TResult; state: HostedSystemMailboxState }>,
+    | { result: TResult; write: false }
+    | Promise<
+        | HostedSystemMailboxState
+        | { result: TResult; state: HostedSystemMailboxState }
+        | { result: TResult; write: false }
+      >,
   options: { now?: () => string } = {},
 ): Promise<TResult> {
   return await withAssistantRuntimeWriteLock(vaultRoot, async () => {
     const current = await readHostedSystemMailboxState(vaultRoot);
     const updated = await update(current);
+    if (isHostedSystemMailboxStateReadResult(updated)) {
+      return updated.result;
+    }
     const nextState = isHostedSystemMailboxStateUpdateResult<TResult>(updated)
       ? updated.state
       : updated;
@@ -498,7 +506,7 @@ function isHostedUserInvokedDelegatedSystemMailboxItem(
   return isHostedGroupContextHandoffSystemMailboxItem(item);
 }
 
-function isHostedGroupContextHandoffSystemMailboxItem(
+export function isHostedGroupContextHandoffSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
   if (
@@ -1207,10 +1215,22 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
 }
 
 function isHostedSystemMailboxStateUpdateResult<TResult>(
-  value: HostedSystemMailboxState | { result: TResult; state: HostedSystemMailboxState },
+  value:
+    | HostedSystemMailboxState
+    | { result: TResult; state: HostedSystemMailboxState }
+    | { result: TResult; write: false },
 ): value is { result: TResult; state: HostedSystemMailboxState } {
   return typeof (value as { result?: unknown }).result !== "undefined"
     && typeof (value as { state?: unknown }).state !== "undefined";
+}
+
+function isHostedSystemMailboxStateReadResult<TResult>(
+  value:
+    | HostedSystemMailboxState
+    | { result: TResult; state: HostedSystemMailboxState }
+    | { result: TResult; write: false },
+): value is { result: TResult; write: false } {
+  return "write" in value && value.write === false;
 }
 
 function isVersionedJsonEnvelope(value: unknown): boolean {

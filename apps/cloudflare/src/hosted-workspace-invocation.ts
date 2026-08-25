@@ -58,6 +58,7 @@ import {
   isHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
+const HOSTED_ASSISTANT_RUNTIME_NAME = "cloudflare-hosted-runner";
 const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
 const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
   "home",
@@ -85,6 +86,7 @@ export interface HostedWorkspaceInvocationOptions {
   ) => void;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   runnerJobAcceptedAt?: string | null;
+  releaseSha?: string | null;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
   supervisorEnv: Readonly<Record<string, string | undefined>>;
@@ -244,6 +246,10 @@ export async function runHostedWorkspaceInvocation(
       onConversationActivityObserved: options.onConversationActivityObserved,
       platform,
       readCurrentLease: () => currentLease,
+      runtimeIssueProvenance: {
+        releaseSha: options.releaseSha ?? null,
+        runtimeName: HOSTED_ASSISTANT_RUNTIME_NAME,
+      },
       runtimeWakeSignal,
       shutdownSignal: options.shutdownSignal ?? null,
       snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),

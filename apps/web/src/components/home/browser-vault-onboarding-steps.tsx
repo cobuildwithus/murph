@@ -35,7 +35,7 @@ export function BrowserVaultOnboardingStepsContent({
   protocols,
   ...props
 }: BrowserVaultOnboardingStepsProps) {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, error, status } = useBrowserVault();
   const vaultUnavailable = status === "error" && client === null;
   const hideLabsStep =
     props.hideLabsStep ||
@@ -55,10 +55,7 @@ export function BrowserVaultOnboardingStepsContent({
   if (vaultUnavailable) {
     return (
       <>
-        <BrowserVaultUnavailableAlert
-          message={error}
-          onRetry={() => void refresh()}
-        />
+        <BrowserVaultUnavailableAlert message={error} />
         <OnboardingSteps
           {...props}
           hideExperimentStep

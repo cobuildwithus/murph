@@ -21,16 +21,23 @@ export interface EntityCollection {
 
 export async function readAssessmentEntitiesStrict(
   vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<CanonicalEntity[]> {
-  return readJsonlEntitiesStrict(vaultRoot, VAULT_LAYOUT.assessmentLedgerDirectory, projectAssessmentEntity);
+  return readJsonlEntitiesStrict(
+    vaultRoot,
+    VAULT_LAYOUT.assessmentLedgerDirectory,
+    projectAssessmentEntity,
+    options,
+  );
 }
 
 export async function readJsonlEntitiesStrict(
   vaultRoot: string,
   relativeRoot: string,
   project: (value: unknown, relativePath: string) => CanonicalEntity | null,
+  options: { signal?: AbortSignal } = {},
 ): Promise<CanonicalEntity[]> {
-  return (await readJsonlRecords(vaultRoot, relativeRoot))
+  return (await readJsonlRecords(vaultRoot, relativeRoot, options))
     .map((entry) => project(entry.value, entry.relativePath))
     .filter((entity): entity is CanonicalEntity => entity !== null)
     .sort(compareCanonicalEntities);
@@ -51,9 +58,10 @@ export async function readJsonlEntitiesTolerant(
   vaultRoot: string,
   relativeRoot: string,
   project: (value: unknown, relativePath: string) => CanonicalEntity | null,
+  options: { signal?: AbortSignal } = {},
 ): Promise<EntityCollection> {
   return projectJsonlOutcomes(
-    await readJsonlRecordOutcomes(vaultRoot, relativeRoot),
+    await readJsonlRecordOutcomes(vaultRoot, relativeRoot, options),
     project,
   );
 }

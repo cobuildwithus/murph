@@ -53,10 +53,7 @@ export function HomeLoadStateStudy() {
         id="home-browser-vault-unavailable-section"
         inert
       >
-        <BrowserVaultUnavailableAlert
-          message="Your dashboard data is not available right now."
-          onRetry={() => {}}
-        />
+        <BrowserVaultUnavailableAlert message="Your dashboard data is not available right now." />
       </div>
     </div>
   );

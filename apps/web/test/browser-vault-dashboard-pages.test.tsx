@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 
-import { act, createElement } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -236,7 +236,7 @@ test("PatternsPage keeps a legacy replica in the preparing state during refresh"
   assert.doesNotMatch(markup, /No clear comparison is ready/u);
 });
 
-test("PatternsPage exposes the existing retry action after a load failure", async () => {
+test("PatternsPage keeps a stable error without a Retry action", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
@@ -248,6 +248,7 @@ test("PatternsPage exposes the existing retry action after a load failure", asyn
   });
   const rendered = await renderClientComponent(
     createElement(PatternsPageClient),
+    { requireButton: false },
   );
 
   try {
@@ -255,16 +256,13 @@ test("PatternsPage exposes the existing retry action after a load failure", asyn
       rendered.container.textContent ?? "",
       /Could not load your patterns/u,
     );
-    const retryButton = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry",
+    assert.equal(
+      [...rendered.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry",
+      ),
+      false,
     );
-    assert.ok(retryButton);
-    await act(async () => {
-      retryButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.equal(mocks.refresh.mock.calls.length, 0);
   } finally {
     await rendered.cleanup();
   }

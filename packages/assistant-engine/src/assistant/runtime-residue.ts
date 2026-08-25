@@ -61,9 +61,36 @@ const ASSISTANT_INPUT_EVENT_RETENTION_LIMIT = 1_000
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
 export interface AssistantGeneratedDeliveryResiduePruneResult {
+  generatedDeliveryActiveFilesMissing: number
+  generatedDeliveryActiveFilesRetained: number
   generatedDeliveryCleanupSkippedUntrustedOutbox: boolean
   generatedDeliveryBytesPruned: number
+  generatedDeliveryBytesScanned: number
   generatedDeliveryFilesPruned: number
+  generatedDeliveryFilesScanned: number
+}
+
+export type AssistantGeneratedDeliveryResiduePruneErrorCode =
+  | 'active_file_multiple_hard_links'
+  | 'directory_changed'
+  | 'file_changed'
+  | 'root_not_directory'
+  | 'staging_not_flat'
+  | 'staging_non_regular_file'
+  | 'staging_symlink'
+  | 'unsafe_filename'
+
+export class AssistantGeneratedDeliveryResiduePruneError extends Error {
+  readonly code: AssistantGeneratedDeliveryResiduePruneErrorCode
+
+  constructor(
+    code: AssistantGeneratedDeliveryResiduePruneErrorCode,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'AssistantGeneratedDeliveryResiduePruneError'
+    this.code = code
+  }
 }
 
 export interface AssistantRuntimeResiduePruneResult {
@@ -125,6 +152,8 @@ interface AssistantGeneratedDeliveryFileSnapshot {
 }
 
 interface AssistantGeneratedDeliveryPrunePlan {
+  activeFilesMissing: number
+  activeFilesRetained: number
   files: AssistantGeneratedDeliveryFileSnapshot[]
   inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[]
   root: string | null
@@ -187,10 +216,17 @@ export async function pruneAssistantGeneratedDeliveryResidue(input: {
         vault: input.vault,
       })
       return {
+        generatedDeliveryActiveFilesMissing: plan.activeFilesMissing,
+        generatedDeliveryActiveFilesRetained: plan.activeFilesRetained,
         generatedDeliveryCleanupSkippedUntrustedOutbox:
           plan.skippedUntrustedOutbox,
         generatedDeliveryBytesPruned: pruneResult.bytesPruned,
+        generatedDeliveryBytesScanned: plan.inventoryFiles.reduce(
+          (total, file) => total + file.stats.size,
+          0,
+        ),
         generatedDeliveryFilesPruned: pruneResult.filesPruned,
+        generatedDeliveryFilesScanned: plan.inventoryFiles.length,
       }
     },
     input.signal,
@@ -342,6 +378,8 @@ async function planAssistantGeneratedDeliveryPrune(input: {
 }): Promise<AssistantGeneratedDeliveryPrunePlan> {
   if (!input.outbox.trusted) {
     return {
+      activeFilesMissing: 0,
+      activeFilesRetained: 0,
       files: [],
       inventoryFiles: [],
       root: null,
@@ -386,6 +424,8 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         || media.sha256 !== first.sha256)
     ) {
       return {
+        activeFilesMissing: 0,
+        activeFilesRetained: 0,
         files: [],
         inventoryFiles: [],
         root: null,
@@ -405,12 +445,9 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   } catch (error) {
     input.signal?.throwIfAborted()
     if (isMissingFileError(error)) {
-      if (activeMediaByRef.size > 0) {
-        throw new Error(
-          'An active assistant generated delivery is missing from runtime staging.',
-        )
-      }
       return {
+        activeFilesMissing: activeMediaByRef.size,
+        activeFilesRetained: 0,
         files: [],
         inventoryFiles: [],
         root: null,
@@ -420,7 +457,8 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     throw error
   }
   if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
-    throw new Error(
+    throw new AssistantGeneratedDeliveryResiduePruneError(
+      'root_not_directory',
       'Assistant generated-delivery root must be a regular directory.',
     )
   }
@@ -437,27 +475,32 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     const stats = await lstat(absolutePath)
     input.signal?.throwIfAborted()
     if (entry.isSymbolicLink() || stats.isSymbolicLink()) {
-      throw new Error(
+      throw new AssistantGeneratedDeliveryResiduePruneError(
+        'staging_symlink',
         'Assistant generated-delivery paths must not contain symlinks.',
       )
     }
     if (entry.isDirectory() && stats.isDirectory()) {
-      throw new Error(
+      throw new AssistantGeneratedDeliveryResiduePruneError(
+        'staging_not_flat',
         'Assistant generated-delivery staging must remain flat.',
       )
     }
     if (!entry.isFile() || !stats.isFile()) {
-      throw new Error(
+      throw new AssistantGeneratedDeliveryResiduePruneError(
+        'staging_non_regular_file',
         'Assistant generated-delivery staging may contain only regular files.',
       )
     }
     if (!isAssistantGeneratedDeliveryRef(ref)) {
-      throw new Error(
+      throw new AssistantGeneratedDeliveryResiduePruneError(
+        'unsafe_filename',
         'Assistant generated-delivery staging contains an unsafe filename.',
       )
     }
     if (stats.nlink !== 1 && activeMediaByRef.has(ref)) {
-      throw new Error(
+      throw new AssistantGeneratedDeliveryResiduePruneError(
+        'active_file_multiple_hard_links',
         'An active assistant generated delivery must have exactly one hard link.',
       )
     }
@@ -480,13 +523,12 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 
   const observedRefs = new Set(inventoryFiles.map((file) => file.ref))
-  for (const activeRef of activeMediaByRef.keys()) {
-    if (!observedRefs.has(activeRef)) {
-      throw new Error(
-        'An active assistant generated delivery is missing from runtime staging.',
-      )
-    }
-  }
+  const activeFilesMissing = [...activeMediaByRef.keys()].filter(
+    (activeRef) => !observedRefs.has(activeRef),
+  ).length
+  const activeFilesRetained = [...activeMediaByRef.keys()].filter(
+    (activeRef) => observedRefs.has(activeRef),
+  ).length
 
   for (const file of inventoryFiles) {
     input.signal?.throwIfAborted()
@@ -498,6 +540,8 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 
   return {
+    activeFilesMissing,
+    activeFilesRetained,
     files,
     inventoryFiles,
     root,
@@ -602,14 +646,16 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
       )
       input.signal?.throwIfAborted()
       if (resolvedDirectory !== input.plan.root) {
-        throw new Error(
+        throw new AssistantGeneratedDeliveryResiduePruneError(
+          'directory_changed',
           'Assistant generated-delivery directory changed during cleanup.',
         )
       }
       const stats = await lstat(input.plan.root)
       input.signal?.throwIfAborted()
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
-        throw new Error(
+        throw new AssistantGeneratedDeliveryResiduePruneError(
+          'directory_changed',
           'Assistant generated-delivery directory changed during cleanup.',
         )
       }
@@ -645,18 +691,32 @@ async function assertAssistantGeneratedDeliveryFileUnchanged(input: {
   )
   input.signal?.throwIfAborted()
   if (resolvedPath !== input.file.absolutePath) {
-    throw new Error(
+    throw new AssistantGeneratedDeliveryResiduePruneError(
+      'file_changed',
       'Assistant generated-delivery file changed during cleanup.',
     )
   }
-  const current = await lstat(resolvedPath)
+  let current: Stats
+  try {
+    current = await lstat(resolvedPath)
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    if (isMissingFileError(error)) {
+      throw new AssistantGeneratedDeliveryResiduePruneError(
+        'file_changed',
+        'Assistant generated-delivery file changed during cleanup.',
+      )
+    }
+    throw error
+  }
   input.signal?.throwIfAborted()
   if (
     current.isSymbolicLink() ||
     !current.isFile() ||
     !assistantFileStatsMatch(input.file.stats, current)
   ) {
-    throw new Error(
+    throw new AssistantGeneratedDeliveryResiduePruneError(
+      'file_changed',
       'Assistant generated-delivery file changed during cleanup.',
     )
   }

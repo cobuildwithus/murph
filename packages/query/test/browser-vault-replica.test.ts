@@ -25,6 +25,7 @@ import {
   selectBrowserVaultTrackedExperiments,
 } from "../src/browser.ts";
 import { analyzeExperimentOutcome, buildMetricProjection } from "../src/index.ts";
+import { stringifyJsonCooperatively } from "../src/browser-replica/json.ts";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
@@ -508,6 +509,27 @@ test("browser vault replica generation is content-addressed and legacy-readable"
     () => parseBrowserVaultReplica({ ...replica, generation: Number.MAX_SAFE_INTEGER + 1 }),
     /generation must be a positive safe integer/u,
   );
+});
+
+test("cooperative Browser Vault serialization matches JSON and observes cancellation", async () => {
+  const value = {
+    array: [undefined, Number.NaN, "kept"],
+    omitted: undefined,
+    present: {
+      value: 42,
+    },
+  };
+  assert.equal(await stringifyJsonCooperatively(value), JSON.stringify(value));
+
+  const controller = new AbortController();
+  const reason = new DOMException("Foreground work took priority.", "AbortError");
+  const serialization = stringifyJsonCooperatively(
+    Array.from({ length: 20_000 }, (_entry, index) => ({ index })),
+    { signal: controller.signal },
+  );
+  setImmediate(() => controller.abort(reason));
+
+  await assert.rejects(serialization, (error: unknown) => error === reason);
 });
 
 test("browser vault query client freezes the exposed replica graph", async () => {

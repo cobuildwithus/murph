@@ -13,7 +13,6 @@ import type {
   TimelineEvent,
   TrendData,
 } from "@/src/types/experiments";
-import { Button } from "@/src/components/ui/button";
 import { ExperimentSummaryTiles } from "./experiment-summary-tiles";
 import { ResultsSummary, ResultsSummarySkeleton } from "./results-summary";
 import { StartExperimentButton } from "./start-experiment-button";
@@ -22,7 +21,6 @@ interface ResultsTabProps {
   experiment: ResultsTabExperiment;
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
-  onPrivateRunRetry?: () => Promise<void>;
   privateRunError: string | null;
   privateRunStatus: BrowserVaultStatus;
   showFinishedOutcomeSummary?: boolean;
@@ -55,7 +53,6 @@ export function ResultsTab({
   experiment,
   initialContactChannels,
   murphPhoneNumber,
-  onPrivateRunRetry,
   privateRunError,
   privateRunStatus,
   showFinishedOutcomeSummary = true,
@@ -117,9 +114,6 @@ export function ResultsTab({
           alert
           title="Your results couldn't load"
           body={privateRunError ?? "We couldn't unlock your private results right now. The protocol details are still available."}
-          action={onPrivateRunRetry
-            ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
-            : null}
         />
       )}
 
@@ -148,9 +142,6 @@ export function ResultsTab({
           alert
           title="Showing saved results"
           body={`Refresh failed. ${privateRunError}`}
-          action={onPrivateRunRetry
-            ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
-            : null}
         />
       )}
 

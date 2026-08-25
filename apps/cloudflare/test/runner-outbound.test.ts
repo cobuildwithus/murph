@@ -134,6 +134,7 @@ import {
   resetRunnerOutboundSharedCachesForTest,
 } from "../src/runner-outbound/shared.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -304,6 +305,16 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync reconcile",
     path: "/api/internal/device-sync/reconcile",
+  },
+  {
+    body: {
+      assistantInputId: `ain_${"a".repeat(32)}`,
+      afterDays: 10,
+      mode: "after_days",
+      sourceProviderSlug: "garmin",
+    },
+    name: "device-sync no-data outreach",
+    path: HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   },
   {
     body: {
@@ -752,18 +763,23 @@ describe("handleRunnerOutboundRequest", () => {
       })).toBe(true);
 
       const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      const responseBody = path === "/api/internal/hosted-workspace/checkpoint"
+        ? createHostedWorkspaceCheckpointResponse("5")
+        : path === HOSTED_RUNTIME_USAGE_RECORD_PATH
+        ? {
+            platformAiUsageAllowedAfter: true,
+            recorded: true,
+            usageId: "usage_allowlisted_proxy",
+          }
+        : {
+            ok: true,
+            path,
+          };
       const fetchMock = vi.fn(async (
         ..._args: Parameters<typeof fetch>
       ): Promise<Response> =>
         new Response(
-          JSON.stringify(
-            path === "/api/internal/hosted-workspace/checkpoint"
-              ? createHostedWorkspaceCheckpointResponse("5")
-              : {
-                  ok: true,
-                  path,
-                },
-          ),
+          JSON.stringify(responseBody),
           {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -799,14 +815,7 @@ describe("handleRunnerOutboundRequest", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual(
-        path === "/api/internal/hosted-workspace/checkpoint"
-          ? createHostedWorkspaceCheckpointResponse("5")
-          : {
-              ok: true,
-              path,
-            },
-      );
+      await expect(response.json()).resolves.toEqual(responseBody);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const firstCall = fetchMock.mock.calls[0];
       if (!firstCall) {
@@ -1901,6 +1910,7 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("adds hosted usage reporting attribution inside the Worker web-control proxy", async () => {
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => true);
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> =>
@@ -1931,6 +1941,13 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              revokeActiveRuntimePlatformAiUsage,
+            };
+          },
+        },
       }),
       "member_123",
     );
@@ -1951,13 +1968,22 @@ describe("handleRunnerOutboundRequest", () => {
         }),
       },
     }));
+    expect(revokeActiveRuntimePlatformAiUsage).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
   });
 
   it("clears hosted usage reporting attribution when the Worker secret is absent", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> =>
-      new Response(JSON.stringify({ ok: true }), {
+      new Response(JSON.stringify({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "turn_123.attempt-1",
+      }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
         },

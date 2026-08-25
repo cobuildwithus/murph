@@ -221,6 +221,19 @@ test("hashCanonicalQuerySources changes when query-visible files are deleted", a
   assert.notEqual(empty.hash, populated.hash);
 });
 
+test("hashCanonicalQuerySources rejects an already-aborted source read", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "# Core\n");
+  const controller = new AbortController();
+  const reason = new DOMException("Source hash was cancelled.", "AbortError");
+  controller.abort(reason);
+
+  await assert.rejects(
+    hashCanonicalQuerySources(vaultRoot, { signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
+});
+
 test("isCanonicalQuerySourcePath matches the shared source families", () => {
   assert.equal(isCanonicalQuerySourcePath(VAULT_LAYOUT.metadata), true);
   assert.equal(

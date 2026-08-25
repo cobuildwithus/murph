@@ -1,6 +1,7 @@
 ---
 title: 'Removing a temporary workspace dependency rewrites unrelated lockfile peers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2162'
 ---
 
 ## Expected Behavior

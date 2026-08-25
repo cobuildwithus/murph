@@ -245,7 +245,49 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       ],
       [
         'pr-head-draft-reset.yml',
-        workflow.replace('  pull-requests: write', '  contents: write'),
+        workflow.replace('permissions: {}', 'permissions:\n  pull-requests: write'),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '      name: frog-reconciliation',
+          '      name: unprotected',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '          permission-contents: write\n',
+          '',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '          permission-pull-requests: write',
+          '          permission-issues: write\n          permission-pull-requests: write',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1',
+          'actions/create-github-app-token@v3',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          'GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}',
+          'GH_TOKEN: ${{ github.token }}',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}',
+          '          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}\n          UNRELATED_SECRET: ${{ secrets.OTHER_SECRET }}',
+        ),
       ],
       [
         'pr-head-draft-reset.yml',
@@ -264,8 +306,8 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       [
         'pr-head-draft-reset.yml',
         workflow.replace(
-          '    steps:\n      - name: Convert the exact synchronized head to draft',
-          '    steps:\n      - uses: actions/checkout@untrusted\n      - name: Convert the exact synchronized head to draft',
+          '      - name: Convert the exact synchronized head to draft',
+          '      - uses: actions/checkout@untrusted\n      - name: Convert the exact synchronized head to draft',
         ),
       ],
     ] as const) {
@@ -543,7 +585,6 @@ function isAllowedPrHeadDraftResetHandoff(
   if (
     file !== 'pr-head-draft-reset.yml'
     || description !== 'workflow_run handoff trigger'
-    || workflow.includes('secrets.')
     || workflow.includes('pull_request_target')
   ) {
     return false
@@ -566,14 +607,23 @@ function isAllowedPrHeadDraftResetHandoff(
   if (
     !isRecord(workflowRun)
     || !isRecord(resetJob)
+    || !isRecord(resetJob.environment)
     || !Array.isArray(resetJob.steps)
-    || resetJob.steps.length !== 1
+    || resetJob.steps.length !== 2
   ) {
     return false
   }
 
-  const resetStep = resetJob.steps[0]
-  if (!isRecord(resetStep) || !isRecord(resetStep.env) || typeof resetStep.run !== 'string') {
+  const tokenStep = resetJob.steps[0]
+  const resetStep = resetJob.steps[1]
+  const secretExpressions = workflow.match(/\$\{\{[^}]*\bsecrets\.[^}]*\}\}/gu)
+  if (
+    !isRecord(tokenStep)
+    || !isRecord(tokenStep.with)
+    || !isRecord(resetStep)
+    || !isRecord(resetStep.env)
+    || typeof resetStep.run !== 'string'
+  ) {
     return false
   }
 
@@ -581,16 +631,30 @@ function isAllowedPrHeadDraftResetHandoff(
     isStringArray(workflowRun.workflows, ['Pull Request Head Change'])
     && isStringArray(workflowRun.types, ['completed'])
     && Object.keys(triggers).join(',') === 'workflow_run'
-    && Object.keys(permissions).join(',') === 'pull-requests'
-    && permissions['pull-requests'] === 'write'
+    && Object.keys(permissions).length === 0
     && resetJob.permissions === undefined
+    && resetJob.environment.name === 'frog-reconciliation'
+    && resetJob.environment.deployment === false
     && resetJob.if === "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}"
+    && tokenStep.name === 'Mint draft-reset pull request token'
+    && tokenStep.id === 'frog-app-token'
+    && tokenStep.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1'
+    && Object.keys(tokenStep.with).sort().join(',') === 'client-id,permission-contents,permission-pull-requests,private-key'
+    && tokenStep.with['client-id'] === '${{ vars.FROG_APP_CLIENT_ID }}'
+    && tokenStep.with['private-key'] === '${{ secrets.FROG_APP_PRIVATE_KEY }}'
+    && tokenStep.with['permission-contents'] === 'write'
+    && tokenStep.with['permission-pull-requests'] === 'write'
+    && secretExpressions !== null
+    && secretExpressions.length === 1
+    && secretExpressions[0] === '${{ secrets.FROG_APP_PRIVATE_KEY }}'
     && resetStep.name === 'Convert the exact synchronized head to draft'
     && resetStep.shell === 'bash'
     && resetStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'
-    && resetStep.env.GH_TOKEN === '${{ github.token }}'
+    && resetStep.env.GH_TOKEN === '${{ steps.frog-app-token.outputs.token }}'
     && resetStep.env.HEAD_BRANCH === '${{ github.event.workflow_run.head_branch }}'
     && resetStep.env.HEAD_REPOSITORY === '${{ github.event.workflow_run.head_repository.full_name }}'
+    && !workflow.includes('github.token')
+    && !workflow.includes('secrets.GITHUB_TOKEN')
     && !workflow.includes('github.event.workflow_run.pull_requests[0]')
     && !resetStep.run.includes('commits/${EXPECTED_HEAD_SHA}/pulls')
     && resetStep.run.includes('HEAD_OWNER="${HEAD_REPOSITORY%%/*}"')

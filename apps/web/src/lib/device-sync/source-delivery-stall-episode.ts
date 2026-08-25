@@ -4,6 +4,8 @@ import {
   isPushPrimarySourceRecoveryNoticeEligible,
 } from "@murphai/device-syncd/source-staleness";
 
+import { readHostedSourceNoDataOutreachPolicy } from "./source-no-data-outreach-policy";
+
 const NOTICE_IDENTITY_PREFIX = "device-delivery-stalled:v1:";
 const SOURCE_ID_PATTERN = /^dcs_[A-Za-z0-9_-]{1,120}$/u;
 const EPISODE_DIGEST_PATTERN = /^[a-f0-9]{32}$/u;
@@ -104,15 +106,24 @@ export async function isHostedSourceDeliveryStallEpisodeCurrentTx(input: {
     },
     where: { id: identity.sourceId },
   });
+  const outreachPolicy = source
+    ? await readHostedSourceNoDataOutreachPolicy({
+        memberId: input.memberId,
+        prisma: input.tx,
+        sourceProviderSlug: source.sourceProviderSlug,
+      })
+    : null;
   if (
     !source
     || source.connection.userId !== input.memberId
     || source.connection.status !== "active"
     || source.status !== "connected"
     || source.lastDataAt === null
+    || !outreachPolicy?.enabled
     || !isPushPrimarySourceRecoveryNoticeEligible({
       lastDataAt: source.lastDataAt.toISOString(),
       now: input.now,
+      silentHours: outreachPolicy.silentHours,
       sourceProviderSlug: source.sourceProviderSlug,
       status: source.status,
     })

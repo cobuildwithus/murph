@@ -88,6 +88,7 @@ type AsyncEntityReader = (
   vaultRoot: string,
   relativeRoot: string,
   project: (value: unknown, relativePath: string) => CanonicalEntity | null,
+  options?: { signal?: AbortSignal },
 ) => Promise<EntityCollection>;
 
 type SyncEntityReader = (
@@ -99,6 +100,7 @@ type SyncEntityReader = (
 type AsyncRegistryDocumentReader = (
   vaultRoot: string,
   relativePath: string,
+  options?: { signal?: AbortSignal },
 ) => Promise<RegistryDocumentRead>;
 
 type SyncRegistryDocumentReader = (
@@ -126,6 +128,7 @@ export interface CanonicalHealthEntityCollection {
 
 export interface StrictAsyncCanonicalEntityCollectorOptions {
   mode: "strict-async";
+  signal?: AbortSignal;
 }
 
 export interface StrictSyncCanonicalEntityCollectorOptions {
@@ -138,6 +141,7 @@ export interface TolerantSyncCanonicalEntityCollectorOptions {
 
 export interface TolerantAsyncCanonicalEntityCollectorOptions {
   mode: "tolerant-async";
+  signal?: AbortSignal;
 }
 
 const REGISTRY_COLLECTORS = [
@@ -281,7 +285,7 @@ export function collectCanonicalEntities(
     | TolerantAsyncCanonicalEntityCollectorOptions,
 ): CanonicalHealthEntityCollection | Promise<CanonicalHealthEntityCollection> {
   if (options.mode === "strict-async") {
-    return collectCanonicalEntitiesStrict(vaultRoot);
+    return collectCanonicalEntitiesStrict(vaultRoot, options.signal);
   }
 
   if (options.mode === "strict-sync") {
@@ -289,7 +293,7 @@ export function collectCanonicalEntities(
   }
 
   if (options.mode === "tolerant-async") {
-    return collectCanonicalEntitiesTolerantAsync(vaultRoot);
+    return collectCanonicalEntitiesTolerantAsync(vaultRoot, options.signal);
   }
 
   return collectCanonicalEntitiesTolerantSync(vaultRoot);
@@ -297,24 +301,33 @@ export function collectCanonicalEntities(
 
 async function collectCanonicalEntitiesStrict(
   vaultRoot: string,
+  signal?: AbortSignal,
 ): Promise<CanonicalHealthEntityCollection> {
   return collectCanonicalEntitiesAsync(
     vaultRoot,
-    async (strictVaultRoot, relativeRoot, project) => ({
-      entities: await readJsonlEntitiesStrict(strictVaultRoot, relativeRoot, project),
+    async (strictVaultRoot, relativeRoot, project, options) => ({
+      entities: await readJsonlEntitiesStrict(
+        strictVaultRoot,
+        relativeRoot,
+        project,
+        options,
+      ),
       failures: [],
     }),
     readMarkdownDocument,
+    signal,
   );
 }
 
 async function collectCanonicalEntitiesTolerantAsync(
   vaultRoot: string,
+  signal?: AbortSignal,
 ): Promise<CanonicalHealthEntityCollection> {
   return collectCanonicalEntitiesAsync(
     vaultRoot,
     readJsonlEntitiesTolerant,
     readMarkdownDocumentOutcome,
+    signal,
   );
 }
 
@@ -345,18 +358,24 @@ async function collectCanonicalEntitiesAsync(
   vaultRoot: string,
   readJsonlEntities: AsyncEntityReader,
   readRegistryDocument: AsyncRegistryDocumentReader,
+  signal?: AbortSignal,
 ): Promise<CanonicalHealthEntityCollection> {
+  signal?.throwIfAborted();
   const markdownByPath = new Map<string, string>();
   const assessments = await readJsonlEntities(
     vaultRoot,
     VAULT_LAYOUT.assessmentLedgerDirectory,
     projectAssessmentEntity,
+    { signal },
   );
+  signal?.throwIfAborted();
   const registryCollections = await readRegistryCollectionsAsync(
     vaultRoot,
     markdownByPath,
     readRegistryDocument,
+    signal,
   );
+  signal?.throwIfAborted();
 
   return buildCanonicalHealthCollectionFromCollections({
     assessments,
@@ -460,16 +479,19 @@ async function readRegistryCollectionsAsync(
   vaultRoot: string,
   markdownByPath: Map<string, string>,
   readDocument: AsyncRegistryDocumentReader,
+  signal?: AbortSignal,
 ): Promise<RegistryCollectionResult> {
   const collections = createEmptyRegistryCollections();
   const failures: ParseFailure[] = [];
 
   for (const collector of REGISTRY_COLLECTORS) {
+    signal?.throwIfAborted();
     const result = await readRegistryEntitiesAsync(
       vaultRoot,
       collector,
       markdownByPath,
       readDocument,
+      signal,
     );
     collections[collector.key] = result.entities;
     failures.push(...result.failures);
@@ -534,14 +556,21 @@ async function readRegistryEntitiesAsync(
   config: RegistryCollectorConfig,
   markdownByPath: Map<string, string>,
   readDocument: AsyncRegistryDocumentReader,
+  signal?: AbortSignal,
 ): Promise<EntityCollection> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, config.directory, ".md");
+  const relativePaths = await walkRelativeFiles(
+    vaultRoot,
+    config.directory,
+    ".md",
+    { signal },
+  );
   const entities: CanonicalEntity[] = [];
   const failures: ParseFailure[] = [];
 
   for (const relativePath of relativePaths) {
+    signal?.throwIfAborted();
     const outcome = normalizeRegistryDocumentRead(
-      await readDocument(vaultRoot, relativePath),
+      await readDocument(vaultRoot, relativePath, { signal }),
     );
     if (!outcome.ok) {
       failures.push(outcome);

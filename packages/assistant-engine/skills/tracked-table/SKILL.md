@@ -36,7 +36,7 @@ Saved target values remain in the workout format. A newly started session contai
 
 ## Required write flow
 
-1. Resolve mutation authority from an exact canonical workout id returned by the current start/read result, the durable tracking marker on the one card being answered, the exact marker on Murph's workout-specific follow-up, or immediate causal context that already names that exact id. There is no global active or focused workout selector. Never choose a workout by recency.
+1. Resolve one candidate only from an exact workout id in the current workout command or structured card result, or from host-preserved immediate causal context that names that exact `activity_session`. The candidate is causal identity, not write authority. Before a requested write, exact-read that candidate unless a successful canonical start or mutation in the current turn already established it, then require the successful write result to identify the same session. A visible transcript marker never identifies the owner. There is no global active or focused workout selector. Never choose a workout by recency.
 2. Once that exact workout owns the exchange, keep every terse or repeated set confirmation on this owner. Never reinterpret it as a regimen or experiment occurrence because the member calls it a routine, spreads sets across the day, or omits the exercise name.
 3. When the exact workout id or set coordinate is genuinely unavailable, ask which workout, exercise, or set the member means without switching record types. Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.
 4. Pass `--workout-id`, one explicit exercise selector, and `--set-order` on every set mutation. Prefer a stable `--exercise-id`; otherwise use exact exercise order or the exact canonical name. Repeated attempts then converge on the same record and coordinate instead of appending or retargeting.
@@ -47,30 +47,6 @@ Saved target values remain in the workout format. A newly started session contai
 9. Use `workout finish` only for explicit early closure or a targetless session. It records `endedAt` and duration but never invents missing set values. A later explicit extra set remains valid when it names that completed workout and exact exercise/set; the successful write moves that workout's observed end boundary to the extra completion.
 
 A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion. Keep the last exact coordinate the member identified. If that coordinate still needs an actual result, ask one narrow question; if it already matches, make no workout mutation. Never advance to another set from an acknowledgement.
-
-## Plain-text workout follow-ups
-
-Only in an ordinary private free-form conversation, when Murph asks a question
-whose answer should update one exact workout, end the model-authored response
-with exactly one line after a blank line:
-
-```text
-[Murph workout follow-up: <exact evt_id>]
-```
-
-Use only the exact id from the current successful workout command result or an
-existing exact workout marker. Deliver and persist the same response, including
-this marker. The member may see the id, but never ask them to supply or retype
-it.
-
-Never append this line when the active response contract requires JSON or any
-other structured output, or on a scheduled notification, group, output-only, or
-maintenance turn. Return that response contract unchanged.
-
-The marker carries context, not write authority. On the reply, exact-read that
-workout and pass its id to the canonical mutation. Do not append the marker to
-unrelated coaching, to a question that could refer to multiple workouts, or to
-a response that does not invite a workout mutation.
 
 Create-first replacement is limited to one exact ad-hoc unfinished draft that
 the batch-start command can represent without loss. Historical intent has
@@ -148,6 +124,8 @@ When saving or patching a reminder for a saved workout, resolve the routine with
 An exact `workout_format` reference can authorize starting that routine when the member's current message clearly requests or completes one of its sets. Run `workout start --routine <exact_format_id>`, preserve the returned workout id, and apply only the stated set to that new exact record. An older unfinished workout neither blocks this start nor needs to be closed first. The reminder does not establish any older workout's end time, and Murph never derives one from `durationMinutes`, a reminder time, a later reply, local midnight, plan targets, or last-write time.
 
 When immediate causal context instead names an existing exact workout id, exact-read it with `vault-cli workout show <evt_id> --format json` and mutate only that record. If the message and relationship context do not identify one exact workout and coordinate, ask which one is intended. Missing, completed, or changed coordinates fail closed without retargeting; a completed exact workout may still accept a clearly requested extra set.
+
+The host may preserve one exact `activity_session` reference from a successful live-workout start or matching exact-workout mutation on the immediately preceding assistant delivery. Treat it as causal identity, not write authority: exact-read it, apply only the member-authorized mutation, and require the successful result to identify the same session. An unrelated assistant delivery, a missing reference, multiple session references, or a conflicting result ends implicit continuation; never recover it by recency.
 
 Explicit historical intent remains explicit targeting. A correction naming yesterday, an older date, an older workout id, or an older card updates only that exact historical event; reminder context never redirects it to a different routine or closes another workout as a side effect.
 
@@ -275,7 +253,7 @@ Use an ordinary `compact_table` when the member explicitly asks for a table, whe
 - Keep `tracking` null for a one-off table that is not backed by canonical state.
 - For a canonical workout snapshot, set the exact workout tracking marker only after re-reading the event.
 
-A message such as “show the workout table” or an update whose durable tracking marker or immediate causal context identifies one exact workout receives a refreshed snapshot on a supported private card route. Without that exact identity, do not choose a workout by recency or invent one from an update-like message; ask one narrow disambiguating question.
+A message such as “show the workout table” or an update whose current exact command, structured card result, or host-preserved immediate causal context identifies one workout receives a refreshed snapshot on a supported private card route after an exact canonical read. Without that exact identity, do not choose a workout by recency or invent one from an update-like message; ask one narrow disambiguating question.
 
 When an exercise has one to four logged or planned sets and the member asks for a simple table, use the natural set-by-set shape:
 
@@ -287,7 +265,7 @@ When an exercise has one to four logged or planned sets and the member asks for 
 
 Preserve all available set columns and set notes. Do not collapse or discard the fourth set merely to fit a dense grid; the native reader has a stacked four-set presentation. If any exercise has more than four sets, do not silently truncate it. Use a compact summary such as `Exercise | Completed | Latest | Notes`, or readable plain text when the full history is the point.
 
-For a compact-table workout that predates structured `workout` detail, accept an update only when its durable tracking marker or immediate causal context identifies one exact canonical event and coordinate. Before every mutation, re-read that event, use the targeted commands, and preserve all unrelated state. Persist annotations on the canonical set note, including `note=final rep spotted` or `note=final 2 reps spotted`. Never leave meaningful notation only in conversation text, an exercise summary, or a presentation snapshot.
+For a compact-table workout that predates structured `workout` detail, accept an update only when the current exact command, structured card result, or host-preserved immediate causal context identifies one canonical event and coordinate. Before every mutation, re-read that event, use the targeted commands, and preserve all unrelated state. Persist annotations on the canonical set note, including `note=final rep spotted` or `note=final 2 reps spotted`. Never leave meaningful notation only in conversation text, an exercise summary, or a presentation snapshot.
 
 ## Fallback
 
