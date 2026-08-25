@@ -1364,6 +1364,23 @@ export class RunnerContainer extends Container {
         }
         return { kind: "not-wakeable", reason: "no-active-child" };
       }
+      if (
+        response.ok
+        && active
+        && explicitlyRejected
+        && !absent
+        && !mismatch
+        && active.result
+      ) {
+        await active.result.catch(() => undefined);
+        if (
+          this.pointerlessWakeBlockingLifecycleCount > 0
+          || this.workspaceInvocationCoordinationChanged(null)
+        ) {
+          return { kind: "unknown", reason: "active-child-rejected" };
+        }
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {
       emitHostedExecutionStructuredLog({

@@ -1,6 +1,7 @@
 ---
 title: 'finish-task retains archived active-plan path from directory expansion'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2178'
 ---
 
 ## Expected Behavior

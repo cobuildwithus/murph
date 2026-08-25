@@ -11,8 +11,10 @@ import {
   withCanonicalWriteLock,
 } from "@murphai/core";
 import {
+  AssistantGeneratedDeliveryResiduePruneError,
   pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
+  type AssistantGeneratedDeliveryResiduePruneErrorCode,
   type AssistantGeneratedDeliveryResiduePruneResult,
   type AssistantRuntimeResiduePruneResult,
 } from "@murphai/assistant-engine/assistant-runtime-residue";
@@ -333,6 +335,10 @@ async function createHostedWorkspaceV2Snapshot(
     | null = null;
   let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
   let assistantRuntimeGeneratedDeliveryPruneFailed = false;
+  let assistantRuntimeGeneratedDeliveryPruneErrorCode:
+    | AssistantGeneratedDeliveryResiduePruneErrorCode
+    | "unknown"
+    | null = null;
   let snapshotFailureObserved = false;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
@@ -452,11 +458,16 @@ async function createHostedWorkspaceV2Snapshot(
         assistantGeneratedDeliveryPruneResult.generatedDeliveryFilesPruned >
           0 ||
         assistantGeneratedDeliveryPruneResult
+          .generatedDeliveryActiveFilesMissing > 0 ||
+        assistantGeneratedDeliveryPruneResult
           .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
         const generatedDeliveryCleanupSkipped =
           assistantGeneratedDeliveryPruneResult
             .generatedDeliveryCleanupSkippedUntrustedOutbox;
+        const generatedDeliveryActiveFilesMissing =
+          assistantGeneratedDeliveryPruneResult
+            .generatedDeliveryActiveFilesMissing > 0;
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
@@ -465,9 +476,14 @@ async function createHostedWorkspaceV2Snapshot(
             ),
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
-          level: generatedDeliveryCleanupSkipped ? "warn" : "info",
+          level:
+            generatedDeliveryCleanupSkipped || generatedDeliveryActiveFilesMissing
+              ? "warn"
+              : "info",
           message: generatedDeliveryCleanupSkipped
             ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
+            : generatedDeliveryActiveFilesMissing
+              ? "Hosted workspace generated-delivery cleanup found active references without staging files."
             : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
           phase: "checkpoint",
           userId: input.userId,
@@ -476,10 +492,15 @@ async function createHostedWorkspaceV2Snapshot(
     } catch (cleanupError) {
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
       assistantRuntimeGeneratedDeliveryPruneFailed = true;
+      assistantRuntimeGeneratedDeliveryPruneErrorCode =
+        cleanupError instanceof AssistantGeneratedDeliveryResiduePruneError
+          ? cleanupError.code
+          : "unknown";
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
           assistantRuntimeGeneratedDeliveryPruneFailed: true,
+          assistantRuntimeGeneratedDeliveryPruneErrorCode,
           snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
         },
         error: cleanupError,
@@ -877,6 +898,7 @@ async function createHostedWorkspaceV2Snapshot(
 
   await writeHostedCheckpointSnapshotFinishedLog({
     assistantGeneratedDeliveryPruneResult,
+    assistantRuntimeGeneratedDeliveryPruneErrorCode,
     assistantRuntimeGeneratedDeliveryPruneFailed,
     assistantRuntimeResiduePruneResult,
     encryptedByteSize,
@@ -1339,14 +1361,24 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
     !result ||
     (
       result.generatedDeliveryFilesPruned === 0 &&
+      result.generatedDeliveryFilesScanned === 0 &&
+      result.generatedDeliveryActiveFilesMissing === 0 &&
       !result.generatedDeliveryCleanupSkippedUntrustedOutbox
     )
   ) {
     return {};
   }
   return {
+    assistantRuntimeGeneratedDeliveryActiveFilesMissing:
+      result.generatedDeliveryActiveFilesMissing,
+    assistantRuntimeGeneratedDeliveryActiveFilesRetained:
+      result.generatedDeliveryActiveFilesRetained,
+    assistantRuntimeGeneratedDeliveryBytesScanned:
+      result.generatedDeliveryBytesScanned,
     prunedAssistantRuntimeGeneratedDeliveryBytes:
       result.generatedDeliveryBytesPruned,
+    assistantRuntimeGeneratedDeliveryFilesScanned:
+      result.generatedDeliveryFilesScanned,
     prunedAssistantRuntimeGeneratedDeliveryFileCount:
       result.generatedDeliveryFilesPruned,
     assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
@@ -1361,6 +1393,10 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
     | AssistantGeneratedDeliveryResiduePruneResult
     | null;
   assistantRuntimeGeneratedDeliveryPruneFailed: boolean;
+  assistantRuntimeGeneratedDeliveryPruneErrorCode:
+    | AssistantGeneratedDeliveryResiduePruneErrorCode
+    | "unknown"
+    | null;
   assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
   fileCount: number;
@@ -1380,7 +1416,11 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     ...createHostedCheckpointSnapshotRequestLogDetails(input.request),
     ...(input.assistantRuntimeGeneratedDeliveryPruneFailed
-      ? { assistantRuntimeGeneratedDeliveryPruneFailed: true }
+      ? {
+          assistantRuntimeGeneratedDeliveryPruneErrorCode:
+            input.assistantRuntimeGeneratedDeliveryPruneErrorCode ?? "unknown",
+          assistantRuntimeGeneratedDeliveryPruneFailed: true,
+        }
       : {}),
     browserVaultReplicaState: "omitted",
     leaseCheckCount: input.leaseCheckCount,

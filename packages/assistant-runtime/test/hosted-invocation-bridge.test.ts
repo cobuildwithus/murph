@@ -1951,10 +1951,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     )).toBe(true);
   });
 
-  it("continues checkpoint publication when generated-delivery cleanup fails", async () => {
+  it("prunes unrelated generated deliveries when an active delivery file is missing", async () => {
     const vaultRoot = await createVaultRoot();
     const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing.pdf`;
+    const orphanRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/orphan.pdf`;
     const activeContents = Buffer.from("missing active generated delivery\n");
+    const orphanContents = Buffer.from("orphan generated delivery\n");
     await createAssistantOutboxIntent({
       channel: "linq",
       identityId: "identity-missing-generated-delivery",
@@ -1975,6 +1977,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       turnId: "turn-missing-generated-delivery",
       vault: vaultRoot,
     });
+    await mkdir(path.dirname(path.join(vaultRoot, orphanRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, orphanRef), orphanContents);
     const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
     const options = createBridgeOptions({
@@ -1989,11 +1993,48 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await expectMissing(path.join(vaultRoot, orphanRef));
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryActiveFilesMissing === 1
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryFilesScanned === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === orphanContents.byteLength
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed !== true
+    )).toBe(true);
+  });
+
+  it("records a closed diagnostic code when generated-delivery cleanup fails", async () => {
+    const vaultRoot = await createVaultRoot();
+    const generatedDeliveryRoot = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+    );
+    await mkdir(path.dirname(generatedDeliveryRoot), { recursive: true });
+    await writeFile(generatedDeliveryRoot, "invalid generated-delivery root\n");
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.eventCode === "checkpoint.snapshot_finished"
       && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed === true
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneErrorCode
+        === "root_not_directory"
     )).toBe(true);
   });
 

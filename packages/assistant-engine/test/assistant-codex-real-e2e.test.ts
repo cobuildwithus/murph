@@ -13,6 +13,7 @@ import {
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
+  addMeal,
   initializeVault,
   readHabitatAspect,
   upsertHabitatAspect,
@@ -930,6 +931,65 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
+    'answers every still-relevant request after same-thread reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: config.env,
+          excludeResumeTurns: true,
+          model: 'gpt-5.6-sol',
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 13 plus 8?',
+        })
+        expect(first.finalMessage).toMatch(/\b21\b/u)
+
+        const reconsiderationInstruction = [
+          'New messages arrived before delivery.',
+          'Re-evaluate all accepted messages under the group turn rules and return one final result.',
+          'Do not mention this review or repeat completed effects.',
+        ].join(' ')
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: `${reconsiderationInstruction}\n\nMurph, what is 7 times 6?`,
+          resumeSessionId: first.sessionId,
+        })
+
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(second.finalMessage).toMatch(/\b21\b/u)
+        expect(second.finalMessage).toMatch(/\b42\b/u)
+        expect(second.finalMessage).not.toMatch(
+          /held|not sent|previous response|re-?evaluat|review/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
     'prefers grounded group-chat actions while respecting collective human ownership',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -972,7 +1032,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A 54:A 55:B 56:A 57:B 58:A 59:B 60:A 61:B 62:A 63:A 64:A 65:A 66:B 67:B 68:B 69:B',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A 54:A 55:B 56:A 57:B 58:A 59:B 60:A 61:B 62:A 63:A 64:A 65:A 66:B 67:B 68:B 69:B 70:A 71:A',
         )
         expect(
           actions.some((action) =>
@@ -8411,6 +8471,358 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+describeRealCodex('real Codex automatic meal clarification e2e', () => {
+  it(
+    'asks only for a genuinely unidentifiable capture and enriches that same meal after the reply',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const eligible = await runRealAutomaticMealClarificationScenario({
+          config,
+          protectedContext: false,
+        })
+        expect(eligible.firstMessage).toMatch(/\?/u)
+        expect(eligible.firstMessage).toMatch(/what|food|drink|meal/iu)
+        expect(eligible.firstMessage).toMatch(
+          /amount|how much|portion|roughly|about/iu,
+        )
+        const mealShowCommand =
+          `meal show ${eligible.mealId} --format json`
+        const removePhotoCommand =
+          `meal remove-photo ${eligible.mealId}`
+        const firstShowIndex = eligible.firstCommands.findIndex((command) =>
+          command === mealShowCommand
+        )
+        const removeIndex = eligible.firstCommands.findIndex((command) =>
+          command === removePhotoCommand
+        )
+        expect(firstShowIndex).toBeGreaterThanOrEqual(0)
+        expect(removeIndex).toBeGreaterThan(firstShowIndex)
+        expect(
+          eligible.firstCommands.findIndex(
+            (command, index) =>
+              index > removeIndex
+              && command === mealShowCommand,
+          ),
+        ).toBeGreaterThan(removeIndex)
+        expect(eligible.firstCommands).not.toEqual(
+          expect.arrayContaining([
+            expect.stringMatching(/^(?:goal|meal totals)\b/u),
+          ]),
+        )
+        expect(eligible.firstCard).toBeNull()
+        expect(eligible.savedAttachmentCount).toBe(0)
+
+        const editIndex = eligible.followupCommands.findIndex((command) =>
+          command.startsWith(`meal edit ${eligible.mealId} `)
+        )
+        const readbackIndex = eligible.followupCommands.findIndex(
+          (command, index) =>
+            index > editIndex
+            && command === mealShowCommand,
+        )
+        const totalsIndex = eligible.followupCommands.findIndex(
+          (command, index) =>
+            index > readbackIndex
+            && command.startsWith(
+              'meal totals --from 2026-08-24 --to 2026-08-24',
+            ),
+        )
+        expect(editIndex).toBeGreaterThanOrEqual(0)
+        const editCommand = eligible.followupCommands[editIndex] ?? ''
+        for (const requiredFlag of [
+          '--ingredient',
+          '--nutrition-calories',
+          '--nutrition-protein-grams',
+          '--nutrition-carbs-grams',
+          '--nutrition-fat-grams',
+          '--nutrition-source estimated',
+        ]) {
+          expect(editCommand).toContain(requiredFlag)
+        }
+        expect(readbackIndex).toBeGreaterThan(editIndex)
+        expect(totalsIndex).toBeGreaterThan(readbackIndex)
+        expect(eligible.commands).not.toEqual(
+          expect.arrayContaining([
+            expect.stringMatching(/^meal add\b/u),
+          ]),
+        )
+        expect(eligible.followupMessage).toMatch(/smoothie/iu)
+        if (eligible.savedCalories === null) {
+          throw new Error('Expected the existing captured meal to be enriched.')
+        }
+        expect(eligible.savedCalories).toBeGreaterThan(0)
+        expect(eligible.followupMessage).toContain(
+          String(eligible.savedCalories),
+        )
+
+        const protectedResult =
+          await runRealAutomaticMealClarificationScenario({
+            config,
+            protectedContext: true,
+          })
+        expect(protectedResult.firstCommands).toContain(
+          `meal remove-photo ${protectedResult.mealId}`,
+        )
+        expect(protectedResult.firstCommands).not.toEqual(
+          expect.arrayContaining([
+            expect.stringMatching(/^(?:goal|meal edit|meal totals)\b/u),
+          ]),
+        )
+        expect(protectedResult.firstMessage).not.toMatch(/\?/u)
+        expect(protectedResult.firstMessage).not.toMatch(
+          /calor|macro|protein|carb|fat|fiber|portion|how much/iu,
+        )
+        expect(protectedResult.firstCard).toBeNull()
+        expect(protectedResult.savedAttachmentCount).toBe(0)
+        expect(protectedResult.savedCalories).toBeNull()
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+})
+
+async function runRealAutomaticMealClarificationScenario(input: {
+  config: RealCodexE2eConfig
+  protectedContext: boolean
+}): Promise<{
+  commands: string[]
+  firstCard: unknown
+  firstCommands: string[]
+  firstMessage: string
+  followupCommands: string[]
+  followupMessage: string
+  mealId: string
+  savedAttachmentCount: number | null
+  savedCalories: number | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-automatic-meal-clarification-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const photoPath = path.join(workingRoot, 'ambiguous-meal.jpg')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'automatic-meal-capture',
+      }),
+      materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      writeFile(commandLog, '', 'utf8'),
+      writeFile(photoPath, 'synthetic undecodable meal image\n', 'utf8'),
+    ])
+    const meal = await addMeal({
+      externalRef: {
+        resourceId: 'capture_automatic_clarification',
+        resourceType: 'photo',
+        system: 'meal-photo-capture',
+        version: '5'.repeat(64),
+      },
+      occurredAt: '2026-08-24T23:37:00.000Z',
+      photoPath,
+      source: 'device',
+      vaultRoot,
+    })
+    await materializeAutomaticMealClarificationVaultCli({ binDirectory })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const sharedTurn = {
+      approvalPolicy: 'never' as const,
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT:
+          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+        AUTOMATIC_MEAL_E2E_COMMAND_LOG: commandLog,
+        AUTOMATIC_MEAL_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
+        AUTOMATIC_MEAL_E2E_VAULT: vaultRoot,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      reasoningEffort: 'medium' as const,
+      sandbox: 'workspace-write' as const,
+      workingDirectory: vaultRoot,
+    }
+    const first = await executeRealCodexAppServerTurn({
+      ...sharedTurn,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          protectedContext: input.protectedContext,
+          scheduled: true,
+        }),
+      prompt: [
+        MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+        'Controlled scenario evidence:',
+        '- The canonical fixture has one device-captured meal at 7:37pm and no nearby manual duplicate.',
+        '- Inspect the retained attachment through the canonical meal before deciding whether it supports an estimate.',
+        '- Complete the normal closeout and return its terminal delivery decision.',
+      ].join('\n\n'),
+    })
+    const firstDecision = parseAssistantNotificationDecision(
+      first.finalMessage,
+    )
+    const firstMessage = firstDecision.kind === 'send_message'
+      ? firstDecision.text
+      : firstDecision.privateSummary
+    const firstCommandText = (await readFile(commandLog, 'utf8')).trim()
+    const firstCommands = firstCommandText === ''
+      ? []
+      : firstCommandText.split('\n')
+    const afterFirst = await readAutomaticMealClarificationState({
+      mealId: meal.mealId,
+      vaultRoot,
+    })
+
+    if (input.protectedContext) {
+      return {
+        commands: firstCommands,
+        firstCard: first.responseCard,
+        firstCommands,
+        firstMessage,
+        followupCommands: [],
+        followupMessage: '',
+        mealId: meal.mealId,
+        ...afterFirst,
+      }
+    }
+
+    const followup = await executeRealCodexAppServerTurn({
+      ...sharedTurn,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          protectedContext: false,
+          scheduled: false,
+        }),
+      prompt: [
+        'That empty cup was a berry smoothie: about one cup, made with berries, Greek yogurt, and milk.',
+        'Update that captured meal and tell me my refreshed calorie and macro total for August 24.',
+        'Do not add another meal.',
+      ].join(' '),
+      resumeSessionId: first.sessionId,
+    })
+    const allCommandText = (await readFile(commandLog, 'utf8')).trim()
+    const commands = allCommandText === '' ? [] : allCommandText.split('\n')
+    const afterFollowup = await readAutomaticMealClarificationState({
+      mealId: meal.mealId,
+      vaultRoot,
+    })
+
+    return {
+      commands,
+      firstCard: first.responseCard,
+      firstCommands,
+      firstMessage,
+      followupCommands: commands.slice(firstCommands.length),
+      followupMessage: followup.finalMessage,
+      mealId: meal.mealId,
+      ...afterFollowup,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+function buildAutomaticMealClarificationDeveloperInstructions(input: {
+  protectedContext: boolean
+  scheduled: boolean
+}): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: 'Use vault-cli for canonical member data.',
+    assistantContextSnapshotPrompt: input.protectedContext
+      ? [
+          'Known member context:',
+          '- The member uses intuitive eating, has eating-disorder-risk context, and is number-sensitive.',
+          '- Do not estimate or surface calories or macros, and minimize food prompts.',
+        ].join('\n')
+      : null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-24',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ...(input.scheduled
+      ? { scheduledOccurrenceAt: '2026-08-25T01:00:00.000Z' }
+      : { ordinaryInboundTurn: true }),
+    turnTrigger: input.scheduled ? 'automation-cron' : null,
+  })
+}
+
+async function materializeAutomaticMealClarificationVaultCli(input: {
+  binDirectory: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      'if [ -z "$AUTOMATIC_MEAL_E2E_COMMAND_LOG" ] || [ -z "$AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT" ] || [ -z "$AUTOMATIC_MEAL_E2E_TSX_BIN" ] || [ -z "$AUTOMATIC_MEAL_E2E_VAULT" ]; then',
+      '  exit 70',
+      'fi',
+      'printf \'%s\\n\' "$*" >> "$AUTOMATIC_MEAL_E2E_COMMAND_LOG"',
+      'exec "$AUTOMATIC_MEAL_E2E_TSX_BIN" "$AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT" "$@" --vault "$AUTOMATIC_MEAL_E2E_VAULT"',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function readAutomaticMealClarificationState(input: {
+  mealId: string
+  vaultRoot: string
+}): Promise<{
+  savedAttachmentCount: number | null
+  savedCalories: number | null
+}> {
+  const vault = await readVaultRawTolerant(input.vaultRoot)
+  const event = [...vault.events]
+    .reverse()
+    .find((candidate) => candidate.entityId === input.mealId)
+  const meal = readRecord(event?.attributes.meal)
+  const nutrition = readRecord(meal?.nutrition)
+  const totals = readRecord(nutrition?.totals)
+
+  return {
+    savedAttachmentCount: Array.isArray(meal?.attachments)
+      ? meal.attachments.length
+      : null,
+    savedCalories: typeof totals?.calories === 'number'
+      ? totals.calories
+      : null,
+  }
+}
 type NutritionConditionRecovery =
   | 'ambiguous'
   | 'complete'
@@ -10985,8 +11397,8 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
     'Each candidate describes the complete action for that transcript.',
-    'For transcripts 14-22, 30-35, and 46-69, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B> 54:<A-or-B> 55:<A-or-B> 56:<A-or-B> 57:<A-or-B> 58:<A-or-B> 59:<A-or-B> 60:<A-or-B> 61:<A-or-B> 62:<A-or-B> 63:<A-or-B> 64:<A-or-B> 65:<A-or-B> 66:<A-or-B> 67:<A-or-B> 68:<A-or-B> 69:<A-or-B>` with no explanation.',
+    'For transcripts 14-22, 30-35, and 46-71, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B> 54:<A-or-B> 55:<A-or-B> 56:<A-or-B> 57:<A-or-B> 58:<A-or-B> 59:<A-or-B> 60:<A-or-B> 61:<A-or-B> 62:<A-or-B> 63:<A-or-B> 64:<A-or-B> 65:<A-or-B> 66:<A-or-B> 67:<A-or-B> 68:<A-or-B> 69:<A-or-B> 70:<A-or-B> 71:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -11165,15 +11577,15 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'A: Return one text reply in one bubble; the host owns any pre-send cadence.',
     'B: Run a shell sleep, then split the answer across two short bubbles.',
     '',
-    '50. Murph is told its previous response was held and not sent because another ordinary human message arrived. The refreshed beat still calls for a text reply.',
+    '50. New messages arrive before delivery, and the refreshed beat still calls for a text reply.',
     'A: Return the old response and then a separate response to the new message.',
     'B: Reconsider the whole current beat and return one final response.',
     '',
-    '51. Murph is told its previous response was held and not sent. The new message introduces genuinely urgent safety information.',
+    '51. New messages arrive before delivery, including genuinely urgent safety information.',
     'A: Reconsider the current beat and answer the urgent information once.',
     'B: Preserve the old response and defer the urgent information to another turn.',
     '',
-    '52. Murph is told its previous response was held and not sent. Another human has now fully answered the room question and taken the floor.',
+    '52. New messages arrive before delivery. Another human has now fully answered the room question and taken the floor.',
     'A: Send Murph\'s held answer too so the original asker gets two answers.',
     'B: Re-evaluate the floor and finish without the stale text reply.',
     '',
@@ -11244,6 +11656,14 @@ function buildGroupPointOfViewCandidateProbe(): string {
     '69. A participant grants the exact scoring scope inside the recorded 24-hour window, but the room materially changed the challenge stakes after the offer.',
     'A: Record the participant as `in` under the changed terms.',
     'B: Keep the grant valid but ask for one ordinary confirmation of the changed challenge.',
+    '',
+    '70. Two accepted messages in one group turn each make a separate direct request to Murph. Both remain relevant and unanswered.',
+    'A: Return one reply that answers both requests.',
+    'B: Answer only the later request.',
+    '',
+    '71. A participant asks Murph to recommend a vegetarian restaurant. A later accepted message corrects only the diet requirement to vegan.',
+    'A: Return one vegan recommendation without a separate vegetarian answer.',
+    'B: Answer both the superseded vegetarian request and the vegan correction.',
   ].join('\n')
 }
 
