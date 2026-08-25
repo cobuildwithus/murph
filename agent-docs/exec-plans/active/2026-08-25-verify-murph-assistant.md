@@ -101,12 +101,18 @@ Updated: 2026-08-25
   required effects: private timing/off preferences were saved once, a group
   mutation was blocked and redirected to private chat, unsupported Fitbit
   stayed unchanged, ordinary stale data stayed quiet, and reauthorization sent
-  one reconnect link. Manual reply review found one overly cautious save
-  confirmation despite the successful effect; the operator accepted that
-  stochastic wording as non-blocking for this tooling-only PR.
+  one reconnect link. The final-head rerun produced overly cautious
+  confirmations after both successful private preference writes; the operator
+  accepted that stochastic wording as non-blocking for this tooling-only PR.
 - ReviewGPT's proposal to copy the normal Codex profile into an isolated home
   was rejected by the operator. Normal local subscription auth is intentional
   for this developer-only command; the provider-key lane remains isolated.
+- ReviewGPT's exact-head round found that a newly merged child-model live leaf
+  stored its multi-agent requirement in provider-only TOML and hard-coded the
+  parent model. The accepted correction keeps the three required dotted
+  `configOverrides` on that leaf and uses the resolved model for execution and
+  usage attribution. The exact subscription-backed child leaf passed with a
+  Sol parent and Luna child, without depending on ambient profile settings.
 
 ## Verification
 

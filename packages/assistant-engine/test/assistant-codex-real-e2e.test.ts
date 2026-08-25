@@ -309,14 +309,17 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
+  'features.multi_agent_v2.enabled=true',
+  'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
+  'features.multi_agent_v2.max_concurrent_threads_per_session=4',
+] as const
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
     'runs a Luna child through native collaboration',
     async () => {
-      const config = await resolveRealCodexE2eConfig({
-        multiAgentV2: true,
-      })
+      const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-codex-luna-child-e2e-'),
       )
@@ -330,9 +333,10 @@ describeRealCodex('real Codex child model selection e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
+          configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
           env: config.env,
           excludeResumeTurns: true,
-          model: DEFAULT_REAL_CODEX_MODEL,
+          model: config.model,
           modelProvider: config.modelProvider,
           onAdditionalUsage: async (usage) => {
             childUsages.push(usage)
@@ -351,7 +355,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
         const parentUsage = extractCodexAssistantProviderUsage({
           providerConfig: normalizeAssistantProviderConfig({
             provider: 'codex-cli',
-            model: DEFAULT_REAL_CODEX_MODEL,
+            model: config.model,
             modelProvider: config.modelProvider,
             oss: false,
           }),
@@ -8401,21 +8405,11 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
     expect(configToml).not.toContain('[features.multi_agent_v2]')
-
-    const multiAgentConfigToml = buildRealCodexConfigToml({
-      apiKeyEnv: 'PROVIDER_KEY',
-      model: 'gpt-5.6-terra',
-      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
-      multiAgentV2: true,
-    })
-    expect(multiAgentConfigToml).toContain('[features.multi_agent_v2]')
-    expect(multiAgentConfigToml).toContain('enabled = true')
-    expect(multiAgentConfigToml).toContain(
-      'expose_spawn_agent_model_overrides = true',
-    )
-    expect(multiAgentConfigToml).toContain(
-      'max_concurrent_threads_per_session = 4',
-    )
+    expect(CHILD_MODEL_SELECTION_CONFIG_OVERRIDES).toEqual([
+      'features.multi_agent_v2.enabled=true',
+      'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
+      'features.multi_agent_v2.max_concurrent_threads_per_session=4',
+    ])
   })
 
   it('uses normal Codex home only in explicit subscription mode', async () => {
@@ -12911,7 +12905,6 @@ function summarizeCodexEventSequence(
 
 async function resolveRealCodexE2eConfig(
   input: {
-    multiAgentV2?: boolean
     sourceEnv?: NodeJS.ProcessEnv
   } = {},
 ): Promise<RealCodexE2eConfig> {
@@ -13000,7 +12993,6 @@ async function resolveRealCodexE2eConfig(
       apiKeyEnv,
       model,
       modelProvider,
-      multiAgentV2: input.multiAgentV2,
     }),
     {
       encoding: 'utf8',
@@ -13049,7 +13041,6 @@ function buildRealCodexConfigToml(input: {
   apiKeyEnv: string
   model: string
   modelProvider: string
-  multiAgentV2?: boolean
 }): string {
   const baseUrl =
     input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
@@ -13084,15 +13075,6 @@ function buildRealCodexConfigToml(input: {
     'stream_max_retries = 5',
     'supports_websockets = false',
     '',
-    ...(input.multiAgentV2
-      ? [
-          '[features.multi_agent_v2]',
-          'enabled = true',
-          'expose_spawn_agent_model_overrides = true',
-          'max_concurrent_threads_per_session = 4',
-          '',
-        ]
-      : []),
   ].join('\n')
 }
 
