@@ -574,11 +574,7 @@ function readAutomationLocalAtAttempt(
   }
 
   const targetKey = args.localAtRecoveryKey
-    ?? buildAutomationLocalAtTargetKey(
-      args.action === 'patch'
-        ? args.lookup
-        : args.title,
-    )
+    ?? buildAutomationLocalAtTargetKey(args)
   return {
     explicitLocalDate: schedule.localAt.date ?? null,
     recoveryKey: args.localAtRecoveryKey ?? null,
@@ -589,9 +585,14 @@ function readAutomationLocalAtAttempt(
   }
 }
 
-function buildAutomationLocalAtTargetKey(targetIdentity: string): string {
+function buildAutomationLocalAtTargetKey(
+  args: Extract<
+    z.infer<typeof automationArgumentsSchema>,
+    { action: 'patch' | 'save' }
+  >,
+): string {
   return createHash('sha256')
-    .update(JSON.stringify(targetIdentity))
+    .update(JSON.stringify(args))
     .digest('hex')
 }
 

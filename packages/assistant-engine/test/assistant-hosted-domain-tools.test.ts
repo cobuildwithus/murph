@@ -221,6 +221,25 @@ describe('hosted domain dynamic tools', () => {
       safeFailureCode: 'local_at_gap',
     })
     expect(gapRequest.localAtTargetKey).toMatch(/^[a-f0-9]{64}$/u)
+    const sameTitleGapRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send a different reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Spring reminder',
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    if (sameTitleGapRequest?.kind !== 'invalid-automation-arguments') {
+      throw new TypeError('Expected a second daylight-saving gap failure.')
+    }
+    expect(sameTitleGapRequest.localAtTargetKey).not.toBe(
+      gapRequest.localAtTargetKey,
+    )
     const gapResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,

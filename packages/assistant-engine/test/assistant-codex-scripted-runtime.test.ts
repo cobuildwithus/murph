@@ -166,9 +166,9 @@ const scriptedPermissionShellIt =
     ? it.skip
     : it
 
-function buildTestAutomationLocalAtRecoveryKey(identity: string): string {
+function buildTestAutomationLocalAtRecoveryKey(request: unknown): string {
   return createHash('sha256')
-    .update(JSON.stringify(identity))
+    .update(JSON.stringify(request))
     .digest('hex')
 }
 
@@ -3644,7 +3644,7 @@ if (!tool) {
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
     expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
-    expect(automationOutput).toContain('morning-reminder')
+    expect(automationOutput).not.toContain('lookupId')
     expect(automationOutput).toContain('active')
     expect(automationRequests).toEqual([{
       action: 'save',
@@ -4279,9 +4279,7 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        title,
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
@@ -4386,24 +4384,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4464,25 +4463,26 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4557,24 +4557,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4733,7 +4734,7 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(automationId),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       lookup: automationId,
       schedule: {
         kind: 'at',
@@ -5015,7 +5016,6 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5027,12 +5027,11 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      slug,
       title: 'Medication reminder',
     }
     const retryRequest = {
       ...failedRequest,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: {
@@ -5081,7 +5080,7 @@ text(JSON.stringify(result));
     })
 
     const question =
-      'For reminder "Medication reminder (medication-reminder)", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(result.finalMessage).toContain(question)
     expect(result.transcriptMessage).toContain(question)
@@ -5136,9 +5135,6 @@ text(JSON.stringify(result));
     resolvedAt,
     resolvedLocalAt,
   }) => {
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(
-      'medication-reminder',
-    )
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5152,6 +5148,7 @@ text(JSON.stringify(result));
       },
       title: 'Medication reminder',
     }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     const matchingInvalidRetry = {
       ...failedRequest,
       instructions: 'Send the renamed medication reminder.',
@@ -5382,14 +5379,12 @@ text(JSON.stringify(result));
     }
     const successA = {
       ...failureA,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        'medication-reminder',
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
       schedule: { kind: 'at', localAt: recoveryA },
     }
     const successB = {
       ...failureB,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey('call-reminder'),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureB),
       schedule: { kind: 'at', localAt: recoveryB },
     }
     const responseCard = {
@@ -5482,7 +5477,7 @@ text(JSON.stringify(result));
               input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${date}",
 });
 text(JSON.stringify(result));
@@ -5508,9 +5503,7 @@ text(JSON.stringify(result));
         }
         const mismatchedA = {
           ...failureA,
-          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-            'medication-reminder',
-          ),
+          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
           schedule: {
             kind: 'at',
             localAt: {
@@ -5587,7 +5580,7 @@ text(JSON.stringify(result));
             input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${mismatchDate}",
 });
 text(JSON.stringify(result));
