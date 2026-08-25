@@ -35,6 +35,9 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RETIRED_SOURCE_DELIVERY_STALL_EVENT_ID_PREFIX,
+} from "@murphai/hosted-execution/orchestration-control";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
 import type { HostedRuntimeEffectsPort } from "../platform.ts";
@@ -49,8 +52,6 @@ type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0
 
 const HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX =
   "assistant.notification.requested:";
-const HOSTED_RETIRED_SOURCE_DELIVERY_STALL_NOTIFICATION_PREFIX =
-  "assistant.notification.requested:device-delivery-stalled:v1:";
 const HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED_ERROR_CODE =
   "HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED";
 const HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX =
@@ -95,7 +96,7 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
 ): Promise<HostedAssistantNotificationSystemMailboxPreparation> {
   if (
     input.mailboxDedupeKey.startsWith(
-      HOSTED_RETIRED_SOURCE_DELIVERY_STALL_NOTIFICATION_PREFIX,
+      HOSTED_RETIRED_SOURCE_DELIVERY_STALL_EVENT_ID_PREFIX,
     )
   ) {
     return {

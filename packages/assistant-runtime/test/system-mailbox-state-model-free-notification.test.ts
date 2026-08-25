@@ -9,6 +9,7 @@ type PendingItem = Parameters<typeof isHostedSystemMailboxModelFreeExactNotifica
 function exactNotification(input: {
   dedupeKey?: string;
   deliveryDedupeToken?: string;
+  deliveryIdempotencyKey?: string;
   laneSeq: string;
 }): PendingItem {
   const deliveryDedupeToken =
@@ -25,7 +26,8 @@ function exactNotification(input: {
       notification: {
         deliveryDedupeToken,
         deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: deliveryDedupeToken,
+        deliveryIdempotencyKey:
+          input.deliveryIdempotencyKey ?? deliveryDedupeToken,
         responsePolicy: { kind: "require_send_exact_text", text: "Confirmation" },
       },
     },
@@ -67,6 +69,14 @@ describe("blocked model-free exact notification frontier", () => {
     });
     expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification))
       .toBe(true);
+  });
+
+  it("rejects an exact notification with mismatched delivery identities", () => {
+    expect(isHostedSystemMailboxModelFreeExactNotificationItem(exactNotification({
+      deliveryDedupeToken: "group-join:membership",
+      deliveryIdempotencyKey: "group-join:different-membership",
+      laneSeq: "1",
+    }))).toBe(false);
   });
 
   it("does not overtake a generic notification at the durable frontier", () => {

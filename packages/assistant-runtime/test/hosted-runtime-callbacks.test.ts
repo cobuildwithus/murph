@@ -610,6 +610,60 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
+  it("terminalizes retired source-delivery intents before building effects", async () => {
+    const pending = createPendingHostedDeliveryIntent({
+      deliveryIdempotencyKey: "device-delivery-stalled:v1:",
+      intentId: "intent_retired_pending",
+      status: "pending",
+    });
+    const sending = createPendingHostedDeliveryIntent({
+      deliveryIdempotencyKey: "device-delivery-stalled:v1:sending",
+      intentId: "intent_retired_sending",
+      nextAttemptAt: null,
+      status: "sending",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([pending, sending]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent: AssistantOutboxIntent) =>
+        intent.status === "pending" || intent.status === "sending",
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockImplementation(
+      async (input: { intentId: string; status: "abandoned" | "failed" }) => ({
+        ...(input.intentId === pending.intentId ? pending : sending),
+        lastError: {
+          code: input.status === "failed"
+            ? "ASSISTANT_DELIVERY_AMBIGUOUS"
+            : "ASSISTANT_RETIRED_SOURCE_DELIVERY_STALL_SUPPRESSED",
+          message: "Synthetic terminal retirement.",
+        },
+        nextAttemptAt: null,
+        status: input.status,
+      }),
+    );
+
+    await expect(collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledTimes(2);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: pending.intentId,
+        onlyCurrentStatuses: ["pending"],
+        status: "abandoned",
+      }),
+    );
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: sending.intentId,
+        onlyCurrentStatuses: ["sending"],
+        status: "failed",
+      }),
+    );
+  });
+
   it("resolves an exact durable delivery identity and preserves its retry wake", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       createPendingHostedDeliveryIntent({

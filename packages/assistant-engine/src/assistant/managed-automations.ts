@@ -388,6 +388,15 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
   '- Do not stack another unsolicited corrective health message while a recent one is unanswered unless the new item is safety-relevant or clearly more valuable.',
 ].join('\n')
 
+const MURPH_WEEKLY_HEALTH_DIGEST_RECONNECT_RULE =
+  '- Wearable explicitly requires reconnect: a device account exists with `status: reauthorization_required`, or a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`. Missing or stale data alone never authorizes outreach because it can reflect intentional or occasional wear. Without an explicit reconnect-required state, suppress instead of asking the user to troubleshoot, sync, or reconnect. This branch requires a successful `murph.device` call with `action: connect` for that provider and the `connectUrl` from its result. If the tool is unavailable or the call fails, suppress instead of promising a reconnect path. Otherwise send one short, warm in-chat note acknowledging the explicit connection problem and inviting the user to reconnect so Murph can keep seeing their data. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.'
+const MURPH_WEEKLY_HEALTH_DIGEST_SUPPRESSION_RULE =
+  '- Suppress: If the week was ordinary — numbers inside the user\'s usual ranges, no notable context, no experiment movement — or if there are no connected device accounts, no live wearable, no recent manual logs, and no experiment movement worth mentioning, return `{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}` and suppress the scheduled message. If the explicit reconnect-required branch applies, it wins over suppression. Skipping an unremarkable week is the expected outcome, not a failure. Do not send a process note or a "quiet week" message.'
+const MURPH_RETIRED_WEEKLY_HEALTH_DIGEST_RECONNECT_RULE =
+  '- Wearable connected but not delivering: a device account exists with `status: reauthorization_required`, a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`, or its sources show no new data for roughly a week or more. This branch requires a successful `murph.device` call with `action: connect` for that provider and the `connectUrl` from its result. If the tool is unavailable or the call fails, suppress instead of promising a reconnect path. Otherwise send one short, warm in-chat note acknowledging the gap and inviting the user to reconnect so Murph can keep seeing their data. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.'
+const MURPH_RETIRED_WEEKLY_HEALTH_DIGEST_SUPPRESSION_RULE =
+  '- Suppress: If the week was ordinary — numbers inside the user\'s usual ranges, no notable context, no experiment movement — or if there are no connected device accounts, no live wearable, no recent manual logs, and no experiment movement worth mentioning, return `{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}` and suppress the scheduled message. If the reconnect branch applies, it wins over suppression. Skipping an unremarkable week is the expected outcome, not a failure. Do not send a process note or a "quiet week" message.'
+
 export const MURPH_MANAGED_AUTOMATIONS = [
   {
     automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
@@ -416,8 +425,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Branch on what you find:',
       '- Substance present: verified goal-congruent progress or steadiness, a week-vs-recent-baseline shift that materially changes interpretation, a link between real-life context and a signal (for example two hard yardwork days lining up with a recovery dip), trustworthy movement in an active experiment, or a scary-looking change that is probably just noise and worth defusing. New data or a decline alone is not substance. Produce the concise weekly health digest as described below.',
-      '- Wearable explicitly requires reconnect: a device account exists with `status: reauthorization_required`, or a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`. Missing or stale data alone never authorizes outreach because it can reflect intentional or occasional wear. Without an explicit reconnect-required state, suppress instead of asking the user to troubleshoot, sync, or reconnect. This branch requires a successful `murph.device` call with `action: connect` for that provider and the `connectUrl` from its result. If the tool is unavailable or the call fails, suppress instead of promising a reconnect path. Otherwise send one short, warm in-chat note acknowledging the explicit connection problem and inviting the user to reconnect so Murph can keep seeing their data. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
-      '- Suppress: If the week was ordinary — numbers inside the user\'s usual ranges, no notable context, no experiment movement — or if there are no connected device accounts, no live wearable, no recent manual logs, and no experiment movement worth mentioning, return `{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}` and suppress the scheduled message. If the explicit reconnect-required branch applies, it wins over suppression. Skipping an unremarkable week is the expected outcome, not a failure. Do not send a process note or a "quiet week" message.',
+      MURPH_WEEKLY_HEALTH_DIGEST_RECONNECT_RULE,
+      MURPH_WEEKLY_HEALTH_DIGEST_SUPPRESSION_RULE,
       '',
       'Frame the digest as a compass, not a report: what changed, what stayed steady, what was probably noise, the likely real-life context behind the week, at most one thing worth keeping, and at most one thing not worth reacting to.',
       '- This is the narrative of the current week, not a performance review. Lead with verified progress, steadiness, or reassuring context when that is the most goal-relevant fact, but never manufacture praise.',
@@ -1160,6 +1169,18 @@ export async function applyMurphManagedAutomations(
       preserveExistingSchedule &&
       existing.schedule.kind === 'at'
     ) {
+      const reconciledQueuedInstructions =
+        reconcileQueuedWeeklyHealthDigestInstructions({ existing, seed })
+      if (reconciledQueuedInstructions !== null) {
+        await patchAutomation({
+          instructions: reconciledQueuedInstructions,
+          lookup: existing.automationId,
+          now,
+          vaultRoot: input.vaultRoot,
+        })
+        result.updated += 1
+        continue
+      }
       // Device-activity matching rewrites the reusable managed record into a
       // due one-shot with occurrence-specific prompt context. Do not reconcile
       // the weekly seed over that queued payload before the automation lane runs.
@@ -1333,6 +1354,39 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+function reconcileQueuedWeeklyHealthDigestInstructions(input: {
+  existing: AutomationRecord
+  seed: MurphManagedAutomationSeed
+}): string | null {
+  if (
+    input.existing.automationId !== MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+    || input.seed.automationId !== MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+  ) {
+    return null
+  }
+
+  const retiredSeed = input.seed.instructions
+    .replace(
+      MURPH_WEEKLY_HEALTH_DIGEST_RECONNECT_RULE,
+      MURPH_RETIRED_WEEKLY_HEALTH_DIGEST_RECONNECT_RULE,
+    )
+    .replace(
+      MURPH_WEEKLY_HEALTH_DIGEST_SUPPRESSION_RULE,
+      MURPH_RETIRED_WEEKLY_HEALTH_DIGEST_SUPPRESSION_RULE,
+    )
+  const occurrenceContextPrefix = '\n\nDevice activity context:\n'
+  if (
+    !input.existing.instructions.startsWith(
+      `${retiredSeed}${occurrenceContextPrefix}`,
+    )
+  ) {
+    return null
+  }
+
+  return input.seed.instructions
+    + input.existing.instructions.slice(retiredSeed.length)
 }
 
 async function archiveRetiredMurphManagedAutomations(input: {

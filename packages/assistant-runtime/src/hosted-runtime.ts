@@ -255,7 +255,9 @@ import {
 import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
+  isHostedRetiredSourceDeliveryStallDeliveryKey,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  retireHostedSourceDeliveryStallIntentById,
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
@@ -2839,6 +2841,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   exactDeliveryPreparation: null,
                   exactDeliveryRecordItem: null,
                   preparation,
+                  retiredExactDelivery: false,
                 };
               }
 
@@ -2848,11 +2851,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ? preparationRecordItem.wake.notification
                     .deliveryIdempotencyKey ?? ""
                   : "";
-              const exactDeliveryIntentState =
+              const retiredExactDelivery =
+                isHostedRetiredSourceDeliveryStallDeliveryKey(
+                  deliveryIdempotencyKey,
+                );
+              let exactDeliveryIntentState =
                 await resolveHostedAssistantDeliveryIntentState({
                   deliveryIdempotencyKey,
                   vaultRoot: restored.vaultRoot,
                 });
+              if (
+                retiredExactDelivery
+                && exactDeliveryIntentState
+                && !exactDeliveryIntentState.terminal
+              ) {
+                await retireHostedSourceDeliveryStallIntentById({
+                  intentId: exactDeliveryIntentState.intentId,
+                  vaultRoot: restored.vaultRoot,
+                });
+                exactDeliveryIntentState =
+                  await resolveHostedAssistantDeliveryIntentState({
+                    deliveryIdempotencyKey,
+                    vaultRoot: restored.vaultRoot,
+                  });
+              }
               const preferredIntentIds =
                 exactDeliveryIntentState && !exactDeliveryIntentState.terminal
                   ? [exactDeliveryIntentState.intentId]
@@ -2897,6 +2919,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 exactDeliveryPreparation,
                 exactDeliveryRecordItem,
                 preparation,
+                retiredExactDelivery,
               };
             },
           });
@@ -2906,6 +2929,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             exactDeliveryPreparation,
             exactDeliveryRecordItem,
             preparation,
+            retiredExactDelivery,
           } = persistedPreparation.result;
           if (persistedPreparation.canonicalWritePersisted) {
             activeWorkspace = persistedPreparation.workspace;
@@ -3035,7 +3059,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               prepared: true,
             };
           };
-          if (ownsExactModelFreeDelivery && exactDeliveryIntentState?.terminal) {
+          if (
+            ownsExactModelFreeDelivery
+            && (
+              exactDeliveryIntentState?.terminal
+              || (retiredExactDelivery && exactDeliveryIntentState === null)
+            )
+          ) {
             return await recordSystemMailboxItem({
               exactDeliveryCompleted: true,
               item: recordItem,

@@ -19,6 +19,10 @@ Updated: 2026-08-24
   suppress claims, not as authority to ask the member to reconnect.
 - An account or source that explicitly reports reauthorization-required state
   can still receive the existing verified reconnect flow.
+- Existing queued digest occurrences and retired direct-notification intents
+  reconcile safely without introducing another queue, state owner, or migration.
+- Preliminary specialist findings can be dispositioned and fixed in the active
+  turn; final cross-cutting findings retain their mutation pause.
 - Focused owner tests, typechecks, diff verification, and the Product UX
   walkthrough pass.
 
@@ -26,7 +30,8 @@ Updated: 2026-08-24
 
 - In scope: the Garmin delivery-stall notification added on 2026-08-23, its
   mailbox/provider-entry support, the weekly digest reconnect policy, tests,
-  compatibility documentation, and the associated changelog entry.
+  compatibility documentation, the associated changelog entry, and the
+  completion-workflow specialist continuation rule.
 - Out of scope: provider ingestion, source-health observability, explicit
   reconnect-required handling, and historical source-data repair.
 
@@ -50,8 +55,12 @@ Updated: 2026-08-24
    automation test suites.
 3. Risk: queued legacy notifications could survive the code change.
    Mitigation: retain only the old namespace as model-free drain authority and
-   terminate matching imported items before assistant or provider entry; remove
-   the producer, source materializer, copy, and provider-entry path.
+   terminate matching mailbox and outbox state at their existing durable owners
+   before assistant or provider entry; remove the producer, source materializer,
+   copy, and provider-entry path.
+4. Risk: an already-due weekly digest could retain the retired reconnect prompt.
+   Mitigation: patch only the exact retired managed seed while preserving its
+   one-shot schedule and occurrence context.
 
 ## Tasks
 
@@ -61,8 +70,12 @@ Updated: 2026-08-24
    recovery state and codify that staleness alone suppresses outreach.
 3. [x] Run focused package and Web verification plus the Product UX
    walkthrough.
-4. [ ] Commit through the repository workflow, open the PR, and run ReviewGPT with
-   CI on the exact pushed head.
+4. [x] Reconcile the branch with current `main`, independently triage the first
+   ReviewGPT findings, and implement the accepted owner-boundary corrections.
+5. [x] Update the completion workflow so preliminary specialist remediation can
+   continue after the parent disposition update while final findings still pause.
+6. [ ] Commit the corrected candidate, push it, and complete final ReviewGPT and
+   CI on the exact head.
 
 ## Decisions
 
@@ -77,6 +90,12 @@ Updated: 2026-08-24
   reauthorization-required state still reaches the existing verified connect
   link; an already-queued retired event terminates before assistant and
   provider entry. No new UI, consent step, or member action was added.
+- Review findings were accepted where they exposed shipped durable state: an
+  exact retired queued digest seed is now reconciled in place, and retired
+  mailbox/outbox delivery state is terminalized through existing owners.
+  No new durable state, lifecycle, queue, or background reconciliation pass was
+  added. The optional specialist coverage artifact was not applied because the
+  equivalent smaller identity-mismatch proof was restored directly.
 
 ## Verification
 
@@ -95,3 +114,12 @@ Updated: 2026-08-24
   intents, never calls assistant execution, advances the mailbox item, and
   leaves no pending item. Prompt readback proves staleness alone requires
   suppression while explicit auth failure retains the connect action.
+- Corrected-head focused proof: managed automations (56), retired mailbox
+  notification state (62), durable callback retirement (1), restored exact
+  notification integration (13), hosted model-free admission (2), and workflow
+  documentation contracts (46) pass. Assistant Engine, Assistant Runtime,
+  hosted-execution, and CLI typechecks pass.
+- The production-shaped real-Codex test is committed for both stale-only silence
+  and explicit reauthorization with exactly one returned connect URL. Its local
+  live run is credential-blocked because neither supported provider credential
+  is configured; the same file compiles and its deterministic owner proofs pass.

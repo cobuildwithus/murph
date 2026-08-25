@@ -61,6 +61,7 @@ import {
   MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  MURPH_DEVICE_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
@@ -95,6 +96,7 @@ import {
 } from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
+  AssistantHostedDeviceToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_MANAGED_AUTOMATIONS,
@@ -3746,6 +3748,158 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
                 && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
               )
               expect(finishCalls.length).toBeLessThanOrEqual(1)
+              if (result.finalMessage !== '') {
+                expect(JSON.parse(result.finalMessage.trim())).toEqual({
+                  kind: 'skip',
+                  privateSummary:
+                    'No weekly digest cleared the memorability bar.',
+                })
+              }
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex weekly health digest reconnect authority e2e', () => {
+  it(
+    'stays quiet for stale-only data and sends one verified link for explicit reauthorization',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      )
+      if (!weeklyHealthDigest) {
+        throw new Error('Expected the managed weekly health digest automation.')
+      }
+      const probes = [
+        {
+          accountStatus: 'active',
+          kind: 'stale-only',
+          lastErrorCode: null,
+          reauthorizationRequired: false,
+        },
+        {
+          accountStatus: 'reauthorization_required',
+          kind: 'explicit-reauthorization',
+          lastErrorCode: 'TOKEN_REFRESH_FAILED',
+          reauthorizationRequired: true,
+        },
+      ] as const
+      const connectUrl = 'https://connect.example.test/session/verified-reconnect'
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-weekly-digest-${probe.kind}-e2e-`),
+          )
+          const binDirectory = path.join(workingDirectory, 'bin')
+          const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+
+          try {
+            await materializeWeeklyHealthDigestVaultCli({
+              binDirectory,
+              reauthorizationRequired: probe.reauthorizationRequired,
+            })
+            const result = await executeRealCodexAppServerTurn({
+              allowFinishWithoutReply: true,
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildWeeklyHealthDigestDeveloperInstructions(),
+              dynamicTools: [
+                MURPH_DEVICE_TOOL,
+                MURPH_FINISH_WITHOUT_REPLY_TOOL,
+              ],
+              env: {
+                ...config.env,
+                PATH: [binDirectory, config.env.PATH]
+                  .filter((value): value is string => Boolean(value))
+                  .join(path.delimiter),
+              },
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => null,
+                currentHostedMailboxItemIds: () => [],
+                deviceTool: {
+                  request: async (request) => {
+                    deviceRequests.push(request)
+                    if (request.action === 'list_accounts') {
+                      return {
+                        accounts: [{
+                          accountId: 'account-fixture',
+                          displayName: 'Garmin',
+                          lastErrorCode: probe.lastErrorCode,
+                          lastSyncCompletedAt: '2026-08-10T12:00:00.000Z',
+                          provider: 'garmin',
+                          status: probe.accountStatus,
+                        }],
+                        action: request.action,
+                        provider: request.provider ?? null,
+                        sourceProvider: request.sourceProvider ?? null,
+                      }
+                    }
+                    if (request.action === 'connect') {
+                      return {
+                        action: request.action,
+                        link: {
+                          authorizationUrl: connectUrl,
+                          connectUrl,
+                          expiresAt: '2026-08-24T18:00:00.000Z',
+                          provider: request.provider,
+                          providerLabel: 'Garmin',
+                        },
+                      }
+                    }
+                    throw new Error('Unexpected device reconcile request.')
+                  },
+                },
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: [
+                weeklyHealthDigest.instructions,
+                'Device activity context:',
+                probe.reauthorizationRequired
+                  ? '- Garmin account status is `reauthorization_required`; its source status is `error` with `lastErrorCode: TOKEN_REFRESH_FAILED`.'
+                  : '- Garmin account status is `active`; its source is healthy but last delivered data on 2026-08-10 because this wearable is used only occasionally.',
+                '- There are no recent manual logs, experiment changes, or other substantive health findings for this run.',
+              ].join('\n\n'),
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const connectRequests = deviceRequests.filter(
+              (request) => request.action === 'connect',
+            )
+
+            if (probe.reauthorizationRequired) {
+              expect(connectRequests).toEqual([{
+                action: 'connect',
+                provider: 'garmin',
+              }])
+              expect(result.finalMessage).toContain(connectUrl)
+              expect(result.finalMessage.split(connectUrl)).toHaveLength(2)
+            } else {
+              expect(connectRequests).toHaveLength(0)
               if (result.finalMessage !== '') {
                 expect(JSON.parse(result.finalMessage.trim())).toEqual({
                   kind: 'skip',
@@ -9992,6 +10146,46 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeWeeklyHealthDigestVaultCli(input: {
+  binDirectory: string
+  reauthorizationRequired: boolean
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const sources = JSON.stringify({
+    sources: [{
+      lastDate: '2026-08-10',
+      lastErrorCode: input.reauthorizationRequired
+        ? 'TOKEN_REFRESH_FAILED'
+        : null,
+      provider: 'garmin',
+      stalenessVsNewestDays: 14,
+      status: input.reauthorizationRequired ? 'error' : 'healthy',
+    }],
+  })
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables sources list"*)',
+      `    printf '%s\\n' '${sources}'`,
+      '    ;;',
+      '  *"wearables"*|*"experiment"*|*"list"*|*"search"*|*"meal"*)',
+      '    printf \'%s\\n\' \'{"data":[],"summary":"No material change in the available canonical period."}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 async function materializeProductNotesFixtures(input: {
   appendCapturePath: string
   binDirectory: string
@@ -10937,6 +11131,31 @@ function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: scheduled ? 'automation-cron' : null,
+  })
+}
+
+function buildWeeklyHealthDigestDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: true,
+    assistantHostedDeviceConnectProviders: [{
+      label: 'Garmin',
+      provider: 'garmin',
+    }],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-24',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
   })
 }
 

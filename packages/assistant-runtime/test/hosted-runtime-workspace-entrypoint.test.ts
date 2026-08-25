@@ -50,6 +50,7 @@ import {
 } from "@murphai/contracts";
 import {
   appendAssistantTranscriptEntries,
+  beginAssistantOutboxIntentMirrorPreparedDispatch,
   createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
@@ -10877,6 +10878,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: false,
       expectedProviderSends: 1,
       initialOutboxState: "pending" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10884,6 +10886,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "pending" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10891,6 +10894,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "due_retryable" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10898,6 +10902,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: false,
       expectedProviderSends: 0,
       initialOutboxState: "retryable" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10905,6 +10910,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: false,
       expectedProviderSends: 0,
       initialOutboxState: "sent" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10912,6 +10918,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "pending" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10919,6 +10926,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "due_retryable" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "success" as const,
     },
     {
@@ -10926,6 +10934,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: false,
       expectedProviderSends: 3,
       initialOutboxState: "pending" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "retryable_failure" as const,
     },
     {
@@ -10933,13 +10942,25 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversationInputAhead: false,
       expectedProviderSends: 3,
       initialOutboxState: "pending" as const,
+      notificationKind: "group-join" as const,
       providerOutcome: "retryable_failure_with_host_abort" as const,
     },
-  ])("system mailbox mode resumes a restored exact group-join delivery from its durable identity ($channel, $initialOutboxState outbox, provider: $providerOutcome, foreground checkpoint: $checkpointConversationInputAhead)", async ({
+    ...(["absent", "pending", "retryable", "sending"] as const).map(
+      (initialOutboxState) => ({
+        channel: "linq" as const,
+        checkpointConversationInputAhead: false,
+        expectedProviderSends: 0,
+        initialOutboxState,
+        notificationKind: "retired-delivery-stall" as const,
+        providerOutcome: "success" as const,
+      }),
+    ),
+  ])("system mailbox mode resolves a restored exact notification ($notificationKind, $channel, $initialOutboxState outbox, provider: $providerOutcome, foreground checkpoint: $checkpointConversationInputAhead)", async ({
     channel,
     checkpointConversationInputAhead,
     expectedProviderSends,
     initialOutboxState,
+    notificationKind,
     providerOutcome,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -10950,8 +10971,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const retryCheckpointAbortReason = new Error(
       "Synthetic host abort during exact delivery retry checkpoint.",
     );
-    const exactText = "You are now part of the synthetic group.";
-    const exactDeliveryKey = "group-join:membership_restored_exact";
+    const retiredDeliveryStall = notificationKind === "retired-delivery-stall";
+    const exactText = retiredDeliveryStall
+      ? "Reconnect the synthetic wearable."
+      : "You are now part of the synthetic group.";
+    const exactDeliveryKey = retiredDeliveryStall
+      ? "device-delivery-stalled:v1:restored-exact"
+      : "group-join:membership_restored_exact";
     const exactTarget = channel === "telegram"
       ? "123456789"
       : "linq_private_group_join_thread";
@@ -10971,7 +10997,9 @@ describe("hosted workspace runtime entrypoint", () => {
     ).toISOString();
     const exactItem = createMailboxItem({
       dedupeKey: exactDedupeKey,
-      id: "mailbox_item_group_join_restored_exact",
+      id: retiredDeliveryStall
+        ? "mailbox_item_retired_delivery_stall_restored_exact"
+        : "mailbox_item_group_join_restored_exact",
       kind: "assistant.notification.requested",
       lane: "system",
       laneSeq: "1",
@@ -11112,25 +11140,28 @@ describe("hosted workspace runtime entrypoint", () => {
             : item
         ),
       }));
-      const exactIntent = await createAssistantOutboxIntent({
-        channel,
-        createdAt: TEST_NOW,
-        dedupeToken: exactDeliveryKey,
-        deliveryIdempotencyKey: exactDeliveryKey,
-        deliveryTransportIdempotent: channel === "linq",
-        explicitTarget: exactTarget,
-        identityId: exactIdentityId,
-        message: exactText,
-        sessionId: "session_group_join_restored_exact",
-        threadId: exactThreadId,
-        threadIsDirect: true,
-        turnId: "turn_group_join_restored_exact",
-        vault: vaultRoot,
-      });
+      const exactIntent = initialOutboxState === "absent"
+        ? null
+        : await createAssistantOutboxIntent({
+            channel,
+            createdAt: TEST_NOW,
+            dedupeToken: exactDeliveryKey,
+            deliveryIdempotencyKey: exactDeliveryKey,
+            deliveryTransportIdempotent: channel === "linq",
+            explicitTarget: exactTarget,
+            identityId: exactIdentityId,
+            message: exactText,
+            sessionId: "session_group_join_restored_exact",
+            threadId: exactThreadId,
+            threadIsDirect: true,
+            turnId: "turn_group_join_restored_exact",
+            vault: vaultRoot,
+          });
       if (
         initialOutboxState === "retryable"
         || initialOutboxState === "due_retryable"
       ) {
+        assert.ok(exactIntent);
         await saveAssistantOutboxIntent(vaultRoot, {
           ...exactIntent,
           attemptCount: 1,
@@ -11145,7 +11176,19 @@ describe("hosted workspace runtime entrypoint", () => {
           updatedAt: TEST_NOW,
         });
       }
+      if (initialOutboxState === "sending") {
+        assert.ok(exactIntent);
+        const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+          deliveryIdempotencyKey: exactDeliveryKey,
+          deliveryTransportIdempotent: channel === "linq",
+          intentId: exactIntent.intentId,
+          startedAt: TEST_NOW,
+          vault: vaultRoot,
+        });
+        assert.equal(prepared?.intent.status, "sending");
+      }
       if (initialOutboxState === "sent") {
+        assert.ok(exactIntent);
         const sentIntent = await markAssistantOutboxIntentSentById({
           delivery: {
             channel,
@@ -11333,6 +11376,42 @@ describe("hosted workspace runtime entrypoint", () => {
       }
 
       const result = await resultPromise;
+
+      if (retiredDeliveryStall) {
+        assert.equal(deliveryBodies.length, 0);
+        assert.deepEqual(
+          (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
+            errorCode: intent.lastError?.code ?? null,
+            status: intent.status,
+          })),
+          initialOutboxState === "absent"
+            ? []
+            : [{
+                errorCode: initialOutboxState === "sending"
+                  ? "ASSISTANT_DELIVERY_AMBIGUOUS"
+                  : "ASSISTANT_RETIRED_SOURCE_DELIVERY_STALL_SUPPRESSED",
+                status: initialOutboxState === "sending"
+                  ? "failed"
+                  : "abandoned",
+              }],
+        );
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending,
+          [],
+        );
+        assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+        assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
+        assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+        assert.equal(
+          checkpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+        assert.equal(result.status, "idle", JSON.stringify(result));
+        assert.equal(result.nextWakeAt, null);
+        assert.equal(result.nextWakeReason ?? null, null);
+        return;
+      }
 
       if (channel === "telegram" && checkpointConversationInputAhead) {
         const preparedWorkspace = checkpointBundles.at(0);

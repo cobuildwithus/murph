@@ -2271,6 +2271,80 @@ describe('applyMurphManagedAutomations', () => {
       }))
   })
 
+  it('refreshes only the retired queued weekly digest seed and preserves its occurrence context', async () => {
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) =>
+        seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    if (!digestSeed) {
+      throw new Error('Expected the managed weekly health digest seed.')
+    }
+    const retiredInstructions = digestSeed.instructions
+      .replace(
+        '- Wearable explicitly requires reconnect: a device account exists with `status: reauthorization_required`, or a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`. Missing or stale data alone never authorizes outreach because it can reflect intentional or occasional wear. Without an explicit reconnect-required state, suppress instead of asking the user to troubleshoot, sync, or reconnect.',
+        '- Wearable connected but not delivering: a device account exists with `status: reauthorization_required`, a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`, or its sources show no new data for roughly a week or more.',
+      )
+      .replace(
+        'acknowledging the explicit connection problem',
+        'acknowledging the gap',
+      )
+      .replace(
+        'If the explicit reconnect-required branch applies',
+        'If the reconnect branch applies',
+      )
+    const queuedSchedule = {
+      at: '2026-06-20T12:01:00.000Z',
+      kind: 'at' as const,
+    }
+    const occurrenceContext = [
+      '',
+      'Device activity context:',
+      'Kind: workout',
+      'Occurred at: 2026-06-20T12:00:00.000Z',
+      'Source: whoop',
+    ].join('\n')
+    const queuedTags = [
+      'assistant',
+      'scheduled',
+      'murph-managed',
+      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+    ]
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: `${retiredInstructions}\n${occurrenceContext}`,
+      route: defaultRoute,
+      schedule: queuedSchedule,
+      slug: 'weekly-health-digest',
+      status: 'active',
+      summary: 'Queued weekly digest.',
+      tags: queuedTags,
+      title: 'Weekly health digest',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const reconciled = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    expect(reconciled).toEqual(expect.objectContaining({
+      instructions: `${digestSeed.instructions}\n${occurrenceContext}`,
+      schedule: queuedSchedule,
+      tags: queuedTags,
+    }))
+    expect(reconciled?.instructions).not.toContain(
+      'sources show no new data for roughly a week',
+    )
+  })
+
   it('spreads managed recurring schedules deterministically by vault id', async () => {
     await applyMurphManagedAutomations({
       defaultRoute,

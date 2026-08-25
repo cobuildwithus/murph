@@ -79,11 +79,17 @@ export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];
 
+export const HOSTED_RETIRED_SOURCE_DELIVERY_STALL_DELIVERY_KEY_PREFIX =
+  "device-delivery-stalled:v1:" as const;
+
+export const HOSTED_RETIRED_SOURCE_DELIVERY_STALL_EVENT_ID_PREFIX =
+  `assistant.notification.requested:${HOSTED_RETIRED_SOURCE_DELIVERY_STALL_DELIVERY_KEY_PREFIX}` as const;
+
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
   [
     // Retained only so already-queued notifications reach the runtime's
     // terminal no-send tombstone without requiring model access.
-    "assistant.notification.requested:device-delivery-stalled:v1:",
+    HOSTED_RETIRED_SOURCE_DELIVERY_STALL_EVENT_ID_PREFIX,
     "assistant.notification.requested:group-join:",
   ] as const;
 
