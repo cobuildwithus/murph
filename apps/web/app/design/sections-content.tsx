@@ -87,13 +87,15 @@ import {
 
 function StudySection({
   children,
+  id,
   title,
 }: {
   children: React.ReactNode;
+  id?: string;
   title: string;
 }) {
   return (
-    <section className="flex flex-col gap-6">
+    <section className="flex flex-col gap-6" id={id}>
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
         {title}
       </h2>
@@ -790,7 +792,10 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Private Murph diagnostic and direct member message">
+          <StudySection
+            id="operator-tasks"
+            title="Private Murph diagnostic and direct member message"
+          >
             <OpsOperatorTaskStudy />
           </StudySection>
         </>
