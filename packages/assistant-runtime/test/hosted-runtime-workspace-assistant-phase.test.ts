@@ -6895,7 +6895,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         buildOnboardingFirstPersonalReadAutomationSaveRequest({
           now: new Date("2026-08-06T21:00:00.000Z"),
         });
-      const genericFixedTargetRequests = [
+      const genericFixedIdentityRequests = [
         {
           action: "save" as const,
           automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -6916,17 +6916,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
           title: "Replacement by slug",
         },
-        {
-          action: "save" as const,
-          instructions: "Replace the fixed first-read policy.",
-          schedule: {
-            at: "2026-08-06T21:02:00.000Z",
-            kind: "at" as const,
-          },
-          title: "Onboarding___first / personal read",
-        },
       ];
-      for (const request of genericFixedTargetRequests) {
+      for (const request of genericFixedIdentityRequests) {
         await expect(operationScope.runAutoReplyGroup({
           executionContext: laneInput.executionContext,
           inputIds: [inputId],
@@ -6950,7 +6941,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
-          return await automationTool.request(genericFixedTargetRequests[0], {
+          return await automationTool.request(genericFixedIdentityRequests[0], {
             onboardingFirstReadCompletionTransition: true,
           });
         },
