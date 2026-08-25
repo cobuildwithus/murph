@@ -181,40 +181,48 @@ test("JournalPage renders the derived private health timeline", () => {
     ...clientFixture.replica,
     generatedAt: "2026-08-12T12:00:00.000Z",
     journal: {
-      days: [{
-        date: "2026-08-12",
-        events: [{
+      days: [
+        {
           date: "2026-08-12",
-          details: [],
-          id: "morning-walk",
-          kind: "activity",
-          occurredAt: "2026-08-12T08:00:00.000Z",
-          records: [{
-            id: "morning-walk-record",
-            kind: "activity_session",
-            label: "Morning walk",
-            occurredAt: "2026-08-12T08:00:00.000Z",
-            source: "Apple Health",
-            summary: "30 min",
-            tags: [],
-            timeZone: "Europe/Warsaw",
-          }],
-          summary: "30 min",
-          timing: "timed",
-          timeZone: "Europe/Warsaw",
-          title: "Morning walk",
-        }],
-      }],
+          events: [
+            {
+              date: "2026-08-12",
+              details: [],
+              id: "morning-walk",
+              kind: "activity",
+              occurredAt: "2026-08-12T08:00:00.000Z",
+              records: [
+                {
+                  id: "morning-walk-record",
+                  kind: "activity_session",
+                  label: "Morning walk",
+                  occurredAt: "2026-08-12T08:00:00.000Z",
+                  source: "Apple Health",
+                  summary: "30 min",
+                  tags: [],
+                  timeZone: "Europe/Warsaw",
+                },
+              ],
+              summary: "30 min",
+              timing: "timed",
+              timeZone: "Europe/Warsaw",
+              title: "Morning walk",
+            },
+          ],
+        },
+      ],
       eventCount: 1,
       recordCount: 1,
-      weeks: [{
-        activityMinutes: 30,
-        averageSleepMinutes: null,
-        averageSleepScore: null,
-        endDate: "2026-08-16",
-        sleepNights: 0,
-        startDate: "2026-08-10",
-      }],
+      weeks: [
+        {
+          activityMinutes: 30,
+          averageSleepMinutes: null,
+          averageSleepScore: null,
+          endDate: "2026-08-16",
+          sleepNights: 0,
+          startDate: "2026-08-10",
+        },
+      ],
       windowDays: 120,
     },
   });
@@ -234,6 +242,7 @@ test("JournalPage renders the derived private health timeline", () => {
   assert.match(markup, /10–16 August 2026/u);
   assert.match(markup, /Morning walk/u);
   assert.match(markup, /To add, correct, or remove an entry, tell Murph/u);
+  assert.doesNotMatch(markup, /No data/u);
 });
 
 test("JournalPage renders its empty state after Browser Vault finishes without data", () => {
@@ -242,7 +251,7 @@ test("JournalPage renders its empty state after Browser Vault finishes without d
     dataVersion: null,
     error: null,
     ref: null,
-    refreshPending: true,
+    refreshPending: false,
     refresh: mocks.refresh,
     status: "empty",
   });
@@ -251,6 +260,67 @@ test("JournalPage renders its empty state after Browser Vault finishes without d
 
   assert.match(markup, /Your timeline starts with one useful detail/u);
   assert.doesNotMatch(markup, /Preparing your Journal/u);
+});
+
+test("JournalPage renders a structural skeleton while its first timeline is prepared", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    freshness: "stale",
+    ref: null,
+    refreshPending: true,
+    refresh: mocks.refresh,
+    status: "empty",
+  });
+
+  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+
+  assert.match(markup, /Preparing your Journal/u);
+  assert.match(markup, /aria-busy="true"/u);
+  assert.doesNotMatch(markup, /Your timeline starts with one useful detail/u);
+});
+
+test("JournalPage keeps its page context and recovery action when loading fails", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: "Internal implementation detail",
+    freshness: "stale",
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "error",
+  });
+
+  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+
+  assert.match(markup, /Your Journal/u);
+  assert.match(markup, /Journal could not load/u);
+  assert.match(markup, /Try again/u);
+  assert.doesNotMatch(markup, /Internal implementation detail/u);
+});
+
+test("JournalPage offers recovery when an old replica has no Journal view", () => {
+  const legacyReplica = { ...clientFixture.replica };
+  delete legacyReplica.journal;
+  const legacyClient = createBrowserVaultQueryClient(legacyReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: legacyClient,
+    dataVersion: legacyClient.replica.source.dataVersion,
+    error: null,
+    freshness: "stale",
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+
+  assert.match(markup, /Journal is not ready yet/u);
+  assert.match(markup, /Refresh Journal/u);
+  assert.doesNotMatch(markup, /Your timeline starts with one useful detail/u);
 });
 
 test("Personal Patterns comparison controls name their factor and next-day outcome", () => {

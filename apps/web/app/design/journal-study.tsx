@@ -1,6 +1,17 @@
-import type { JournalEvent, JournalRecord, JournalView } from "@murphai/query/browser-overview";
+"use client";
 
-import { JournalViewContent } from "@/src/components/journal/journal-view";
+import type {
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "@murphai/query/browser-overview";
+
+import {
+  JournalErrorState,
+  JournalLoadingState,
+  JournalUnavailableState,
+  JournalViewContent,
+} from "@/src/components/journal/journal-view";
 
 const STUDY_WEEK_START = "2026-06-08";
 
@@ -54,10 +65,16 @@ const JOURNAL_STUDY_DATA: JournalView = {
         source: "Oura",
         summary: "24 min",
       }),
-      journalEvent("headache", "symptom", "Headache", "2026-06-10T19:10:00.000Z", {
-        source: "You",
-        summary: "Mild, started after dinner",
-      }),
+      journalEvent(
+        "headache",
+        "symptom",
+        "Headache",
+        "2026-06-10T19:10:00.000Z",
+        {
+          source: "You",
+          summary: "Mild, started after dinner",
+        },
+      ),
     ]),
     day("2026-06-09", [
       journalEvent("sleep-tue", "sleep", "Sleep", "2026-06-09T07:10:00.000Z", {
@@ -66,18 +83,30 @@ const JOURNAL_STUDY_DATA: JournalView = {
         summary: "7 h 18 · score 81",
         timing: "night",
       }),
-      journalEvent("yard", "activity", "Yard work", "2026-06-09T11:00:00.000Z", {
-        source: "Oura",
-        summary: "2 h 20 across 3 sessions",
-      }),
+      journalEvent(
+        "yard",
+        "activity",
+        "Yard work",
+        "2026-06-09T11:00:00.000Z",
+        {
+          source: "Oura",
+          summary: "2 h 20 across 3 sessions",
+        },
+      ),
     ]),
     day("2026-06-08", [
-      journalEvent("trip", "experiment_context", "Work trip", "2026-06-08T12:00:00.000Z", {
-        details: ["Away from home · Hotel stay"],
-        source: "You",
-        summary: "Berlin · day 1 of 3",
-        timing: "all_day",
-      }),
+      journalEvent(
+        "trip",
+        "experiment_context",
+        "Work trip",
+        "2026-06-08T12:00:00.000Z",
+        {
+          details: ["Away from home · Hotel stay"],
+          source: "You",
+          summary: "Berlin · day 1 of 3",
+          timing: "all_day",
+        },
+      ),
       journalEvent("sleep-mon", "sleep", "Sleep", "2026-06-08T07:50:00.000Z", {
         details: ["82% efficiency", "HRV 46 ms", "readiness 65"],
         source: "Oura",
@@ -88,31 +117,59 @@ const JOURNAL_STUDY_DATA: JournalView = {
   ],
   eventCount: 13,
   recordCount: 29,
-  weeks: [{
-    activityMinutes: 264,
-    averageSleepMinutes: 437,
-    averageSleepScore: 79,
-    endDate: "2026-06-14",
-    sleepNights: 6,
-    startDate: STUDY_WEEK_START,
-  }],
+  weeks: [
+    {
+      activityMinutes: 264,
+      averageSleepMinutes: 437,
+      averageSleepScore: 79,
+      endDate: "2026-06-14",
+      sleepNights: 6,
+      startDate: STUDY_WEEK_START,
+    },
+  ],
   windowDays: 120,
 };
 
 export function JournalStudy() {
   return (
-    <section data-design-study="journal" id="journal-study" inert>
-      <JournalViewContent
-        asOfDate="2026-06-13"
-        insights={[{
-          detail: "Late caffeine and shorter sleep moved together in your data.",
-          href: "/patterns",
-          id: "caffeine-sleep",
-          label: "Pattern",
-          title: "Late caffeine",
-        }]}
-        journal={JOURNAL_STUDY_DATA}
-      />
+    <section data-design-study="journal" id="journal-study">
+      <section inert>
+        <JournalViewContent
+          asOfDate="2026-06-13"
+          insights={[
+            {
+              detail:
+                "Late caffeine and shorter sleep moved together in your data.",
+              href: "/patterns",
+              id: "caffeine-sleep",
+              label: "Pattern",
+              title: "Late caffeine",
+            },
+          ]}
+          journal={JOURNAL_STUDY_DATA}
+        />
+      </section>
+      <section aria-label="Journal loading state" inert>
+        <JournalLoadingState />
+      </section>
+      <section aria-label="Journal empty state" inert>
+        <JournalViewContent
+          asOfDate="2026-06-13"
+          journal={{
+            days: [],
+            eventCount: 0,
+            recordCount: 0,
+            weeks: [],
+            windowDays: 120,
+          }}
+        />
+      </section>
+      <section aria-label="Journal unavailable state" inert>
+        <JournalUnavailableState onRetry={() => undefined} />
+      </section>
+      <section aria-label="Journal error state" inert>
+        <JournalErrorState onRetry={() => undefined} />
+      </section>
     </section>
   );
 }
@@ -139,7 +196,16 @@ function journalEvent(
     id,
     kind,
     occurredAt,
-    records: [journalRecord(id, kind, title, occurredAt, options.source, options.summary)],
+    records: [
+      journalRecord(
+        id,
+        kind,
+        title,
+        occurredAt,
+        options.source,
+        options.summary,
+      ),
+    ],
     summary: options.summary,
     timing: options.timing ?? "timed",
     timeZone: "Europe/Berlin",

@@ -14,6 +14,7 @@ import {
   Footprints,
   Moon,
   NotebookPen,
+  RefreshCw,
   Stethoscope,
   Sun,
   Trees,
@@ -25,6 +26,7 @@ import type {
 } from "@murphai/query/browser-overview";
 
 import { Button } from "@/src/components/ui/button";
+import { Skeleton } from "@/src/components/ui/skeleton";
 import { cn } from "@/src/lib/utils";
 
 const WEEK_DAY_COUNT = 7;
@@ -40,11 +42,17 @@ export interface JournalInsight {
 export function JournalViewContent({
   asOfDate,
   insights = [],
+  isRefreshing = false,
+  isStale = false,
   journal,
+  onRefresh,
 }: {
   asOfDate?: string;
   insights?: JournalInsight[];
+  isRefreshing?: boolean;
+  isStale?: boolean;
   journal: JournalView;
+  onRefresh?: () => void;
 }) {
   const today = asOfDate ?? new Date().toISOString().slice(0, 10);
   const latestWeekStart = startOfIsoWeek(today);
@@ -68,36 +76,38 @@ export function JournalViewContent({
   return (
     <section
       aria-labelledby="journal-page-heading"
+      aria-busy={isRefreshing}
       className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 lg:gap-[2.125rem] lg:px-[4.5rem] lg:py-16 lg:pb-[4.5rem]"
     >
-      <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex max-w-[43.75rem] flex-col gap-2">
-          <p className="font-mono text-[11px] uppercase leading-4 tracking-[0.12em] text-muted-foreground">
-            Your Journal
-          </p>
-          <h1
-            id="journal-page-heading"
-            className="font-serif text-[2.625rem] font-semibold leading-[2.875rem] tracking-[-0.025em] text-foreground"
-          >
-            Journal
-          </h1>
-          <p className="text-[15px] leading-[23px] text-muted-foreground">
-            A clear record of what happened, how you felt, and what your health
-            data recorded.
-          </p>
-        </div>
+      <JournalPageHeader>
         {journal.days.length > 0 ? (
-          <WeekControls
-            canGoNext={selectedWeekStart < latestWeekStart}
-            canGoPrevious={selectedWeekStart > earliestWeekStart}
-            onNext={() => setSelectedWeekStart(addDays(selectedWeekStart, 7))}
-            onPrevious={() =>
-              setSelectedWeekStart(addDays(selectedWeekStart, -7))
-            }
-            onToday={() => setSelectedWeekStart(latestWeekStart)}
-          />
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            {isRefreshing ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Updating latest data
+              </p>
+            ) : isStale && onRefresh ? (
+              <Button
+                className="h-auto gap-1.5 px-0 text-xs"
+                onClick={onRefresh}
+                variant="link"
+              >
+                <RefreshCw className="size-3" aria-hidden="true" />
+                Refresh latest data
+              </Button>
+            ) : null}
+            <WeekControls
+              canGoNext={selectedWeekStart < latestWeekStart}
+              canGoPrevious={selectedWeekStart > earliestWeekStart}
+              onNext={() => setSelectedWeekStart(addDays(selectedWeekStart, 7))}
+              onPrevious={() =>
+                setSelectedWeekStart(addDays(selectedWeekStart, -7))
+              }
+              onToday={() => setSelectedWeekStart(latestWeekStart)}
+            />
+          </div>
         ) : null}
-      </header>
+      </JournalPageHeader>
 
       {journal.days.length === 0 ? (
         <JournalEmptyState />
@@ -166,6 +176,179 @@ export function JournalViewContent({
   );
 }
 
+export function JournalLoadingState() {
+  return (
+    <section
+      aria-busy="true"
+      aria-labelledby="journal-page-heading"
+      className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 lg:gap-[2.125rem] lg:px-[4.5rem] lg:py-16 lg:pb-[4.5rem]"
+    >
+      <JournalPageHeader>
+        <span className="sr-only" role="status">
+          Preparing your Journal
+        </span>
+      </JournalPageHeader>
+
+      <section className="flex flex-col gap-4 border-b border-border pb-6 pt-5">
+        <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+        <Skeleton className="h-8 w-52 motion-reduce:animate-none" />
+        <Skeleton className="h-5 w-full max-w-lg motion-reduce:animate-none" />
+      </section>
+
+      <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1fr)_21.375rem] lg:gap-16">
+        <div className="flex flex-col" aria-hidden="true">
+          {[0, 1, 2, 3].map((day) => (
+            <div
+              className="grid gap-4 border-b border-border/70 py-[26px] first:pt-2 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-7"
+              key={day}
+            >
+              <div className="flex gap-3 sm:flex-col sm:gap-2">
+                <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+                <Skeleton className="h-9 w-10 motion-reduce:animate-none" />
+              </div>
+              <div className="flex flex-col gap-4">
+                <JournalEventSkeleton
+                  width={day % 2 === 0 ? "wide" : "medium"}
+                />
+                {day < 2 ? <JournalEventSkeleton width="short" /> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        <aside className="flex flex-col gap-8" aria-hidden="true">
+          <Skeleton className="h-72 w-full rounded-xl motion-reduce:animate-none" />
+          <div className="flex gap-8">
+            <Skeleton className="h-14 flex-1 motion-reduce:animate-none" />
+            <Skeleton className="h-14 flex-1 motion-reduce:animate-none" />
+            <Skeleton className="h-14 flex-1 motion-reduce:animate-none" />
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+export function JournalErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <JournalStatusState
+      actionLabel="Try again"
+      description="Your private health timeline could not be opened. Your data is still safe."
+      onAction={onRetry}
+      title="Journal could not load"
+      tone="error"
+    />
+  );
+}
+
+export function JournalUnavailableState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <JournalStatusState
+      actionLabel="Refresh Journal"
+      description="Murph could not prepare this view from your latest health data."
+      onAction={onRetry}
+      title="Journal is not ready yet"
+      tone="neutral"
+    />
+  );
+}
+
+function JournalPageHeader({ children }: { children?: React.ReactNode }) {
+  return (
+    <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex max-w-[43.75rem] flex-col gap-2">
+        <p className="font-mono text-[11px] uppercase leading-4 tracking-[0.12em] text-muted-foreground">
+          Your Journal
+        </p>
+        <h1
+          id="journal-page-heading"
+          className="font-serif text-[2.625rem] font-semibold leading-[2.875rem] tracking-[-0.025em] text-foreground"
+        >
+          Journal
+        </h1>
+        <p className="text-[15px] leading-[23px] text-muted-foreground">
+          A clear record of what happened, how you felt, and what your health
+          data recorded.
+        </p>
+      </div>
+      {children}
+    </header>
+  );
+}
+
+function JournalEventSkeleton({
+  width,
+}: {
+  width: "medium" | "short" | "wide";
+}) {
+  const titleWidth =
+    width === "short" ? "w-28" : width === "medium" ? "w-36" : "w-44";
+  const detailWidth =
+    width === "short" ? "w-40" : width === "medium" ? "w-56" : "w-72";
+  return (
+    <div className="grid grid-cols-[3.375rem_1.875rem_minmax(0,1fr)] items-start gap-x-3.5">
+      <Skeleton className="mt-1 h-3 w-9 justify-self-end motion-reduce:animate-none" />
+      <Skeleton className="size-[30px] rounded-full motion-reduce:animate-none" />
+      <div className="flex flex-col gap-2 pt-0.5">
+        <Skeleton
+          className={cn("h-4 motion-reduce:animate-none", titleWidth)}
+        />
+        <Skeleton
+          className={cn(
+            "h-3 max-w-full motion-reduce:animate-none",
+            detailWidth,
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+function JournalStatusState({
+  actionLabel,
+  description,
+  onAction,
+  title,
+  tone,
+}: {
+  actionLabel: string;
+  description: string;
+  onAction: () => void;
+  title: string;
+  tone: "error" | "neutral";
+}) {
+  return (
+    <section
+      aria-labelledby="journal-page-heading"
+      className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 lg:px-[4.5rem] lg:py-16"
+    >
+      <JournalPageHeader />
+      <div
+        className={cn(
+          "max-w-2xl rounded-2xl border bg-card p-6 sm:p-8",
+          tone === "error" ? "border-destructive/30" : "border-border",
+        )}
+      >
+        <CircleAlert
+          className={cn(
+            "size-7",
+            tone === "error" ? "text-destructive" : "text-primary",
+          )}
+          aria-hidden="true"
+        />
+        <h2 className="mt-4 font-serif text-2xl font-semibold tracking-tight text-foreground">
+          {title}
+        </h2>
+        <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
+          {description}
+        </p>
+        <Button className="mt-5" onClick={onAction} size="sm" variant="outline">
+          {actionLabel}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function WeeklyInsights({ insights }: { insights: JournalInsight[] }) {
   return (
     <section aria-label="Weekly insights" className="flex flex-col gap-3">
@@ -209,8 +392,8 @@ function JournalEmptyState() {
         Your timeline starts with one useful detail
       </h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        Tell Murph what happened, how you felt, or what context may matter.
-        Connected devices will appear here too.
+        Tell Murph what happened, how you felt, or what context mattered. Sleep
+        and activity from connected devices will appear automatically.
       </p>
     </section>
   );
@@ -328,7 +511,6 @@ function JournalDaySection({
 }
 
 function JournalEventRow({ event }: { event: JournalEvent }) {
-  const Icon = resolveEventIcon(event);
   const sources = [
     ...new Set(
       event.records
@@ -363,7 +545,7 @@ function JournalEventRow({ event }: { event: JournalEvent }) {
           isConcern && "bg-destructive/10 text-destructive",
         )}
       >
-        <Icon className="size-[15px] stroke-2" aria-hidden="true" />
+        {renderEventIcon(event)}
       </span>
       <div className="min-w-0 pt-0.5">
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
@@ -467,28 +649,33 @@ function MiniCalendar({
 }
 
 function WeekStats({ week }: { week: JournalView["weeks"][number] | null }) {
-  const stats = [
-    {
+  const stats: Array<{ label: string; value: string }> = [];
+  if (
+    week?.averageSleepMinutes !== null &&
+    week?.averageSleepMinutes !== undefined
+  ) {
+    stats.push({
       label: "Average sleep",
-      value:
-        week?.averageSleepMinutes === null ||
-        week?.averageSleepMinutes === undefined
-          ? "No data"
-          : formatDuration(week.averageSleepMinutes),
-    },
-    {
+      value: formatDuration(week.averageSleepMinutes),
+    });
+  }
+  if (
+    week?.averageSleepScore !== null &&
+    week?.averageSleepScore !== undefined
+  ) {
+    stats.push({
       label: "Sleep score",
-      value:
-        week?.averageSleepScore === null ||
-        week?.averageSleepScore === undefined
-          ? "No data"
-          : String(Math.round(week.averageSleepScore)),
-    },
-    {
+      value: String(Math.round(week.averageSleepScore)),
+    });
+  }
+  if (week && week.activityMinutes > 0) {
+    stats.push({
       label: "Activity",
-      value: week ? formatDuration(week.activityMinutes) : "No data",
-    },
-  ];
+      value: formatDuration(week.activityMinutes),
+    });
+  }
+
+  if (stats.length === 0) return null;
 
   return (
     <section aria-label="Week at a glance">
@@ -506,6 +693,11 @@ function WeekStats({ week }: { week: JournalView["weeks"][number] | null }) {
       </dl>
     </section>
   );
+}
+
+function renderEventIcon(event: JournalEvent) {
+  const Icon = resolveEventIcon(event);
+  return <Icon className="size-[15px] stroke-2" aria-hidden="true" />;
 }
 
 function resolveEventIcon(event: JournalEvent): LucideIcon {

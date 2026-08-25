@@ -188,13 +188,28 @@ For hosted runner/container proof, stop the main stack or wait for the
 
 ### Interactive HTTPS preview
 
-When a person must use the preview after the agent turn, run both long-lived
-processes in Orca-managed terminals for that worktree. Do not leave the Web
-server in a tool-owned exec session, `nohup`, or `screen`. Those processes can
-end while the browser keeps a stale page open.
+When a person must use an authenticated preview after the agent turn, run the
+Worker, Web server, and HTTPS proxy in separate Orca-managed terminals for that
+worktree. The Worker is required for Browser Vault data and other authenticated
+backend requests. A Web-only preview is valid only for public or synthetic UI.
+Do not leave any preview process in a tool-owned exec session, `nohup`, or
+`screen`. Those processes can end while the browser keeps a stale page open.
 
 Use the standard local HTTPS origin only when that exact origin is configured
-for the development Privy client. Start the Web server with one public origin:
+for the development Privy client.
+
+Start the local Worker first:
+
+```bash
+vercel env run -- env \
+  MURPH_DEV_SKIP_WORKERS_AI=1 \
+  MURPH_DEV_TEMPORAL=disabled \
+  MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS=1 \
+  pnpm hosted-local up --profile worker-only
+```
+
+Wait for the harness to report the Worker ready on `127.0.0.1:8787`. Then
+start the Web server with one public origin:
 
 ```bash
 cd apps/web
@@ -208,7 +223,7 @@ vercel env run -- env \
   pnpm dev:local-env -- --hostname 127.0.0.1 --port <web-port>
 ```
 
-Run the HTTPS proxy in a second Orca-managed terminal:
+Run the HTTPS proxy in a third Orca-managed terminal:
 
 ```bash
 caddy reverse-proxy \
@@ -224,15 +239,20 @@ origin.
 
 Before handoff, prove all of the following:
 
-1. The direct Web port is listening.
-2. `https://local.withmurph.ai:3443/<route>` returns HTTP 200.
-3. The Orca browser can reload the route after both terminals are active.
-4. The auth dialog reaches its usable phone or email form.
-5. Both terminals remain running after the browser check.
+1. The Worker health check returns HTTP 200 on port 8787.
+2. The direct Web port is listening.
+3. `https://local.withmurph.ai:3443/<route>` returns HTTP 200.
+4. The Orca browser can reload the route after all three terminals are active.
+5. The auth dialog reaches its usable phone or email form.
+6. A signed-in data page leaves its loading state and renders data or a
+   truthful empty state.
+7. All three terminals remain running after the browser check.
 
-Opening the auth dialog alone does not prove login. If it shows `Invalid
-request`, check the proxy response first. A live proxy with a stopped Web
-server returns 502 and can leave a stale auth panel visible.
+Opening the auth dialog alone does not prove login or data access. If it shows
+`Invalid request`, check the proxy response first. A live proxy with a stopped
+Web server returns 502 and can leave a stale auth panel visible. If a signed-in
+page stays in a loading state, confirm that the local Worker still answers on
+port 8787 before debugging the page.
 
 ## Auth And Secret Sources
 
