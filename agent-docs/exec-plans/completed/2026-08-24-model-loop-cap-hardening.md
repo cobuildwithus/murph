@@ -1,8 +1,8 @@
 # Bound model-backed retry loops and cap overshoot
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -153,3 +153,11 @@ Updated: 2026-08-24
     allowance period exceeds its cap by more than twenty percent.
   - Specialist review explicitly evaluates the entire feature composition and
     rejects isolated seam proof when a stable composed/E2E boundary exists.
+  - The preliminary specialist findings were dispositioned and resolved; final
+    ReviewGPT round 1 returned `PASS` with no findings on the immutable pushed
+    candidate.
+  - After the single current-main merge, the affected focused suites passed:
+    75 engine tests, 59 runtime tests, 33 hosted-control tests, 129 Web tests,
+    and 685 Cloudflare tests. All five affected typechecks, docs drift, and doc
+    gardening passed.
+Completed: 2026-08-25
