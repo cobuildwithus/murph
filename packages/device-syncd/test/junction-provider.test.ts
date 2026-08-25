@@ -21864,6 +21864,35 @@ test("Junction workout_stream completes without provider egress when no connecte
   assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });
 
+test.each([
+  { label: "incapable", sourceProviderSlug: "polar" },
+  { label: "unknown", sourceProviderSlug: "unknown-source" },
+])("Junction workout_stream makes no provider egress for an $label source scope", async ({
+  sourceProviderSlug,
+}) => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["scoped-workout"],
+  });
+  const sources = [
+    createJunctionWorkoutStreamSource("garmin", true),
+    createJunctionWorkoutStreamSource("polar", false),
+  ];
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      listConnectionSources: async () => sources,
+    }),
+    createJunctionWorkoutStreamResourceJob({ sourceProviderSlug }),
+  );
+
+  assert.equal(
+    harness.requestUrls.some((url) => url.includes("/v2/summary/workouts/")),
+    false,
+  );
+  assert.deepEqual(harness.streamRequests, []);
+});
+
 test("Junction workout_stream filters mixed-source candidates before stream progress", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({

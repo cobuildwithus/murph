@@ -5200,7 +5200,21 @@ export function createJunctionDeviceSyncProvider(
     const eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
       input.context,
     );
-    if (eligibleSourceProviderSlugs.size === 0) {
+    const sourceScopeProvided = input.sourceProviderSlug !== undefined
+      && input.sourceProviderSlug !== null;
+    const scopedSourceProviderSlug = canonicalizeJunctionProviderSlug(
+      input.sourceProviderSlug,
+    );
+    if (
+      eligibleSourceProviderSlugs.size === 0
+      || (
+        sourceScopeProvided
+        && (
+          !scopedSourceProviderSlug
+          || !eligibleSourceProviderSlugs.has(scopedSourceProviderSlug)
+        )
+      )
+    ) {
       return {
         emptyTimestampArraySeen: workoutStreamEmptySeen,
         historicalProviderRecordsSeen,
