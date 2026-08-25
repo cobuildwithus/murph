@@ -396,13 +396,17 @@ export class HostedBillingBrowserDriver {
     });
   }
 
-  async assertSettingsUsageLabel(
+  async assertSettingsAvailableUsage(
     actor: HostedBillingBrowserActor,
     label: string,
   ): Promise<void> {
     await this.runStep("settings-projection", "murph-settings", async () => {
       await this.openSettings(actor);
-      await actor.page.getByLabel(label, { exact: true }).waitFor();
+      const usage = actor.page.getByLabel(label, { exact: true });
+      await usage.waitFor();
+      await usage.getByRole("progressbar", {
+        name: /\b(?:[1-9]\d?|100)% remaining$/u,
+      }).waitFor();
     });
   }
 

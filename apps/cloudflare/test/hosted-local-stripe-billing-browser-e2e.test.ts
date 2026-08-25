@@ -134,7 +134,7 @@ async function proveStarterUsageStartsPaidPulseThroughCheckout(): Promise<void> 
   const actor = await createActor(member.session);
   try {
     await requireDriver().activateStarterUsage(actor, invite.inviteCode);
-    await requireDriver().assertSettingsUsageLabel(actor, "Starter AI usage");
+    await requireDriver().assertSettingsAvailableUsage(actor, "Starter AI usage");
 
     const checkout = await requireDriver().beginDirectPlanCheckout(actor, "Pulse");
     await requireDriver().assertStripeCheckoutReady(actor);
