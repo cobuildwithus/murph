@@ -774,12 +774,6 @@ function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   skippedAt: Date | null;
   status: string;
 }): HostedLinqInstantFirstTurnDeliveryDisposition {
-  if (input.deliveredAt !== null || input.status === "delivered") {
-    return "answered";
-  }
-  if (input.skippedAt !== null || input.status === "skipped") {
-    return "fallback";
-  }
   if (isHostedLinqDeliveryProviderCorrelated(input)) {
     return "answered";
   }

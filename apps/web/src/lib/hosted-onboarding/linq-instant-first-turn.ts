@@ -763,7 +763,7 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
     input.wakeHandoff.eventId,
   );
 
-  const finalization = await input.prisma.$transaction(async (tx) => {
+  await input.prisma.$transaction(async (tx) => {
     const milestone = await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: input.acceptedAt,
       idempotencyKey,
@@ -771,34 +771,12 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
       messageId: input.providerMessageId,
       prisma: tx,
     });
-    if (milestone.deliveryStatus === "failed") {
-      const cleared = await tx.hostedLinqDelivery.updateMany({
-        data: {
-          payloadCiphertext: null,
-          payloadOwnerMemberId: null,
-          payloadSchema: null,
-          skippedAt: input.acceptedAt,
-          skipReason: "instant_first_turn_provider_failed",
-        },
-        where: {
-          idempotencyKey:
-            requireHostedLinqInstantFirstTurnIdempotencyLookupKey(
-              idempotencyKey,
-            ),
-          payloadOwnerMemberId: input.wakeHandoff.userId,
-          payloadSchema: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
-        },
-      });
-      if (cleared.count !== 1) {
-        throw new Error(
-          "Hosted Linq instant first-turn failed payload was not cleared.",
-        );
-      }
-      return "failed" as const;
-    }
+    // A buffered failure receipt does not undo the provider's acceptance or
+    // authorize a second sender for the same inbound.
     if (
       milestone.deliveryStatus !== "accepted"
       && milestone.deliveryStatus !== "delivered"
+      && milestone.deliveryStatus !== "failed"
     ) {
       throw new Error(
         "Hosted Linq instant first-turn acceptance was not persisted.",
@@ -847,11 +825,7 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
         "Hosted Linq instant first-turn accepted payload was not cleared.",
       );
     }
-    return "accepted" as const;
   });
-  if (finalization === "failed") {
-    return { kind: "fallback" };
-  }
   return readCompletedHostedLinqInstantFirstTurn({
     prisma: input.prisma,
     wakeHandoff: input.wakeHandoff,

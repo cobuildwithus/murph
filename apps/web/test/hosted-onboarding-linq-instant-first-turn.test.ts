@@ -729,7 +729,7 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("falls back only after a failed provider milestone clears the pending body", async () => {
+  it("keeps accepted Web ownership when a buffered provider failure is replayed", async () => {
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValueOnce({
       deliveryStatus: "failed",
       reopenOnboardingLink: null,
@@ -755,20 +755,38 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).resolves.toEqual({ kind: "fallback" });
+    })).resolves.toEqual({
+      kind: "accepted",
+      wakeHandoff: {
+        ...WAKE_HANDOFF,
+        mailboxItemId: "mailbox_outbound",
+        wakeMailboxCheckpoint: {
+          lane: "conversation",
+          laneSeq: "2",
+        },
+      },
+    });
 
-    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
+      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
+      where: expect.objectContaining({
+        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
+      }),
+    });
     expect(mocks.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
           payloadCiphertext: null,
           payloadOwnerMemberId: null,
           payloadSchema: null,
-          skippedAt: expect.any(Date),
-          skipReason: "instant_first_turn_provider_failed",
         },
       }),
     );
+    const clearData = mocks.hostedLinqDeliveryUpdateMany.mock.calls.at(-1)?.[0]
+      ?.data;
+    expect(clearData).not.toHaveProperty("skippedAt");
+    expect(clearData).not.toHaveProperty("skipReason");
   });
 
   it("retries instead of exposing a partial continuity handoff", async () => {

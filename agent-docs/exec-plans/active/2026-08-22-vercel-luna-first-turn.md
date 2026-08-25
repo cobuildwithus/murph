@@ -14,7 +14,7 @@ Success criteria:
 - Web sends at most one answer for the exact first inbound through the existing
   Linq delivery and idempotency lifecycle.
 - Provider acceptance consumes the original conversation mailbox item and
-  durably hands the exact delivered assistant text to the runtime as an
+  durably hands the exact provider-accepted assistant text to the runtime as an
   already-completed turn.
 - Temporal and Cloudflare receive pointers only; raw conversation content stays
   in the existing encrypted mailbox boundary.
@@ -22,8 +22,10 @@ Success criteria:
   reply.
 - The next inbound is causally ordered after the completed first turn and uses
   the ordinary hosted runtime.
-- Generation, admission, activation, or provider failure leaves the original
-  inbound available for the existing runtime path.
+- Generation, admission, activation, or definitive pre-acceptance provider
+  failure leaves the original inbound available for the existing runtime path.
+  Provider acceptance is the irreversible reply-ownership boundary even when
+  later receipts report failure.
 - Focused tests, typecheck, exact-head CI, specialist review, final ReviewGPT,
   and parent final review pass.
 
@@ -56,7 +58,7 @@ and a second message after provider acceptance but before background runtime
 convergence. In every
 case the person must see one coherent conversation, never duplicate or
 contradictory first answers, and the next runtime turn must know exactly what
-was delivered.
+Web sent.
 
 ## Approach
 
@@ -72,12 +74,13 @@ was delivered.
    provider acceptance into original-mailbox consumption plus one encrypted
    completed-turn handoff.
 4. Wake the existing runtime with only the durable outbound pointer. The
-   existing consumed-conversation importer restores the user and delivered
+   existing consumed-conversation importer restores the user and Web-authored
    assistant exchange in order with no reply obligation.
-5. On generation failure or pre-accept provider failure, use the
-   existing original-conversation signal and runtime reply path. On ambiguous
-   provider outcome, reconcile the same delivery identity before choosing a
-   fallback.
+5. On generation failure or pre-accept provider failure, use the existing
+   original-conversation signal and runtime reply path. Once the provider
+   accepts the Web send, persist that exact exchange as canonical context and
+   never release a second runtime sender for the same inbound; later receipts
+   remain delivery evidence, not reply-authority transitions.
 6. Prove success, fallback, replay, concurrent second inbound, causal import,
    no duplicate model/send, privacy, and usage accounting with focused tests.
 
@@ -121,16 +124,38 @@ was delivered.
   call or destination.
 - Public changelog fragment validation passes 7 tests, and the Web typecheck
   passes with source PR 2173 included.
+- The round-8 ownership correction passes 19 instant-turn, 149 delivery-store,
+  and 52 runtime provider-entry cases. The Web typecheck and focused ESLint pass;
+  production source deletes more lines than it adds.
 - Required exact-head PR CI and preliminary Product UX, prompt, and coverage
   specialist review, plus the cross-cutting final ReviewGPT gate.
 
 ## State
 
-Active. Round 7 remediation and focused verification are complete. The
+Active. Round 8 retrospective remediation and focused verification are
+complete. The
 design reuses the existing delivery ledger as the only provider outbox, stores
 the exact pending body encrypted for ambiguous recovery, and represents the
 completed exchange as two ordinary consumed conversation rows. ReviewGPT,
 exact-head gates, and completion remain.
+
+## ReviewGPT round 8 retrospective
+
+The finding was accepted. The round-7 correction let a buffered failed receipt
+cede an already provider-accepted Web send to the runtime. A later delivered
+receipt could then reverse ownership again, allowing two independently
+idempotent replies or leaving a delivered Web response outside canonical
+mailbox history.
+
+The irreversible boundary is provider acceptance. Before acceptance, a
+definitive failure may release the existing runtime fallback. After acceptance,
+Web remains the sole owner and atomically records the exact outbound plus the
+consumed inbound even when a buffered receipt currently says failed. Later
+receipts update delivery evidence but cannot authorize or suppress a second
+sender. This deletes the post-acceptance cession branch and reduces both exact
+replay and runtime egress to one existing-ledger rule: provider correlation is
+answered; only an uncorrelated terminal row is fallback. No field, enum, queue,
+service, state owner, dependency, lease, or reconciliation process is added.
 
 ## ReviewGPT round 7 disposition
 

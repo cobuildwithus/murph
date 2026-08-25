@@ -1567,22 +1567,9 @@ describe("hosted Linq observability stores", () => {
 
   it.each([
     {
-      expectedReplay: "terminal",
-      expectedRuntime: "available",
-      label: "explicitly ceded buffered failure",
-      overrides: {
-        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
-        failedAt: new Date("2026-03-26T12:00:02.000Z"),
-        lastReceiptAt: new Date("2026-03-26T12:00:02.000Z"),
-        messageLookupKey: "hbidx:linq-message:failed",
-        skippedAt: new Date("2026-03-26T12:00:01.000Z"),
-        status: "failed",
-      },
-    },
-    {
       expectedReplay: "completed",
       expectedRuntime: "already_answered",
-      label: "late failure after completed Web continuity",
+      label: "provider-accepted buffered failure",
       overrides: {
         acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
         failedAt: new Date("2026-03-26T12:00:02.000Z"),
@@ -1595,7 +1582,7 @@ describe("hosted Linq observability stores", () => {
     {
       expectedReplay: "completed",
       expectedRuntime: "already_answered",
-      label: "delivered evidence after an earlier fallback marker",
+      label: "provider-accepted delivery despite a stale fallback marker",
       overrides: {
         acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
         deliveredAt: new Date("2026-03-26T12:00:03.000Z"),
