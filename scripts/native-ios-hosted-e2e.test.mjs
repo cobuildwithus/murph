@@ -241,7 +241,9 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
     "apps/web/src/lib/hosted-onboarding/request-auth.ts",
     "apps/web/src/lib/hosted-messages/user-facing-messages.ts",
     "apps/web/src/lib/device-sync/control-plane.ts",
+    "apps/web/next-artifacts.ts",
     "apps/web/prisma/schema.prisma",
+    "apps/web/vercel.json",
     "packages/device-syncd/src/hosted-runtime.ts",
   ]) {
     assert.equal(runWorkflowSelector(workflow, file), "selected", file);

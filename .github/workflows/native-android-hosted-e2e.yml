@@ -82,10 +82,10 @@ jobs:
                 apps/web/src/lib/hosted-agent-sessions.ts|apps/web/src/lib/hosted-messages/user-facing-messages.ts|apps/web/src/lib/http.ts|apps/web/src/lib/murph-contact-avatars.ts|\
                 apps/web/src/lib/murph-contact-routing.ts|apps/web/src/lib/primitives.ts|apps/web/src/lib/prisma-operation-timing.ts|\
                 apps/web/src/lib/prisma.ts|apps/web/src/lib/process-warnings.ts|\
-                apps/web/instrumentation.ts|apps/web/next.config.ts|apps/web/package.json|apps/web/prisma.config.ts|apps/web/prisma/*|apps/web/proxy.ts|\
+                apps/web/instrumentation.ts|apps/web/next-artifacts.ts|apps/web/next.config.ts|apps/web/package.json|apps/web/prisma.config.ts|apps/web/prisma/*|apps/web/proxy.ts|\
                 apps/web/scripts/build-memory-guard.sh|apps/web/scripts/hosted-web-migration-owner.ts|apps/web/scripts/prepare-prisma-client-for-build.ts|\
                 apps/web/scripts/run-prisma-migrate-deploy.ts|apps/web/scripts/run-production-migrations.ts|apps/web/scripts/run-production-next-build.sh|\
-                apps/web/scripts/vercel-build.sh|apps/web/tsconfig.json|\
+                apps/web/scripts/vercel-build.sh|apps/web/tsconfig.json|apps/web/vercel.json|\
                 packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|packages/device-syncd/*|\
                 packages/gateway-core/*|packages/health-metrics/*|packages/hosted-execution/*|packages/importers/*|packages/messaging-ingress/*|packages/runtime-state/*|\
                 scripts/native-ios-hosted-e2e*|scripts/native-android-hosted-e2e*|\
