@@ -8015,6 +8015,33 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       expect(legacy.progressUpdates).toEqual([])
       expect(readNutritionGoalMutationCommands(legacy.commands)).toEqual([])
 
+      const rollingLegacy = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'rolling-legacy',
+      })
+      expect(rollingLegacy.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+        localDate: '2026-07-30',
+        version: 2,
+      })
+      expect(rollingLegacy.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(rollingLegacy.commands),
+      ).toEqual([])
+
+      const mixedRollingLegacy = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'rolling-legacy-mixed',
+      })
+      expect(mixedRollingLegacy.card).toBeNull()
+      expect(mixedRollingLegacy.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(mixedRollingLegacy.commands),
+      ).toEqual([])
+
       const canonicalWithActivity = await runRealNutritionCardAuthorityScenario({
         config,
         conditionRecovery: 'none',
@@ -8105,6 +8132,8 @@ type NutritionGoalScenario =
   | 'activity-same-goal'
   | 'canonical-with-activity'
   | 'legacy'
+  | 'rolling-legacy'
+  | 'rolling-legacy-mixed'
 
 async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
@@ -8254,6 +8283,53 @@ async function materializeNutritionCardVaultCli(input: {
     },
     vault: 'synthetic-vault',
   }
+  const rollingLegacyGoal = {
+    ...legacyGoal,
+    entity: {
+      ...legacyGoal.entity,
+      data: {
+        ...legacyGoal.entity.data,
+        metricTargets: legacyGoal.entity.data.metricTargets.map((target) =>
+          goalMetricTargetSchema.parse({
+            ...target,
+            evaluation: {
+              kind: 'rolling-window',
+              statistic: 'mean',
+              windowDays: 7,
+            },
+            selectionPolicyOverride: {
+              kind: 'daily-aggregate',
+              statistic: 'mean',
+            },
+          })),
+      },
+      id: 'goal_rolling_legacy_bundle',
+      kind: 'goal',
+      title: 'Rolling daily nutrition targets',
+    },
+  }
+  const mixedRollingLegacyGoal = {
+    ...rollingLegacyGoal,
+    entity: {
+      ...rollingLegacyGoal.entity,
+      data: {
+        ...rollingLegacyGoal.entity.data,
+        metricTargets: rollingLegacyGoal.entity.data.metricTargets.map(
+          (target, index) => index === 0
+            ? pointTarget(
+                target.targetId,
+                target.metricKey,
+                target.unit,
+                target.value,
+              )
+            : target,
+        ),
+      },
+      id: 'goal_mixed_rolling_legacy_bundle',
+      kind: 'goal',
+      title: 'Mixed daily nutrition targets',
+    },
+  }
   const canonicalNutritionGoal = {
     ...legacyGoal,
     entity: {
@@ -8334,6 +8410,10 @@ async function materializeNutritionCardVaultCli(input: {
   }
   const activeGoals = input.goalScenario === 'legacy'
     ? [legacyGoal]
+    : input.goalScenario === 'rolling-legacy'
+      ? [rollingLegacyGoal]
+    : input.goalScenario === 'rolling-legacy-mixed'
+      ? [mixedRollingLegacyGoal]
     : input.goalScenario === 'activity-same-goal'
       ? [activitySameGoal]
     : input.goalScenario === 'canonical-with-activity'

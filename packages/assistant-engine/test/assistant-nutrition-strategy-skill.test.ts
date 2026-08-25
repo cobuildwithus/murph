@@ -384,7 +384,19 @@ describe('assistant nutrition strategy skill', () => {
       'Comparator compatibility is part of target authority.',
     )
     expect(compactGoals).toContain(
-      'This point-target card and its managed derivation accept a selected-value target only when its comparator is `between` and its numeric `value` and `highValue` are identical.',
+      'This point-target card and its managed derivation normally accept a target only when its evaluation is `selected-value`, its comparator is `between`, and its numeric `value` and `highValue` are identical.',
+    )
+    expect(compactGoals).toContain(
+      'The complete same-Goal historical `daily-*` nutrition set below has one read-only display-compatibility path',
+    )
+    expect(compactGoals).toContain(
+      '`evaluation.kind: rolling-window` plus `selectionPolicyOverride.kind: daily-aggregate` with a unit-preserving statistic, never `count`.',
+    )
+    expect(compactGoals).toContain(
+      'preserve the Goal, and never extend this exception to another target identity or workflow.',
+    )
+    expect(compactGoals).toContain(
+      'A mixed evaluation bundle or any other rolling or aggregate shape is incompatible.',
     )
     expect(compactGoals).toContain(
       'A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between` range, or any other target shape remains authoritative canonical state but is incompatible with this workflow.',

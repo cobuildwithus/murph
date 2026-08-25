@@ -947,7 +947,22 @@ describe('murph.attach_response_card', () => {
       'canonical dietary-calories in kcal plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Each target must use selected-value comparator between with identical numeric value and highValue',
+      'Accept selected-value evaluation normally.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'complete same-Goal historical daily-* nutrition set above has one read-only display-compatibility path',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'rolling-window evaluation plus selectionPolicyOverride kind daily-aggregate with a unit-preserving statistic, never count',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A mixed evaluation bundle or another rolling or aggregate shape is incompatible.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'without narrating tool or schema mechanics',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible',
