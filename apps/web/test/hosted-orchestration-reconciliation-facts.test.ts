@@ -1671,6 +1671,7 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = await response.json();
 
     expect(facts).not.toHaveProperty("environmentInterviewPending");
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readPendingHostedEnvironmentInterviewMailboxItem).not.toHaveBeenCalled();
   });
 
@@ -1703,6 +1704,7 @@ describe("hosted orchestration reconciliation facts", () => {
         version: "4",
       },
     });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
     expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
   });
