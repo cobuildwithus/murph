@@ -569,7 +569,12 @@ describe("markdown document primitives", () => {
         status: "active",
         title: "Mobility reminder",
       }),
-    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_CONFLICT",
+      details: expect.not.objectContaining({
+        existingAutomationId: expect.any(String),
+      }),
+    });
 
     const created = await upsertAutomation({
       vaultRoot,
@@ -595,7 +600,12 @@ describe("markdown document primitives", () => {
         status: "active",
         title: "Mobility reminder",
       }),
-    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_CONFLICT",
+      details: {
+        existingAutomationId: created.record.automationId,
+      },
+    });
 
     await patchAutomation({
       vaultRoot,
@@ -612,7 +622,12 @@ describe("markdown document primitives", () => {
         status: "active",
         title: "Mobility reminder",
       }),
-    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_CONFLICT",
+      details: {
+        existingAutomationId: created.record.automationId,
+      },
+    });
 
     await patchAutomation({
       vaultRoot,

@@ -170,6 +170,7 @@ function resolveAvailableAutomationCreateSlug(
       throw new VaultError(
         "VAULT_AUTOMATION_CONFLICT",
         "Automation already exists; use a versioned patch to change it.",
+        { existingAutomationId: existingRecord.automationId },
       );
     }
   }
@@ -1693,6 +1694,9 @@ async function upsertAutomationWithLatestRegistry(
       throw new VaultError(
         "VAULT_AUTOMATION_CONFLICT",
         "Automation already exists; use a versioned patch to change it.",
+        existingRecord.status === "archived"
+          ? {}
+          : { existingAutomationId: existingRecord.automationId },
       );
     }
     requestedSlug = resolveAvailableAutomationCreateSlug(

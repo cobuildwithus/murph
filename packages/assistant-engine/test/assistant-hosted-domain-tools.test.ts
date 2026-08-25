@@ -87,7 +87,7 @@ describe('hosted domain dynamic tools', () => {
       'An archived-only same-name automation does not block a fresh save',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'If an active or paused automation already exists, use action=inspect and then a versioned patch',
+      'If save reports an existingAutomationId, inspect that exact id and then apply a versioned patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
@@ -1699,6 +1699,48 @@ describe('hosted domain dynamic tools', () => {
     )
     expect(conflictResult.rpcResult.contentItems[0]?.text).not.toContain(
       'private conflict detail',
+    )
+
+    const successorId = 'automation-synthetic-reminder-successor'
+    const successorConflict = Object.assign(new Error('private successor detail'), {
+      code: 'VAULT_AUTOMATION_CONFLICT',
+      details: {
+        existingAutomationId: successorId,
+      },
+    })
+    automationTool.request.mockRejectedValueOnce(successorConflict)
+    const saveRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send a reminder.',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      },
+      slug: 'synthetic-reminder',
+      title: 'Synthetic reminder',
+    })
+    if (!saveRequest) {
+      throw new Error('Expected a save request.')
+    }
+    const successorConflictResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: saveRequest,
+    })
+    expect(successorConflictResult.rpcResult).toMatchObject({ success: false })
+    expect(successorConflictResult.rpcResult.contentItems[0]?.text).toBe(
+      JSON.stringify({
+        code: 'automation_conflict',
+        existingAutomationId: successorId,
+        recovery:
+          'inspect existingAutomationId exactly, then decide from that stored schedule and apply a versioned patch',
+      }),
+    )
+    expect(successorConflictResult.rpcResult.contentItems[0]?.text).not.toContain(
+      'private successor detail',
     )
   })
 

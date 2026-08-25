@@ -5897,7 +5897,7 @@ text(JSON.stringify(result));
       localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
       schedule: { kind: 'at', localAt: recoveryLocalAt },
     }
-    const inspect = { action: 'inspect', lookup: slug }
+    const inspect = { action: 'inspect', lookup: automationId }
     const patch = {
       action: 'patch',
       expectedUpdatedAt: updatedAt,
@@ -5992,6 +5992,7 @@ text(JSON.stringify(result));
             if (request.action === 'save') {
               throw Object.assign(new Error('automation already exists'), {
                 code: 'VAULT_AUTOMATION_CONFLICT' as const,
+                details: { existingAutomationId: automationId },
               })
             }
             if (request.action === 'inspect') {
@@ -6058,6 +6059,10 @@ text(JSON.stringify(result));
       lookup: patchLookup,
       ...(newSlug ? { slug: newSlug } : {}),
       schedule: { at: resolvedAt, kind: 'at' },
+    })
+    expect(ownerRequests[1]).toEqual({
+      action: 'inspect',
+      lookup: automationId,
     })
     const medicationQuestion =
       `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
