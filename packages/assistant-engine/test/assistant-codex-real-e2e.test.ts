@@ -195,6 +195,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
 type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
 const OPENAI_ENV_MODEL_PROVIDER = 'openai-env'
+const OPENAI_SUBSCRIPTION_MODEL_PROVIDER = 'openai'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
 const VERCEL_AI_GATEWAY_MODEL_PROVIDER = 'vercel-ai-gateway'
@@ -213,9 +214,15 @@ const REAL_CODEX_E2E_ENV_ALLOWLIST = [
   'NODE_EXTRA_CA_CERTS',
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 ] as const
+const REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST = [
+  ...REAL_CODEX_E2E_ENV_ALLOWLIST,
+  'HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+] as const
 
 interface RealCodexE2eConfig {
-  codexHome: string
+  codexHome: string | null
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
@@ -4121,6 +4128,12 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
               })
               expect(result.finalMessage).toMatch(/connect|authorization/iu)
             }
+            process.stdout.write(
+              `[adaptive-wearable-outreach-e2e] ${JSON.stringify({
+                finalMessage: result.finalMessage,
+                scenario: probe.kind,
+              })}\n`,
+            )
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)
           }
@@ -8269,6 +8282,38 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('[model_providers.openai-env]')
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
+  })
+
+  it('uses normal Codex home only in explicit subscription mode', async () => {
+    const config = await resolveRealCodexE2eConfig({
+      DATABASE_URL: 'ignored-database-url',
+      HOME: '/synthetic-home',
+      MURPH_REAL_CODEX_AUTH: 'subscription',
+      OPENAI_API_KEY: 'ignored-provider-value',
+      PATH: '/usr/bin:/bin',
+      XDG_CONFIG_HOME: '/synthetic-config',
+    })
+
+    expect(config).toEqual({
+      codexHome: null,
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+        XDG_CONFIG_HOME: '/synthetic-config',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+  })
+
+  it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
+    await expect(resolveRealCodexE2eConfig({
+      MURPH_REAL_CODEX_AUTH: 'provider',
+      MURPH_REAL_CODEX_MODEL_PROVIDER: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+    })).rejects.toThrow(
+      `Use ${OPENAI_ENV_MODEL_PROVIDER} for provider-key real Codex e2e.`,
+    )
   })
 
   it('sanitizes live provider failures before Vitest prints them', () => {
@@ -12726,29 +12771,56 @@ function summarizeCodexEventSequence(
   })
 }
 
-async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
+async function resolveRealCodexE2eConfig(
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+): Promise<RealCodexE2eConfig> {
   const model =
-    normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
-  const configuredCodexHome = normalizeEnvString(process.env.MURPH_REAL_CODEX_HOME)
+  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
   if (configuredCodexHome) {
     throw new Error(
-      'MURPH_REAL_CODEX_HOME is not supported for this e2e; it always creates an isolated Codex home.',
+      'MURPH_REAL_CODEX_HOME is not supported; provider mode creates an isolated home and subscription mode uses the normal local Codex home.',
     )
   }
 
+  const authMode =
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_AUTH) ?? 'provider'
+  if (authMode !== 'provider' && authMode !== 'subscription') {
+    throw new Error(
+      'MURPH_REAL_CODEX_AUTH must be provider or subscription.',
+    )
+  }
   const explicitModelProvider =
-    normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL_PROVIDER)
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL_PROVIDER)
+  if (authMode === 'subscription') {
+    if (
+      explicitModelProvider
+      && explicitModelProvider !== OPENAI_SUBSCRIPTION_MODEL_PROVIDER
+    ) {
+      throw new Error(
+        `Subscription real Codex e2e uses the built-in ${OPENAI_SUBSCRIPTION_MODEL_PROVIDER} provider.`,
+      )
+    }
+    return {
+      codexHome: null,
+      env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
+      model,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    }
+  }
+
   const modelProvider =
     explicitModelProvider
     ?? (
-      normalizeEnvString(process.env[VERCEL_AI_GATEWAY_API_KEY_ENV])
+      normalizeEnvString(sourceEnv[VERCEL_AI_GATEWAY_API_KEY_ENV])
         ? VERCEL_AI_GATEWAY_MODEL_PROVIDER
         : OPENAI_ENV_MODEL_PROVIDER
     )
-  if (modelProvider === 'openai') {
+  if (modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER) {
     throw new Error(
-      `Use ${OPENAI_ENV_MODEL_PROVIDER} for this e2e; the built-in openai provider would require the normal Codex auth store.`,
+      `Use ${OPENAI_ENV_MODEL_PROVIDER} for provider-key real Codex e2e.`,
     )
   }
   if (
@@ -12761,14 +12833,14 @@ async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
   }
 
   const apiKeyEnv =
-    normalizeEnvString(process.env.MURPH_REAL_CODEX_PROVIDER_ENV_KEY)
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_PROVIDER_ENV_KEY)
     ?? resolveRealCodexProviderApiKeyEnv(modelProvider)
   if (!apiKeyEnv) {
     throw new Error(
       `MURPH_REAL_CODEX_PROVIDER_ENV_KEY is required for ${modelProvider} real Codex e2e.`,
     )
   }
-  if (!normalizeEnvString(process.env[apiKeyEnv])) {
+  if (!normalizeEnvString(sourceEnv[apiKeyEnv])) {
     throw new Error(
       `${apiKeyEnv} is required for ${modelProvider} real Codex e2e.`,
     )
@@ -12797,11 +12869,25 @@ async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
     codexHome,
     env: buildRealCodexE2eEnv({
       apiKeyEnv,
+      sourceEnv,
     }),
     model,
     modelProvider,
     temporaryPaths,
   }
+}
+
+function buildRealCodexSubscriptionE2eEnv(
+  sourceEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST) {
+    const value = normalizeEnvString(sourceEnv[key])
+    if (value) {
+      env[key] = value
+    }
+  }
+  return env
 }
 
 function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null {

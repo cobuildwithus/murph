@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-21
+Last verified: 2026-08-25
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -180,8 +180,29 @@ run, finish the cheap deterministic proof first:
 This order keeps stochastic evidence useful without making incidental model
 behavior or an avoidable late contradiction trigger repeated expensive runs.
 
-Assistant Engine's opt-in live Codex journeys use
-`MURPH_RUN_REAL_CODEX_E2E=1` with a supported provider credential. The
+Changes that can alter Murph's interpretation, tool choice or arguments,
+reply-versus-silence decision, or user-visible prose must apply
+`$verify-murph-assistant` after their deterministic boundary tests pass. Add a
+focused production-derived journey to
+`assistant-codex-real-e2e.test.ts`, assert required and forbidden effects, and
+run only that journey locally:
+
+```bash
+pnpm test:assistant:live -- --test "<unique test-name pattern>"
+```
+
+The helper requires a name pattern so it cannot accidentally fan out across
+the paid suite. It defaults to `gpt-5.6-terra` through the authenticated local
+ChatGPT/Codex subscription without copying auth material; `--auth provider`
+keeps the existing isolated provider-key route. Read every printed synthetic
+reply and record a `Ready` or `Hold` UX verdict covering correctness, action
+count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
+must never depend on local subscription state or make the paid call.
+
+Assistant Engine's lower-level opt-in live Codex journeys still use
+`MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
+credential, while explicit subscription mode uses the normal local Codex home
+for auth and is developer-local rather than hermetic CI evidence. The
 generated-image avatar journey must exercise the production tool contracts in
 three natural turns: launch with a truthful wait acknowledgement, trusted
 completion media attachment with no group mutation, and a later explicit

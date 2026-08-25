@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -200,6 +200,13 @@ product-decision owners.
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
    shared-default push, run `pnpm verify:acceptance`.
+   When the diff can change how Murph interprets a turn, selects or calls a
+   tool, decides to stay quiet, or writes a user-visible reply, apply
+   `$verify-murph-assistant`: add a production-derived real-Codex journey for
+   the changed behavior, run that focused journey after deterministic boundary
+   proof, inspect every actual reply, and record its effect result plus
+   `Ready`/`Hold` UX verdict. This live proof is required even when the ordinary
+   deterministic suite is already green.
 6. For user-visible, persisted-state, operational, or trust-boundary changes,
    complete the Product UX Walkthrough with direct evidence in addition to
    scripted tests. Match the evidence to each affected person's changed claim.
