@@ -6435,7 +6435,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
     ).toContain(
-      'requests answered only in earlier undelivered response text as unanswered',
+      'include their still-relevant answers in the final result; response text is not a completed effect',
     )
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,

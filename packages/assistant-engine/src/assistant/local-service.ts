@@ -191,7 +191,7 @@ const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
   'New messages arrived before delivery; no response text from this group beat has been delivered.',
-  'Treat requests answered only in earlier undelivered response text as unanswered.',
+  'Treat requests answered only in earlier undelivered response text as unanswered and include their still-relevant answers in the final result; response text is not a completed effect.',
   'Re-evaluate all accepted messages under the group turn rules and return one final result.',
   'Do not mention this review or repeat completed effects.',
 ].join(' ')

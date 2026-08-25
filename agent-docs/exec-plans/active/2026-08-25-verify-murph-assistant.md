@@ -178,7 +178,7 @@ Updated: 2026-08-25
   on the existing provider-usage extractor.
 - The original tooling-only scope changed only where the required live proof
   demonstrated an existing user-visible failure. The production correction is
-  two declarative instruction clauses on the existing reconsideration seam,
+  a declarative clarification on the existing reconsideration seam,
   with one focused local-service regression; weakening the journey or keeping
   a hidden Sol override would conceal the demonstrated failure.
 - This is one indivisible correction: the runner model must reach the leaf, the
