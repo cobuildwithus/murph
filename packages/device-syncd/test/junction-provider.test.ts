@@ -21890,6 +21890,30 @@ test("Junction workout_stream completes without workout egress when no connected
   assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });
 
+test("Junction workout_stream makes no workout egress when live provider inventory is disconnected", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listProviders: () => [{
+      ...createJunctionWorkoutStreamProviderConnection("garmin", true),
+      status: "disconnected",
+    }],
+    listWorkoutIds: () => ["disconnected-live-provider-workout"],
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      listConnectionSources: async () => [createJunctionWorkoutStreamSource("garmin", true)],
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.equal(
+    harness.requestUrls.some((url) => url.includes("/v2/summary/workouts/")),
+    false,
+  );
+  assert.deepEqual(harness.streamRequests, []);
+});
+
 test("Junction workout_stream makes no workout egress through a disconnect fence", async () => {
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["fenced-workout"],
