@@ -51,6 +51,73 @@ export const pathSchema = z
   .min(1)
   .describe('Filesystem path supplied by the operator.')
 
+export const vaultCliBatchCommandResultEnvelopeSchema = z.object({
+  index: z.number().int().nonnegative(),
+  argv: z.array(z.string().min(1)).min(1),
+  durationMs: z.number().int().nonnegative(),
+  ok: z.boolean(),
+  outputBytes: z.number().int().nonnegative().describe(
+    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
+  ),
+  outputChars: z.number().int().nonnegative().describe(
+    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
+  ),
+  stdout: z.string(),
+  data: z.unknown().optional(),
+  error: z.object({ message: z.string().min(1) }).strict().optional(),
+})
+
+export const vaultCliBatchCommandResultSchema =
+  vaultCliBatchCommandResultEnvelopeSchema.strict()
+
+export const vaultCliBatchResultEnvelopeSchema = z.object({
+  schema: z.literal(VAULT_CLI_BATCH_RESULT_SCHEMA),
+  vault: pathSchema,
+  count: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  commands: z
+    .array(vaultCliBatchCommandResultEnvelopeSchema)
+    .min(1)
+    .max(VAULT_CLI_BATCH_MAX_COMMANDS),
+})
+
+export const vaultCliBatchResultSchema = vaultCliBatchResultEnvelopeSchema
+  .extend({
+    commands: z
+      .array(vaultCliBatchCommandResultSchema)
+      .min(1)
+      .max(VAULT_CLI_BATCH_MAX_COMMANDS),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    if (result.count !== result.commands.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch count must equal the number of command results.',
+        path: ['count'],
+      })
+    }
+    if (
+      result.failed !==
+      result.commands.filter((command) => !command.ok).length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch failed count must equal the failed command results.',
+        path: ['failed'],
+      })
+    }
+    for (const [index, command] of result.commands.entries()) {
+      if (command.index !== index) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Batch command indexes must be contiguous and ordered.',
+          path: ['commands', index, 'index'],
+        })
+      }
+    }
+  })
+
 export const requestIdSchema = z
   .string()
   .min(1)

@@ -9,6 +9,6 @@
     "summary": "Set confirmations during a live workout now keep updating one canonical workout, even when a message is short or describes a repeated routine.",
     "details": "Murph refreshes the same verified workout card after each accepted set. If no exact workout or separate routine owner is available, Murph asks one question and records nothing.",
     "relevanceTags": ["assistant", "reliability", "workouts"],
-    "sourcePullRequests": [2195]
+    "sourcePullRequests": [2195, 2254]
   }
 }

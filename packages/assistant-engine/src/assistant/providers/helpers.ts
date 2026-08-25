@@ -23,8 +23,7 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  VAULT_CLI_BATCH_MAX_COMMANDS,
-  VAULT_CLI_BATCH_RESULT_SCHEMA,
+  vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   resolveCodexCommandFamily,
@@ -693,68 +692,21 @@ function readAssistantTurnProfileBatchToolAggregates(
     return null
   }
 
-  const result = readAssistantProviderRecord(parsed)
-  if (result?.schema !== VAULT_CLI_BATCH_RESULT_SCHEMA) {
+  const parsedResult = vaultCliBatchResultSchema.safeParse(parsed)
+  if (!parsedResult.success) {
     return null
   }
-  const commands = result?.commands
-  const count = result?.count
-  const failed = result?.failed
-  if (
-    !Array.isArray(commands)
-    || commands.length === 0
-    || commands.length > VAULT_CLI_BATCH_MAX_COMMANDS
-    || typeof count !== 'number'
-    || !Number.isSafeInteger(count)
-    || count !== commands.length
-    || typeof failed !== 'number'
-    || !Number.isSafeInteger(failed)
-    || failed < 0
-  ) {
-    return null
-  }
+  const { commands } = parsedResult.data
 
   const aggregates: AssistantTurnProfileToolAggregate[] = []
-  let failedCommands = 0
-  for (const value of commands) {
-    const command = readAssistantProviderRecord(value)
-    const argv = command?.argv
-    const durationMs = command?.durationMs
-    const ok = command?.ok
+  for (const command of commands) {
+    const { argv, durationMs, ok, outputBytes, stdout } = command
     // The v1 batch envelope counts UTF-16 code units, not bytes. Validate it
     // only as part of the envelope; byte metrics come from source-owned bytes.
-    const legacyOutputChars = command?.outputChars
-    const outputBytes = command?.outputBytes
-    const stdout = command?.stdout
     if (
-      !command
-      || !Array.isArray(argv)
-      || argv.some((token) => typeof token !== 'string')
-      || typeof durationMs !== 'number'
-      || !Number.isSafeInteger(durationMs)
-      || durationMs < 0
-      || typeof ok !== 'boolean'
-      || typeof legacyOutputChars !== 'number'
-      || !Number.isSafeInteger(legacyOutputChars)
-      || legacyOutputChars < 0
-      || typeof outputBytes !== 'number'
-      || !Number.isSafeInteger(outputBytes)
-      || outputBytes < 0
-      || typeof stdout !== 'string'
-      || (stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes)
+      stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes
     ) {
       return null
-    }
-
-    if (!ok) {
-      const nextFailedCommands = safeAssistantTurnProfileIntegerSum(
-        failedCommands,
-        1,
-      )
-      if (nextFailedCommands === null) {
-        return null
-      }
-      failedCommands = nextFailedCommands
     }
 
     aggregates.push({
@@ -770,10 +722,6 @@ function readAssistantTurnProfileBatchToolAggregates(
       outputBytesMax: outputBytes,
       outputBytesTotal: outputBytes,
     })
-  }
-
-  if (failedCommands !== failed) {
-    return null
   }
 
   return aggregates

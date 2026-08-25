@@ -196,6 +196,54 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal attaches runtime-derived context to the exact deliveries', async () => {
+  const session = createAssistantSession()
+  const contextReferences = [{
+    entityId: 'evt_current_workout',
+    entityKind: 'activity_session',
+  }]
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [{
+          contextReferences,
+          deliveryContextOrdinal: 0,
+          response: 'First workout reply.',
+        }],
+        response: 'Final workout reply.',
+        responseContextReferences: contextReferences,
+        responseDeliveryContextOrdinal: 0,
+        route: { routeId: 'route-workout-context' },
+        session,
+        transcriptResponse: 'Final workout reply.',
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Continue the workout',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        contextReferences,
+        response: 'First workout reply.',
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input)
+    .toEqual(expect.objectContaining({
+      outboxAutomationContextReferences: contextReferences,
+    }))
+})
+
 test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
   const session = createAssistantSession()
   const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {
@@ -4488,7 +4536,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   providerRelease.resolve()
 
   await expect(resultPromise).resolves.toMatchObject({
-    prompt: 'Event-backed follow up',
+    prompt: 'Initial prompt\n\nEvent-backed follow up',
     response: 'final after event input',
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
@@ -5012,6 +5060,10 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
 })
 
 test('sendAssistantMessageLocal live-steers same-conversation input without a second provider request', async () => {
+  const reminderReferences = [{
+    entityId: 'wfmt_initial',
+    entityKind: 'workout_format',
+  }]
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -5055,6 +5107,10 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
         codexContinuation: {
           kind: 'explicit-structured-history',
         },
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          response: 'initial response before live steer',
+        }],
         response: 'final after live-steered input',
         responseDeliveryContextOrdinal: 1,
         transcriptResponse: 'final after live-steered input',
@@ -5065,6 +5121,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
 
   const firstResultPromise = sendAssistantMessageLocal({
     onProviderRequestStarted: providerRequestStarted,
+    outboxAutomationContextReferences: reminderReferences,
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })
@@ -5098,6 +5155,14 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   expect(providerRequestStarted).not.toHaveBeenCalled()
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments?.[0]
+      ?.deliveryContext?.outboxAutomationContextReferences,
+  ).toEqual(reminderReferences)
+  expect(
+    mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input
+      ?.outboxAutomationContextReferences,
+  ).toBeNull()
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
       .map((call) => call[0])
@@ -6361,9 +6426,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     ).toMatchObject({
       prompt: 'Actually, plans changed.',
       turnContext: expect.stringContaining(
-        'Your previous response was held and was not sent.',
+        'Re-evaluate all accepted messages under the group turn rules and return one final result.',
       ),
     })
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
+    ).not.toContain('previous response was held')
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
         ?.resumeState,
@@ -6980,6 +7048,134 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
       source: 'manual',
     }),
   ])
+})
+
+test('sendAssistantMessageLocal keeps every group prompt accepted before provider start', async () => {
+  const initialImage = Buffer.from('synthetic-image-input')
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  let admissionCount = 0
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
+    async () => {
+      admissionCount += 1
+      if (admissionCount > 1) {
+        return { kind: 'no-new-input' }
+      }
+      return {
+        acceptedInputs: [
+          {
+            id: 'hook-1',
+            promptFallbackReason: 'manual-input',
+            promptFallbackText: 'Also share the walking time.',
+            source: 'manual',
+          },
+        ],
+        kind: 'accepted' as const,
+        prompt: 'Also share the walking time.',
+        transcriptText: 'Also share the walking time.',
+        userMessageContent: [
+          {
+            text: 'Also share the walking time.',
+            type: 'text' as const,
+          },
+        ],
+      }
+    },
+  )
+  const firstDraftReady = createDeferred<void>()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      firstDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-pre-provider',
+          response: 'The venue opens at nine, and the walk takes ten minutes.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-pre-provider' },
+          session,
+          transcriptResponse:
+            'The venue opens at nine, and the walk takes ten minutes.',
+        },
+      }
+    },
+  )
+
+  vi.useFakeTimers()
+  const resultPromise = sendAssistantMessageLocal({
+    activeTurnInput,
+    conversation: {
+      channel: 'telegram',
+      directness: 'group',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliverResponse: true,
+    prompt: 'What time does the venue open?',
+    turnTrigger: 'automation-auto-reply',
+    userMessageContent: [
+      {
+        image: initialImage,
+        mediaType: 'image/png',
+        type: 'image',
+      },
+      {
+        text: 'What time does the venue open?',
+        type: 'text',
+      },
+    ],
+    vault: '/vaults/test',
+  })
+  await firstDraftReady.promise
+
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input.prompt,
+  ).toBe(
+    'What time does the venue open?\n\nAlso share the walking time.',
+  )
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input
+      .userMessageContent,
+  ).toEqual([
+    {
+      image: initialImage,
+      mediaType: 'image/png',
+      type: 'image',
+    },
+    {
+      text: 'What time does the venue open?',
+      type: 'text',
+    },
+    {
+      text: 'Also share the walking time.',
+      type: 'text',
+    },
+  ])
+  await vi.advanceTimersByTimeAsync(4_000)
+  await expect(resultPromise).resolves.toMatchObject({
+    response: 'The venue opens at nine, and the walk takes ten minutes.',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
 })
 
 test('sendAssistantMessageLocal exposes hosted current-input authority to dynamic tools', async () => {
@@ -10056,6 +10252,10 @@ async function loadLocalServiceModule(input?: {
           codexThreadId?: string | null
           finalAction?: AssistantNoReplyDisposition
           precedingResponseSegments?: readonly {
+            contextReferences?: readonly {
+              entityId: string
+              entityKind: string
+            }[] | null
             deliveryContextOrdinal: number
             media?: AssistantDeliveryOutcome['media']
             response: string
@@ -10072,6 +10272,10 @@ async function loadLocalServiceModule(input?: {
             routeId?: string
           }
           response: string
+          responseContextReferences?: readonly {
+            entityId: string
+            entityKind: string
+          }[] | null
           responseDeliveryContextOrdinal: number
           responseMedia?: readonly AssistantResponseMedia[] | null
           responseCard?: AssistantResponseCard | null

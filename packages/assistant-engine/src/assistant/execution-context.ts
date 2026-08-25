@@ -127,6 +127,22 @@ export type AssistantHostedDeviceToolRequest =
       accountId: string
       action: 'reconcile'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      afterDays: number
+      mode: 'after_days'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'default'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'off'
+      sourceProvider: string
+    }
 
 export interface AssistantHostedDeviceAccountSummary {
   accountId: string
@@ -154,11 +170,21 @@ export type AssistantHostedDeviceToolResponse =
       occurredAt: string
       status: 'queued'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      effectiveAfterDays: number | null
+      setting: 'custom' | 'default' | 'off'
+      sourceProvider: string
+      status: 'saved' | 'unchanged'
+    }
 
 export interface AssistantHostedDeviceTool {
   request(
     request: AssistantHostedDeviceToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      acceptedInputAuthority?: { assistantInputId: string }
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedDeviceToolResponse>
 }
 

@@ -85,7 +85,6 @@ import {
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
 } from "./system-mailbox-state.ts";
 import {
-  hasHostedRuntimeJunctionPlatformEnv,
   resolveHostedRuntimeDeviceSyncProviderConfigs,
 } from "./device-sync-provider-configs.ts";
 import {
@@ -176,13 +175,8 @@ export async function runHostedDeviceSyncPass(
   skipped: boolean;
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
-  const platformEnv = options.platformEnv ?? {};
   options.onStage?.("starting");
-  await writeHostedLegacyDeviceSyncPlatformEnvLog({
-    deviceSyncConfig,
-    platform: options.runtimeLogPlatform ?? null,
-    platformEnv,
-  });
+  const platformEnv = options.platformEnv ?? {};
   const shouldYield = createHostedDeviceSyncYieldPredicate(
     options.shouldYield ?? null,
     options.signal ?? null,
@@ -1691,36 +1685,6 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
     entries,
     platform: input.platform,
     shouldYieldBetweenBatches: input.shouldYield,
-  });
-}
-
-async function writeHostedLegacyDeviceSyncPlatformEnvLog(input: {
-  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
-  platformEnv: Readonly<Record<string, string>>;
-}): Promise<void> {
-  if (!input.platform?.logPort || !input.deviceSyncConfig?.providerConfigs.junction) {
-    return;
-  }
-
-  const legacyPlatformEnvKeyCount = Object.keys(input.platformEnv).length;
-  const junctionPlatformEnvPresent = hasHostedRuntimeJunctionPlatformEnv(input.platformEnv);
-  if (legacyPlatformEnvKeyCount === 0 || !junctionPlatformEnvPresent) {
-    return;
-  }
-
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      component: "device-sync",
-      eventCode: "device-sync.legacy_platform_env_present",
-      level: "info",
-      phase: "invoke",
-      redactedJson: {
-        junctionPlatformEnvPresent,
-        legacyPlatformEnvKeyCount,
-      },
-    },
-    platform: input.platform,
   });
 }
 

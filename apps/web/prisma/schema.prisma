@@ -81,6 +81,16 @@ model DeviceConnectionSource {
   @@map("device_connection_source")
 }
 
+model DeviceSourceNoDataOutreachPreference {
+  userId             String   @map("user_id")
+  sourceProviderSlug String   @map("source_provider_slug")
+  reminderAfterDays  Int?     @map("reminder_after_days")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@id([userId, sourceProviderSlug])
+  @@map("device_source_no_data_outreach_preference")
+}
+
 model DeviceTokenAudit {
   id                   Int              @id @default(autoincrement())
   userId               String           @map("user_id")
