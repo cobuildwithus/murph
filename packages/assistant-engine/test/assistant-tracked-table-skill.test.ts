@@ -358,14 +358,34 @@ describe('assistant tracked workout table skill', () => {
   })
 
   it('uses host-preserved exact workout context without a visible marker', async () => {
-    const skill = await readFile(
-      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
-      'utf8',
-    )
+    const [skill, strengthSkill] = await Promise.all([
+      readFile(
+        path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+        'utf8',
+      ),
+      readFile(
+        path.join(resolveAssistantSkillsRoot(), 'strength-training', 'SKILL.md'),
+        'utf8',
+      ),
+    ])
 
     expect(skill).not.toContain('[Murph workout follow-up:')
+    expect(strengthSkill).not.toContain('[Murph workout follow-up:')
+    expect(skill).not.toContain('workout follow-up marker')
+    expect(strengthSkill).not.toContain('workout follow-up marker')
     expect(skill).toContain(
       'The host may preserve one exact `activity_session` reference',
+    )
+    expect(skill).toContain('The candidate is causal identity, not write authority.')
+    expect(skill).toContain('exact-read that candidate')
+    expect(skill).toContain(
+      'require the successful write result to identify the same session',
+    )
+    expect(strengthSkill).toContain(
+      'require a current exact canonical read or a matching successful canonical mutation for that same session',
+    )
+    expect(strengthSkill).toContain(
+      'A visible transcript marker, conversational recency, and the previously logged set never identify the owner.',
     )
     expect(skill).toContain(
       'An unrelated assistant delivery, a missing reference, multiple session references, or a conflicting result ends implicit continuation',
@@ -386,7 +406,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Do not collapse or discard the fourth set')
     expect(skill).toContain('do not silently truncate it')
     expect(skill).toContain(
-      'durable tracking marker or immediate causal context identifies one exact workout',
+      'current exact command, structured card result, or host-preserved immediate causal context identifies one workout',
     )
     expect(skill).toContain(
       'do not choose a workout by recency or invent one from an update-like message',

@@ -77,12 +77,29 @@ logging sequence stays on one exact live workout.
 - Product UX walkthrough: Ready. The reminder remains routine context, the
   first logged set establishes the exact activity session, and later terse
   replies receive that exact session reference without exposing internal IDs.
+- ReviewGPT's specialist prompt audit found one stale strength-training sentence
+  that still allowed the retired visible follow-up marker. Both workout skills
+  now share the same rule: runtime context identifies only a candidate; a
+  current canonical read or matching successful mutation proves the write
+  target. Visible transcript markers and recency provide no authority.
+- Product UX revalidation after the prompt correction: Ready. The purpose,
+  entry point, member-visible feedback, and recovery path are unchanged; the
+  correction only removes an obsolete hidden authority path.
 - Focused regression coverage passes for direct and batched workout results,
   option-first commands, delete invalidation, malformed batch output,
-  response-specific delivery metadata, and live-steer ordinal isolation.
-- `pnpm test:diff` passes on the corrected final tree, including affected
+  response-specific delivery metadata, live-steer ordinal isolation, both
+  workout skill contracts, and rejection of a legacy visible marker without a
+  trusted runtime reference. The live-provider case is compiled but cannot run
+  locally without the opt-in provider credential.
+- `pnpm test:diff` passed on implementation head `037102aa3e61`, including affected
   typechecks, package-shape verification, package tests, package-boundary
   smoke tests, hosted web verification, and Cloudflare verification.
+- On the prompt-corrected tree, the three focused assistant-engine files pass
+  with 18 tests and 76 credential-gated cases skipped, and the package
+  typecheck passes. A follow-up full assistant-engine test attempt exhausted
+  the Node heap in the unrelated local-service runtime worker before Vitest
+  produced a suite result; the focused command is the next-best validation for
+  this prompt-and-test-only correction.
 
 ## Architecture decision
 
