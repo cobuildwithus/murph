@@ -817,7 +817,7 @@ describe('searchFoodLabels', () => {
     assert.equal(error.context?.failureStage, 'response_validation')
     assert.equal(error.context?.retryable, false)
     assert.equal(error.context?.stage, 'response')
-    assert.equal(error.context?.validationErrorName, 'SyntaxError')
+    assert.equal(error.context?.issues, undefined)
     assert.match(error.message, /not valid JSON \(HTTP 200\)/u)
     assert.equal('repair' in error, false)
     assert.doesNotMatch(

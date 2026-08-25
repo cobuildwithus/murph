@@ -425,11 +425,7 @@ describe('searchSupplementLabels', () => {
     assert.equal(error.context?.retryable, false)
     assert.equal(error.context?.stage, 'response')
     assert.equal(error.context?.status, 200)
-    assert.equal(error.context?.validationErrorName, 'ZodError')
-    assert.deepEqual(error.context?.issues, [{
-      code: 'invalid_type',
-      publicPath: ['items'],
-    }])
+    assert.equal(error.context?.issues, undefined)
     assert.match(error.message, /expected label schema \(HTTP 200\)/u)
     assert.equal('repair' in error, false)
     assert.doesNotMatch(

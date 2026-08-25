@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -24,8 +24,8 @@ Updated: 2026-08-24
 
 - In scope: the shared hosted food/supplement label request classifier, focused
   regression coverage, exact-head PR evidence, and review preparation.
-- Out of scope: an internal retry loop, changes to response-body/schema
-  classification, new error abstractions, or other CLI families.
+- Out of scope: an internal retry loop, new error abstractions, or other CLI
+  families.
 
 ## Risks and mitigations
 
@@ -50,6 +50,10 @@ Updated: 2026-08-24
   retry machinery is warranted.
 - Preserve safe error name/code diagnostics. Only exception messages, query
   values, provider bodies, and concrete credentials stay outside the envelope.
+- Integrate the final shared foundation by retaining one typed request owner and
+  deleting the downstream raw-response parser. Provider-schema failures remain
+  fieldless because they are not model-correctable inputs; the nutrition branch
+  continues to add only bounded transport name/code diagnostics.
 
 ## Verification
 
@@ -65,3 +69,6 @@ Updated: 2026-08-24
   parity probes. Vault CLI: 9,465,853 / 9,477,676 bytes total, 805 / 20,000
   bytes entry, 25,155 / 33,200 bytes static closure. Runner: 11,277,964 /
   11,393,617 bytes total, 1,740,666 bytes entry, 8,598,164 bytes static closure.
+- Final-foundation integration focused proof passed 73 source tests across the
+  food, supplement, and shared provider-recovery suites (29 prepared-runtime
+  cases skipped); CLI typecheck passed.

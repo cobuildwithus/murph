@@ -13,7 +13,6 @@ export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH = 256
 const MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES = 32 * 1024
 const DEFAULT_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 10_000
 const MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 30_000
-const MAX_HOSTED_DATA_API_LABEL_RESPONSE_ISSUES = 12
 const HOSTED_DATA_API_LABELS_BASE_URL = 'http://murph-data-api.worker'
 
 export const hostedDataApiLabelSearchInputSchema = z.object({
@@ -349,12 +348,12 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       url.searchParams.set('nutritionOnly', 'true')
     }
 
-    const response = await fetchLabelsApi(config, fetchImpl, url, env)
-    const payload = await parseLabelsResponsePayload(
+    const payload = await fetchLabelsApiPayload(
       config,
-      response,
+      fetchImpl,
+      url,
+      env,
       apiResponseSchema,
-      'items',
     )
 
     return searchResultSchema.parse({
@@ -395,18 +394,19 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       )
     }
 
-    const response = await fetchLabelsApi(config, fetchImpl, url, env, {
-      body,
-      headers: {
-        'content-type': 'application/json',
-      },
-      method: 'POST',
-    })
-    const payload = await parseLabelsResponsePayload(
+    const payload = await fetchLabelsApiPayload(
       config,
-      response,
+      fetchImpl,
+      url,
+      env,
       batchApiResponseSchema,
-      'results',
+      {
+        body,
+        headers: {
+          'content-type': 'application/json',
+        },
+        method: 'POST',
+      },
     )
 
     return batchSearchResultSchema.parse({
@@ -464,18 +464,18 @@ function assertHostedRuntime<TSource extends string>(
   )
 }
 
-async function fetchLabelsApi<TSource extends string>(
+async function fetchLabelsApiPayload<TSource extends string, TPayload>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   fetchImpl: typeof fetch,
   url: URL,
   env: NodeJS.ProcessEnv,
+  responseSchema: z.ZodType<TPayload>,
   options: {
-    allowNotFound?: boolean
     body?: BodyInit
     headers?: HeadersInit
     method?: 'GET' | 'POST'
   } = {},
-): Promise<Response> {
+): Promise<TPayload> {
   let response: Response
   const providerCredential = readHostedDataApiProviderCredential(config, env)
 
@@ -493,16 +493,29 @@ async function fetchLabelsApi<TSource extends string>(
     throw createLabelsTransportError(config, error)
   }
 
-  if (response.status === 404 && options.allowNotFound === true) {
-    return response
-  }
-
   if (!response.ok) {
     await discardLabelsResponseBody(response)
     throw createLabelsHttpError(config, response.status)
   }
 
-  return response
+  let payload: unknown
+
+  try {
+    payload = await response.json()
+  } catch (error) {
+    if (readSafeErrorName(error) !== 'SyntaxError') {
+      throw createLabelsResponseBodyTransportError(config, response.status, error)
+    }
+
+    throw createLabelsInvalidResponseError(config, response.status, 'json')
+  }
+
+  const parsed = responseSchema.safeParse(payload)
+  if (!parsed.success) {
+    throw createLabelsInvalidResponseError(config, response.status, 'schema')
+  }
+
+  return parsed.data
 }
 
 function readHostedDataApiProviderCredential<TSource extends string>(
@@ -519,38 +532,6 @@ function readHostedDataApiProviderCredential<TSource extends string>(
     `${config.searchDescription} requires the hosted Murph data API provider credential.`,
     { retryable: false, stage: 'configuration' },
   )
-}
-
-async function parseLabelsResponsePayload<TPayload>(
-  config: HostedDataApiLabelsClientConfig<string>,
-  response: Response,
-  responseSchema: z.ZodType<TPayload>,
-  publicResponsePath: 'items' | 'results',
-): Promise<TPayload> {
-  let payload: unknown
-
-  try {
-    payload = await response.json()
-  } catch (error) {
-    if (readSafeErrorName(error) !== 'SyntaxError') {
-      throw createLabelsResponseBodyTransportError(config, response.status, error)
-    }
-
-    throw createLabelsInvalidResponseError(config, response.status, error, {
-      responseKind: 'json',
-    })
-  }
-
-  const parsed = responseSchema.safeParse(payload)
-  if (!parsed.success) {
-    throw createLabelsInvalidResponseError(config, response.status, parsed.error, {
-      responseKind: 'schema',
-      issues: parsed.error.issues,
-      publicResponsePath,
-    })
-  }
-
-  return parsed.data
 }
 
 function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
@@ -690,7 +671,6 @@ function classifyLabelsHttpFailure(
       retryable: true,
     }
   }
-
   if (status === 408) {
     return {
       codeSuffix: 'request_timed_out',
@@ -718,34 +698,18 @@ function classifyLabelsHttpFailure(
 function createLabelsInvalidResponseError<TSource extends string>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   status: number,
-  error: unknown,
-  details: {
-    issues?: readonly { code: string }[]
-    publicResponsePath?: 'items' | 'results'
-    responseKind: 'json' | 'schema'
-  },
+  responseKind: 'json' | 'schema',
 ): VaultCliError {
-  const issues = details.publicResponsePath === undefined
-    ? undefined
-    : details.issues
-      ?.slice(0, MAX_HOSTED_DATA_API_LABEL_RESPONSE_ISSUES)
-      .map(issue => ({
-        code: issue.code,
-        publicPath: [details.publicResponsePath],
-      }))
-
   return new VaultCliError(
     `${config.errorCodePrefix}_invalid_response`,
-    details.responseKind === 'json'
+    responseKind === 'json'
       ? `${config.searchDescription} received a successful response that was not valid JSON (HTTP ${status}).`
       : `${config.searchDescription} received a successful response that did not match the expected label schema (HTTP ${status}).`,
     {
       failureStage: 'response_validation',
-      ...(issues && issues.length > 0 ? { issues } : {}),
       retryable: false,
       stage: 'response',
       status,
-      validationErrorName: readSafeErrorName(error),
     },
   )
 }
