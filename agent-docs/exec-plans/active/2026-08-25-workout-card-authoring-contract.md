@@ -130,15 +130,18 @@ Updated: 2026-08-25
   `input`, `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and
   `tools` when present; volatile temporary Codex paths and runtime identifiers
   were normalized, and model/reasoning/storage/streaming/service-tier/account/
-  cache/client/transport metadata were excluded identically. Direct changes
-  from 28,421 tokens / 131,826 bytes to 28,458 / 131,960 (+37 tokens,
-  +0.1302%; +134 bytes, +0.1016%). Group remains exactly 23,405 tokens /
-  107,342 bytes. The direct delta is confined to Codex-generated code-mode
-  response-card tool/schema guidance in `input`; the deferred tracked-table
-  skill is absent from the first request. Measurement-only instrumentation was
-  removed.
+  cache/client/transport metadata were excluded identically. The reviewed
+  generic-timestamp correction was then measured twice at the same generated
+  code-mode schema boundary and adds 5 tokens / 20 bytes to the first-reviewed
+  request. Final direct impact is therefore 28,421 tokens / 131,826 bytes to
+  28,463 / 131,980 (+42 tokens, +0.1478%; +154 bytes, +0.1168%). Group remains
+  exactly 23,405 tokens / 107,342 bytes. The direct delta is confined to
+  Codex-generated response-card tool/schema guidance in `input`; the deferred
+  tracked-table skill is absent from the first request. Measurement-only
+  instrumentation and its temporary dependency were removed.
 - The first ReviewGPT round found the overly broad timestamp predicate and the
   one-time contract-fingerprint rollout disclosure; both corrections are now
-  represented in code, tests, and this plan. Rebase/merge against current
-  `origin/main`, refreshed provider capture, ReviewGPT round 2, and exact-head
+  represented in code, tests, and this plan. Merged current `origin/main` at
+  `53ba33ce80` through two-parent merge `8aa1fa7470`; focused tests and all
+  affected package typechecks pass afterward. ReviewGPT round 2 and exact-head
   CI remain pending.
