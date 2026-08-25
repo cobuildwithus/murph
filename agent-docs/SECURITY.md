@@ -1461,11 +1461,14 @@ Last verified: 2026-08-23
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
   GitHub App credential only through the protected `frog-reconciliation`
   environment. Its workflow-provided token has no permissions; the controller
-  mints a current-repository installation token with only
-  `pull-requests: write`, uses it for the exact-target reads and sole draft
-  mutation, and requests no Contents, Issues, Actions, or other App authority.
-  The controller remains default-branch-owned and must not check out candidate
-  code or weaken its exact-head, open-state, draft-state, or one-target gates.
+  mints a current-repository installation token with exactly `contents: write`
+  and `pull-requests: write`. Pull requests write covers the exact-target REST
+  reads; Contents write is requested only because GitHub App authorization for
+  GraphQL `convertPullRequestToDraft` requires it. The controller does not call
+  the Contents API, mutate repository contents, or check out candidate code;
+  its sole mutation remains the exact pull request's draft state. It requests no
+  Issues, Actions, Workflows, Administration, or other App authority and must
+  not weaken its exact-head, open-state, draft-state, or one-target gates.
 - Public Temporal compatibility credentials belong only to the protected
   `temporal-compatibility` GitHub Environment. The GitHub App installation is
   limited to private `cobuildwithus/murph-cloud` and grants only Actions write

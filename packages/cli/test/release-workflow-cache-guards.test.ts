@@ -257,8 +257,15 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       [
         'pr-head-draft-reset.yml',
         workflow.replace(
+          '          permission-contents: write\n',
+          '',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
           '          permission-pull-requests: write',
-          '          permission-contents: write\n          permission-pull-requests: write',
+          '          permission-issues: write\n          permission-pull-requests: write',
         ),
       ],
       [
@@ -632,9 +639,10 @@ function isAllowedPrHeadDraftResetHandoff(
     && tokenStep.name === 'Mint draft-reset pull request token'
     && tokenStep.id === 'frog-app-token'
     && tokenStep.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1'
-    && Object.keys(tokenStep.with).sort().join(',') === 'client-id,permission-pull-requests,private-key'
+    && Object.keys(tokenStep.with).sort().join(',') === 'client-id,permission-contents,permission-pull-requests,private-key'
     && tokenStep.with['client-id'] === '${{ vars.FROG_APP_CLIENT_ID }}'
     && tokenStep.with['private-key'] === '${{ secrets.FROG_APP_PRIVATE_KEY }}'
+    && tokenStep.with['permission-contents'] === 'write'
     && tokenStep.with['permission-pull-requests'] === 'write'
     && secretExpressions !== null
     && secretExpressions.length === 1
