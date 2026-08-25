@@ -396,6 +396,16 @@ export class HostedBillingBrowserDriver {
     });
   }
 
+  async assertSettingsUsageLabel(
+    actor: HostedBillingBrowserActor,
+    label: string,
+  ): Promise<void> {
+    await this.runStep("settings-projection", "murph-settings", async () => {
+      await this.openSettings(actor);
+      await actor.page.getByLabel(label, { exact: true }).waitFor();
+    });
+  }
+
   async assertSettingsPlanState(
     actor: HostedBillingBrowserActor,
     input: {
