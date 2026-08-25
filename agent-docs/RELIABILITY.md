@@ -1587,9 +1587,10 @@ Last verified: 2026-08-23
   states can use currently advertised workout-stream capability. No eligible
   source completes this optional resource without index or stream egress;
   mixed-source indexes discard ineligible or unattributed workouts before
-  candidate progress is computed. An exact unsupported-workout response skips
-  only that candidate, while ambiguous request failures remain terminal. One
-  admitted workout index yields serial exact-workout SDK reads; each response
+  candidate progress is computed. An exact clear-unsupported HTTP 400 skips
+  only that candidate; ambiguous or request-shape HTTP 400s remain terminal.
+  Existing optional HTTP 404/422 candidate handling is unchanged. One admitted
+  workout index yields serial exact-workout SDK reads; each response
   has an 8 MiB cap and reduces before import to one compact overall
   feature plus at most 64 fixed-distance splits. The stable workout/source
   identity and source update version form one authoritative facet set, so a

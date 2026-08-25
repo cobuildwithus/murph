@@ -92,6 +92,11 @@ Updated: 2026-08-25
   workout egress. Reuse the existing one-attempt inventory work limit only for
   the PR-added unscoped `workout_stream` branch; preserve preexisting source-
   scoped continuation behavior and add no helper, constant, cache, or state.
+- Accepted a documentation-accuracy correction: distinguish terminal ambiguous
+  or request-shape HTTP 400 workout candidates from the existing optional HTTP
+  404/422 candidate skips. Rejected prompt-lens applicability because this PR
+  independently changes runtime behavior and is therefore not prompt-primary
+  under the canonical preliminary-lens trigger.
 - Rejected a separate hosted listed-only service fixture as duplicate proof:
   existing service wiring, generic listed-only admission, and workout zero-
   egress tests already cover its unchanged owner composition.
