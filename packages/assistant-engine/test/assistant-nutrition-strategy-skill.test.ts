@@ -390,13 +390,13 @@ describe('assistant nutrition strategy skill', () => {
       'The complete same-Goal historical `daily-*` nutrition set below has one read-only display-compatibility path',
     )
     expect(compactGoals).toContain(
-      '`evaluation.kind: rolling-window` plus `selectionPolicyOverride.kind: daily-aggregate` with a unit-preserving statistic, never `count`.',
+      '`evaluation.kind: rolling-window` with `statistic: mean` plus `selectionPolicyOverride.kind: daily-aggregate` with `statistic: mean`.',
     )
     expect(compactGoals).toContain(
       'preserve the Goal, and never extend this exception to another target identity or workflow.',
     )
     expect(compactGoals).toContain(
-      'A mixed evaluation bundle or any other rolling or aggregate shape is incompatible.',
+      'A mixed evaluation bundle or any other rolling-window or daily-aggregate statistic is incompatible.',
     )
     expect(compactGoals).toContain(
       'A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between` range, or any other target shape remains authoritative canonical state but is incompatible with this workflow.',

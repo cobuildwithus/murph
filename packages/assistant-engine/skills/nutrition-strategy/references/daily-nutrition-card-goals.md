@@ -63,12 +63,12 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   is `selected-value`, its comparator is `between`, and its numeric `value` and
   `highValue` are identical. The complete same-Goal historical `daily-*`
   nutrition set below has one read-only display-compatibility path when every
-  target instead uses `evaluation.kind: rolling-window` plus
-  `selectionPolicyOverride.kind: daily-aggregate` with a unit-preserving
-  statistic, never `count`. Copy each unchanged point bound into the card for
-  the selected `localDate`, preserve the Goal, and never extend this exception
-  to another target identity or workflow. A mixed evaluation bundle or any
-  other rolling or aggregate shape is incompatible.
+  target instead uses `evaluation.kind: rolling-window` with `statistic: mean`
+  plus `selectionPolicyOverride.kind: daily-aggregate` with `statistic: mean`.
+  Copy each unchanged point bound into the card for the selected `localDate`,
+  preserve the Goal, and never extend this exception to another target identity
+  or workflow. A mixed evaluation bundle or any other rolling-window or
+  daily-aggregate statistic is incompatible.
   A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between`
   range, or any other target shape remains authoritative canonical state but is
   incompatible with this workflow. Never translate its bound into a point:

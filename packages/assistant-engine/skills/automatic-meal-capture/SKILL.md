@@ -269,10 +269,10 @@ On a scheduled run:
    be an exact point with comparator `between` and identical numeric `value` and
    `highValue`. Accept `selected-value` evaluation normally. The complete
    same-Goal historical `daily-*` set above may instead use the read-only
-   rolling-window plus unit-preserving daily-aggregate display compatibility in
-   the shared daily-card reference; preserve the Goal and do not extend that
-   exception. A mixed evaluation bundle or another rolling or aggregate shape
-   is incompatible. A one-sided `<`, `<=`, `>`, or `>=` threshold,
+   rolling-mean plus daily-aggregate-mean display compatibility in the shared
+   daily-card reference; preserve the Goal and do not extend that exception. A
+   mixed evaluation bundle or another rolling-window or daily-aggregate
+   statistic is incompatible. A one-sided `<`, `<=`, `>`, or `>=` threshold,
    non-identical range, or other shape remains authoritative but is incompatible
    with this point-target card.
    Never expose, compare, copy, or derive from its bound, and never create,

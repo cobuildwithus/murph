@@ -953,10 +953,10 @@ describe('murph.attach_response_card', () => {
       'complete same-Goal historical daily-* nutrition set above has one read-only display-compatibility path',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'rolling-window evaluation plus selectionPolicyOverride kind daily-aggregate with a unit-preserving statistic, never count',
+      'rolling-window evaluation with statistic mean plus selectionPolicyOverride kind daily-aggregate with statistic mean',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A mixed evaluation bundle or another rolling or aggregate shape is incompatible.',
+      'A mixed evaluation bundle or any other rolling-window statistic or daily-aggregate statistic is incompatible.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets',

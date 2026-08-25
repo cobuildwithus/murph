@@ -193,10 +193,10 @@ describe('assistant automatic meal capture skill', () => {
       'Accept `selected-value` evaluation normally.',
     )
     expect(compactSkill).toContain(
-      'read-only rolling-window plus unit-preserving daily-aggregate display compatibility in the shared daily-card reference',
+      'read-only rolling-mean plus daily-aggregate-mean display compatibility in the shared daily-card reference',
     )
     expect(compactSkill).toContain(
-      'A mixed evaluation bundle or another rolling or aggregate shape is incompatible.',
+      'A mixed evaluation bundle or another rolling-window or daily-aggregate statistic is incompatible.',
     )
     expect(compactSkill).toContain(
       'A one-sided `<`, `<=`, `>`, or `>=` threshold, non-identical range, or other shape remains authoritative but is incompatible with this point-target card.',
