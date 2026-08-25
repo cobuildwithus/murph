@@ -603,7 +603,10 @@ Last verified: 2026-08-23
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately. Metric families are normalized
-  independently: an absent or structurally unusable family remains unknown,
+  independently: primary-only Postgres and PgBouncer families require an
+  explicit `planetscale_role="primary"` label, while the edge connection-error
+  family remains role-less by provider contract. An absent or structurally
+  unusable family remains unknown,
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
   A collection that fails before producing a usable observation, including a

@@ -83,6 +83,7 @@ describe("database health store", () => {
     };
 
     store.recordFailedSample({
+      checkedAtMs: 301_000,
       connectionErrorCounterBaseline,
       connectionErrorDelta: 2,
       conditions: [
@@ -131,6 +132,7 @@ describe("database health store", () => {
     });
     expect(store.readRecentSamples()).toEqual([
       expect.objectContaining({
+        checkedAtMs: 301_000,
         connectionErrorDelta: 2,
         failureCode: "required_metrics_missing",
       }),
