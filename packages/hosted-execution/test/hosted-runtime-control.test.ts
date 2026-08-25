@@ -2531,6 +2531,24 @@ describe("hosted runtime control contracts", () => {
     }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
   });
 
+  it("accepts retired device-sync environment logs from warm runners", () => {
+    const entry = {
+      at: "2026-04-26T00:00:03.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.legacy_platform_env_present",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        junctionPlatformEnvPresent: true,
+        legacyPlatformEnvKeyCount: 4,
+      },
+    };
+
+    expect(parseHostedRuntimeLogRequest({ entries: [entry] })).toEqual({
+      entries: [entry],
+    });
+  });
+
   it("keeps runtime logs structured and privacy-bounded", () => {
     const entry = {
       at: "2026-04-26T00:00:03.000Z",
