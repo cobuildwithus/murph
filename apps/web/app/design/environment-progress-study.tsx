@@ -7,6 +7,10 @@ import {
   EnvironmentShell,
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
+import {
+  PrintEnvironmentLink,
+  ShareEnvironmentButton,
+} from "../(dashboard)/environment/environment-components";
 import { EnvironmentReportSkeleton } from "../(dashboard)/environment/environment-report-skeleton";
 import { EnvironmentShareCard } from "../(dashboard)/environment/environment-share-card";
 import { EnvironmentVoiceCapture } from "../(dashboard)/environment/environment-voice-capture";
@@ -92,8 +96,6 @@ const GAP_SCRIPTS: Readonly<Record<10 | 30 | 70, EnvironmentVoiceScript>> = {
 const UPDATE_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Update your environment",
   flow: "update",
-  idleDescription:
-    "You do not need to repeat the full walkthrough. Mention only what is new or different.",
   idleTitle: "Record what changed",
   topics: [
     {
@@ -102,6 +104,59 @@ const UPDATE_SCRIPT: EnvironmentVoiceScript = {
       prompt:
         "Describe anything that changed at home. Murph will update only the clear details.",
       title: "What changed?",
+    },
+  ],
+};
+
+const LIVE_TOPIC_SCRIPT: EnvironmentVoiceScript = {
+  dialogTitle: "Continue your Environment report",
+  flow: "fill-gaps",
+  idleTitle: "Pick up where you left off",
+  initialCoveredDetails: 6,
+  totalDetails: 16,
+  topics: [
+    {
+      eyebrow: "Workspace",
+      fields: [
+        {
+          aspectId: "workspace",
+          indicatorId: "work_mode",
+          label: "Whether you work at home, an office, or both",
+          valueType: { kind: "enum", values: ["remote", "office", "hybrid"] },
+        },
+        {
+          aspectId: "workspace",
+          indicatorId: "desk_hours",
+          label: "How many hours you spend at a desk each day",
+          valueType: { kind: "number", min: 0, max: 18, unit: "h/day" },
+        },
+        {
+          aspectId: "workspace",
+          indicatorId: "standing_desk",
+          label: "Whether your desk adjusts for standing",
+          valueType: {
+            kind: "enum",
+            values: ["adjustable_used", "adjustable_unused", "fixed"],
+          },
+        },
+        {
+          aspectId: "workspace",
+          indicatorId: "screen_setup",
+          label: "Whether your screen is at eye level",
+          valueType: {
+            kind: "enum",
+            values: ["external_monitor", "laptop_only", "mixed"],
+          },
+        },
+      ],
+      focus: [
+        "Whether you work at home, an office, or both",
+        "How many hours you spend at a desk each day",
+        "Whether your desk adjusts for standing",
+        "Whether your screen is at eye level",
+      ],
+      id: "workspace:0",
+      title: "Your work setup",
     },
   ],
 };
@@ -139,12 +194,41 @@ export function EnvironmentProgressStudy() {
           triggerLabel="Preview live interview"
         />
       </StudyState>
+      <StudyState label="Guided interview · Listening on a phone">
+        <EnvironmentVoiceCapture
+          authGate={false}
+          contactOptions={DESIGN_CONTACT_OPTIONS}
+          initialTopicId="workspace:0"
+          preview={{
+            capturedFieldKeys: ["workspace.work_mode", "workspace.standing_desk"],
+            speaking: true,
+            state: "listening",
+            transcript:
+              "I work from home most days.\nThe desk goes up and down, I use it standing in the afternoon.\nMy monitor sits at eye level.",
+          }}
+          script={LIVE_TOPIC_SCRIPT}
+          showTrigger={false}
+          triggerLabel="Preview live topic"
+        />
+      </StudyState>
       <StudyState label="Private report · Preparing and bounded recovery">
         <EnvironmentReportSkeleton />
       </StudyState>
       <StudyState label="Populated report · Shared dashboard width">
         <div id="environment-populated-dashboard-shell">
-          <EnvironmentShell>
+          <EnvironmentShell
+            actions={
+              <>
+                <ShareEnvironmentButton
+                  coverage={88}
+                  grade={overallGrade(reportNotes, REPORT_DESIGN_VALUES)}
+                  known={10}
+                  total={16}
+                />
+                <PrintEnvironmentLink />
+              </>
+            }
+          >
             <EnvironmentReport
               conditions={{ outdoorAir: "Good", weather: "Clear · 21°C" }}
               contactOptions={DESIGN_CONTACT_OPTIONS}
@@ -263,9 +347,6 @@ function gapScript(
   return {
     dialogTitle: "Fill the gaps in your report",
     flow: "fill-gaps",
-    idleDescription: `${topics.length} short ${
-      topics.length === 1 ? "topic" : "topics"
-    }, based on what Murph does not know yet.`,
     idleTitle: "Only the missing details",
     topics: [buildTopic(firstTopic), ...remainingTopics.map(buildTopic)],
   };
