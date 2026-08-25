@@ -45,6 +45,7 @@ import {
 import { HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT } from "../src/hosted-runtime.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "../src/public-account.ts";
@@ -21889,6 +21890,29 @@ test("Junction workout_stream completes without workout egress when no connected
   assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });
 
+test("Junction workout_stream makes no workout egress through a disconnect fence", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["fenced-workout"],
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      listConnectionSources: async () => [{
+        ...createJunctionWorkoutStreamSource("garmin", true),
+        lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      }],
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.equal(
+    harness.requestUrls.some((url) => url.includes("/v2/summary/workouts/")),
+    false,
+  );
+  assert.deepEqual(harness.streamRequests, []);
+});
+
 test.each([
   { label: "incapable", sourceProviderSlug: "polar" },
   { label: "unknown", sourceProviderSlug: "unknown-source" },
@@ -21962,19 +21986,31 @@ test("Junction workout_stream filters mixed-source candidates before stream prog
   assert.deepEqual(importedWorkoutIds, ["garmin-workout"]);
 });
 
-test("Junction full-job workout_stream uses live capability before Web projection catches up", async () => {
+test.each([{
+  label: "uses live capability before Web projection catches up",
+  source: {
+    ...createJunctionWorkoutStreamSource("garmin", false),
+    resourceAvailabilitySummary: {},
+  },
+  workoutId: "current-capability-workout",
+}, {
+  label: "keeps current detail active during historical reconnect recovery",
+  source: {
+    ...createJunctionWorkoutStreamSource("garmin", true),
+    status: "error" as const,
+    lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+    lastErrorMessage: "Historical export requires a member-confirmed reset.",
+  },
+  workoutId: "historical-reconnect-current-workout",
+}])("Junction full-job workout_stream $label", async ({ source, workoutId }) => {
   const harness = createJunctionWorkoutStreamTestProvider({
     listProviders: () => [
       createJunctionWorkoutStreamProviderConnection("garmin", true),
     ],
-    listWorkoutIds: () => ["current-capability-workout"],
+    listWorkoutIds: () => [workoutId],
   });
-  const connectedWebSource = {
-    ...createJunctionWorkoutStreamSource("garmin", false),
-    resourceAvailabilitySummary: {},
-  };
   const context = createJunctionWorkoutStreamJobContext({
-    listConnectionSources: async () => [connectedWebSource],
+    listConnectionSources: async () => [source],
   });
 
   const initial = await executeJunctionJob(
@@ -22003,7 +22039,7 @@ test("Junction full-job workout_stream uses live capability before Web projectio
     ).length,
     2,
   );
-  assert.deepEqual(harness.streamRequests, ["current-capability-workout"]);
+  assert.deepEqual(harness.streamRequests, [workoutId]);
 });
 
 test("Junction workout_stream fails closed without a source-capability projection", async () => {

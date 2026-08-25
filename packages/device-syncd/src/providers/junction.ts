@@ -9971,19 +9971,20 @@ async function resolveJunctionWorkoutStreamEligibleSources(
   context: ProviderJobContext,
   providers: readonly JunctionProviderConnection[],
 ): Promise<ReadonlySet<string>> {
-  const sources = context.listConnectionSources
-    ? await context.listConnectionSources()
-    : [];
-  const connectedSourceProviderSlugs = new Set(sources.flatMap((source) => {
-    const sourceProviderSlug = canonicalizeJunctionProviderSlug(source.sourceProviderSlug);
-    return sourceProviderSlug && source.status === "connected" ? [sourceProviderSlug] : [];
-  }));
+  if (!context.listConnectionSources) {
+    return new Set();
+  }
+  const sources = await context.listConnectionSources();
 
   return new Set(projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
   ).flatMap((source) =>
-    connectedSourceProviderSlugs.has(source.sourceProviderSlug)
+    isJunctionSourceAdmittedForImport(
+      sources,
+      source.sourceProviderSlug,
+      context.connectionSourceAdmissionMode !== "listed_only",
+    )
       && source.status === "connected"
       && isJunctionResourceAvailableInSummary(
         source.resourceAvailabilitySummary,

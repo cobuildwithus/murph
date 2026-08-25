@@ -12,7 +12,7 @@ Updated: 2026-08-25
 
 ## Success criteria
 
-- Web/control-plane source state remains the connected/disconnected authority.
+- Web/control-plane source state remains the current-import admission authority.
 - Current Junction provider inventory remains the workout-stream capability
   authority, intersected at the existing provider-local seam.
 - An unscoped full-job workout continuation loads current provider inventory;
@@ -75,6 +75,10 @@ Updated: 2026-08-25
 - Keep Web source status as authorization and use live provider inventory only
   for current resource capability; do not overlay or republish capability in a
   second owner.
+- Accepted the final round-two finding that a feature-local `connected` check
+  contradicted the existing non-disconnected import owner during historical
+  reconnect recovery. Reuse that owner so disconnect fences remain terminal
+  while authorized current ingestion continues.
 
 ## Verification
 

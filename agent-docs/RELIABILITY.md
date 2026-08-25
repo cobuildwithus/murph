@@ -1581,9 +1581,10 @@ Last verified: 2026-08-23
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
-  owner. Before the workout index, control-plane connection status intersects
-  with the current Junction provider inventory so only connected sources that
-  currently advertise workout-stream capability are admitted. No eligible
+  owner. Before the workout index, the existing control-plane current-import
+  admission predicate intersects with the current Junction provider inventory
+  so disconnect-fenced sources stay blocked while non-disconnected recovery
+  states can use currently advertised workout-stream capability. No eligible
   source completes this optional resource without index or stream egress;
   mixed-source indexes discard ineligible or unattributed workouts before
   candidate progress is computed. An exact unsupported-workout response skips
