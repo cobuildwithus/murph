@@ -380,11 +380,20 @@ it has been explicitly elevated to a cross-cutting invariant.
   every admitted group message's sender, opaque message reference, content,
   attachments, and native reply context separately. Initial selection freezes
   before provider start. Exact successors may then join through the existing
-  live-steering path only until the first completed assistant response; initial
-  plus live input is capped at 50 messages, and overflow or later input remains
-  pending for the next ordinary turn. Every completed assistant text or media
-  segment remains part of the turn and is delivered; no audience-specific
-  last-response-wins rule may discard it. A gap, legacy or missing causal
+  live-steering path only until the first completed assistant response. The one
+  narrow exception is an ordinary interactive Linq/iMessage or Telegram group
+  auto-reply: request 0 remains an in-memory draft for one four-second window,
+  and exact successors admitted during that window may cause exactly one
+  same-thread request 1 before the final cutoff. Initial plus live input is
+  capped at 50 messages, and overflow or later input remains pending for the
+  next ordinary turn. Every completed assistant text or media segment remains
+  part of an ordinary turn and is delivered; no audience-specific
+  last-response-wins rule may discard it. In the held-draft exception,
+  completed conversational segments remain provisional until selection, and
+  only the selected request's latest terminal response is deliverable: request
+  0 at a quiet cutoff or request 1 when reconsideration occurs. Completed tools,
+  progress messages, and other real-world effects remain authoritative and must
+  not be repeated. A gap, legacy or missing causal
   identifier, changed direct anchor or actor, or changed room boundary starts a
   later turn; terminal evidence covers every admitted input so restart repair
   cannot resend the reply.
@@ -656,9 +665,17 @@ direct-Starter gate is fully exhausted again.
 - Observability work never adds user latency. Diagnostics never block provider
   start or delivery. Once the active reply cannot continue, a bounded
   best-effort crash record may run.
-- Capture structured errors at the root boundary, apply shared redaction, and
-  preserve a stable code plus useful redacted cause. Never expose secrets,
-  message content, private identifiers, or local paths in external artifacts.
+- Capture structured errors at the root boundary and preserve a stable code,
+  stage, retryability, and useful bounded cause or detail. Do not collapse
+  ordinary diagnostic prose or build speculative exhaustive redaction or
+  allowlist machinery merely because the prose could theoretically contain
+  sensitive content.
+- Redact at concrete boundaries: actual credentials, authentication material,
+  and secrets; direct identifiers or local paths escaping externally; and raw
+  private payloads, transcripts, health data, or vault content. Private
+  operator diagnostics and model/tool errors authorized for the same user and
+  context may retain bounded raw detail. Proven higher-risk shapes remain
+  governed by their stricter owner rules in `agent-docs/SECURITY.md`.
 - Growing persisted collections declare ownership, retention, indexing or
   pagination, snapshot treatment, and cardinality or byte limits. Hosted
   workspace files also follow `docs/contracts/06-hosted-workspace-file-count.md`.

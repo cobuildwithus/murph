@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 
 import {
-  act,
   cloneElement,
   createElement,
   isValidElement,
@@ -390,7 +389,7 @@ test("BrowserVaultOnboardingStepsContent keeps the experiment step for empty vau
   assert.match(markup, /Start an experiment/);
 });
 
-test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a retryable error", async () => {
+test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a stable error", async () => {
   const refresh = vi.fn();
   mocks.useBrowserVault.mockReturnValue({
     client: null,
@@ -415,14 +414,13 @@ test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a r
   assert.doesNotMatch(rendered.container.textContent ?? "", /Start an experiment/u);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Sync labs/u);
 
-  const retry = [...rendered.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Retry",
+  assert.equal(
+    [...rendered.container.querySelectorAll("button")].some(
+      (button) => button.textContent === "Retry",
+    ),
+    false,
   );
-  assert.ok(retry);
-  await act(async () => {
-    retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-  assert.equal(refresh.mock.calls.length, 1);
+  assert.equal(refresh.mock.calls.length, 0);
 
   await rendered.cleanup();
 });

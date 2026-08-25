@@ -19,6 +19,7 @@ import type {
   DeviceSyncJobFailureDiagnostic,
   DeviceSyncJobFailureEventOrigin,
   DeviceSyncJobRecord,
+  DeviceSyncJobTimingDiagnostic,
 } from "@murphai/device-syncd/types";
 import {
   resolveDeviceSyncStoreNextJobWakeAt,
@@ -85,7 +86,6 @@ import {
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
 } from "./system-mailbox-state.ts";
 import {
-  hasHostedRuntimeJunctionPlatformEnv,
   resolveHostedRuntimeDeviceSyncProviderConfigs,
 } from "./device-sync-provider-configs.ts";
 import {
@@ -102,6 +102,7 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
 const HOSTED_DEVICE_SYNC_QUEUE_READ_LIMIT = HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT + 1;
+const HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT = 16;
 type HostedDeviceSyncPassStage =
   | "completed"
   | "control_plane_reconcile"
@@ -158,6 +159,9 @@ export async function runHostedDeviceSyncPass(
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
   options: {
+    onJobTimingDiagnostics?: (
+      diagnostics: readonly DeviceSyncJobTimingDiagnostic[]
+    ) => void;
     onProcessedJobs?: ((processedJobs: number) => void) | null;
     onQueueSnapshots?: ((snapshots: HostedDeviceSyncPassQueueSnapshots) => void) | null;
     platformEnv?: Readonly<Record<string, string>>;
@@ -176,13 +180,8 @@ export async function runHostedDeviceSyncPass(
   skipped: boolean;
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
-  const platformEnv = options.platformEnv ?? {};
   options.onStage?.("starting");
-  await writeHostedLegacyDeviceSyncPlatformEnvLog({
-    deviceSyncConfig,
-    platform: options.runtimeLogPlatform ?? null,
-    platformEnv,
-  });
+  const platformEnv = options.platformEnv ?? {};
   const shouldYield = createHostedDeviceSyncYieldPredicate(
     options.shouldYield ?? null,
     options.signal ?? null,
@@ -363,6 +362,7 @@ export async function runHostedDeviceSyncPass(
         shouldYield,
       });
     } finally {
+      options.onJobTimingDiagnostics?.(service.listJobTimingDiagnostics?.() ?? []);
       const queueSnapshotAfter = options.onQueueSnapshots
         ? readHostedDeviceSyncQueueSnapshot({
             accountId: wakeLocalAccountId,
@@ -1253,6 +1253,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   const startedAtMs = Date.now();
   let passStage: HostedDeviceSyncPassStage = "starting";
   let processedJobs = 0;
+  let jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[] = [];
   let queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null = null;
   let foregroundYieldObserved = false;
   const shouldYieldDeviceSync = input.shouldYieldDeviceSync
@@ -1275,6 +1276,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome: null,
       passStage,
       processedJobs: 0,
+      jobTimingDiagnostics,
       queueSnapshots,
       result: null,
       startedAtMs,
@@ -1295,6 +1297,11 @@ export async function runHostedDeviceSyncWakeLane(input: {
           },
           ...(input.runtimeLogPlatform?.logPort
             ? {
+                onJobTimingDiagnostics: (
+                  observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+                ) => {
+                  jobTimingDiagnostics = observedJobTimingDiagnostics;
+                },
                 onQueueSnapshots: (observedQueueSnapshots: HostedDeviceSyncPassQueueSnapshots) => {
                   queueSnapshots = observedQueueSnapshots;
                 },
@@ -1320,6 +1327,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
         outcome: "failed",
         passStage,
         processedJobs,
+        jobTimingDiagnostics,
         queueSnapshots,
         result: null,
         startedAtMs,
@@ -1366,6 +1374,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome,
       passStage,
       processedJobs: deviceSyncResult.processedJobs,
+      jobTimingDiagnostics,
       queueSnapshots,
       result: metrics,
       startedAtMs,
@@ -1421,6 +1430,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   outcome: HostedDeviceSyncPassOutcome | null;
   passStage: HostedDeviceSyncPassStage;
   processedJobs: number;
+  jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[];
   queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null;
   result: HostedMaintenanceMetrics | null;
   startedAtMs: number;
@@ -1437,6 +1447,9 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     : "other";
   const queueSnapshotBefore = input.queueSnapshots?.before ?? null;
   const queueSnapshotAfter = input.queueSnapshots?.after ?? null;
+  const jobTimingSummary = summarizeHostedDeviceSyncJobTimings(
+    input.jobTimingDiagnostics,
+  );
   void writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
@@ -1476,6 +1489,10 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
               pendingRunningJobCountBefore: queueSnapshotBefore?.runningJobCount ?? null,
               queueSnapshotAfterPresent: queueSnapshotAfter !== null,
               queueSnapshotBeforePresent: queueSnapshotBefore !== null,
+              deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
+              deviceSyncJobTimingSampleLimit: HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
+              deviceSyncJobTimingSummaries: jobTimingSummary.summaries,
+              deviceSyncJobTimingTruncated: jobTimingSummary.truncated,
               workerJobLimitReached:
                 input.processedJobs >= HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
             }
@@ -1492,6 +1509,41 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     },
     platform: input.input.runtimeLogPlatform,
   });
+}
+
+function summarizeHostedDeviceSyncJobTimings(
+  diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+): {
+  summaries: Array<Record<string, boolean | number | string | null>>;
+  truncated: boolean;
+} {
+  const slowest = [...diagnostics]
+    .sort((left, right) => right.elapsedMs - left.elapsedMs)
+    .slice(0, HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT);
+
+  return {
+    summaries: slowest.map((diagnostic) => ({
+      attempts: diagnostic.attempts,
+      connectionSourceReadCount: diagnostic.connectionSourceReadCount,
+      connectionSourceReadElapsedMs: diagnostic.connectionSourceReadElapsedMs,
+      credentialRefreshCount: diagnostic.credentialRefreshCount,
+      credentialRefreshElapsedMs: diagnostic.credentialRefreshElapsedMs,
+      durableProgressCommitted: diagnostic.durableProgressCommitted,
+      elapsedMs: diagnostic.elapsedMs,
+      jobCount: diagnostic.jobCount,
+      jobKind: toHostedRuntimeLogCode(diagnostic.jobKind),
+      outcome: toHostedRuntimeLogCode(diagnostic.outcome),
+      provider: toHostedRuntimeLogCode(diagnostic.provider),
+      providerExecutionElapsedMs: diagnostic.providerExecutionElapsedMs,
+      providerUnattributedElapsedMs: diagnostic.providerUnattributedElapsedMs,
+      ...(diagnostic.resource
+        ? { resource: toHostedRuntimeLogCode(diagnostic.resource) }
+        : {}),
+      snapshotImportCount: diagnostic.snapshotImportCount,
+      snapshotImportElapsedMs: diagnostic.snapshotImportElapsedMs,
+    })),
+    truncated: diagnostics.length > HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
+  };
 }
 
 function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
@@ -1691,36 +1743,6 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
     entries,
     platform: input.platform,
     shouldYieldBetweenBatches: input.shouldYield,
-  });
-}
-
-async function writeHostedLegacyDeviceSyncPlatformEnvLog(input: {
-  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
-  platformEnv: Readonly<Record<string, string>>;
-}): Promise<void> {
-  if (!input.platform?.logPort || !input.deviceSyncConfig?.providerConfigs.junction) {
-    return;
-  }
-
-  const legacyPlatformEnvKeyCount = Object.keys(input.platformEnv).length;
-  const junctionPlatformEnvPresent = hasHostedRuntimeJunctionPlatformEnv(input.platformEnv);
-  if (legacyPlatformEnvKeyCount === 0 || !junctionPlatformEnvPresent) {
-    return;
-  }
-
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      component: "device-sync",
-      eventCode: "device-sync.legacy_platform_env_present",
-      level: "info",
-      phase: "invoke",
-      redactedJson: {
-        junctionPlatformEnvPresent,
-        legacyPlatformEnvKeyCount,
-      },
-    },
-    platform: input.platform,
   });
 }
 

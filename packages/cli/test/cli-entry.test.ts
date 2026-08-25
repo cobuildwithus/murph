@@ -161,8 +161,11 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("renderMurphCliEntrypointError classifies human failures without raw detail", async () => {
-  const error = Object.assign(new Error("Config validation failed."), {
+test("renderMurphCliEntrypointError preserves a bounded diagnostic failure", async () => {
+  const submittedValue = "private-submitted-value";
+  const providerBody = "private-provider-response";
+  const rawMessage = `Parser rejected ${submittedValue}: ${providerBody}.`;
+  const error = Object.assign(new Error(rawMessage), {
     code: "CONFIG_INVALID",
     details: {
       errors: [
@@ -178,11 +181,12 @@ test("renderMurphCliEntrypointError classifies human failures without raw detail
   assert.equal(
     rendered.output,
     [
-      "Error: Config validation failed.",
+      `Error (CONFIG_INVALID): ${rawMessage}`,
       "Stage: command",
-      "Hint: Check the command inputs and runtime status before retrying.",
     ].join("\n"),
   );
+  assert.equal(rendered.output.includes(submittedValue), true);
+  assert.equal(rendered.output.includes(providerBody), true);
 });
 
 test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
@@ -196,10 +200,12 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
           code: "invalid_value",
           expected: "IANA time zone",
           path: ["schedule", "timeZone"],
+          publicPath: ["schedule", "timeZone"],
           message: privateValue,
         },
       ],
       retryable: false,
+      stage: "validation",
     },
   );
 
@@ -316,7 +322,7 @@ test("renderMurphCliEntrypointError defaults non-interactive failures to machine
   assert.equal(rendered.machineReadable, true);
   assert.match(rendered.output, /permission_denied/u);
   assert.match(rendered.output, /filesystem/u);
-  assert.doesNotMatch(rendered.output, /private\/vault/u);
+  assert.match(rendered.output, /private\/vault/u);
 });
 
 test("isBrokenPipeError recognizes stdout pipe closure failures", () => {

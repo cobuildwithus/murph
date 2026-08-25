@@ -49,7 +49,7 @@ const ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER =
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE =
   '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).'
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE =
-  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.'
+  '- Do not infer that safety-critical context is absent. For a concrete concern or an owning workflow\'s explicit contract, read only the canonical owner and detail records needed to resolve it. Do not enumerate unrelated conditions, allergies, regimens, goals, or history.'
 const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_UNAVAILABLE_LINE =
   '- Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).'
 const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_LOOKUP_LINE =
@@ -661,11 +661,7 @@ async function buildAssistantSnapshotCoverage(input: {
       totalCount: activeMedicationRegimens.length,
     }),
     activeRecordReadLine: hasActivePromptContext
-      ? [
-          '- For active conditions, allergies, medications, supplements, goals, habits, routines, or ramps,',
-          'read the relevant `vault-cli condition show` / `vault-cli allergy show` / `vault-cli regimen show` / `vault-cli goal show` record',
-          'before safety-relevant guidance or reconstructing baselines, ladders, targets, or fallback details.',
-        ].join(' ')
+      ? '- Treat this snapshot as navigation, not a completeness gate. For a concrete concern or an owning workflow\'s explicit contract, read only the relevant canonical record needed to resolve it; do not enumerate or detail-read unrelated records.'
       : null,
     activeSupplementRegimenCount: activeSupplementRegimens.length,
     activeSupplementRegimensLine: renderActiveSafetyRegimensLine({

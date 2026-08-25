@@ -70,10 +70,11 @@ function privateRun(overrides = {}) {
     conclusion: "success",
     event: "workflow_dispatch",
     head_repository: { full_name: TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY },
+    head_branch: PRIVATE_REF,
     head_sha: PRIVATE_SHA,
     id: RUN_ID,
     name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-    path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${PRIVATE_REF}`,
+    path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
     repository: { full_name: TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY },
     run_attempt: 1,
     status: "completed",
@@ -394,8 +395,9 @@ test("private run proof binds repository, workflow, tag SHA, event, and first at
   }), { complete: true, conclusion: "success" });
   for (const overrides of [
     { event: "push" },
+    { head_branch: "main" },
     { head_sha: PUBLIC_SHA },
-    { path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH },
+    { path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${PRIVATE_REF}` },
     { run_attempt: 2 },
     { repository: { full_name: "other/private" } },
   ]) {
@@ -554,6 +556,133 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
     }));
     assert.equal(proof.readerCount, 2);
     assert.deepEqual(calls, ["tag", "workflow", "head", "dispatch", "run", "jobs"]);
+  }));
+});
+
+test("controller waits for its accepted exact run to become visible", async () => {
+  let runReads = 0;
+  const sleepDurations = [];
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.includes("/git/ref/tags/")) {
+      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      runReads += 1;
+      return runReads === 1
+        ? new Response("not yet visible", { status: 404 })
+        : jsonResponse(privateRun());
+    }
+    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+      return jsonResponse({ jobs: proofJobs(), total_count: 3 });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    const proof = await runTemporalCompatibility(compatibilityArgs({
+      sleepFn: async (duration) => {
+        sleepDurations.push(duration);
+      },
+    }));
+    assert.equal(proof.readerCount, 2);
+    assert.equal(runReads, 2);
+    assert.deepEqual(sleepDurations, [15_000]);
+  }));
+});
+
+test("controller does not reopen visibility recovery after the run is visible", async () => {
+  const controls = [];
+  let runReads = 0;
+  const sleepDurations = [];
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.includes("/git/ref/tags/")) {
+      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
+      controls.push(url);
+      return new Response(null, { status: 202 });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      runReads += 1;
+      if (runReads === 1) {
+        return jsonResponse(privateRun({ conclusion: null, status: "in_progress" }));
+      }
+      if (runReads === 2) return new Response("uncertain after visibility", { status: 404 });
+      return jsonResponse(privateRun({ conclusion: "cancelled" }));
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
+      sleepFn: async (duration) => {
+        sleepDurations.push(duration);
+      },
+    })), /run lookup failed with HTTP 404/u);
+    assert.equal(runReads, 3);
+    assert.deepEqual(sleepDurations, [15_000]);
+    assert.deepEqual(controls, [
+      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+    ]);
+  }));
+});
+
+test("controller bounds exact-run visibility recovery before cancellation", async () => {
+  const controls = [];
+  let runReads = 0;
+  const sleepDurations = [];
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.includes("/git/ref/tags/")) {
+      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
+      controls.push(url);
+      return new Response(null, { status: 202 });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      runReads += 1;
+      return runReads <= 5
+        ? new Response("not yet visible", { status: 404 })
+        : jsonResponse(privateRun({ conclusion: "cancelled" }));
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
+      sleepFn: async (duration) => {
+        sleepDurations.push(duration);
+      },
+    })), /run lookup failed with HTTP 404/u);
+    assert.equal(runReads, 6);
+    assert.deepEqual(sleepDurations, [15_000, 15_000, 15_000, 15_000]);
+    assert.deepEqual(controls, [
+      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+    ]);
   }));
 });
 

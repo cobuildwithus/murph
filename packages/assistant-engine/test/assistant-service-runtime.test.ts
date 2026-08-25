@@ -709,6 +709,62 @@ describe("assistant usage recording seam", () => {
     );
   });
 
+  it("waits for additional usage recording to finish", async () => {
+    let finishRecording: () => void = () => undefined;
+    const recording = new Promise<void>((resolve) => {
+      finishRecording = resolve;
+    });
+    const recordUsage = vi.fn(() => recording);
+
+    let finished = false;
+    const result = recordAdditionalAssistantUsageEvents({
+      additionalUsages: [
+        {
+          occurredAt: "2026-04-08T10:00:04.000Z",
+          provider: "codex-cli",
+          providerRequestOrdinal: 1,
+          providerRequestOutcome: "succeeded",
+          usage: {
+            apiKeyEnv: null,
+            baseUrl: null,
+            cacheWriteTokens: null,
+            cachedInputTokens: null,
+            inputTokens: 3,
+            outputTokens: 2,
+            providerMetadataJson: null,
+            providerName: null,
+            providerRequestId: null,
+            rawUsageJson: null,
+            reasoningTokens: null,
+            requestedModel: null,
+            servedModel: null,
+            totalTokens: 5,
+          },
+        },
+      ],
+      effectiveEnv: {},
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          usageRecorder: { recordUsage },
+          userEnvKeys: [],
+        },
+      },
+      providerResult: createProviderResult(),
+      turnId: "turn-additional-latency",
+    }).then(() => {
+      finished = true;
+    });
+
+    expect(recordUsage).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(finished).toBe(false);
+
+    finishRecording();
+    await result;
+    expect(finished).toBe(true);
+  });
+
   it("uses Codex provider options without legacy credential headers for fallback hosted usage attribution", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:02:00.000Z"));
@@ -2035,6 +2091,72 @@ describe("assistant delivery orchestration seam", () => {
       message: "Answer two.",
       turnId: "turn-segments",
     });
+  });
+
+  it("preserves, replaces, and clears per-delivery context references", async () => {
+    const session = createAssistantSession();
+    const reminderReferences = [{
+      entityId: "wfmt_current",
+      entityKind: "workout_format",
+    }];
+    const workoutReferences = [{
+      entityId: "evt_current",
+      entityKind: "activity_session",
+    }];
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment-context-reference",
+        messageLength: 10,
+        providerMessageId: "provider-segment-context-reference",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: { intentId: "intent-segment-context-reference" },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Inherited reminder context.",
+        },
+        {
+          contextReferences: workoutReferences,
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Replaced with workout context.",
+        },
+        {
+          contextReferences: [],
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Cleared context.",
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segment-context-references",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(
+        (call) => call[0]?.automationContextReferences,
+      ),
+    ).toEqual([reminderReferences, workoutReferences, []]);
   });
 
   it("derives preceding segment keys from an explicit delivery idempotency key", async () => {

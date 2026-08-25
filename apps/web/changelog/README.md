@@ -44,3 +44,19 @@ builds generate an ignored TypeScript module from the fragments, avoiding both
 a committed merge hotspot and runtime filesystem reads. The loader and focused
 tests validate fragments and publish them through the existing archive, feed,
 permalink, and share-card contracts.
+
+## Review proof for content-only entries
+
+A PR whose only user-facing hosted Web changes are authored files under
+`entries/**` plus optional `editions/**` does not need a branch preview solely
+for design proof. Review the changed JSON copy directly, run
+`pnpm --dir apps/web test -- changelog-page.test.tsx`, and use
+`https://www.withmurph.ai/screenshots/ops#changelog-archive` as the
+repository-owned production presentation reference. The focused test loads every
+authored fragment and proves its visible copy and try-it affordance server-render
+through the production archive component; the synthetic archive study renders
+that same production component and therefore covers unchanged presentation.
+
+This exception is content-only. A change to changelog rendering, components,
+styles, visuals, or interaction still requires the normal current-branch design
+proof.

@@ -88,9 +88,6 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
-import type {
-  AssistantCronOccurrenceUnverifiedReason,
-} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -130,6 +127,22 @@ export type AssistantHostedDeviceToolRequest =
       accountId: string
       action: 'reconcile'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      afterDays: number
+      mode: 'after_days'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'default'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'off'
+      sourceProvider: string
+    }
 
 export interface AssistantHostedDeviceAccountSummary {
   accountId: string
@@ -157,11 +170,21 @@ export type AssistantHostedDeviceToolResponse =
       occurredAt: string
       status: 'queued'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      effectiveAfterDays: number | null
+      setting: 'custom' | 'default' | 'off'
+      sourceProvider: string
+      status: 'saved' | 'unchanged'
+    }
 
 export interface AssistantHostedDeviceTool {
   request(
     request: AssistantHostedDeviceToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      acceptedInputAuthority?: { assistantInputId: string }
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedDeviceToolResponse>
 }
 
@@ -221,11 +244,24 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
-export type AssistantAutomationTimingVerificationIssue =
-  | AssistantCronOccurrenceUnverifiedReason
+export type AssistantAutomationOccurrenceProjectionIssue =
   | 'default_timezone_unverified'
   | 'projection_unavailable'
   | 'record_readback_mismatch'
+  | 'stale_recurring_occurrence'
+
+export type AssistantAutomationOccurrenceProjection =
+  | {
+      nextOccurrenceAt: string | null
+      status: 'resolved'
+    }
+  | {
+      status: 'pending'
+    }
+  | {
+      issues: readonly AssistantAutomationOccurrenceProjectionIssue[]
+      status: 'unavailable'
+    }
 
 export type AssistantHostedAutomationToolResponse =
   | {
@@ -234,12 +270,10 @@ export type AssistantHostedAutomationToolResponse =
       contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -249,12 +283,10 @@ export type AssistantHostedAutomationToolResponse =
       created: boolean
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'current_conversation' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -558,6 +590,7 @@ export interface AssistantHostedExecutionContext {
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
+  releaseSha?: string | null
   resolveScheduledLinqRoute?(input: {
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
@@ -576,6 +609,8 @@ export interface AssistantHostedExecutionContext {
     signal?: AbortSignal | null
     target: string
   }): Promise<HostedExecutionExternalThreadRouteAuthority>
+  runtimeAttemptId?: string | null
+  runtimeName?: string | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -663,6 +698,9 @@ export function normalizeAssistantExecutionContext(
   const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
     hosted?.productFeedbackCandidateSink,
   )
+  const releaseSha = normalizeNullableString(hosted?.releaseSha)
+  const runtimeAttemptId = normalizeNullableString(hosted?.runtimeAttemptId)
+  const runtimeName = normalizeNullableString(hosted?.runtimeName)
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
     return {
@@ -734,6 +772,9 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
+      ...(releaseSha ? { releaseSha } : {}),
+      ...(runtimeAttemptId ? { runtimeAttemptId } : {}),
+      ...(runtimeName ? { runtimeName } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       ...(progressDeliveryDependencies

@@ -2806,7 +2806,7 @@ test("regimen upserts can reject existing slug updates in normalized groups", as
       }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_REGIMEN_CONFLICT" &&
+      error.code === "VAULT_REGIMEN_SLUG_EXISTS" &&
       error.message === "regimen slug already exists; include regimenId or choose a different slug.",
   );
 

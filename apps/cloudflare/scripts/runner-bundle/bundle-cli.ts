@@ -137,6 +137,10 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // static-startup topology. The combined cap composes its reviewed 41,089 B
 // lazy-graph delta with the current public Linux baseline and retains the same
 // 32 KiB graph allowance plus 8 KiB production-overlay reserve.
+// Exact workout delivery context extends the existing lazy Assistant Engine
+// graph without adding a package or changing the entry or static-startup
+// topology. The merged public Linux graph measured 9,456,843 B on 2026-08-25;
+// ratchet from that exact baseline while retaining the same allowances.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
@@ -144,11 +148,14 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
-// Knowledge, memory, and Exa recovery metadata measure 9,482,512 B on public
-// Linux after the reviewed path/privacy and Exa body-read remediation.
-// Fail-closed Commons protocol recovery reduces that lazy graph by 20 B without
-// changing the entry or static-startup topology.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_482_492;
+// Nutrition and provider recovery metadata add 6,153 B to the lazy CLI graph.
+// The follow-up nutrition recovery correction at exact candidate
+// 65de007f50ed05b3f5abbd2dc142a23223364828 measured 9,477,676 B in canonical
+// local production assembly, a 3,875 B total-only increase in the existing lazy
+// error and protocol-validation graph. Entry and static-startup limits stay put.
+// Compose both measured nutrition deltas with the current foundation and exact-
+// workout graph. None of these changes alter startup topology.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_510_683;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

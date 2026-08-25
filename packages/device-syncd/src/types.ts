@@ -168,6 +168,38 @@ export interface DeviceSyncJobFailureDiagnostic {
   summary?: string;
 }
 
+export type DeviceSyncJobTimingOutcome =
+  | "cancelled"
+  | "completed"
+  | "deferred"
+  | "failed"
+  | "yielded";
+
+/**
+ * Bounded metadata for one claimed worker attempt. This intentionally omits
+ * account/job ids, payloads, cursors, provider responses, and health values so
+ * hosted runtimes can persist it as privacy-safe operational telemetry.
+ */
+export interface DeviceSyncJobTimingDiagnostic {
+  at: string;
+  attempts: number;
+  connectionSourceReadCount: number;
+  connectionSourceReadElapsedMs: number;
+  credentialRefreshCount: number;
+  credentialRefreshElapsedMs: number;
+  durableProgressCommitted: boolean;
+  elapsedMs: number;
+  jobCount: number;
+  jobKind: string;
+  outcome: DeviceSyncJobTimingOutcome;
+  provider: string;
+  providerExecutionElapsedMs: number | null;
+  providerUnattributedElapsedMs: number | null;
+  resource?: string;
+  snapshotImportCount: number;
+  snapshotImportElapsedMs: number;
+}
+
 export interface DeviceSyncHttpConfig {
   host?: string;
   port?: number;

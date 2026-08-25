@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client";
+import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 test("createDeviceSyncClient sends bearer auth to control-plane routes", async () => {
@@ -135,6 +136,36 @@ test("createDeviceSyncClient validates connection authorization URLs before open
       error.context?.path === "/providers/oura/connect",
   );
   assert.equal(openedUrl, null);
+});
+
+test("createDeviceSyncClient keeps malformed connection responses fieldless", async () => {
+  const privateProviderValue = "private-provider-response";
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          provider: privateProviderValue,
+          state: 42,
+          expiresAt: "not-a-timestamp",
+          authorizationUrl: "not-a-url",
+        }),
+        { status: 200 },
+      ),
+  });
+
+  await assert.rejects(
+    () => client.beginConnection({ provider: "oura" }),
+    (error) => {
+      if (!(error instanceof VaultCliError)) return false;
+      const projection = projectVaultCliError(error);
+      assert.equal(projection.code, "device_sync_invalid_response");
+      assert.equal(projection.stage, "response");
+      assert.equal(projection.fieldErrors, undefined);
+      assert.equal(JSON.stringify(projection).includes(privateProviderValue), false);
+      return true;
+    },
+  );
 });
 
 test("createDeviceSyncClient rejects non-loopback base URLs when a control-plane bearer is configured", () => {

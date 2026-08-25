@@ -114,6 +114,7 @@ import {
 import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
+import { recordAdditionalAssistantUsageEvents } from './service-usage.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -686,6 +687,24 @@ async function executeAssistantCodexAttempt(input: {
           attemptPlan.routePlan.onboardingGuidanceInjected &&
           executionPlan.input.scheduledOccurrenceAt == null &&
           executionPlan.input.scheduledInvocationAuthority == null,
+        onAdditionalUsage: executionPlan.executionContext.hosted?.usageRecorder
+          ? (additionalUsage) => recordAdditionalAssistantUsageEvents({
+              additionalUsages: [additionalUsage],
+              effectiveEnv: attemptEnv,
+              executionContext: executionPlan.executionContext,
+              providerRequestAcceptedInputIds:
+                (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+              providerResult: {
+                attemptCount: attemptPlan.attemptCount,
+                provider: attemptPlan.route.provider,
+                providerOptions: attemptPlan.route.providerOptions,
+                route: attemptPlan.route,
+                session: attemptPlan.session,
+                usageAttribution,
+              },
+              turnId: executionPlan.turnId,
+            })
+          : null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
@@ -773,6 +792,8 @@ async function executeAssistantCodexAttempt(input: {
         showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
         systemPrompt: attemptPlan.routePlan.systemPrompt,
         turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
+        trustedContextReferences:
+          executionPlan.input.trustedContextReferences ?? null,
         usageAttribution,
         vaultRoot: executionPlan.input.vault,
         userMessageContent: resolveCodexRouteUserMessageContent({

@@ -63,6 +63,18 @@ export type CodexCommandFamilyInput =
       source: 'display'
     }
 
+export function resolveCodexVaultCliCommandArgv(input: {
+  allowKnownShellWrapper?: boolean
+  commandLabel: string | null
+}): readonly string[] | null {
+  const command = normalizeCodexDisplayCommand(input)
+  if (command === null) {
+    return null
+  }
+  const tokens = command.split(/\s+/u)
+  return tokens[0] === 'vault-cli' ? tokens : null
+}
+
 /**
  * Return only a finite server-owned command family. Command text and argv are
  * inspected transiently and never returned. Display commands fail closed to
@@ -79,29 +91,21 @@ export function resolveCodexCommandFamily(
     return BATCH_COMMAND_FAMILIES.get(`${head} ${subcommand}`) ?? 'other'
   }
 
-  if (input.commandLabel === null) {
+  const command = normalizeCodexDisplayCommand(input)
+  if (command === null) {
     return 'command'
   }
-  const outerCommand = input.commandLabel.trim()
-  if (hasExecutableShellControl(outerCommand)) {
-    return 'command'
-  }
-  const command = input.allowKnownShellWrapper
-    ? unwrapKnownShellWrapper(outerCommand) ?? outerCommand
-    : outerCommand
-  if (hasExecutableShellControl(command)) {
-    return 'command'
-  }
+  const directArgv = resolveCodexVaultCliCommandArgv(input)
   if (DIRECT_SEARCH_COMMAND_PATTERN.test(command)) {
     return 'search'
   }
 
-  const tokens = command.split(/\s+/u)
+  const tokens = directArgv ?? command.split(/\s+/u)
   const directFamily = DIRECT_EXECUTABLE_FAMILIES.get(tokens[0] ?? '')
   if (directFamily) {
     return directFamily
   }
-  if (tokens[0] !== 'vault-cli') {
+  if (directArgv === null) {
     return 'command'
   }
 
@@ -115,6 +119,23 @@ export function resolveCodexCommandFamily(
     return exactFamily
   }
   return VAULT_CLI_TOP_LEVEL_FAMILIES.get(tokens[1] ?? '') ?? 'command'
+}
+
+function normalizeCodexDisplayCommand(input: {
+  allowKnownShellWrapper?: boolean
+  commandLabel: string | null
+}): string | null {
+  if (input.commandLabel === null) {
+    return null
+  }
+  const outerCommand = input.commandLabel.trim()
+  if (hasExecutableShellControl(outerCommand)) {
+    return null
+  }
+  const command = input.allowKnownShellWrapper
+    ? unwrapKnownShellWrapper(outerCommand) ?? outerCommand
+    : outerCommand
+  return hasExecutableShellControl(command) ? null : command
 }
 
 // Codex shlex-joins a known shell's single script argument. Unwrap exactly one

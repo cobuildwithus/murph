@@ -212,6 +212,76 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("does not schedule runtime work for an observation-only missing replica poll", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        refreshObservationOnly: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      encryptedReplica: null,
+      freshness: "stale",
+      refreshPending: true,
+      state: "empty",
+    });
+  });
+
+  it("does not resignal runtime work when an observation-only poll cannot find the referenced replica", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    const knownReplicaRef = createReplicaRef({
+      generatedAt: "2998-04-20T08:00:00.000Z",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef,
+        refreshObservationOnly: true,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        message: "Requested browser vault data is temporarily unavailable.",
+        retryable: true,
+      },
+    });
+  });
+
   it("rejects an all-bucket interactive request reserved for export", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
 
@@ -1221,6 +1291,50 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("does not resignal runtime work when an observation-only poll cannot find a selected shard", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownMetricBuckets: ["00"],
+        knownReplicaRef: replicaRef,
+        knownShards: ["core", "metricsIndex"],
+        refreshObservationOnly: true,
+        requestedMetricBuckets: ["00", "01"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        retryable: true,
+      },
+    });
+  });
+
   it.each([
     { knownShards: ["core"], requestedShards: undefined },
     { requestedShards: [] },
@@ -1901,6 +2015,25 @@ describe("browser vault session route", () => {
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
         requestRefresh: "yes",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      },
+    });
+  });
+
+  it("rejects a refresh request marked observation-only", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        refreshObservationOnly: true,
+        requestRefresh: true,
       }),
     );
 

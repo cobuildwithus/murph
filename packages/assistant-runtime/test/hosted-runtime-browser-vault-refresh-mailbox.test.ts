@@ -269,6 +269,53 @@ describe("legacy Browser Vault refresh mailbox compaction", () => {
     }
   });
 
+  it("resumes a recording refresh without rewriting or re-executing it", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-browser-vault-mailbox-recording-resume-",
+    );
+
+    try {
+      await enqueueRuntimeControlItem({
+        kind: "runtime.browser-vault-refresh-requested",
+        seq: 1,
+        vaultRoot: workspace.vaultRoot,
+      });
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        retainProcessedItemUntilRecorded: true,
+        runtime: createRuntime(),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        item: { attemptCount: 1, status: "recording" },
+        status: "processed",
+      });
+      const beforeResume = await readHostedSystemMailboxState(
+        workspace.vaultRoot,
+      );
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => "2026-08-11T12:01:00.000Z",
+        retainProcessedItemUntilRecorded: true,
+        runtime: createRuntime(),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        item: beforeResume.pending[0],
+        status: "recording",
+      });
+
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(
+        beforeResume,
+      );
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("retains the collapsed refresh intent when foreground work preempts it", async () => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-browser-vault-mailbox-preemption-",

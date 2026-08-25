@@ -13,6 +13,7 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   accountHostedAiUsageForAllowanceTx,
+  settleHostedAiUsageForAllowanceTx,
   type HostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "./usage-retell";
@@ -41,6 +42,11 @@ export interface RecordHostedAiUsageResult {
 
 interface RecordHostedAiUsageAccountingResult extends RecordHostedAiUsageResult {
   limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[];
+  platformAiUsageAllowedAfter: boolean | null;
+}
+
+interface RecordHostedAiUsageWithAllowanceResult extends RecordHostedAiUsageResult {
+  platformAiUsageAllowedAfter: boolean | null;
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
@@ -107,7 +113,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   prisma?: PrismaClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
-}): Promise<RecordHostedAiUsageResult> {
+}): Promise<RecordHostedAiUsageWithAllowanceResult> {
   const prisma = input.prisma ?? getPrisma();
   const result = await recordHostedAiUsageRecordsForAccounting({ ...input, prisma });
   for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
@@ -123,6 +129,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   }
 
   return {
+    platformAiUsageAllowedAfter: result.platformAiUsageAllowedAfter,
     recordedIds: result.recordedIds,
   };
 }
@@ -158,10 +165,11 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
   const recordedIds: string[] = [];
   const limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[] = [];
+  let platformAiUsageAllowedAfter: boolean | null = null;
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       await persistHostedAiUsageRecordTx({
         memberId,
         record,
@@ -169,7 +177,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       });
 
       if (input.accountAllowance === true) {
-        return accountHostedAiUsageForAllowanceTx({
+        return settleHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
@@ -179,14 +187,18 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       return null;
     });
 
-    if (limitNoticeCandidate) {
-      limitNoticeCandidates.push(limitNoticeCandidate);
+    if (settlement?.limitNoticeCandidate) {
+      limitNoticeCandidates.push(settlement.limitNoticeCandidate);
+    }
+    if (settlement) {
+      platformAiUsageAllowedAfter = settlement.platformAiUsageAllowedAfter;
     }
     recordedIds.push(record.usageId);
   }
 
   return {
     limitNoticeCandidates,
+    platformAiUsageAllowedAfter,
     recordedIds,
   };
 }

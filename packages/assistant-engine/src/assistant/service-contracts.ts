@@ -26,6 +26,7 @@ import type {
   AssistantProviderStartCriticalPathContext,
 } from './provider-start-critical-path.js'
 import type {
+  AutomationContextReference,
   AutomationAssistantTargetOverride,
 } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from './content-types.js'
@@ -186,6 +187,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   prompt: string
   suppressProviderFailureTranscriptAudit?: boolean
   turnContext?: string | null
+  /** Runtime-attested entity context for this turn; never model supplied. */
+  trustedContextReferences?: readonly AutomationContextReference[]
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   scheduledAutomationAuthority?: HostedRuntimeGroupEmailScheduledAuthority | null

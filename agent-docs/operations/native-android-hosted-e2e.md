@@ -18,6 +18,17 @@ the shared identity concurrently. The Android postcondition is platform
 specific and requires Junction provider slug `health_connect`; the existing iOS
 postcondition remains `apple_health_kit`.
 
+PR admission uses stable Web ownership boundaries rather than a per-file list.
+It selects every top-level Web config/build entrypoint, the complete `scripts`,
+`prisma`, and `src/lib` trees, the companion API subtree, the current workspace
+package closure, and the shared/native Android controller owners. New files in
+those owners select automatically, and renamed paths are evaluated. Nested Web
+UI, content, and tests plus unrelated workspace packages publish a path-filtered
+success without consuming the shared live slot. Android and iOS retain the same
+Web and package boundaries because both native journeys exercise the same hosted
+companion surface; Android additionally selects its private dispatcher and
+controller files.
+
 Production deployment events run a separate non-destructive canary. The
 controller proves the deployment SHA is protected-main history and that the
 current production alias still resolves to that exact SHA before dispatching.
@@ -93,6 +104,12 @@ the same Privy application as the private Android environment's public app id,
 and that Android environment's client id must belong to it. The fixed OTP
 remains only in the private Android repository; the shared backend neither
 receives nor stores it.
+
+A native Privy app client may be shared across iOS and Android only when its
+allowed app identifiers include the exact Android application ids
+`ai.withmurph.app` and `ai.withmurph.app.dev`. The dashboard client label is
+descriptive, not an authorization boundary; the allowed identifiers are the
+enforced contract.
 
 The database URLs name the same explicit E2E/test database. The shared Vercel
 custom environment and Junction namespace remain the existing hosted-native

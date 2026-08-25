@@ -6,7 +6,6 @@ import {
   FOOD_STATUSES,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
-  foodUpsertPayloadSchema,
   type FoodUpsertPayload,
 } from '@murphai/contracts'
 import { Cli, z } from 'incur'
@@ -246,13 +245,6 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodSavePaylo
       type: 'related_regimen',
       targetId,
     }))
-  }
-
-  const parsed = foodUpsertPayloadSchema.safeParse(payload)
-  if (!parsed.success) {
-    throw new VaultCliError('contract_invalid', 'Food save options are invalid.', {
-      errors: parsed.error.flatten(),
-    })
   }
 
   return payload

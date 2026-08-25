@@ -6,7 +6,6 @@ import {
   readCodexNonEmptyString,
   readCodexRecord,
   readCodexServerNotification,
-  readCodexTokenUsageBreakdown,
   readCodexThreadTokenUsage,
   type CodexThreadTokenUsage,
   type CodexTokenUsageBreakdown,
@@ -24,8 +23,7 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  VAULT_CLI_BATCH_MAX_COMMANDS,
-  VAULT_CLI_BATCH_RESULT_SCHEMA,
+  vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   resolveCodexCommandFamily,
@@ -47,6 +45,7 @@ import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type {
+  AssistantProviderRequestOutcome,
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
@@ -693,68 +692,21 @@ function readAssistantTurnProfileBatchToolAggregates(
     return null
   }
 
-  const result = readAssistantProviderRecord(parsed)
-  if (result?.schema !== VAULT_CLI_BATCH_RESULT_SCHEMA) {
+  const parsedResult = vaultCliBatchResultSchema.safeParse(parsed)
+  if (!parsedResult.success) {
     return null
   }
-  const commands = result?.commands
-  const count = result?.count
-  const failed = result?.failed
-  if (
-    !Array.isArray(commands)
-    || commands.length === 0
-    || commands.length > VAULT_CLI_BATCH_MAX_COMMANDS
-    || typeof count !== 'number'
-    || !Number.isSafeInteger(count)
-    || count !== commands.length
-    || typeof failed !== 'number'
-    || !Number.isSafeInteger(failed)
-    || failed < 0
-  ) {
-    return null
-  }
+  const { commands } = parsedResult.data
 
   const aggregates: AssistantTurnProfileToolAggregate[] = []
-  let failedCommands = 0
-  for (const value of commands) {
-    const command = readAssistantProviderRecord(value)
-    const argv = command?.argv
-    const durationMs = command?.durationMs
-    const ok = command?.ok
+  for (const command of commands) {
+    const { argv, durationMs, ok, outputBytes, stdout } = command
     // The v1 batch envelope counts UTF-16 code units, not bytes. Validate it
     // only as part of the envelope; byte metrics come from source-owned bytes.
-    const legacyOutputChars = command?.outputChars
-    const outputBytes = command?.outputBytes
-    const stdout = command?.stdout
     if (
-      !command
-      || !Array.isArray(argv)
-      || argv.some((token) => typeof token !== 'string')
-      || typeof durationMs !== 'number'
-      || !Number.isSafeInteger(durationMs)
-      || durationMs < 0
-      || typeof ok !== 'boolean'
-      || typeof legacyOutputChars !== 'number'
-      || !Number.isSafeInteger(legacyOutputChars)
-      || legacyOutputChars < 0
-      || typeof outputBytes !== 'number'
-      || !Number.isSafeInteger(outputBytes)
-      || outputBytes < 0
-      || typeof stdout !== 'string'
-      || (stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes)
+      stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes
     ) {
       return null
-    }
-
-    if (!ok) {
-      const nextFailedCommands = safeAssistantTurnProfileIntegerSum(
-        failedCommands,
-        1,
-      )
-      if (nextFailedCommands === null) {
-        return null
-      }
-      failedCommands = nextFailedCommands
     }
 
     aggregates.push({
@@ -770,10 +722,6 @@ function readAssistantTurnProfileBatchToolAggregates(
       outputBytesMax: outputBytes,
       outputBytesTotal: outputBytes,
     })
-  }
-
-  if (failedCommands !== failed) {
-    return null
   }
 
   return aggregates
@@ -1008,212 +956,109 @@ function subtractCodexTokenUsage(
 }
 
 export interface CodexSubagentTurnTokenUsageSample {
-  executionMetadata?: CodexSubagentExecutionMetadata | null
   firstEvent: unknown
   lastEvent: unknown
   occurredAt: string
-  rawResponseEvents?: unknown[]
+  providerRequestOutcome: AssistantProviderRequestOutcome
   threadId: string
   turnId: string
 }
 
-export interface CodexSubagentExecutionMetadata {
-  model: string
-  modelProvider: string
-  reasoningEffort: string | null
-  serviceTier: string | null
-}
-
-// Codex ships no aggregate usage primitive for spawned subagent threads (no
-// usage RPC, no usage on the protocol Turn, no parent-side aggregation), so
-// the canonical pattern is consuming each child thread's usage notifications.
-// Fresh raw-enabled lifecycles produce one exact rawResponse/completed usage
-// record per provider request. Cold or legacy lifecycles retain the existing
-// first/final tokenUsage delta fallback. A lifecycle chooses exactly one
-// source, so cumulative notifications can never double-bill exact raw usage.
-// Billing is gated on spawn evidence: only threads named by a parent-thread
-// collabAgentToolCall item's receiverThreadIds (multi-agent V1: spawnAgent,
-// sendInput, wait, resume — covering freshly spawned and reused children) or
-// by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
-// activity items instead of collab tool calls) become drafts. The model is
-// attributed directly from V1 spawn items or optional V2 activity evidence;
-// same-model children without explicit evidence inherit parentModel. Warm
-// processes are reused across threads, so a foreign thread id alone is not
-// proof of a subagent — a stale flush from a previous thread must never mint a
-// usage row.
 export function extractCodexSubagentUsageDrafts(input: {
-  authorizedRequestedModelByThreadId?: ReadonlyMap<string, string | null>
   modelProvider: string | null
   ordinalStart: number
   parentModel?: string | null
-  parentRawEvents: readonly unknown[]
   serviceTier?: AssistantProviderServiceTier | null
   subagentTokenUsageByTurn: ReadonlyMap<
     string,
     CodexSubagentTurnTokenUsageSample
   >
-  seenRawResponseIds?: Set<string>
 }): AssistantProviderUsageDraft[] {
   if (input.subagentTokenUsageByTurn.size === 0) {
     return []
   }
 
-  const spawnModelByThreadId = input.authorizedRequestedModelByThreadId
-    ? new Map(input.authorizedRequestedModelByThreadId)
-    : readCodexCollabSpawnModelsByThread(input.parentRawEvents)
   const drafts: AssistantProviderUsageDraft[] = []
-  const seenRawResponseIds = input.seenRawResponseIds ?? new Set<string>()
   let ordinal = input.ordinalStart
 
   for (const sample of input.subagentTokenUsageByTurn.values()) {
-    if (!spawnModelByThreadId.has(sample.threadId)) {
-      continue
-    }
-
-    const requestedModel = spawnModelByThreadId.get(sample.threadId)
-      ?? input.parentModel
-      ?? null
-    const servedModel = sample.executionMetadata?.model ?? requestedModel
-    const modelProvider = sample.executionMetadata?.modelProvider
-      ?? input.modelProvider
-    const serviceTier = sample.executionMetadata
-      ? readAssistantProviderServiceTier(sample.executionMetadata.serviceTier)
-      : input.serviceTier ?? null
-    const providerMetadataJson = sample.executionMetadata
-      ? {
-          reasoningEffort: sample.executionMetadata.reasoningEffort,
-          requestedServiceTier: sample.executionMetadata.serviceTier,
-        }
-      : null
-    const appendDraft = (usageInput: {
-      providerRequestId: string | null
-      sourcePath: string
-      usage: CodexTokenUsageBreakdown
-    }): void => {
-      const rawUsageJson = sanitizeCodexUsage(usageInput.usage)
-      drafts.push({
-        occurredAt: sample.occurredAt,
-        provider: 'codex-cli',
-        providerRequestOrdinal: ordinal++,
-        providerRequestOutcome: 'succeeded',
-        usage: {
-          apiKeyEnv: null,
-          baseUrl: null,
-          cacheWriteTokens: usageInput.usage.cacheWriteInputTokens,
-          cachedInputTokens: usageInput.usage.cachedInputTokens,
-          inputTokens: usageInput.usage.inputTokens,
-          outputTokens: usageInput.usage.outputTokens,
-          providerMetadataJson,
-          providerName: resolveAssistantCodexUsageProviderName(modelProvider),
-          providerRequestId: usageInput.providerRequestId,
-          rawUsageJson,
-          rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
-          reasoningTokens: usageInput.usage.reasoningOutputTokens,
-          requestedModel,
-          servedModel,
-          tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-            model: servedModel,
-            modelProvider,
-            serviceTier,
-          }),
-          totalTokens: usageInput.usage.totalTokens,
-          usageExtractionSourcePath: usageInput.sourcePath,
-          usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
-        },
-      })
-    }
-
-    const rawResponseEvents = sample.rawResponseEvents ?? []
-    const rawResponseSourceSelected = rawResponseEvents.some((event) =>
-      readCodexServerNotification(event)?.method === 'rawResponse/completed'
-    )
-    if (rawResponseSourceSelected) {
-      for (const event of rawResponseEvents) {
-        const response = readAssistantCodexRawResponseUsageFromEvent(event)
-        if (
-          !response ||
-          response.threadId !== sample.threadId ||
-          response.turnId !== sample.turnId ||
-          seenRawResponseIds.has(response.responseId)
-        ) {
-          continue
-        }
-        seenRawResponseIds.add(response.responseId)
-        if (response.usage) {
-          appendDraft({
-            providerRequestId: response.responseId,
-            sourcePath: 'subagent.rawResponse.completed.usage',
-            usage: response.usage,
-          })
-        }
-      }
-      continue
-    }
-
-    const pairs = (
-      sample.firstEvent === sample.lastEvent
-        ? [sample.firstEvent]
-        : [sample.firstEvent, sample.lastEvent]
-    ).flatMap((event) => {
-      const pair = readAssistantCodexTokenUsagePairFromEvent(event)
-      return pair &&
-        pair.threadId === sample.threadId &&
-        pair.turnId === sample.turnId
-        ? [pair]
-        : []
+    const draft = buildCodexSubagentUsageDraft({
+      metadata: {
+        model: input.parentModel ?? null,
+        modelProvider: input.modelProvider,
+        serviceTier: input.serviceTier ?? null,
+      },
+      ordinal,
+      sample,
     })
-    const delta = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
-    if (delta) {
-      appendDraft({
-        providerRequestId: null,
-        sourcePath: 'subagent.turn.tokenUsage.total.delta',
-        usage: delta,
-      })
+    if (draft) {
+      drafts.push(draft)
+      ordinal += 1
     }
   }
 
   return drafts
 }
 
-function readAssistantCodexRawResponseUsageFromEvent(rawEvent: unknown): {
-  responseId: string
-  threadId: string
-  turnId: string
-  usage: CodexTokenUsageBreakdown | null
-} | null {
-  const notification = readCodexServerNotification(rawEvent)
-  if (notification?.method !== 'rawResponse/completed') {
+export function buildCodexSubagentUsageDraft(input: {
+  metadata: {
+    model: string | null
+    modelProvider: string | null
+    serviceTier: AssistantProviderServiceTier | null
+  }
+  ordinal: number
+  sample: CodexSubagentTurnTokenUsageSample
+}): AssistantProviderUsageDraft | null {
+  const pairs = (
+    input.sample.firstEvent === input.sample.lastEvent
+      ? [input.sample.firstEvent]
+      : [input.sample.firstEvent, input.sample.lastEvent]
+  ).flatMap((event) => {
+    const pair = readAssistantCodexTokenUsagePairFromEvent(event)
+    return pair &&
+      pair.threadId === input.sample.threadId &&
+      pair.turnId === input.sample.turnId
+      ? [pair]
+      : []
+  })
+  const usage = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
+  if (!usage) {
     return null
   }
 
-  const params = notification.params
-  const threadId = readCodexNonEmptyString(params.threadId)
-  const turnId = readCodexNonEmptyString(params.turnId)
-  const responseId = readCodexNonEmptyString(params.responseId)
-  const usage = params.usage === null
-    ? null
-    : readCodexTokenUsageBreakdown(params.usage)
-  if (
-    !threadId ||
-    !turnId ||
-    !responseId ||
-    (usage === null && params.usage !== null)
-  ) {
-    return null
-  }
-
+  const rawUsageJson = sanitizeCodexUsage(usage)
   return {
-    responseId,
-    threadId,
-    turnId,
-    usage,
+    occurredAt: input.sample.occurredAt,
+    provider: 'codex-cli',
+    providerRequestOrdinal: input.ordinal,
+    providerRequestOutcome: input.sample.providerRequestOutcome,
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: usage.cacheWriteInputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      providerMetadataJson: null,
+      providerName: resolveAssistantCodexUsageProviderName(
+        input.metadata.modelProvider,
+      ),
+      providerRequestId: null,
+      rawUsageJson,
+      rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+      reasoningTokens: usage.reasoningOutputTokens,
+      requestedModel: input.metadata.model,
+      servedModel: input.metadata.model,
+      tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+        model: input.metadata.model,
+        modelProvider: input.metadata.modelProvider,
+        serviceTier: input.metadata.serviceTier,
+      }),
+      totalTokens: usage.totalTokens,
+      usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+      usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
+    },
   }
-}
-
-function readAssistantProviderServiceTier(
-  value: string | null,
-): AssistantProviderServiceTier | null {
-  return value === 'flex' ? value : null
 }
 
 export function resolveCodexAssistantProviderTokenPricingBasis(input: {
@@ -1226,96 +1071,6 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
     providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
     serviceTier: input.serviceTier ?? null,
   })
-}
-
-// Spawn evidence map: every thread id named by a canonical collab tool call
-// or subAgentActivity item is a key. That membership authorizes billing a
-// foreign thread's usage. Only spawnAgent carries an explicit model in the
-// pinned protocol; activity-only evidence inherits the parent model.
-function readCodexCollabSpawnModelsByThread(
-  rawEvents: readonly unknown[],
-): Map<string, string | null> {
-  const modelByThreadId = new Map<string, string | null>()
-  for (const rawEvent of rawEvents) {
-    const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
-    if (!collabToolCall) {
-      continue
-    }
-
-    for (const receiverThreadId of collabToolCall.receiverThreadIds) {
-      modelByThreadId.set(
-        receiverThreadId,
-        modelByThreadId.get(receiverThreadId) ?? collabToolCall.spawnModel,
-      )
-    }
-  }
-
-  return modelByThreadId
-}
-
-export interface CodexSubagentReceiverEvidence {
-  detached: boolean
-  requestedModel: string | null
-  threadId: string
-}
-
-export function readCodexCollabReceiverEvidence(
-  rawEvent: unknown,
-): readonly CodexSubagentReceiverEvidence[] {
-  const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
-  return collabToolCall
-    ? collabToolCall.receiverThreadIds.map((threadId) => ({
-        detached: collabToolCall.detached,
-        requestedModel: collabToolCall.spawnModel,
-        threadId,
-      }))
-    : []
-}
-
-function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
-  detached: boolean
-  receiverThreadIds: string[]
-  spawnModel: string | null
-} | null {
-  const notification = readCodexServerNotification(rawEvent)
-  if (
-    notification?.method !== 'item/started' &&
-    notification?.method !== 'item/completed'
-  ) {
-    return null
-  }
-
-  const item = readCodexRecord(notification.params.item)
-  const itemType = readCodexNonEmptyString(item?.type)
-  if (itemType === 'subAgentActivity') {
-    const agentThreadId = readCodexNonEmptyString(item?.agentThreadId)
-    return agentThreadId
-      ? {
-          detached: true,
-          receiverThreadIds: [agentThreadId],
-          spawnModel: null,
-        }
-      : null
-  }
-  if (itemType !== 'collabAgentToolCall' || !Array.isArray(item?.receiverThreadIds)) {
-    return null
-  }
-
-  const receiverThreadIds = item.receiverThreadIds.flatMap((receiverThreadId) => {
-    const normalized = readCodexNonEmptyString(receiverThreadId)
-    return normalized ? [normalized] : []
-  })
-  if (receiverThreadIds.length === 0) {
-    return null
-  }
-
-  return {
-    detached: false,
-    receiverThreadIds,
-    spawnModel: item.tool === 'spawnAgent'
-      ? readCodexNonEmptyString(item.model)
-      : null,
-  }
 }
 
 function findAssistantCodexCompletionEvent(

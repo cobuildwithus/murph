@@ -326,9 +326,11 @@ type StripeEventPrismaHarnessClient = {
   $transaction: <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => Promise<T>;
   hostedMember: {
     findUnique: () => Promise<{
+      billingStatus: HostedBillingStatus;
       billingRef: {
         currentBillingPhase: string | null;
       } | null;
+      suspendedAt: Date | null;
     } | null>;
   };
   hostedStripeEvent: {
@@ -381,7 +383,7 @@ describe("hosted Stripe event reconciliation", () => {
       welcomeEmailMemberId: null,
     });
     mocks.applyStripeCheckoutExpired.mockResolvedValue(undefined);
-    mocks.applyStripeDisputeUpdated.mockResolvedValue(undefined);
+    mocks.applyStripeDisputeUpdated.mockResolvedValue("applied");
     mocks.applyStripeInvoicePaid.mockResolvedValue({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "dispatch_123",
@@ -1279,6 +1281,57 @@ describe("hosted Stripe event reconciliation", () => {
       status: HostedStripeEventStatus.completed,
     }));
     errorSpy.mockRestore();
+  });
+
+  it("stores the exact mailbox handoff when a dispute restores access", async () => {
+    const prisma = createStripeEventPrismaHarness({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "paid",
+      suspendedAt: null,
+    });
+    const event = makeDisputeFundsReinstatedEvent();
+    const preparedProviderState = {
+      memberId: "member_123",
+      refundCoversCurrentEntitlement: false,
+      stripeSubscriptionId: "sub_123",
+      subscription: makeCanonicalSubscription(),
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.resolveStripeCustomerContext.mockResolvedValue({
+      customerId: "cus_123",
+    });
+    mocks.prepareHostedStripeReversalProviderState.mockResolvedValue(
+      preparedProviderState,
+    );
+    mocks.applyStripeDisputeUpdated.mockResolvedValueOnce({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:dispute",
+      hostedExecutionMailboxItemId: "mailbox_access_restored_dispute",
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:dispute",
+      hostedExecutionMailboxItemId: "mailbox_access_restored_dispute",
+      status: "completed",
+    });
+
+    expect(mocks.applyStripeDisputeUpdated).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      activationResultJson: {
+        activationMailboxItemIds: ["mailbox_access_restored_dispute"],
+        schema: "hosted.stripe.activation-result.v1",
+      },
+      attemptCount: 1,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
   });
 
   it("reissues a paid direct-billing wake after an expired processing lease", async () => {
@@ -4411,6 +4464,30 @@ function makeRefundCreatedEvent(): Stripe.Event {
   });
 }
 
+function makeDisputeFundsReinstatedEvent(): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708803,
+    data: {
+      object: {
+        charge: "ch_dispute",
+        id: "dp_123",
+        payment_intent: "pi_dispute",
+        status: "won",
+      },
+    },
+    id: "evt_dispute_funds_reinstated_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type: "charge.dispute.funds_reinstated",
+  });
+}
+
 function makeSubscriptionScheduleEvent(
   type:
     | "subscription_schedule.created"
@@ -4478,7 +4555,9 @@ function makeStripeEvent<
 }
 
 function createStripeEventPrismaHarness(input?: {
+  billingStatus?: HostedBillingStatus;
   currentBillingPhase?: string | null;
+  suspendedAt?: Date | null;
 }) {
   const rows: MutableStripeEventRow[] = [];
   const transaction = vi.fn(
@@ -4492,9 +4571,11 @@ function createStripeEventPrismaHarness(input?: {
       findUnique: vi.fn(async () => input?.currentBillingPhase === undefined
         ? null
         : {
+            billingStatus: input.billingStatus ?? HostedBillingStatus.active,
             billingRef: {
               currentBillingPhase: input.currentBillingPhase,
             },
+            suspendedAt: input.suspendedAt ?? null,
           }),
     },
     hostedStripeEvent: {

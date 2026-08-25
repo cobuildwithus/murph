@@ -117,6 +117,24 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
+  it("forwards managed AI revocation through the UserRunner Durable Object", async () => {
+    const revoke = vi.spyOn(
+      HostedUserRunner.prototype,
+      "revokeActiveRuntimePlatformAiUsage",
+    ).mockResolvedValue(true);
+    const harness = createUserRunnerDurableObject();
+    const input = {
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    };
+
+    await expect(
+      harness.durableObject.revokeActiveRuntimePlatformAiUsage(input),
+    ).resolves.toBe(true);
+    expect(revoke).toHaveBeenCalledWith(input);
+  });
+
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
     const writeDataPoint = vi.fn();
     const harness = createUserRunnerDurableObject({

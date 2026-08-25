@@ -5,7 +5,6 @@ import { selectBrowserVaultHistory } from "@murphai/query/browser-overview";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
-import { Button } from "@/src/components/ui/button";
 import {
   Card,
   CardContent,
@@ -30,7 +29,7 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function HistoryPage() {
-  const { client, error, refresh, refreshPending, status } = useBrowserVault();
+  const { client, error, refreshPending, status } = useBrowserVault();
   const history = useMemo(() => client ? selectBrowserVaultHistory(client) : null, [client]);
   const timeline = history?.timeline ?? [];
   const canRenderContent = status === "empty" || client !== null;
@@ -74,12 +73,7 @@ export default function HistoryPage() {
         <Alert variant="destructive">
           <AlertTitle>Could not load history</AlertTitle>
           <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "Your history is not available right now."}</span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
+            {error ?? "Your history is not available right now."}
           </AlertDescription>
         </Alert>
       ) : null}

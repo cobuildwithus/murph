@@ -112,6 +112,53 @@ describe("check-provider-request-boundaries", () => {
     `, "packages/example/src/client.ts")).toEqual(["raw-provider-http"]);
   });
 
+  it("uses a statically resolved GitHub host instead of temporal naming", () => {
+    expect(violations(`
+      const scheme = "https://";
+      const githubHost = \`api.github.com\`;
+      const temporalRepositoryPath = "/repos/temporalio/sdk-typescript";
+      const temporalUrl = scheme + githubHost + temporalRepositoryPath;
+      async function fetchTemporalRepository() {
+        return fetch(temporalUrl);
+      }
+    `, "packages/example/src/temporal-github-client.ts")).toEqual([]);
+  });
+
+  it("detects a registered provider host through static bindings and concatenation", () => {
+    const result = findProviderRequestBoundaryViolations(
+      "packages/example/src/temporal-provider-client.ts",
+      `
+        const scheme = "https://";
+        const openAiHost = "api." + \`openai.com\`;
+        const temporalUrl = scheme + openAiHost + "/v1/responses";
+        async function requestTemporalProvider() {
+          return fetch(temporalUrl);
+        }
+      `,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      boundary: "Direct OpenAI provider HTTP in requestTemporalProvider",
+      kind: "raw-provider-http",
+    });
+  });
+
+  it("falls back to temporal naming when the URL cannot be resolved", () => {
+    const result = findProviderRequestBoundaryViolations(
+      "packages/example/src/temporal-provider-client.ts",
+      `
+        async function requestTemporalProvider(url: string) {
+          return fetch(url);
+        }
+      `,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      boundary: "Direct Temporal provider HTTP in requestTemporalProvider",
+      kind: "raw-provider-http",
+    });
+  });
+
   it("does not mistake official SDK operations for raw HTTP", () => {
     expect(violations(`
       import OpenAI from "openai";

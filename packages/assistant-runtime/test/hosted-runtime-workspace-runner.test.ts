@@ -6609,6 +6609,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         events.push("usage:flush:done");
         resolveUsageFlushDone();
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -6731,6 +6732,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         events.push("usage:flush:done");
         resolveUsageFlushDone();
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -6810,6 +6812,110 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("returns the usage write completion after its capture has settled", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let releaseUsageWrite: () => void = () => undefined;
+    const usageWriteGate = new Promise<void>((resolve) => {
+      releaseUsageWrite = resolve;
+    });
+    let captureCompletion: Promise<void> | null = null;
+    const lateUsage = {
+      record: null as ((
+        record: AssistantUsageRecord,
+        providerRequestAcceptedInputIds?: readonly string[],
+      ) => Promise<void>) | null,
+    };
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        events.push("usage:start");
+        assert.equal(record.usageId, "turn_runner_late_usage.attempt-1");
+        await usageWriteGate;
+        events.push("usage:done");
+        return {
+          platformAiUsageAllowedAfter: true,
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_late_usage",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_late_usage",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_late_usage",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          lateUsage.record = input.recordDeferredUsage ?? null;
+          return {
+            progressed: false,
+          };
+        },
+        trackDeferredUsageCapture(capture) {
+          captureCompletion = capture.completion;
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+      const settledCapture = captureCompletion;
+      assert.ok(settledCapture);
+      await settledCapture;
+
+      const lateUsageRecorder = lateUsage.record;
+      assert.ok(lateUsageRecorder);
+      let writeSettled = false;
+      const writeCompletion = lateUsageRecorder(createAssistantUsageRecord({
+        usageId: "turn_runner_late_usage.attempt-1",
+      })).then(() => {
+        writeSettled = true;
+      });
+
+      await waitUntil(() => {
+        assert.deepEqual(events, ["usage:start"]);
+      });
+      await Promise.resolve();
+      assert.equal(writeSettled, false);
+
+      releaseUsageWrite();
+      await withTestTimeout(writeCompletion, 1_000);
+      assert.equal(writeSettled, true);
+      assert.deepEqual(events, ["usage:start", "usage:done"]);
+    } finally {
+      releaseUsageWrite();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("flushes deferred assistant usage in recorder order", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
@@ -6830,6 +6936,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }
         events.push(`usage:${record.usageId}:done`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -6944,6 +7051,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         events.push("usage:flush");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };

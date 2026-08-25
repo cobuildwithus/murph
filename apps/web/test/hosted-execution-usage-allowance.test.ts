@@ -40,6 +40,7 @@ import {
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   reconcileHostedAiUsageGateForBillingModeChangeTx,
   resolveHostedAiUsageGate,
+  settleHostedAiUsageForAllowanceTx,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
 
@@ -1859,6 +1860,43 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         code: "pulse_upgrade_edge",
         message: expect.any(String),
       }),
+    });
+  });
+
+  it("returns the post-settlement denial on both the crossing charge and its replay", async () => {
+    const now = new Date("2026-03-29T12:00:05.000Z");
+    const crossingTx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 6_399_948n,
+    });
+
+    await expect(settleHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record: BASE_USAGE_RECORD,
+      tx: crossingTx as never,
+    })).resolves.toMatchObject({
+      limitNoticeCandidate: {
+        sourceUsageId: "turn_123.attempt-1",
+      },
+      platformAiUsageAllowedAfter: false,
+    });
+
+    const replayTx = createAllowanceTx({
+      blockedAt: now,
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 0 })),
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+    });
+    await expect(settleHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record: BASE_USAGE_RECORD,
+      tx: replayTx as never,
+    })).resolves.toEqual({
+      limitNoticeCandidate: null,
+      platformAiUsageAllowedAfter: false,
     });
   });
 
