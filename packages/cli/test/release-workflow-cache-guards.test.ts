@@ -278,6 +278,13 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       [
         'pr-head-draft-reset.yml',
         workflow.replace(
+          '          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}',
+          '          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}\n          UNRELATED_SECRET: ${{ secrets.OTHER_SECRET }}',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
           '    name: Return synchronized pull request to draft',
           '    name: Return synchronized pull request to draft\n    permissions:\n      contents: write',
         ),
@@ -602,6 +609,7 @@ function isAllowedPrHeadDraftResetHandoff(
 
   const tokenStep = resetJob.steps[0]
   const resetStep = resetJob.steps[1]
+  const secretExpressions = workflow.match(/\$\{\{[^}]*\bsecrets\.[^}]*\}\}/gu)
   if (
     !isRecord(tokenStep)
     || !isRecord(tokenStep.with)
@@ -628,6 +636,9 @@ function isAllowedPrHeadDraftResetHandoff(
     && tokenStep.with['client-id'] === '${{ vars.FROG_APP_CLIENT_ID }}'
     && tokenStep.with['private-key'] === '${{ secrets.FROG_APP_PRIVATE_KEY }}'
     && tokenStep.with['permission-pull-requests'] === 'write'
+    && secretExpressions !== null
+    && secretExpressions.length === 1
+    && secretExpressions[0] === '${{ secrets.FROG_APP_PRIVATE_KEY }}'
     && resetStep.name === 'Convert the exact synchronized head to draft'
     && resetStep.shell === 'bash'
     && resetStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'

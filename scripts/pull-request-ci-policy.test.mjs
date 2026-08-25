@@ -164,6 +164,10 @@ function inspectDraftReset(source) {
       "permission-pull-requests: write",
     ],
   );
+  assert.deepEqual(
+    source.match(/\$\{\{[^}]*\bsecrets\.[^}]*\}\}/gu),
+    ["${{ secrets.FROG_APP_PRIVATE_KEY }}"],
+  );
   assert.match(source, /GH_TOKEN: \$\{\{ steps\.frog-app-token\.outputs\.token \}\}/u);
   assert.doesNotMatch(source, /github\.token|secrets\.GITHUB_TOKEN/u);
   assert.match(
@@ -220,6 +224,12 @@ test("draft reset rejects workflow-token fallback and broader App authority", as
     () => inspectDraftReset(source.replace(
       "          permission-pull-requests: write",
       "          permission-contents: write\n          permission-pull-requests: write",
+    )),
+  );
+  assert.throws(
+    () => inspectDraftReset(source.replace(
+      "          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}",
+      "          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}\n          UNRELATED_SECRET: ${{ secrets.OTHER_SECRET }}",
     )),
   );
 });
