@@ -8105,7 +8105,10 @@ text(JSON.stringify(result));
       turnTrigger: null,
     })
     expect(groupDeveloperInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(groupDeveloperInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(groupDeveloperInstructions).not.toContain(
       'Do not use or offer `murph.assistant_configuration` here',
