@@ -5379,7 +5379,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             instructions: "Send the synthetic mobility reminder.",
             schedule: { kind: "dailyLocal", localTime: "08:00" },
-            slug: "mobility-reminder",
             title: "Mobility reminder",
           });
           if (!reminderRoot || reminderRoot.action !== "save") {
@@ -5391,32 +5390,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             lookup: reminderRoot.automationId,
             status: "archived",
           });
-          const independentlyNumberedReminder =
+          const repeatedTitleReminder =
             await executionContext.hosted?.automationTool?.request({
             action: "save",
-            instructions: "Send the independent numbered mobility reminder.",
+            instructions: "Send the new mobility reminder.",
             schedule: { kind: "dailyLocal", localTime: "08:15" },
-            slug: "mobility-reminder-2",
-            title: "Mobility reminder 2",
+            title: "Mobility reminder",
           });
           if (
-            !independentlyNumberedReminder
-            || independentlyNumberedReminder.action !== "save"
+            !repeatedTitleReminder
+            || repeatedTitleReminder.action !== "save"
           ) {
-            throw new Error("Expected independent numbered reminder save.");
+            throw new Error("Expected repeated-title reminder save.");
           }
-          await expect(executionContext.hosted?.automationTool?.request({
-            action: "save",
-            instructions: "Reactivate the synthetic mobility reminder.",
-            schedule: { kind: "dailyLocal", localTime: "08:30" },
-            slug: "mobility-reminder",
-            title: "Mobility reminder",
-          })).rejects.toMatchObject({
-            code: "VAULT_AUTOMATION_CONFLICT",
-            details: {
-              existingAutomationId: reminderRoot.automationId,
-            },
-          });
+          expect(repeatedTitleReminder).toEqual(expect.objectContaining({
+            created: true,
+            lookupId: repeatedTitleReminder.automationId
+              .toLowerCase()
+              .replace("_", "-"),
+            status: "active",
+          }));
+          expect(repeatedTitleReminder.automationId).not.toBe(
+            reminderRoot.automationId,
+          );
           const archivedReminder =
             await executionContext.hosted?.automationTool?.request({
               action: "inspect",
@@ -5427,32 +5423,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }
           expect(archivedReminder).toEqual(expect.objectContaining({
             automationId: reminderRoot.automationId,
-            lookupId: "mobility-reminder",
+            lookupId: reminderRoot.automationId.toLowerCase().replace("_", "-"),
             status: "archived",
-          }));
-          const reactivatedReminder =
-            await executionContext.hosted?.automationTool?.request({
-              action: "patch",
-              expectedUpdatedAt: archivedReminder.updatedAt,
-              lookup: archivedReminder.automationId,
-              schedule: { kind: "dailyLocal", localTime: "08:30" },
-              status: "active",
-            });
-          if (!reactivatedReminder || reactivatedReminder.action !== "patch") {
-            throw new Error("Expected reactivated reminder patch.");
-          }
-          expect(reactivatedReminder).toEqual(expect.objectContaining({
-            automationId: reminderRoot.automationId,
-            created: false,
-            lookupId: "mobility-reminder",
-            status: "active",
-          }));
-          await expect(executionContext.hosted?.automationTool?.request({
-            action: "inspect",
-            lookup: independentlyNumberedReminder.automationId,
-          })).resolves.toEqual(expect.objectContaining({
-            lookupId: "mobility-reminder-2",
-            status: "active",
           }));
 
           const stale = await executionContext.hosted?.automationTool?.request({

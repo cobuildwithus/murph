@@ -3286,7 +3286,9 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
-    expect(prompt).not.toContain('Generic save is create-only')
+    expect(prompt).toContain(
+      'Generic save always creates a new automation with a host-generated `automationId`, even when another automation has the same title.',
+    )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )
@@ -3415,7 +3417,9 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
-    expect(prompt).not.toContain('Generic save is create-only')
+    expect(prompt).toContain(
+      'Generic save always creates a new automation with a host-generated `automationId`, even when another automation has the same title.',
+    )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )

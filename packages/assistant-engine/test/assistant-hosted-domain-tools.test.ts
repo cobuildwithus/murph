@@ -84,13 +84,10 @@ describe('hosted domain dynamic tools', () => {
       'Generic save is create-only',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'If save reports an existingAutomationId, inspect that exact id and then apply a versioned patch',
+      'always creates a new automation with a host-generated automationId',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'reactivate its archived record instead of inventing a suffixed slug',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'A slug is only a readable lookup alias and never identifies a related reminder',
+      'never infer identity from a title',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
@@ -207,14 +204,13 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'spring-reminder',
       title: 'Spring reminder',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     if (gapRequest?.kind !== 'invalid-automation-arguments') {
       throw new TypeError('Expected a daylight-saving gap failure.')
     }
     expect(gapRequest).toMatchObject({
-      localAtTargetLabel: 'Spring reminder (spring-reminder)',
+      localAtTargetLabel: 'Spring reminder',
       resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
@@ -242,7 +238,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'spring-reminder',
       title: 'Spring reminder',
     }, {
       earliestAt: '2026-03-08T04:59:00.000Z',
@@ -274,7 +269,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'morning-meds',
       title: 'Morning meds',
     })
     expect(repeatedGapRequest).toMatchObject({
@@ -284,7 +278,7 @@ describe('hosted domain dynamic tools', () => {
         resolvedLocalDate: '2026-03-08',
       },
       localAtTargetKey: gapRequest.localAtTargetKey,
-      localAtTargetLabel: 'Morning meds (morning-meds)',
+      localAtTargetLabel: 'Morning meds',
       resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
@@ -563,11 +557,11 @@ describe('hosted domain dynamic tools', () => {
     expect(result.rpcResult.success).toBe(true)
   })
 
-  it('keeps recovery correlation private while patching and renaming', async () => {
+  it('keeps recovery correlation private while patching by id', async () => {
     const failedPatch = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: 'medication-reminder',
+      lookup: 'automation-medication-reminder',
       schedule: {
         kind: 'at',
         localAt: {
@@ -576,7 +570,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'morning-meds',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     const recovery = readToolRequest('automation', {
       action: 'patch',
@@ -584,7 +577,7 @@ describe('hosted domain dynamic tools', () => {
       localAtRecoveryKey: failedPatch?.kind === 'invalid-automation-arguments'
         ? failedPatch.localAtTargetKey
         : undefined,
-      lookup: 'medication-reminder',
+      lookup: 'automation-medication-reminder',
       schedule: {
         kind: 'at',
         localAt: {
@@ -593,7 +586,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'morning-meds',
     })
     if (
       failedPatch?.kind !== 'invalid-automation-arguments' ||
@@ -649,7 +641,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'medication-reminder',
       title: 'Medication reminder',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     const recoveryPatch = readToolRequest('automation', {
@@ -658,7 +649,7 @@ describe('hosted domain dynamic tools', () => {
       localAtRecoveryKey: failedSave?.kind === 'invalid-automation-arguments'
         ? failedSave.localAtTargetKey
         : undefined,
-      lookup: 'medication-reminder',
+      lookup: 'automation-medication-reminder',
       schedule: {
         kind: 'at',
         localAt: {
@@ -709,7 +700,7 @@ describe('hosted domain dynamic tools', () => {
     expect(result.rpcResult.success).toBe(true)
   })
 
-  it('contains local one-shot slug derivation failures for a recoverable retry', async () => {
+  it('accepts localized reminder titles without a separate slug', async () => {
     const localizedRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the reminder.',
@@ -724,39 +715,10 @@ describe('hosted domain dynamic tools', () => {
       title: '薬を飲む',
     })
     expect(localizedRequest).toMatchObject({
-      kind: 'invalid-automation-arguments',
-    })
-    if (localizedRequest?.kind !== 'invalid-automation-arguments') {
-      throw new TypeError('Expected a recoverable invalid automation request.')
-    }
-    const invalidResult = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({}),
-      nextUsageOrdinal: () => 0,
-      progressDelivery: null,
-      request: localizedRequest,
-    })
-    expect(invalidResult.rpcResult.success).toBe(false)
-
-    expect(readToolRequest('automation', {
-      action: 'save',
-      instructions: 'Send the reminder.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          date: '2026-03-08',
-          time: '03:30',
-          timeZone: 'America/New_York',
-        },
-      },
-      slug: 'take-medicine',
-      title: '薬を飲む',
-    })).toMatchObject({
       kind: 'automation',
       request: {
         action: 'save',
-        slug: 'take-medicine',
+        title: '薬を飲む',
       },
     })
   })
@@ -1406,7 +1368,6 @@ describe('hosted domain dynamic tools', () => {
         },
       ],
       effectiveTimeZone: 'America/Chicago',
-      lookupId: 'evening-wind-down',
       occurrenceProjection: {
         nextOccurrenceAt: null,
         status: 'resolved' as const,
@@ -1508,7 +1469,6 @@ describe('hosted domain dynamic tools', () => {
       action: 'inspect',
       automationId: 'automation-1',
       effectiveTimeZone: 'America/Chicago',
-      lookupId: 'evening-wind-down',
       occurrenceProjection: {
         nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
         status: 'resolved' as const,
@@ -1701,48 +1661,6 @@ describe('hosted domain dynamic tools', () => {
       'inspect it again and decide from the current stored schedule',
     )
     expect(conflictResult.rpcResult.contentItems[0]?.text).not.toContain(
-      'private conflict detail',
-    )
-
-    const existingAutomationId = 'automation-synthetic-reminder'
-    const identifiedConflict = Object.assign(new Error('private conflict detail'), {
-      code: 'VAULT_AUTOMATION_CONFLICT',
-      details: {
-        existingAutomationId,
-      },
-    })
-    automationTool.request.mockRejectedValueOnce(identifiedConflict)
-    const saveRequest = readToolRequest('automation', {
-      action: 'save',
-      instructions: 'Send a reminder.',
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '09:00',
-      },
-      slug: 'synthetic-reminder',
-      title: 'Synthetic reminder',
-    })
-    if (!saveRequest) {
-      throw new Error('Expected a save request.')
-    }
-    const identifiedConflictResult = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({ automationTool }),
-      nextUsageOrdinal: () => 0,
-      progressDelivery: null,
-      request: saveRequest,
-    })
-    expect(identifiedConflictResult.rpcResult).toMatchObject({ success: false })
-    expect(identifiedConflictResult.rpcResult.contentItems[0]?.text).toBe(
-      JSON.stringify({
-        code: 'automation_conflict',
-        existingAutomationId,
-        recovery:
-          'inspect existingAutomationId exactly, then decide from that stored schedule and apply a versioned patch',
-      }),
-    )
-    expect(identifiedConflictResult.rpcResult.contentItems[0]?.text).not.toContain(
       'private conflict detail',
     )
   })

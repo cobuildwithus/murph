@@ -4212,9 +4212,7 @@ text(JSON.stringify(result));
       expectedAt: '2026-03-08T07:30:00.000Z',
       failedTime: '02:30',
       finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
-      initialSlug: null,
       kind: 'gap',
-      retrySlug: 'morning-meds',
       retryTitle: 'Morning meds',
       referenceAt: '2026-03-08T04:59:00.000Z',
       retryLocalAt: {
@@ -4233,9 +4231,7 @@ text(JSON.stringify(result));
       failedTime: '01:30',
       finalMessage:
         'Done — your reminder is set for the earlier 1:30 AM on November 1.',
-      initialSlug: 'fall-reminder',
       kind: 'fold',
-      retrySlug: null,
       retryTitle: 'Evening meds',
       referenceAt: '2026-11-01T03:59:00.000Z',
       retryLocalAt: {
@@ -4245,21 +4241,19 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'For reminder "Fall reminder (fall-reminder)", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fall reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       steerAt: '2026-11-01T04:01:00.000Z',
       steerPrompt: 'Use the earlier occurrence.',
       title: 'Fall reminder',
     },
-  ])('clears a $kind clarification after a renamed live-steered save retry', {
+  ])('clears a $kind clarification after a retitled live-steered save retry', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
     failedTime,
     finalMessage,
-    initialSlug,
     referenceAt,
     retryLocalAt,
-    retrySlug,
     retryTitle,
     staleClarification,
     steerAt,
@@ -4280,20 +4274,18 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      ...(initialSlug ? { slug: initialSlug } : {}),
       title,
     }
     const retryRequest = {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        initialSlug ?? title.toLowerCase().replace(/\s+/gu, '-'),
+        title,
       ),
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
       },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }
     scenario.stub.queue(
@@ -4342,8 +4334,8 @@ text(JSON.stringify(result));
                 `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               created: true,
               effectiveTimeZone: null,
-              lookupId: retrySlug
-                ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
+              lookupId:
+                `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               occurrenceProjection: {
                 nextOccurrenceAt: expectedAt,
                 status: 'resolved' as const,
@@ -4382,7 +4374,6 @@ text(JSON.stringify(result));
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }])
     expect(result.finalMessage).toBe(finalMessage)
@@ -4686,70 +4677,32 @@ text(JSON.stringify(result));
   it.each([
     {
       expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '02:30',
       referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
       retryLocalAt: {
         date: '2026-03-08',
         time: '03:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'automation-medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'automation-medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      requestedSlug: 'morning-meds',
-      responseLookup: 'morning-meds',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
     },
     {
       expectedAt: '2026-11-01T06:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '01:30',
       referenceAt: '2026-11-01T03:59:00.000Z',
-      requestedSlug: 'evening-meds',
-      responseLookup: 'evening-meds',
       retryLocalAt: {
         date: '2026-11-01',
         fold: 'later' as const,
         time: '01:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'medication-reminder',
     },
-  ])('clears a patch clarification across canonical and renamed aliases', {
+  ])('clears a patch clarification using one exact automation id', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
-    failedLookup,
     failedTime,
     referenceAt,
-    requestedSlug,
-    responseLookup,
     retryLocalAt,
-    retryLookup,
   }) => {
     const scenario = await prepareScriptedTurnScenario()
     const responseCard = {
@@ -4763,11 +4716,11 @@ text(JSON.stringify(result));
       footer: null,
       tracking: null,
     } satisfies AssistantResponseCard
+    const automationId = 'automation-medication-reminder'
     const failedRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: failedLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: {
@@ -4780,9 +4733,8 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedLookup),
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(automationId),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
@@ -4825,10 +4777,10 @@ text(JSON.stringify(result));
       }
       return {
         action: 'patch' as const,
-        automationId: 'automation-medication-reminder',
+        automationId,
         created: false,
         effectiveTimeZone: 'America/New_York',
-        lookupId: responseLookup,
+        lookupId: automationId,
         occurrenceProjection: {
           nextOccurrenceAt: expectedAt,
           status: 'resolved' as const,
@@ -4870,8 +4822,7 @@ text(JSON.stringify(result));
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: { at: expectedAt, kind: 'at' },
     }, expect.anything())
     expect(result.responseCard).toEqual(responseCard)
@@ -4879,7 +4830,7 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).not.toContain('the trusted date is')
   })
 
-  it('contains local one-shot slug failures and accepts a corrected retry', {
+  it('saves a localized one-shot title without a separate slug', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -4896,24 +4847,11 @@ text(JSON.stringify(result));
       },
       title: '薬を飲む',
     }
-    const correctedRequest = {
-      ...localizedRequest,
-      slug: 'take-medicine',
-    }
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
 const result = await tools.murph__automation(${JSON.stringify(localizedRequest)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      },
-      {
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(correctedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -5810,277 +5748,6 @@ text(JSON.stringify(result));
     }
   })
 
-  it.each([
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: 'morning-meds',
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: null,
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'later' as const,
-      newSlug: null,
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T06:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'earlier' as const,
-      newSlug: 'evening-meds',
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T05:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: true,
-    },
-  ])('settles $date save recovery through create conflict and versioned patch', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async ({
-    date,
-    failedTime,
-    fold,
-    newSlug,
-    patchLookup,
-    referenceAt,
-    resolvedAt,
-    resolvedTime,
-    secondPending,
-  }) => {
-    const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
-    const automationId = 'automation-medication-reminder'
-    const updatedAt = '2026-03-07T20:00:00.000Z'
-    const failedSave = {
-      action: 'save',
-      instructions: 'Send the medication reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug,
-      title: 'Medication reminder',
-    }
-    const recoveryLocalAt = {
-      date,
-      ...(fold ? { fold } : {}),
-      time: resolvedTime,
-      timeZone: 'America/New_York',
-    }
-    const retrySave = {
-      ...failedSave,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const inspect = { action: 'inspect', lookup: automationId }
-    const patch = {
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const secondFailure = {
-      action: 'save',
-      instructions: 'Send the call reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug: 'call-reminder',
-      title: 'Call reminder',
-    }
-    const responseCard = {
-      kind: 'compact_table',
-      version: 1,
-      title: 'Medication reminder',
-      subtitle: `${date} at ${resolvedTime}`,
-      rowHeader: 'Status',
-      columns: ['Schedule'],
-      rows: [{ label: 'Active', values: [resolvedTime] }],
-      footer: null,
-      tracking: null,
-    } satisfies AssistantResponseCard
-    const calls = [
-      failedSave,
-      ...(secondPending ? [secondFailure] : []),
-      retrySave,
-      inspect,
-      patch,
-    ]
-    for (const request of calls) {
-      scenario.stub.queue({
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(request)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      })
-    }
-    scenario.stub.queue({
-      functionCall: {
-        arguments: { card: responseCard },
-        name: 'attach_response_card',
-        namespace: 'murph',
-      },
-    })
-    if (secondPending) {
-      scenario.stub.queue(
-        {
-          functionCall: {
-            arguments: {},
-            name: 'finish_without_reply',
-            namespace: 'murph',
-          },
-        },
-        { text: '' },
-      )
-    } else {
-      scenario.stub.queue({ text: 'CARD_ATTACHED' })
-    }
-
-    const ownerRequests: AssistantHostedAutomationToolRequest[] = []
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      allowFinishWithoutReply: true,
-      automationRelativeDateReferenceWindow: {
-        earliestAt: referenceAt,
-        latestAt: referenceAt,
-      },
-      dynamicTools: [
-        MURPH_AUTOMATION_TOOL,
-        MURPH_ATTACH_RESPONSE_CARD_TOOL,
-        MURPH_FINISH_WITHOUT_REPLY_TOOL,
-      ],
-      groupConversation: false,
-      hostedToolContext: {
-        automationTool: {
-          request: async (request) => {
-            ownerRequests.push(request)
-            if (request.action === 'save') {
-              throw Object.assign(new Error('automation already exists'), {
-                code: 'VAULT_AUTOMATION_CONFLICT' as const,
-                details: { existingAutomationId: automationId },
-              })
-            }
-            if (request.action === 'inspect') {
-              return {
-                action: 'inspect',
-                automationId,
-                effectiveTimeZone: 'America/New_York',
-                lookupId: slug,
-                occurrenceProjection: {
-                  nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
-                  status: 'resolved' as const,
-                },
-                routeBinding: 'preserved',
-                schedule: {
-                  at: '2026-03-07T21:00:00.000Z',
-                  kind: 'at',
-                },
-                status: 'active',
-                updatedAt,
-              }
-            }
-            if (request.action !== 'patch') {
-              throw new Error('Expected a versioned patch request.')
-            }
-            return {
-              action: 'patch',
-              automationId,
-              created: false,
-              effectiveTimeZone: 'America/New_York',
-              lookupId: newSlug ?? slug,
-              occurrenceProjection: {
-                nextOccurrenceAt: resolvedAt,
-                status: 'resolved' as const,
-              },
-              routeBinding: 'current_conversation',
-              schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
-              status: 'active',
-              updatedAt: '2026-03-08T05:01:00.000Z',
-            }
-          },
-        },
-        computerToolsAvailable: false,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        sendVaultFile: async () => {
-          throw new Error('Vault file sends are unavailable in this test.')
-        },
-        vaultFileSendAvailable: false,
-      },
-      prompt: 'Set or update my medication reminder for tomorrow.',
-    })
-
-    expect(ownerRequests.map((request) => request.action)).toEqual([
-      'save',
-      'inspect',
-      'patch',
-    ])
-    for (const request of ownerRequests) {
-      expect(request).not.toHaveProperty('localAtRecoveryKey')
-    }
-    expect(ownerRequests[2]).toMatchObject({
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { at: resolvedAt, kind: 'at' },
-    })
-    expect(ownerRequests[1]).toEqual({
-      action: 'inspect',
-      lookup: automationId,
-    })
-    const medicationQuestion =
-      `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
-    expect(result.finalMessage).not.toContain(medicationQuestion)
-    expect(result.transcriptMessage).not.toContain(medicationQuestion)
-    if (secondPending) {
-      const callQuestion =
-        `For reminder "Call reminder (call-reminder)", the trusted date is ${date}.`
-      expect(result.finalAction).toBeNull()
-      expect(result.responseCard).toBeNull()
-      expect(result.finalMessage).toContain(callQuestion)
-      expect(result.transcriptMessage).toContain(callQuestion)
-    } else {
-      expect(result.responseCard).toEqual(responseCard)
-      expect(result.finalMessage).not.toContain('the trusted date is')
-      expect(result.transcriptMessage).not.toContain('the trusted date is')
-    }
-  })
 
   it('suppresses a response card until the trusted DST clarification is delivered', {
     timeout: TURN_TIMEOUT_MS,

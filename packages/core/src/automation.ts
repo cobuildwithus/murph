@@ -1638,10 +1638,15 @@ async function upsertAutomationWithLatestRegistry(
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
-  const requestedSlug = resolveAutomationUpsertSlug({
-    slug: input.slug,
-    title,
-  });
+  const createOnlyRecordId = input.createOnly === true
+    ? normalizedId ?? generateRecordId("automation")
+    : null;
+  const requestedSlug = createOnlyRecordId !== null && input.slug === undefined
+    ? resolveAutomationUpsertSlug({ slug: createOnlyRecordId, title })
+    : resolveAutomationUpsertSlug({
+        slug: input.slug,
+        title,
+      });
   const currentRecords = records ?? await loadAutomationRecords(input.vaultRoot);
   const existingRecord = selectAutomationRecord(
     currentRecords,
@@ -1651,11 +1656,13 @@ async function upsertAutomationWithLatestRegistry(
     throw new VaultError(
       "VAULT_AUTOMATION_CONFLICT",
       "Automation already exists; use a versioned patch to change it.",
-      { existingAutomationId: existingRecord.automationId },
     );
   }
   const now = (input.now ?? new Date()).toISOString();
-  const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
+  const recordId = existingRecord?.automationId
+    ?? createOnlyRecordId
+    ?? normalizedId
+    ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;
   const updatedAt = now;
   const target = resolveMarkdownRegistryUpsertTarget({

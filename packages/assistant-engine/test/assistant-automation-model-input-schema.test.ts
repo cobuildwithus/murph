@@ -191,11 +191,24 @@ describe('automation model input schema', () => {
       title: 'Useful reminder',
     })).toBe(true)
     expect(advertisesRootShape(schema, {
+      action: 'save',
+      instructions: 'A useful reminder.',
+      schedule: { kind: 'every', everyMs: 3_600_000 },
+      slug: 'useful-reminder',
+      title: 'Useful reminder',
+    })).toBe(false)
+    expect(advertisesRootShape(schema, {
       action: 'patch',
       expectedUpdatedAt: '2026-08-21T10:00:00.000Z',
       lookup: 'morning-reminder',
       status: 'archived',
     })).toBe(true)
+    expect(advertisesRootShape(schema, {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-21T10:00:00.000Z',
+      lookup: 'automation_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+      slug: 'morning-reminder',
+    })).toBe(false)
     expect(advertisesRootShape(schema, {
       action: 'reconcile',
       desiredAutomationIds: [],

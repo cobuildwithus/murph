@@ -547,7 +547,7 @@ describe("markdown document primitives", () => {
     })).resolves.toEqual(created.record);
   });
 
-  it("returns the exact archived automation identity instead of inferring a successor from its slug", async () => {
+  it("uses generated ids for create-only automation paths so titles can repeat", async () => {
     const vaultRoot = await makeVaultRoot();
     const archived = await upsertAutomation({
       vaultRoot,
@@ -558,54 +558,50 @@ describe("markdown document primitives", () => {
         title: "Mobility reminder",
       }),
     });
-
-    const independentlyNumbered = await upsertAutomation({
-      vaultRoot,
-      now: new Date("2031-02-15T11:59:00.000Z"),
-      ...createAutomationPayload({
-        slug: "mobility-reminder-2",
-        status: "active",
-        title: "Mobility reminder 2",
-      }),
+    const {
+      slug: _firstSlug,
+      ...firstPayload
+    } = createAutomationPayload({
+      status: "active",
+      title: "Mobility reminder",
     });
-
-    await expect(upsertAutomation({
+    const first = await upsertAutomation({
       vaultRoot,
       createOnly: true,
       now: new Date("2031-02-15T12:00:00.000Z"),
-      ...createAutomationPayload({
-        slug: "mobility-reminder",
-        status: "active",
-        title: "Mobility reminder",
-      }),
-    })).rejects.toMatchObject({
-      code: "VAULT_AUTOMATION_CONFLICT",
-      details: {
-        existingAutomationId: archived.record.automationId,
-      },
+      ...firstPayload,
+    });
+    const {
+      slug: _secondSlug,
+      ...secondPayload
+    } = createAutomationPayload({
+      status: "active",
+      title: "Mobility reminder",
+    });
+    const second = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:01:00.000Z"),
+      ...secondPayload,
     });
 
-    const reactivated = await patchAutomation({
-      vaultRoot,
-      expectedUpdatedAt: archived.record.updatedAt,
-      instructions: "Send the updated mobility reminder.",
-      lookup: archived.record.automationId,
-      now: new Date("2031-02-15T12:01:00.000Z"),
-      schedule: { kind: "dailyLocal", localTime: "09:15" },
-      status: "active",
-    });
-    expect(reactivated.created).toBe(false);
-    expect(reactivated.record).toEqual(expect.objectContaining({
-      automationId: archived.record.automationId,
-      instructions: "Send the updated mobility reminder.",
-      schedule: { kind: "dailyLocal", localTime: "09:15" },
-      slug: "mobility-reminder",
-      status: "active",
-    }));
+    expect(first.record.automationId).not.toBe(second.record.automationId);
+    expect(first.record.slug).toBe(
+      first.record.automationId.toLowerCase().replace("_", "-"),
+    );
+    expect(second.record.slug).toBe(
+      second.record.automationId.toLowerCase().replace("_", "-"),
+    );
+    expect(first.record.relativePath).toBe(
+      `bank/automations/${first.record.slug}.md`,
+    );
+    expect(second.record.relativePath).toBe(
+      `bank/automations/${second.record.slug}.md`,
+    );
     await expect(showAutomation({
-      automationId: independentlyNumbered.record.automationId,
+      automationId: archived.record.automationId,
       vaultRoot,
-    })).resolves.toEqual(independentlyNumbered.record);
+    })).resolves.toEqual(archived.record);
   });
 
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
