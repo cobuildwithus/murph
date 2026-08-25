@@ -72,3 +72,9 @@ Updated: 2026-08-25
 - Final-foundation integration focused proof passed 73 source tests across the
   food, supplement, and shared provider-recovery suites (29 prepared-runtime
   cases skipped); CLI typecheck passed.
+- Prepared-runtime construction and the same three compiled suites passed all
+  102 cases. CLI package shape, docs, workspace boundaries, and package-cycle
+  checks passed.
+- Production bundle assembly and all eight parity probes passed after the
+  integration. Vault CLI is 9,467,768 of 9,477,676 bytes; the runner is
+  11,277,949 of 11,393,617 bytes.
