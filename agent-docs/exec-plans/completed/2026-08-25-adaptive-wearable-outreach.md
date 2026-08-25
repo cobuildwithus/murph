@@ -1,6 +1,6 @@
 # Adaptive wearable no-data outreach
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -83,6 +83,9 @@ Updated: 2026-08-25
 - After that correction, the production-entrypoint abort-guard suite passed all 6 tests, including a regression proving that the first outreach-setting call reaches the underlying device port and a later call is fenced after host cancellation. The existing hosted device phase proof passed with 304 unrelated tests skipped, and the Assistant Runtime typecheck passed.
 - Final ReviewGPT round 4 returned one accepted deployment-contract finding: once preference writes are possible, a pre-feature Web would ignore stored authority and could leave a foreign-key-free preference row after successful account deletion. The non-production-remediation correction declares the preference-aware Web a hard rollback floor, preserves the existing current-Web deletion proof, and adds no compatibility machinery or runtime change.
 - The focused operator-doc contract test passed with 58 unrelated tests skipped. An initial invocation from the Web package directory matched no files because its config uses repository-root include paths; rerunning the same test from the repository root passed.
+- Final ReviewGPT round 5 returned `ROUND_OUTCOME: PASS` on the exact corrected head. It explicitly verified every prior accepted correction, the single-owner data flow, account deletion, the post-write Web rollback floor, and the absence of a new production mechanism.
+- All branch-required exact-head checks passed, including both CLI host lanes, release checks, the required hosted Stripe billing boundary, and Temporal compatibility. The broader release build/typecheck, package-coverage, app-verification, reply-cardinality, sandbox, hygiene, and viewport checks were also green; the optional native controller did not gate completion.
+- Parent final audit confirmed the local and PR heads matched, the worktree and diff checks were clean, the privacy scan passed, and the request → signed callback → canonical preference → materialization/dispatch revalidation → account-deletion path retains one explicit owner at each boundary.
 - Complete initial provider requests were captured through the pinned real Codex App Server with identical synthetic direct/group fixtures and `gpt-tokenizer` 3.4.0 `o200k_harmony`. After the specialist description correction, direct changes from 31,676 tokens / 143,991 bytes to 31,811 / 144,605; group changes from 27,982 / 127,221 to 28,117 / 127,835. Each route adds 135 tokens / 614 bytes (+0.426% direct, +0.482% group tokens): 404 bytes are the device-tool description and 210 are its generated declaration/schema; other provider-visible fields are unchanged. The correction was remeasured at the same serialized tool-fragment boundary because it is the only provider-visible field changed after the complete-request capture. The weekly automation instruction is loaded only for that scheduled occurrence, not these initial ordinary turns. Measurement-only instrumentation was removed.
 
 ## Product UX Walkthrough
@@ -101,3 +104,4 @@ Updated: 2026-08-25
 - Churn: the current authored-source shape remains below the 2,000-line trigger. The round-three correction adds one optional forwarding branch to the existing wrapper plus one production-entrypoint regression; it introduces no mechanism that warrants redesign or splitting.
 - Repeated mechanism: none. The round-two and round-three findings were missed reuse of existing authority and cancellation boundaries; round four concerns the separate persisted-authority deployment floor. None requires another runtime mechanism.
 - Decision: keep runtime corrections inside the existing input gate and abort-guard owners, and express the distinct rollback constraint through the existing deployment-floor contract. Splitting, compatibility readers, dual writes, or reconciliation would add coordination without removing a source of truth or owner.
+Completed: 2026-08-25
