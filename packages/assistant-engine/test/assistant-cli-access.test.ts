@@ -206,7 +206,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       "`retryable: true` permits an unchanged retry",
     );
     expect(guidance).toContain(
-      "fixing a `fieldErrors` field or `hint` prerequisite is a new attempt",
+      "fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt",
     );
     expect(guidance).toContain(
       "Otherwise stop",

@@ -44,7 +44,7 @@ describe('assistant dynamic context prompt blocks', () => {
       '`retryable: true` permits an unchanged retry',
     )
     expect(prompt).toContain(
-      'fixing a `fieldErrors` field or `hint` prerequisite is a new attempt',
+      'fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt',
     )
     expect(prompt).toContain('Otherwise stop')
     expect(prompt).toContain('never guess or echo omitted details')

@@ -583,7 +583,7 @@ describe('resolveMapboxAddress', () => {
     })
   })
 
-  it('does not project a rejected provider body or submitted address', async () => {
+  it('preserves the bounded provider rejection so the caller can recover', async () => {
     const submittedValue = 'private-submitted-value'
     const providerBody = 'private-provider-response'
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
@@ -616,12 +616,12 @@ describe('resolveMapboxAddress', () => {
 
     expect(projection).toMatchObject({
       code: 'UNKNOWN',
-      message: 'The command failed without a safe recoverable detail.',
+      message: failure.message,
       retryable: false,
       stage: 'command',
     })
-    expect(serialized).not.toContain(submittedValue)
-    expect(serialized).not.toContain(providerBody)
+    expect(serialized).toContain(submittedValue)
+    expect(serialized).toContain(providerBody)
   })
 
   it('fails closed when the shared Mapbox runtime token is unavailable', async () => {

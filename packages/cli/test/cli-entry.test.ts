@@ -161,7 +161,7 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("renderMurphCliEntrypointError uses a value-free unknown failure", async () => {
+test("renderMurphCliEntrypointError preserves a bounded diagnostic failure", async () => {
   const submittedValue = "private-submitted-value";
   const providerBody = "private-provider-response";
   const rawMessage = `Parser rejected ${submittedValue}: ${providerBody}.`;
@@ -181,12 +181,12 @@ test("renderMurphCliEntrypointError uses a value-free unknown failure", async ()
   assert.equal(
     rendered.output,
     [
-      "Error: The command failed without a safe recoverable detail.",
+      `Error (CONFIG_INVALID): ${rawMessage}`,
       "Stage: command",
     ].join("\n"),
   );
-  assert.equal(rendered.output.includes(submittedValue), false);
-  assert.equal(rendered.output.includes(providerBody), false);
+  assert.equal(rendered.output.includes(submittedValue), true);
+  assert.equal(rendered.output.includes(providerBody), true);
 });
 
 test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
@@ -322,7 +322,7 @@ test("renderMurphCliEntrypointError defaults non-interactive failures to machine
   assert.equal(rendered.machineReadable, true);
   assert.match(rendered.output, /permission_denied/u);
   assert.match(rendered.output, /filesystem/u);
-  assert.doesNotMatch(rendered.output, /private\/vault/u);
+  assert.match(rendered.output, /private\/vault/u);
 });
 
 test("isBrokenPipeError recognizes stdout pipe closure failures", () => {
