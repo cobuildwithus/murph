@@ -573,17 +573,49 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("revokes the warm invocation after a crossing settlement before another paid call", async () => {
+  it.each([
+    {
+      expectedStatus: 200,
+      label: "an explicit denial",
+      respond: async () => Response.json({
+        platformAiUsageAllowedAfter: false,
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      expectedStatus: 200,
+      label: "a malformed successful response",
+      respond: async () => Response.json({
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      expectedStatus: 503,
+      label: "a non-success response",
+      respond: async () => Response.json(
+        { error: "usage settlement unavailable" },
+        { status: 503 },
+      ),
+    },
+    {
+      expectedStatus: null,
+      label: "a transport failure",
+      respond: async (): Promise<Response> => {
+        throw new Error("usage settlement transport failed");
+      },
+    },
+  ])("revokes the warm invocation after $label before another paid call", async ({
+    expectedStatus,
+    respond,
+  }) => {
     let platformAiUsageAllowed = true;
     const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => {
       platformAiUsageAllowed = false;
       return true;
     });
-    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({
-      platformAiUsageAllowedAfter: false,
-      recorded: true,
-      usageId: "usage_1",
-    }));
+    const fetchMock = vi.fn<typeof fetch>(respond);
     vi.stubGlobal("fetch", fetchMock);
     const env = createInterceptEnv({
       OPENAI_API_KEY: "synthetic-platform-secret",
@@ -599,7 +631,7 @@ describe("hostedRunnerIntercept", () => {
       validateRuntimeWriteFence: vi.fn(async () => true),
     });
 
-    const settlementResponse = await hostedRunnerIntercept(
+    const settlementPromise = hostedRunnerIntercept(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
         body: JSON.stringify({ usage: { usageId: "usage_1" } }),
         headers: {
@@ -612,7 +644,14 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(settlementResponse.status).toBe(200);
+    if (expectedStatus === null) {
+      await expect(settlementPromise).rejects.toThrow(
+        "usage settlement transport failed",
+      );
+    } else {
+      await expect(settlementPromise.then((response) => response.status))
+        .resolves.toBe(expectedStatus);
+    }
     expect(revokeActiveRuntimePlatformAiUsage).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "7",
