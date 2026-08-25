@@ -97,7 +97,7 @@ export interface RunnerBundleManifest {
   bundleFingerprint: string;
   generatedAt: string;
   includeBundleOnlyDependencies: boolean;
-  releaseSha: string | null;
+  releaseSha: string;
   schemaVersion: typeof runnerBundleManifestSchemaVersion;
   sourceFingerprint: string;
   workspacePackageNames: readonly string[];
@@ -110,7 +110,7 @@ export async function writeRunnerBundleManifest(
     buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
-    releaseSha: string | null;
+    releaseSha: string;
     repoRoot?: string;
   },
 ): Promise<RunnerBundleManifest> {
@@ -132,7 +132,7 @@ async function buildRunnerBundleManifest(
     buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
-    releaseSha: string | null;
+    releaseSha: string;
     repoRoot?: string;
   },
 ): Promise<RunnerBundleManifest> {
@@ -313,7 +313,7 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
 
 export function resolvePublicRunnerReleaseSha(
   repoRoot: string = defaultRepoRoot,
-): string | null {
+): string {
   const releaseResult = spawnSync(
     "git",
     ["rev-parse", "--verify", "HEAD^{commit}"],
@@ -332,25 +332,10 @@ export function resolvePublicRunnerReleaseSha(
     throw new Error("Could not resolve the public Murph release SHA for the runner bundle.");
   }
 
-  const statusResult = spawnSync(
-    "git",
-    ["status", "--porcelain=v1", "--untracked-files=all"],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  if (statusResult.error || statusResult.status !== 0) {
-    throw new Error("Could not verify the public Murph checkout state for the runner bundle.");
-  }
-  return statusResult.stdout.length === 0 ? releaseSha : null;
+  return releaseSha;
 }
 
-function normalizePublicReleaseSha(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
+function normalizePublicReleaseSha(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (!publicReleaseShaPattern.test(normalized)) {
     throw new TypeError("Runner bundle release SHA must be a full public Git commit SHA.");
