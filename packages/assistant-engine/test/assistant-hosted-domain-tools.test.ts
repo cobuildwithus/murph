@@ -84,10 +84,13 @@ describe('hosted domain dynamic tools', () => {
       'Generic save is create-only',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'An archived-only same-name automation does not block a fresh save',
+      'If save reports an existingAutomationId, inspect that exact id and then apply a versioned patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'If save reports an existingAutomationId, inspect that exact id and then apply a versioned patch',
+      'reactivate its archived record instead of inventing a suffixed slug',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'A slug is only a readable lookup alias and never identifies a related reminder',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
@@ -1701,14 +1704,14 @@ describe('hosted domain dynamic tools', () => {
       'private conflict detail',
     )
 
-    const successorId = 'automation-synthetic-reminder-successor'
-    const successorConflict = Object.assign(new Error('private successor detail'), {
+    const existingAutomationId = 'automation-synthetic-reminder'
+    const identifiedConflict = Object.assign(new Error('private conflict detail'), {
       code: 'VAULT_AUTOMATION_CONFLICT',
       details: {
-        existingAutomationId: successorId,
+        existingAutomationId,
       },
     })
-    automationTool.request.mockRejectedValueOnce(successorConflict)
+    automationTool.request.mockRejectedValueOnce(identifiedConflict)
     const saveRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send a reminder.',
@@ -1722,7 +1725,7 @@ describe('hosted domain dynamic tools', () => {
     if (!saveRequest) {
       throw new Error('Expected a save request.')
     }
-    const successorConflictResult = await executeMurphDynamicToolRequest({
+    const identifiedConflictResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({ automationTool }),
@@ -1730,17 +1733,17 @@ describe('hosted domain dynamic tools', () => {
       progressDelivery: null,
       request: saveRequest,
     })
-    expect(successorConflictResult.rpcResult).toMatchObject({ success: false })
-    expect(successorConflictResult.rpcResult.contentItems[0]?.text).toBe(
+    expect(identifiedConflictResult.rpcResult).toMatchObject({ success: false })
+    expect(identifiedConflictResult.rpcResult.contentItems[0]?.text).toBe(
       JSON.stringify({
         code: 'automation_conflict',
-        existingAutomationId: successorId,
+        existingAutomationId,
         recovery:
           'inspect existingAutomationId exactly, then decide from that stored schedule and apply a versioned patch',
       }),
     )
-    expect(successorConflictResult.rpcResult.contentItems[0]?.text).not.toContain(
-      'private successor detail',
+    expect(identifiedConflictResult.rpcResult.contentItems[0]?.text).not.toContain(
+      'private conflict detail',
     )
   })
 

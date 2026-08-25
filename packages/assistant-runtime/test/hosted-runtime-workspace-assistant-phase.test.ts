@@ -5391,101 +5391,68 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             lookup: reminderRoot.automationId,
             status: "archived",
           });
-          const reminderSuccessor = await executionContext.hosted?.automationTool?.request({
+          const independentlyNumberedReminder =
+            await executionContext.hosted?.automationTool?.request({
             action: "save",
-            instructions: "Send the replacement synthetic mobility reminder.",
+            instructions: "Send the independent numbered mobility reminder.",
             schedule: { kind: "dailyLocal", localTime: "08:15" },
-            slug: "mobility-reminder",
-            title: "Mobility reminder",
+            slug: "mobility-reminder-2",
+            title: "Mobility reminder 2",
           });
-          if (!reminderSuccessor || reminderSuccessor.action !== "save") {
-            throw new Error("Expected successor reminder save.");
+          if (
+            !independentlyNumberedReminder
+            || independentlyNumberedReminder.action !== "save"
+          ) {
+            throw new Error("Expected independent numbered reminder save.");
           }
-          expect(reminderSuccessor.lookupId).toBe("mobility-reminder-2");
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
-            instructions: "Update the replacement synthetic mobility reminder.",
+            instructions: "Reactivate the synthetic mobility reminder.",
             schedule: { kind: "dailyLocal", localTime: "08:30" },
             slug: "mobility-reminder",
             title: "Mobility reminder",
           })).rejects.toMatchObject({
             code: "VAULT_AUTOMATION_CONFLICT",
             details: {
-              existingAutomationId: reminderSuccessor.automationId,
+              existingAutomationId: reminderRoot.automationId,
             },
           });
-          const activeSuccessor = await executionContext.hosted?.automationTool?.request({
-            action: "inspect",
-            lookup: reminderSuccessor.automationId,
-          });
-          if (!activeSuccessor || activeSuccessor.action !== "inspect") {
-            throw new Error("Expected active successor inspection.");
-          }
-          expect(activeSuccessor).toEqual(expect.objectContaining({
-            automationId: reminderSuccessor.automationId,
-            lookupId: "mobility-reminder-2",
-            status: "active",
-          }));
-          const pausedSuccessor = await executionContext.hosted?.automationTool?.request({
-            action: "patch",
-            expectedUpdatedAt: activeSuccessor.updatedAt,
-            lookup: activeSuccessor.automationId,
-            schedule: { kind: "dailyLocal", localTime: "08:30" },
-            status: "paused",
-          });
-          if (!pausedSuccessor || pausedSuccessor.action !== "patch") {
-            throw new Error("Expected paused successor patch.");
-          }
-          await expect(executionContext.hosted?.automationTool?.request({
-            action: "save",
-            instructions: "Replace the paused synthetic mobility reminder.",
-            schedule: { kind: "dailyLocal", localTime: "08:45" },
-            slug: "mobility-reminder",
-            title: "Mobility reminder",
-          })).rejects.toMatchObject({
-            code: "VAULT_AUTOMATION_CONFLICT",
-            details: {
-              existingAutomationId: pausedSuccessor.automationId,
-            },
-          });
-          const inspectedPausedSuccessor =
+          const archivedReminder =
             await executionContext.hosted?.automationTool?.request({
               action: "inspect",
-              lookup: pausedSuccessor.automationId,
+              lookup: reminderRoot.automationId,
             });
-          if (
-            !inspectedPausedSuccessor
-            || inspectedPausedSuccessor.action !== "inspect"
-          ) {
-            throw new Error("Expected paused successor inspection.");
+          if (!archivedReminder || archivedReminder.action !== "inspect") {
+            throw new Error("Expected archived reminder inspection.");
           }
-          expect(inspectedPausedSuccessor.status).toBe("paused");
-          await executionContext.hosted?.automationTool?.request({
-            action: "patch",
-            expectedUpdatedAt: inspectedPausedSuccessor.updatedAt,
-            lookup: inspectedPausedSuccessor.automationId,
-            status: "archived",
-          });
-          const recreatedReminder = await executionContext.hosted?.automationTool?.request({
-            action: "save",
-            instructions: "Send the recreated synthetic mobility reminder.",
-            schedule: { kind: "dailyLocal", localTime: "09:00" },
-            slug: "mobility-reminder",
-            title: "Mobility reminder",
-          });
-          expect(recreatedReminder).toEqual(expect.objectContaining({
-            action: "save",
-            created: true,
-            lookupId: "mobility-reminder-3",
-            status: "active",
-          }));
-          await expect(executionContext.hosted?.automationTool?.request({
-            action: "inspect",
-            lookup: "mobility-reminder",
-          })).resolves.toEqual(expect.objectContaining({
+          expect(archivedReminder).toEqual(expect.objectContaining({
             automationId: reminderRoot.automationId,
             lookupId: "mobility-reminder",
             status: "archived",
+          }));
+          const reactivatedReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "patch",
+              expectedUpdatedAt: archivedReminder.updatedAt,
+              lookup: archivedReminder.automationId,
+              schedule: { kind: "dailyLocal", localTime: "08:30" },
+              status: "active",
+            });
+          if (!reactivatedReminder || reactivatedReminder.action !== "patch") {
+            throw new Error("Expected reactivated reminder patch.");
+          }
+          expect(reactivatedReminder).toEqual(expect.objectContaining({
+            automationId: reminderRoot.automationId,
+            created: false,
+            lookupId: "mobility-reminder",
+            status: "active",
+          }));
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "inspect",
+            lookup: independentlyNumberedReminder.automationId,
+          })).resolves.toEqual(expect.objectContaining({
+            lookupId: "mobility-reminder-2",
+            status: "active",
           }));
 
           const stale = await executionContext.hosted?.automationTool?.request({

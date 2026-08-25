@@ -5,9 +5,9 @@
     "id": "reminders-reuse-archived-names",
     "kind": "improvement",
     "priority": 3,
-    "title": "Reminders can reuse familiar names",
-    "summary": "Creating a reminder now works when an older reminder with the same name has been archived.",
-    "details": "Murph keeps the older reminder intact and saves the new request as a separate schedule.",
+    "title": "Archived reminders can be reactivated",
+    "summary": "Setting a reminder again now recovers the exact archived reminder instead of failing on its name.",
+    "details": "Murph safely reads the archived reminder, updates its schedule, and reactivates the same reminder.",
     "relevanceTags": ["reminders", "reliability"],
     "sourcePullRequests": [2216]
   }

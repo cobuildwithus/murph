@@ -143,48 +143,6 @@ export function resolveAutomationUpsertSlug(input: {
   );
 }
 
-const AUTOMATION_SLUG_MAX_LENGTH = 160;
-
-function resolveAvailableAutomationCreateSlug(
-  records: readonly AutomationRecord[],
-  requestedSlug: string,
-): string {
-  const recordsBySlug = new Map(records.map((record) => [record.slug, record]));
-  if (!recordsBySlug.has(requestedSlug)) {
-    return requestedSlug;
-  }
-
-  let availableSlug: string | undefined;
-  for (let index = 2; index <= records.length + 2; index += 1) {
-    const suffix = `-${index}`;
-    const stem = requestedSlug
-      .slice(0, AUTOMATION_SLUG_MAX_LENGTH - suffix.length)
-      .replace(/-+$/u, "");
-    const candidate = `${stem}${suffix}`;
-    const existingRecord = recordsBySlug.get(candidate);
-    if (existingRecord === undefined) {
-      availableSlug ??= candidate;
-      continue;
-    }
-    if (existingRecord.status !== "archived") {
-      throw new VaultError(
-        "VAULT_AUTOMATION_CONFLICT",
-        "Automation already exists; use a versioned patch to change it.",
-        { existingAutomationId: existingRecord.automationId },
-      );
-    }
-  }
-
-  if (availableSlug !== undefined) {
-    return availableSlug;
-  }
-
-  throw new VaultError(
-    "VAULT_AUTOMATION_CONFLICT",
-    "Automation slug could not be made unique.",
-  );
-}
-
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
@@ -1680,30 +1638,21 @@ async function upsertAutomationWithLatestRegistry(
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
-  let requestedSlug = resolveAutomationUpsertSlug({
+  const requestedSlug = resolveAutomationUpsertSlug({
     slug: input.slug,
     title,
   });
   const currentRecords = records ?? await loadAutomationRecords(input.vaultRoot);
-  let existingRecord = selectAutomationRecord(
+  const existingRecord = selectAutomationRecord(
     currentRecords,
     { automationId: normalizedId, slug: requestedSlug },
   );
   if (input.createOnly === true && existingRecord !== null) {
-    if (existingRecord.status !== "archived" || normalizedId !== undefined) {
-      throw new VaultError(
-        "VAULT_AUTOMATION_CONFLICT",
-        "Automation already exists; use a versioned patch to change it.",
-        existingRecord.status === "archived"
-          ? {}
-          : { existingAutomationId: existingRecord.automationId },
-      );
-    }
-    requestedSlug = resolveAvailableAutomationCreateSlug(
-      currentRecords,
-      requestedSlug,
+    throw new VaultError(
+      "VAULT_AUTOMATION_CONFLICT",
+      "Automation already exists; use a versioned patch to change it.",
+      { existingAutomationId: existingRecord.automationId },
     );
-    existingRecord = null;
   }
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
