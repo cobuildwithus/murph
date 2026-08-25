@@ -1,8 +1,8 @@
 # Nutrition Card And Meal Capture Recovery
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -63,3 +63,26 @@ evidence-based observation when numeric nutrition cannot be saved.
 - Parent diff review, preliminary Product UX/prompt/coverage ReviewGPT, final
   sensitive-behavior ReviewGPT, required GitHub checks, and current-base merge
   proof on the intended PR head.
+
+## Outcome
+
+- Kept compatibility read-only and narrow: only a complete historical daily
+  bundle using rolling-window mean plus daily-aggregate mean may supply the
+  existing point card; other statistics, mixed bundles, and ambiguous targets
+  still fail closed without Goal mutation.
+- Kept recovery in the existing prompt and tool owners: retry one malformed
+  card call, and after one failed meal edit re-list, re-identify, retry once,
+  and require read-back before photo cleanup.
+- Preserved a concise evidence-based meal observation when nutrition cannot be
+  estimated, while retaining the photo whenever the save cannot be proven.
+- Reconciled the overlapping automatic-meal clarification change from `main`
+  in the same prompt owner, preserving both the last-resort question and this
+  task's bounded save recovery without new state or abstractions.
+- Focused assistant-engine verification passed: four files with 45 tests, the
+  scripted malformed-card recovery test, and package typecheck. Changelog
+  fragment tests and hosted Web typecheck also passed.
+- The provider-gated automatic-meal scenario was added but could not run
+  locally because the required provider credential was unavailable. Final
+  ReviewGPT round 2 passed with no findings; exact-head CI remains the merge
+  gate after this plan-closing commit.
+Completed: 2026-08-25
