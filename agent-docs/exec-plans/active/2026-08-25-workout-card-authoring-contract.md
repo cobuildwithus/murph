@@ -56,9 +56,9 @@ Updated: 2026-08-25
 2. [completed] Make the two compact-table alternatives explicit and move the
    tracking timestamp to runtime ownership.
 3. [completed] Add focused first-call authoring and prompt regressions.
-4. [in_progress] Run focused verification, inspect provider-input size, and complete
-   the Product UX walkthrough.
-5. [pending] Commit, push, open the PR, run the required specialist and final
+4. [completed] Run focused verification, inspect provider-input size, and
+   complete the Product UX walkthrough.
+5. [in_progress] Commit, push, open the PR, run the required specialist and final
    gates, and require green exact-head CI.
 
 ## Decisions
@@ -93,10 +93,24 @@ Updated: 2026-08-25
 
 ## Verification
 
-- Commands to run: focused Assistant Engine response-card, validation, skill,
-  and scripted-runtime tests; Operator Config schema tests; affected package
-  typechecks; provider schema-size measurement; required ReviewGPT and CI gates.
-- Expected outcomes: first-call workout input needs only one complete card
-  shape and exact workout entity identity, runtime output contains a canonical
-  host timestamp, invalid mixed shapes remain rejected, and all existing
-  generic/nutrition behavior stays green.
+- Passed 59 focused tests across Operator Config schema coverage, Assistant
+  Engine response-card parsing/execution, validation feedback, tracked-table
+  skill guidance, oversized semantic recovery, and schema-size compaction.
+- Passed affected Operator Config and Assistant Engine package typechecks plus
+  `git diff --check`.
+- Captured repeat-stable complete first provider requests through the pinned
+  real Codex App Server with `gpt-5.6-terra`, low reasoning, production code
+  mode, identical synthetic direct/group card fixtures, and `gpt-tokenizer`
+  3.4.0 `o200k_harmony`. The selected provider-visible fields were `include`,
+  `input`, `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and
+  `tools` when present; volatile temporary Codex paths and runtime identifiers
+  were normalized, and model/reasoning/storage/streaming/service-tier/account/
+  cache/client/transport metadata were excluded identically. Direct changes
+  from 28,421 tokens / 131,826 bytes to 28,458 / 131,960 (+37 tokens,
+  +0.1302%; +134 bytes, +0.1016%). Group remains exactly 23,405 tokens /
+  107,342 bytes. The direct delta is confined to Codex-generated code-mode
+  response-card tool/schema guidance in `input`; the deferred tracked-table
+  skill is absent from the first request. Measurement-only instrumentation was
+  removed.
+- Merged current `origin/main` before the final provider capture. Required
+  ReviewGPT and exact-head CI gates remain pending.
