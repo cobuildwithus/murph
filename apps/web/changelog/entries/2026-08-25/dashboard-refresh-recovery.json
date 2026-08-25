@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "dashboard-refresh-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Clearer dashboard refresh recovery",
+    "summary": "Overview and History now keep readable data during refresh problems and show a clear Retry state when dashboard data is not yet available.",
+    "details": "Passive checks stop after a bounded wait instead of restarting the same failed work, leaving another attempt under your control.",
+    "relevanceTags": ["dashboard", "reliability", "recovery"],
+    "sourcePullRequests": [2226]
+  }
+}

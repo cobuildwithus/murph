@@ -243,8 +243,14 @@ export function createBrowserVaultSessionRoute() {
       );
     } catch (error) {
       if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) {
-        scheduleRefreshAfterResponse();
-        if (requestedShards !== undefined || requestedMetricBuckets !== undefined) {
+        if (!refreshObservationOnly) {
+          scheduleRefreshAfterResponse();
+        }
+        if (
+          knownReplicaRef !== null
+          || requestedShards !== undefined
+          || requestedMetricBuckets !== undefined
+        ) {
           throw hostedOnboardingError({
             cause: error,
             code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
