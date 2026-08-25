@@ -581,7 +581,7 @@ test("trusted workflow is pinned, protected, source-bound, and shares the destru
   }
 });
 
-test("Android workflow selector admits only the hosted companion dependency closure", async () => {
+test("Android workflow selector uses stable hosted companion ownership boundaries", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
@@ -596,10 +596,25 @@ test("Android workflow selector admits only the hosted companion dependency clos
     ".github/workflows/native-android-hosted-e2e.yml",
     "agent-docs/operations/native-android-hosted-e2e.md",
   ]);
+  assert.equal(
+    workflowTopLevelWebRegex(workflow),
+    workflowTopLevelWebRegex(iosWorkflow),
+    "the top-level Web owner boundary must stay aligned across native platforms",
+  );
   assert.deepEqual(
     workflowSelectorPatterns(workflow).filter((pattern) => !androidControllerPatterns.has(pattern)),
     workflowSelectorPatterns(iosWorkflow),
     "the hosted companion dependency closure must stay aligned across native platforms",
+  );
+  assert.deepEqual(
+    workflowSelectorPatterns(workflow).filter((pattern) => pattern.startsWith("apps/web/")),
+    [
+      "apps/web/app/api/device-sync/companion/*",
+      "apps/web/prisma/*",
+      "apps/web/scripts/*",
+      "apps/web/src/lib/*",
+    ],
+    "Web admission must use stable owner trees rather than file literals",
   );
   assert.doesNotMatch(
     workflow,
@@ -607,18 +622,13 @@ test("Android workflow selector admits only the hosted companion dependency clos
     "the selector must not admit every hosted Web path",
   );
   for (const selected of [
-    "apps/web/app/api/device-sync/companion/admission/route.ts",
-    "apps/web/app/api/device-sync/companion/auth-diagnostics/route.ts",
-    "apps/web/app/api/device-sync/companion/initial-onboarding/contact-card/route.ts",
-    "apps/web/app/api/device-sync/companion/legal-consent/route.ts",
-    "apps/web/app/api/device-sync/companion/sign-in-token/route.ts",
-    "apps/web/app/api/device-sync/companion/status/route.ts",
-    "apps/web/src/lib/hosted-onboarding/request-auth.ts",
-    "apps/web/src/lib/hosted-messages/user-facing-messages.ts",
-    "apps/web/src/lib/device-sync/control-plane.ts",
-    "apps/web/next-artifacts.ts",
-    "apps/web/prisma/schema.prisma",
-    "apps/web/vercel.json",
+    "apps/web/future-build.config.ts",
+    "apps/web/tsconfig.next.json",
+    "apps/web/app/api/device-sync/companion/future/route.ts",
+    "apps/web/prisma/future/schema.prisma",
+    "apps/web/scripts/ensure-prisma-client-link.ts",
+    "apps/web/scripts/future-build-owner.ts",
+    "apps/web/src/lib/future-runtime-owner.ts",
     "packages/device-syncd/src/hosted-runtime.ts",
     "scripts/native-android-hosted-e2e-native.mjs",
     "scripts/native-ios-hosted-e2e-identity.mjs",
@@ -771,9 +781,14 @@ function extractWorkflowStepScript(workflow, stepName) {
 }
 
 function runWorkflowSelector(workflow, file) {
+  const topLevelWebRegex = workflowTopLevelWebRegex(workflow);
   const script = [
     "set -euo pipefail",
     'file="$1"',
+    `if [[ "\${file}" =~ ${topLevelWebRegex} ]]; then`,
+    '  printf "selected\\n"',
+    "  exit 0",
+    "fi",
     'case "${file}" in',
     `${workflowSelectorPatternSource(workflow)})`,
     '  printf "selected\\n"',
@@ -789,6 +804,12 @@ function runWorkflowSelector(workflow, file) {
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
+}
+
+function workflowTopLevelWebRegex(workflow) {
+  const match = /if \[\[ "\$\{file\}" =~ (?<pattern>\S+) \]\]; then/u.exec(workflow);
+  assert.ok(match?.groups?.pattern, "top-level Web selector boundary was not found");
+  return match.groups.pattern;
 }
 
 function workflowSelectorPatterns(workflow) {

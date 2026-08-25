@@ -44,9 +44,9 @@ Updated: 2026-08-24
 ## Risks and mitigations
 
 1. Risk: a companion-affecting change could be incorrectly filtered out.
-   Mitigation: align Android with the already proven iOS companion dependency
-   closure, retain Android/shared-controller owners, and add executable positive,
-   negative, and broad-pattern mutation coverage.
+   Mitigation: use the same structural Web/package owner boundaries on Android
+   and iOS, retain Android/shared-controller owners, and add executable positive,
+   negative, parity, and broad-pattern mutation coverage.
 2. Risk: queue speed is improved by weakening isolation.
    Mitigation: leave the shared live concurrency group, protected environment,
    exact-head revalidation, and lifecycle implementation untouched.
@@ -54,10 +54,10 @@ Updated: 2026-08-24
 ## Tasks
 
 1. Capture recent queue and privacy-safe stage timing evidence.
-2. Replace the broad Android selector with the actual companion route/runtime
-   closure plus shared and Android-specific controller owners.
-3. Expand the Android selector tests to prove representative admission,
-   non-admission, rename handling, and rejection of a broad Web pattern.
+2. Replace the broad Android selector with stable companion route/runtime/build
+   owner boundaries plus shared and Android-specific controller owners.
+3. Expand the selector tests to prove structural admission, non-admission,
+   cross-platform parity, rename handling, and rejection of a broad Web pattern.
 4. Update living verification documentation to describe the narrowed Android
    admission contract.
 5. Run focused checks, review and commit the candidate, open a draft PR, then
@@ -75,6 +75,12 @@ Updated: 2026-08-24
 - Reuse the iOS companion dependency closure because both native journeys call
   the same hosted companion routes; retain the Android and shared-controller
   files that uniquely affect this lane.
+- ReviewGPT round 2 proved that per-file Web literals repeat an omission
+  mechanism even when Android and iOS stay aligned. Redesign through deletion:
+  admit every top-level Web file plus the complete `scripts`, `prisma`, and
+  `src/lib` owner trees and the companion API subtree. This automatically covers
+  new config/build/runtime files without a parser, generated allowlist, or new
+  state owner while leaving nested UI, content, and tests neutral.
 
 ## Verification
 
