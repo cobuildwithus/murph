@@ -547,6 +547,38 @@ describe("markdown document primitives", () => {
     })).resolves.toEqual(created.record);
   });
 
+  it("returns an exact create-only replay without rewriting the automation", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const request = {
+      acceptExactCreateReplay: true,
+      automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41WC",
+      createOnly: true,
+      ...createAutomationPayload({
+        slug: undefined,
+        title: "Stretch reminder",
+      }),
+      vaultRoot,
+    };
+    const created = await upsertAutomation({
+      ...request,
+      now: new Date("2031-02-14T12:00:00.000Z"),
+    });
+    const replayed = await upsertAutomation({
+      ...request,
+      now: new Date("2031-02-14T12:01:00.000Z"),
+    });
+
+    expect(replayed).toEqual({
+      auditPath: null,
+      created: false,
+      record: created.record,
+    });
+    await expect(upsertAutomation({
+      ...request,
+      instructions: "Do not replace the stored reminder during replay.",
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+  });
+
   it("uses generated ids for create-only automation paths so titles can repeat", async () => {
     const vaultRoot = await makeVaultRoot();
     const archived = await upsertAutomation({

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import * as z from '@murphai/contracts/zod-runtime'
+import { deterministicContractId } from '@murphai/core'
 
 import {
   automationActiveUntilSchema,
@@ -29,6 +30,9 @@ import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
 } from '../../assistant/execution-context.js'
+import type {
+  AssistantHostedUserActionScope,
+} from '../../assistant/hosted-tool-context.js'
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
@@ -846,6 +850,7 @@ export async function executeAutomationDynamicTool(input: {
   automationTool: AssistantHostedAutomationTool
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
+  userActionScope?: AssistantHostedUserActionScope | null
 }): Promise<{
   rpcResult: {
     contentItems: Array<{ text: string; type: 'inputText' }>
@@ -863,7 +868,11 @@ export async function executeAutomationDynamicTool(input: {
   }
 
   try {
-    const response = await input.automationTool.request(input.request.request, {
+    const request = bindAutomationSaveReplayIdentity({
+      request: input.request.request,
+      userActionScope: input.userActionScope ?? null,
+    })
+    const response = await input.automationTool.request(request, {
       ...(input.request.onboardingFirstReadCompletionRequested === true
         ? { onboardingFirstReadCompletionTransition: true as const }
         : {}),
@@ -899,6 +908,52 @@ export async function executeAutomationDynamicTool(input: {
     }
     return automationTextResult(false, 'automation operation is unavailable')
   }
+}
+
+function bindAutomationSaveReplayIdentity(input: {
+  request: AssistantHostedAutomationToolRequest
+  userActionScope: AssistantHostedUserActionScope | null
+}): AssistantHostedAutomationToolRequest {
+  if (
+    input.request.action !== 'save'
+    || input.request.automationId !== undefined
+  ) {
+    return input.request
+  }
+  const acceptedInputId = input.userActionScope?.acceptedInputIds.at(-1)
+  if (!acceptedInputId) {
+    return input.request
+  }
+  return {
+    ...input.request,
+    automationId: deterministicContractId(
+      'automation',
+      stableJson({
+        acceptedInputId,
+        request: input.request,
+        schema: 'murph.automation-save-replay-identity.v1',
+      }),
+    ),
+  }
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(stabilizeJsonValue(value))
+}
+
+function stabilizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stabilizeJsonValue(item))
+  }
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entryValue]) => [key, stabilizeJsonValue(entryValue)]),
+  )
 }
 
 function isAutomationNotFoundError(

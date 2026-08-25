@@ -146,6 +146,7 @@ export function resolveAutomationUpsertSlug(input: {
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
+  acceptExactCreateReplay?: boolean;
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
@@ -154,7 +155,7 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
 }
 
 export interface UpsertAutomationResult {
-  auditPath: string;
+  auditPath: string | null;
   created: boolean;
   record: AutomationRecord;
 }
@@ -1652,12 +1653,21 @@ async function upsertAutomationWithLatestRegistry(
     currentRecords,
     { automationId: normalizedId, slug: requestedSlug },
   );
-  if (input.createOnly === true && existingRecord !== null) {
+  const exactCreateReplayRequested =
+    input.createOnly === true
+    && input.acceptExactCreateReplay === true
+    && normalizedId !== undefined;
+  if (
+    input.createOnly === true
+    && existingRecord !== null
+    && !exactCreateReplayRequested
+  ) {
     throw new VaultError(
       "VAULT_AUTOMATION_CONFLICT",
       "Automation already exists; use a versioned patch to change it.",
     );
   }
+  const definitionBase = input.createOnly === true ? null : existingRecord;
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId
     ?? createOnlyRecordId
@@ -1679,12 +1689,12 @@ async function upsertAutomationWithLatestRegistry(
   });
   const schedule = input.schedule !== undefined
     ? normalizeAutomationSchedule(input.schedule)
-    : existingRecord?.schedule ?? scaffoldAutomationPayload().schedule;
+    : definitionBase?.schedule ?? scaffoldAutomationPayload().schedule;
   const activeUntil = input.activeUntil === undefined
-    ? existingRecord?.activeUntil ?? null
+    ? definitionBase?.activeUntil ?? null
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
-  const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
+  const status = normalizeAutomationStatus(input.status ?? definitionBase?.status);
   const scheduleAnchorAt = (
     existingRecord === null ||
     !isDeepStrictEqual(existingRecord.schedule, schedule) ||
@@ -1693,10 +1703,10 @@ async function upsertAutomationWithLatestRegistry(
     ? now
     : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
   const requestedTags = input.tags === undefined
-    ? existingRecord?.tags ?? []
+    ? definitionBase?.tags ?? []
     : normalizeAutomationTags(input.tags);
   assertAutomationReconciledArchiveMarkerNotForged({
-    existingRecord,
+    existingRecord: definitionBase,
     requestedTags,
   });
   // Reconciliation is the only writer allowed to grant future automatic
@@ -1707,7 +1717,7 @@ async function upsertAutomationWithLatestRegistry(
     (tag) => tag !== AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   );
   assertAutomationSupportSeriesOwnershipPreserved({
-    existingRecord,
+    existingRecord: definitionBase,
     nextTags: tags,
   });
 
@@ -1720,34 +1730,34 @@ async function upsertAutomationWithLatestRegistry(
     status,
     summary:
       input.summary === undefined
-        ? existingRecord?.summary ?? null
+        ? definitionBase?.summary ?? null
         : normalizeAutomationSummary(input.summary),
     activeUntil,
     schedule,
     route:
       input.route !== undefined
         ? normalizeAutomationRoute(input.route)
-        : existingRecord?.route ?? scaffoldAutomationPayload().route,
+        : definitionBase?.route ?? scaffoldAutomationPayload().route,
     assistantTargetOverride:
       input.assistantTargetOverride === undefined
-        ? existingRecord?.assistantTargetOverride ?? null
+        ? definitionBase?.assistantTargetOverride ?? null
         : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
     supportKind:
       input.supportKind === undefined
-        ? existingRecord?.supportKind ?? null
+        ? definitionBase?.supportKind ?? null
         : normalizeAutomationSupportKind(input.supportKind),
     plannedOccurrenceOffsetMs:
       input.plannedOccurrenceOffsetMs === undefined
-        ? existingRecord?.plannedOccurrenceOffsetMs ?? null
+        ? definitionBase?.plannedOccurrenceOffsetMs ?? null
         : normalizeAutomationPlannedOccurrenceOffsetMs(
             input.plannedOccurrenceOffsetMs,
           ),
     contextReferences:
       input.contextReferences === undefined
-        ? existingRecord?.contextReferences ?? []
+        ? definitionBase?.contextReferences ?? []
         : normalizeAutomationContextReferences(input.contextReferences),
     continuityPolicy:
-      normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
+      normalizeAutomationContinuityPolicy(input.continuityPolicy ?? definitionBase?.continuityPolicy),
     tags,
     createdAt,
     scheduleAnchorAt,
@@ -1759,6 +1769,23 @@ async function upsertAutomationWithLatestRegistry(
     relativePath: target.relativePath,
     markdown: "",
   };
+
+  if (input.createOnly === true && existingRecord !== null) {
+    if (
+      requestedSlug === existingRecord.slug
+      && automationDefinitionsEqual(record, existingRecord)
+    ) {
+      return {
+        auditPath: null,
+        created: false,
+        record: existingRecord,
+      };
+    }
+    throw new VaultError(
+      "VAULT_AUTOMATION_CONFLICT",
+      "Automation already exists; use a versioned patch to change it.",
+    );
+  }
 
   const { auditPath, record: writtenRecord } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
@@ -1782,6 +1809,30 @@ async function upsertAutomationWithLatestRegistry(
     created: target.created,
     record: writtenRecord,
   };
+}
+
+function automationDefinitionsEqual(
+  left: AutomationRecord,
+  right: AutomationRecord,
+): boolean {
+  const definition = (record: AutomationRecord) => ({
+    activeUntil: record.activeUntil,
+    assistantTargetOverride: record.assistantTargetOverride,
+    automationId: record.automationId,
+    contextReferences: record.contextReferences,
+    continuityPolicy: record.continuityPolicy,
+    instructions: record.instructions,
+    plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs,
+    route: record.route,
+    schedule: record.schedule,
+    slug: record.slug,
+    status: record.status,
+    summary: record.summary,
+    supportKind: record.supportKind,
+    tags: record.tags,
+    title: record.title,
+  });
+  return isDeepStrictEqual(definition(left), definition(right));
 }
 
 function withAutomationRegistryLock<TResult>(

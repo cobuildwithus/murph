@@ -9,6 +9,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.js'
 import type {
   AssistantHostedToolContext,
+  AssistantHostedUserActionScope,
 } from '../src/assistant/hosted-tool-context.js'
 
 describe('hosted domain dynamic tools', () => {
@@ -1448,6 +1449,89 @@ describe('hosted domain dynamic tools', () => {
     expect(unavailable.rpcResult).toMatchObject({ success: false })
   })
 
+  it('binds generic saves to the accepted input while keeping different saves independent', async () => {
+    const automationTool = {
+      request: vi.fn(async (request) => ({
+        action: 'save' as const,
+        automationId: request.action === 'save'
+          ? request.automationId ?? 'missing-automation-id'
+          : 'unexpected-action',
+        created: true,
+        effectiveTimeZone: null,
+        lookupId: 'opaque-lookup',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2031-02-15T18:00:00.000Z',
+          status: 'resolved' as const,
+        },
+        routeBinding: 'current_conversation' as const,
+        schedule: {
+          at: '2031-02-15T18:00:00.000Z',
+          kind: 'at' as const,
+        },
+        status: 'active' as const,
+        updatedAt: '2031-02-15T17:00:00.000Z',
+      })),
+    }
+    const userActionScope: AssistantHostedUserActionScope = {
+      acceptedInputIds: ['ain_0123456789abcdef0123456789abcdef'],
+      conversationId: 'conversation-synthetic',
+      conversationScope: 'direct',
+      inboundMailboxItemIds: ['mailbox-synthetic'],
+      originSessionId: 'session-synthetic',
+      recipientKey: 'recipient-synthetic',
+    }
+    const firstRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the first reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2031-02-15',
+          time: '13:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Stretch reminder',
+    })
+    const secondRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the second reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2031-02-15',
+          time: '14:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Stretch reminder',
+    })
+    if (!firstRequest || !secondRequest) {
+      throw new Error('Expected automation save requests.')
+    }
+    const hostedToolContext = createHostedToolContext({
+      automationTool,
+      userActionScope,
+    })
+    for (const request of [firstRequest, firstRequest, secondRequest]) {
+      await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request,
+      })
+    }
+
+    const automationIds = automationTool.request.mock.calls.map(
+      ([request]) => request.action === 'save' ? request.automationId : null,
+    )
+    expect(automationIds[0]).toMatch(/^automation_[0-9A-HJKMNP-TV-Z]{26}$/u)
+    expect(automationIds[1]).toBe(automationIds[0])
+    expect(automationIds[2]).not.toBe(automationIds[0])
+  })
+
   it('executes read-only automation inspection through the injected port', async () => {
     const automationTool = {
       request: vi.fn(async () => ({
@@ -1829,12 +1913,14 @@ function referenceWindow(at: string): {
 function createHostedToolContext(input: {
   automationTool?: AssistantHostedToolContext['automationTool']
   deviceTool?: AssistantHostedToolContext['deviceTool']
+  userActionScope?: AssistantHostedUserActionScope
 }): AssistantHostedToolContext {
   return {
     automationTool: input.automationTool ?? null,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => input.userActionScope ?? null,
     deviceTool: input.deviceTool ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')

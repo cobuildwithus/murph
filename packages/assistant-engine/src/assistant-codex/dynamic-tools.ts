@@ -2379,6 +2379,8 @@ export async function executeMurphDynamicToolRequest(input: {
         onboardingFirstReadCompletionTransitionAvailable:
           input.onboardingFirstReadCompletionTransitionAvailable ?? false,
         request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
       })
     }
     case 'group-room-model':

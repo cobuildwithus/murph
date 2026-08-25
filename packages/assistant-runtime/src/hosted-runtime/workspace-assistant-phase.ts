@@ -1549,6 +1549,7 @@ function createHostedAssistantAutomationTool(input: {
           status,
         });
         const result = await upsertAutomation({
+          acceptExactCreateReplay: request.automationId !== undefined,
           ...(request.activeUntil === undefined
             ? {}
             : { activeUntil: request.activeUntil }),
