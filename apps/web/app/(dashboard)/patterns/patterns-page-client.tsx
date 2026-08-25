@@ -7,7 +7,7 @@ import { PersonalPatternsSection } from "@/src/components/overview/personal-patt
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 
 export default function PatternsPageClient() {
-  const { client, error, refresh, refreshPending, status } = useBrowserVault();
+  const { client, error, refreshPending, status } = useBrowserVault();
   const report = useMemo(
     () => client ? selectBrowserVaultOverview(client).personalPatterns : null,
     [client],
@@ -24,7 +24,6 @@ export default function PatternsPageClient() {
     <div className="flex flex-col gap-8">
       <PersonalPatternsSection
         error={error}
-        onRetry={() => void refresh()}
         report={report}
         state={sectionState}
       />

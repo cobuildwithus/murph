@@ -232,6 +232,7 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
+  assertNever,
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 import {
@@ -1085,7 +1086,11 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
 function hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): boolean {
-  return preparation !== null && preparation.status !== "preempted";
+  if (!preparation || preparation.status === "preempted") {
+    return false;
+  }
+  return preparation.status !== "recording"
+    || preparation.checkpointRequired;
 }
 
 function readHostedSystemMailboxCheckpointPreparationRecordItem(
@@ -2947,13 +2952,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const projectedWake = await resolveCurrentSystemMailboxModeWake(
             preparationWake ? [preparationWake] : [],
           );
+          const resumedBrowserVaultOnlyRecording =
+            preparation?.status === "recording"
+            && !preparation.checkpointRequired;
           const mustCheckpoint = importOrStartupCheckpointPending
             || hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(preparation)
-            || hostedSystemMailboxWakeChangedFromWorkspace({
-              nextWakeAt: projectedWake.nextWakeAt,
-              nextWakeReason: projectedWake.nextWakeReason,
-              workspace: activeWorkspace,
-            });
+            || (
+              !resumedBrowserVaultOnlyRecording
+              && hostedSystemMailboxWakeChangedFromWorkspace({
+                nextWakeAt: projectedWake.nextWakeAt,
+                nextWakeReason: projectedWake.nextWakeReason,
+                workspace: activeWorkspace,
+              })
+            );
           if (mustCheckpoint) {
             await checkpointSystemMailboxMode(
               `${inputItem.stagePrefix}.checkpoint.prepare`,
@@ -3221,15 +3232,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             });
             throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
           }
-          if (hostedBrowserVaultReplicaRefreshRequiresRetry(refresh)) {
+          const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(
+            refresh,
+          );
+          if (refreshDisposition.action === "preempt") {
             if (refresh.status === "deferred_runtime_wake") {
               foregroundWakeObserved = true;
             }
-            const shouldYield = shouldYieldSystemMailboxWork();
-            return {
-              preempted: shouldYield || hostAbortObserved,
-              prepared: true,
-            };
+            return { preempted: true, prepared: true };
           }
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
@@ -6758,15 +6768,28 @@ function buildHostedBrowserVaultRefreshLogDetails(
   };
 }
 
-function hostedBrowserVaultReplicaRefreshRequiresRetry(
+function classifyHostedBrowserVaultReplicaRefresh(
   refresh: HostedBrowserVaultReplicaRefreshResult,
-): boolean {
-  return refresh.status === "deferred_aborted"
-    || refresh.status === "deferred_runtime_wake"
-    || refresh.status === "deferred_source_changed"
-    || refresh.status === "deferred_timeout"
-    || refresh.status === "publish_conflict"
-    || refresh.status === "refresh_failed";
+):
+  | { action: "complete" }
+  | { action: "preempt" } {
+  switch (refresh.status) {
+    case "published":
+    case "skipped_current":
+    case "skipped_no_port":
+    case "workspace_missing":
+    case "deferred_source_changed":
+    case "deferred_timeout":
+    case "publish_conflict":
+    case "refresh_failed":
+    case "refresh_failed_too_large":
+      return { action: "complete" };
+    case "deferred_aborted":
+    case "deferred_runtime_wake":
+      return { action: "preempt" };
+    default:
+      return assertNever(refresh);
+  }
 }
 
 function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {

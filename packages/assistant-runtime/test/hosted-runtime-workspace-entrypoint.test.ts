@@ -12310,7 +12310,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("system mailbox mode keeps no-record device-sync recording until browser replica publishes", async () => {
+  test("system mailbox mode terminally records an unchanged oversized replica", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -12330,45 +12330,23 @@ describe("hosted workspace runtime entrypoint", () => {
     let snapshotIndex = 0;
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async () => {
       refreshCalls += 1;
-      if (refreshCalls === 1) {
-        return { status: "publish_conflict" };
-      }
       return {
-        byteLength: 256,
+        byteLength: 51 * 1024 * 1024,
         content: {
           entities: 1,
           hasPrivateContent: true,
           labResultRows: 0,
           metricGoalProgressRows: 0,
-          metricRows: 0,
+          metricRows: 1,
           metricSelectionRows: 0,
           searchRows: 0,
           sourceHealthRows: 0,
           timelineRows: 0,
           weeklySampleSummaries: 0,
         },
-        freshness: {
-          freshness: "stale",
-          reason: "source_changed",
-          shouldRefresh: true,
-        },
-        replicaRef: {
-          byteLength: 256,
-          dataVersion: "browser-vault-recovered",
-          generatedAt: TEST_NOW,
-          generation: 2,
-          keyId: "browser-vault-replica:recovered",
-          objectKey: "users/browser-vault-replicas/member-synthetic/recovered-replica.json",
-          replicaSchema: "murph.browser-vault-replica",
-          runtimeRootKeyId: "udrk:runtime:synthetic-root",
-          schema: "murph.hosted-browser-vault-replica-ref.v1",
-          sourceBundleHash: "d".repeat(64),
-        },
-        source: {
-          fileCount: 1,
-          totalBytes: 256,
-        },
-        status: "published",
+        maxBytes: 50 * 1024 * 1024,
+        source: { fileCount: 1, totalBytes: 51 * 1024 * 1024 },
+        status: "refresh_failed_too_large",
       };
     });
 
@@ -12387,6 +12365,8 @@ describe("hosted workspace runtime entrypoint", () => {
           item.itemId === deviceItem.id
             ? {
                 ...item,
+                attemptCount: 1,
+                lastAttemptAt: "2026-04-25T23:59:00.000Z",
                 postCheckpointRecord: null,
                 status: "recording" as const,
               }
@@ -12446,6 +12426,17 @@ describe("hosted workspace runtime entrypoint", () => {
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
         createRunOptions(createWorkspaceState({
+          nextWakeAt: TEST_NOW,
+          nextWakeReason: "device-sync.reconcile",
+          redactedStatus: {
+            hostedMailboxBlockedCount: 0,
+            hostedMailboxConversationImportedSeq: "0",
+            hostedMailboxFetchedCount: 0,
+            hostedMailboxImportedCount: 0,
+            hostedMailboxRetryableBlockedCount: 0,
+            hostedMailboxSystemHandledThroughSeq: "0",
+            hostedMailboxSystemImportedSeq: "1",
+          },
           snapshotRef: restoredWorkspace.snapshotRef,
           version: "0",
         })),
@@ -12454,43 +12445,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(refreshCalls, 1);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(firstResult.nextWakeReason, "device-sync.reconcile");
-      const retainedState = await readHostedSystemMailboxState(vaultRoot);
-      const retained = retainedState.pending.find((item) => item.itemId === deviceItem.id);
-      assert.equal(retained?.status, "recording");
-      assert.equal(retained?.postCheckpointRecord, null);
-      assert.equal(
-        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "0",
-      );
-
-      const retryCheckpoint = checkpointRequests.at(-1);
-      assert.ok(retryCheckpoint);
-      const secondResult = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_system_mailbox_device_browser_publish_resume",
-            processingMode: "system_mailbox",
-            workspaceVersion: "1",
-          },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        createRunOptions(createWorkspaceState({
-          inboxMediaRetentionWakeAt: retryCheckpoint.inboxMediaRetentionWakeAt ?? null,
-          nextWakeAt: retryCheckpoint.nextWakeAt ?? null,
-          nextWakeReason: retryCheckpoint.nextWakeReason ?? null,
-          redactedStatus: retryCheckpoint.redactedStatus ?? null,
-          snapshotRef: retryCheckpoint.snapshotRef,
-          version: "1",
-        })),
-      );
-
-      assert.equal(refreshCalls, 2);
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
-      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(secondResult.status, "idle");
-      assert.equal(secondResult.nextWakeAt, null);
-      assert.equal(secondResult.nextWakeReason ?? null, null);
+      assert.equal(firstResult.status, "idle");
+      assert.equal(firstResult.nextWakeAt, null);
+      assert.equal(firstResult.nextWakeReason ?? null, null);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
@@ -12609,7 +12566,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("replica publish conflict retains the device item and resumes without reapplying", async () => {
+  test("replica publish conflict terminally records the device item without reapplying", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -12629,7 +12586,6 @@ describe("hosted workspace runtime entrypoint", () => {
     let browserWriteCalls = 0;
     let snapshotOrdinal = 0;
     let currentWorkspace: HostedWorkspaceState | null = null;
-
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
@@ -12757,27 +12713,11 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
       assert.equal(browserPublishCalls, 1);
+      assert.equal(browserWriteCalls, 1);
+      assert.equal(first.nextWakeAt, "2026-04-27T00:05:00.000Z");
       assert.equal(first.nextWakeReason, "device-sync.reconcile");
-      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([
-        expect.objectContaining({
-          itemId: deviceItem.id,
-          status: "recording",
-        }),
-      ]);
-      assert.ok(currentWorkspace);
-
-      const second = await runSystemPass(
-        "attempt_synthetic_system_mailbox_replica_publish_retry_second",
-        currentWorkspace.version,
-      );
-
-      assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(browserWriteCalls, 2);
-      assert.equal(browserPublishCalls, 2);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
-      assert.equal(second.nextWakeAt, "2026-04-27T00:05:00.000Z");
-      assert.equal(second.nextWakeReason, "device-sync.reconcile");
+      assert.ok(currentWorkspace);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",

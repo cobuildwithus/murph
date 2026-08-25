@@ -3004,7 +3004,7 @@ request. Conversation and other foreground work still preempt refresh work.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a
-legacy readable replica while refresh retries, but the Worker and warm containers
+legacy readable replica while refresh remains pending or stale, but the Worker and warm containers
 should converge immediately after a generation bump so refreshes produce the
 current marker instead of repeatedly publishing legacy refs. During rollback,
 an older Web or Worker parser may omit the additive marker while echoing an
@@ -3015,13 +3015,30 @@ all other immutable-field mismatches still fail closed.
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
 hashes; mtimes, generatedAt, user ids, and runtime cache paths are excluded.
-Refresh builds from the restored `vaultRoot`, recomputes the source hash before
-publish, and discards the attempt if source content changed. Empty current
-query-visible content is publishable so deletions can clear stale dashboard
-state. Runtime-side refresh runs only after foreground work and checkpoint
-correctness are settled, is capped by the browser-vault replica byte limit, and
-races the existing runtime wake signal; if a wake arrives before publish, refresh
-returns scheduled/deferred work instead of publishing partial state.
+Refresh reads one strict canonical source snapshot from the restored `vaultRoot`,
+derives its metric projection in memory, and does not read, rebuild, or mutate
+the local SQLite query projection. It recomputes the source hash before publish
+and discards the attempt if source content changed. Empty current query-visible
+content is publishable so deletions can clear stale dashboard state. Runtime-side
+refresh runs only after foreground work and checkpoint correctness are settled,
+is capped by the browser-vault replica byte limit, and races the existing runtime
+wake signal; if a wake arrives before publish, refresh retains the current work
+instead of publishing partial state.
+The default refresh deadline is 20 seconds and remains bounded by any earlier
+invocation deadline. Cancellation reaches the direct canonical reads, replica
+build checkpoints, content hashing, and size serialization; parallel source
+reads share that signal and every started child settles before the lane returns,
+so timed-out or preempted work cannot continue beside a successor attempt. A
+Browser Vault control or no-record device-sync item that already reached
+`recording` is selected read-only. A runtime wake or host abort leaves its durable
+state untouched for the next foreground-safe opportunity. Timeout, source
+change, publication conflict, generic failure, and an oversized replica
+terminally record the current item without a future retry; a later browser
+freshness request may enqueue new work after the underlying state changes.
+Fresh work and recording items that own post-checkpoint effects retain their
+existing pre-effect preparation checkpoint. Missing optional publication
+support and missing workspace context remain explicit terminal no-op
+classifications rather than implicit fallthrough.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { act, createElement, type ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -149,7 +149,7 @@ test("renders the vault loading state before declaring a private run absent", ()
   assert.doesNotMatch(markup, /Experiment not found/u);
 });
 
-test("renders and retries a required bucket error instead of leaving the route loading", async () => {
+test("renders a stable required bucket error instead of leaving the route loading", async () => {
   mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(false);
   mocks.useBrowserVault.mockReturnValue(browserVaultContext({
     client: null,
@@ -165,14 +165,13 @@ test("renders and retries a required bucket error instead of leaving the route l
   try {
     assert.match(rendered.container.textContent ?? "", /Your experiment couldn't load/u);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Loading your experiment/u);
-    const retry = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry",
+    assert.equal(
+      [...rendered.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry",
+      ),
+      false,
     );
-    assert.ok(retry);
-    await act(async () => {
-      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.equal(mocks.refresh.mock.calls.length, 0);
   } finally {
     await rendered.cleanup();
   }

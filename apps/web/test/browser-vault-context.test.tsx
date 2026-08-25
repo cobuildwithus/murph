@@ -116,7 +116,9 @@ import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-pro
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
+import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
+import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -1596,13 +1598,92 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   });
 
   assert.equal(fetchMock.mock.calls.length > 1, true);
+  const firstPollBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.equal(firstPollBody.refreshObservationOnly, true);
+  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
+  assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+  const fetchCountAfterBoundedPolling = fetchMock.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAfterBoundedPolling);
+  assert.equal(
+    rendered.container.textContent,
+    "error:Your dashboard data is not available right now.",
+  );
   assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
   assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
 
   await rendered.cleanup();
 });
 
-test("browser-vault provider adopts a refreshed Patterns replica after the fast polling window", async () => {
+test("a missing replica leaves Overview and History in a stable unavailable state without Retry controls", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    encryptedReplica: null,
+    freshness: "stale",
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+    workspaceVersion: "1",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(
+      "div",
+      null,
+      createElement(OverviewPageClient),
+      createElement(HistoryPageClient),
+    )),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "Preparing your dashboard");
+  assert.equal(rendered.container.textContent?.includes("Preparing your timeline"), true);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+
+  assert.equal(rendered.container.textContent?.includes("Could not load your overview"), true);
+  assert.equal(rendered.container.textContent?.includes("Could not load history"), true);
+  assert.equal(rendered.container.textContent?.includes("Your dashboard is ready for data"), false);
+  assert.equal(rendered.container.textContent?.includes("No timeline entries yet"), false);
+  assert.equal(
+    [...rendered.container.querySelectorAll("button")].filter(
+      (button) => button.textContent === "Retry",
+    ).length,
+    0,
+  );
+
+  const fetchCountBeforeFocus = fetchMock.mock.calls.length;
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === fetchCountBeforeFocus + 1,
+    "terminal-state focus observation",
+  );
+
+  assert.equal(rendered.container.textContent?.includes("Could not load your overview"), true);
+  assert.equal(rendered.container.textContent?.includes("Could not load history"), true);
+  assert.equal(rendered.container.textContent?.includes("Preparing your dashboard"), false);
+  assert.equal(rendered.container.textContent?.includes("Preparing your timeline"), false);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider preserves readable stale data when bounded observation cannot load the referenced replica", async () => {
   vi.useFakeTimers();
   const legacyReplica = createReplica({
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
@@ -1635,7 +1716,7 @@ test("browser-vault provider adopts a refreshed Patterns replica after the fast 
     keyId: "browser-vault-replica:e",
   });
   let currentReplicaPublished = false;
-  const fetchMock = vi.fn(() => {
+  const fetchMock = vi.fn<typeof fetch>(() => {
     if (fetchMock.mock.calls.length === 1) {
       return Promise.resolve(jsonResponse({
         encryptedReplica: createReplicaEnvelope(),
@@ -1649,15 +1730,15 @@ test("browser-vault provider adopts a refreshed Patterns replica after the fast 
     }
 
     if (!currentReplicaPublished) {
-      return Promise.resolve(jsonResponse({
-        encryptedReplica: null,
-        freshness: "stale",
-        memberId: "member_123",
-        replicaAad: null,
-        replicaKeyEnvelope: null,
-        replicaRef: legacyRef,
-        refreshPending: true,
-        state: "not_modified",
+      return Promise.resolve(new Response(JSON.stringify({
+        error: {
+          code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+          message: "Requested browser vault data is temporarily unavailable.",
+          retryable: true,
+        },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 503,
       }));
     }
 
@@ -1687,14 +1768,22 @@ test("browser-vault provider adopts a refreshed Patterns replica after the fast 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(25_000);
   });
-  assert.equal(rendered.container.textContent, "legacy:pending");
+  await waitForText(rendered.container, "legacy:ready");
+  const fetchCountAfterBoundedPolling = fetchMock.mock.calls.length;
 
   currentReplicaPublished = true;
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAfterBoundedPolling);
+  assert.equal(rendered.container.textContent, "legacy:ready");
+
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
   await waitForText(rendered.container, "patterns:ready");
-  assert.equal(fetchMock.mock.calls.length > 2, true);
+  const focusBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+  assert.equal(focusBody.refreshObservationOnly, true);
 
   await rendered.cleanup();
 });
@@ -3652,6 +3741,58 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
   await rendered.cleanup();
 });
 
+test("an admission-capable refresh waits behind an in-flight observation", async () => {
+  const observationResponse = createDeferred<Response>();
+  const admissionResponse = createDeferred<Response>();
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockImplementationOnce(() => observationResponse.promise)
+    .mockImplementationOnce(() => admissionResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const observation = startBrowserVaultWarmLoad({
+    refreshObservationOnly: true,
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 1,
+    "passive browser-vault observation",
+  );
+  const admission = startBrowserVaultWarmLoad();
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  observationResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+  }));
+  assert.equal((await observation).status, "empty");
+
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "admission after passive observation",
+  );
+  const observationBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+  const admissionBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.equal(observationBody.refreshObservationOnly, true);
+  assert.equal(admissionBody.refreshObservationOnly, undefined);
+
+  admissionResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+  }));
+  assert.equal((await admission).status, "empty");
+});
+
 test("a background refresh keeps the admitted vault visible while it checks for changes", async () => {
   const ref = createReplicaRef();
   const backgroundResponse = createDeferred<Response>();
@@ -3683,6 +3824,8 @@ test("a background refresh keeps the admitted vault visible while it checks for 
     () => fetchMock.mock.calls.length === 2,
     "background browser-vault refresh",
   );
+  const backgroundRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.equal(backgroundRequest.refreshObservationOnly, undefined);
 
   assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
 
@@ -3962,7 +4105,7 @@ test("browser-vault provider keeps ready stale data when a background revalidati
   await rendered.cleanup();
 });
 
-test("browser-vault provider clears the client when a background revalidation returns empty", async () => {
+test("browser-vault provider keeps ready data when a passive observation returns empty", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
@@ -4006,8 +4149,9 @@ test("browser-vault provider clears the client when a background revalidation re
   await act(async () => {
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
-  await waitForText(rendered.container, "empty:none");
-  assert.equal(getBrowserVaultReadySnapshot(), null);
+  await waitForCondition(() => fetchMock.mock.calls.length === 3, "focus observation");
+  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+  assert.equal(getBrowserVaultReadySnapshot()?.ref.dataVersion, ref.dataVersion);
 
   await rendered.cleanup();
 });
