@@ -674,6 +674,10 @@ describe('searchSupplementLabelsBatch', () => {
       ),
     ).rejects.toMatchObject({
       code: 'supplement_labels_api_credential_missing',
+      context: {
+        retryable: false,
+        stage: 'configuration',
+      },
       message: 'Supplement label search requires the hosted Murph data API provider credential.',
     })
     assert.equal(fetchMock.mock.calls.length, 0)

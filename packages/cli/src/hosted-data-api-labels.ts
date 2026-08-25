@@ -460,6 +460,7 @@ function assertHostedRuntime<TSource extends string>(
   throw new VaultCliError(
     `${config.errorCodePrefix}_hosted_only`,
     `${config.searchDescription} runs through the hosted Murph data API and is only available inside hosted assistant runtime.`,
+    { retryable: false, stage: 'configuration' },
   )
 }
 
@@ -516,6 +517,7 @@ function readHostedDataApiProviderCredential<TSource extends string>(
   throw new VaultCliError(
     `${config.errorCodePrefix}_credential_missing`,
     `${config.searchDescription} requires the hosted Murph data API provider credential.`,
+    { retryable: false, stage: 'configuration' },
   )
 }
 
@@ -579,16 +581,20 @@ function createLabelsTransportError<TSource extends string>(
 ): VaultCliError {
   const transportErrorName = readSafeErrorName(error)
   const transportErrorCode = readSafeErrorCode(error)
+  const cancelled = transportErrorName === 'AbortError'
   const timedOut = transportErrorName === 'TimeoutError'
-    || transportErrorName === 'AbortError'
-  const message = timedOut
-    ? `${config.searchDescription} request timed out.`
-    : `${config.searchDescription} request failed before receiving a response.`
+  const message = cancelled
+    ? `${config.searchDescription} request was cancelled.`
+    : timedOut
+      ? `${config.searchDescription} request timed out.`
+      : `${config.searchDescription} request failed before receiving a response.`
 
   return new VaultCliError(
-    timedOut
-      ? `${config.errorCodePrefix}_request_timed_out`
-      : `${config.errorCodePrefix}_request_failed`,
+    cancelled
+      ? `${config.errorCodePrefix}_request_cancelled`
+      : timedOut
+        ? `${config.errorCodePrefix}_request_timed_out`
+        : `${config.errorCodePrefix}_request_failed`,
     appendLabelsTransportClassification(
       message,
       transportErrorName,
@@ -596,7 +602,7 @@ function createLabelsTransportError<TSource extends string>(
     ),
     {
       failureStage: 'request',
-      retryable: true,
+      retryable: !cancelled,
       stage: 'transport',
       timedOut,
       transportErrorName,

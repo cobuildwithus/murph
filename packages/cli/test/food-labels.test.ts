@@ -735,6 +735,38 @@ describe('searchFoodLabels', () => {
     assert.doesNotMatch(error.message, /private timeout cause|private-timeout-query/u)
   })
 
+  it('keeps request cancellation terminal with bounded transport metadata', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(new Error('private cancellation cause'), {
+        code: 'ABORT_ERR',
+        name: 'AbortError',
+      })
+    })
+
+    const error = await searchFoodLabels(
+      { q: 'private-cancelled-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'food_labels_api_request_cancelled')
+    assert.equal(error.context?.failureStage, 'request')
+    assert.equal(error.context?.retryable, false)
+    assert.equal(error.context?.stage, 'transport')
+    assert.equal(error.context?.timedOut, false)
+    assert.equal(error.context?.transportErrorName, 'AbortError')
+    assert.equal(error.context?.transportErrorCode, 'ABORT_ERR')
+    assert.equal('repair' in error, false)
+    assert.match(
+      error.message,
+      /Transport classification: name=AbortError, code=ABORT_ERR/u,
+    )
+    assert.doesNotMatch(
+      JSON.stringify({ context: error.context, message: error.message }),
+      /private cancellation cause|private-cancelled-query/u,
+    )
+  })
+
   it('makes response-body transport timeouts retryable without exposing the cause', async () => {
     const response = new Response('{}', { status: 200 })
     const bodyError = Object.assign(new Error('private response body timeout'), {
@@ -809,6 +841,10 @@ describe('searchFoodLabels', () => {
       ),
     ).rejects.toMatchObject({
       code: 'food_labels_api_hosted_only',
+      context: {
+        retryable: false,
+        stage: 'configuration',
+      },
       message: 'Food label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
     })
     assert.equal(fetchMock.mock.calls.length, 0)
