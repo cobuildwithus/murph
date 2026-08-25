@@ -552,7 +552,7 @@ async function discardLabelsResponseBody(response: Response): Promise<void> {
   try {
     await response.body?.cancel()
   } catch {
-    // The status is sufficient to classify the failure; disposal is best effort.
+    // The status is sufficient to classify the failure; body disposal is best effort.
   }
 }
 
@@ -560,40 +560,34 @@ function createLabelsTransportError<TSource extends string>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   error: unknown,
 ): VaultCliError {
-  const errorName = error instanceof Error ? error.name : undefined
-
-  if (errorName === 'TimeoutError') {
-    return new VaultCliError(
-      `${config.errorCodePrefix}_request_timed_out`,
-      `${config.searchDescription} request timed out.`,
-      {
-        failureStage: 'request',
-        retryable: true,
-        stage: 'transport',
-        timedOut: true,
-      },
-    )
-  }
-
-  if (errorName === 'AbortError') {
-    return new VaultCliError(
-      `${config.errorCodePrefix}_request_cancelled`,
-      `${config.searchDescription} request was cancelled.`,
-      {
-        failureStage: 'request',
-        retryable: false,
-        stage: 'transport',
-      },
-    )
-  }
+  const transportErrorName = readSafeErrorName(error)
+  const transportErrorCode = readSafeErrorCode(error)
+  const cancelled = transportErrorName === 'AbortError'
+  const timedOut = transportErrorName === 'TimeoutError'
+  const message = cancelled
+    ? `${config.searchDescription} request was cancelled.`
+    : timedOut
+      ? `${config.searchDescription} request timed out.`
+      : `${config.searchDescription} request failed before receiving a response.`
 
   return new VaultCliError(
-    `${config.errorCodePrefix}_request_failed`,
-    `${config.searchDescription} request failed before receiving a response.`,
+    cancelled
+      ? `${config.errorCodePrefix}_request_cancelled`
+      : timedOut
+        ? `${config.errorCodePrefix}_request_timed_out`
+        : `${config.errorCodePrefix}_request_failed`,
+    appendLabelsTransportClassification(
+      message,
+      transportErrorName,
+      transportErrorCode,
+    ),
     {
       failureStage: 'request',
-      retryable: true,
+      retryable: !cancelled,
       stage: 'transport',
+      timedOut,
+      transportErrorName,
+      transportErrorCode,
     },
   )
 }
@@ -603,22 +597,31 @@ function createLabelsResponseBodyTransportError<TSource extends string>(
   status: number,
   error: unknown,
 ): VaultCliError {
-  const errorName = readSafeErrorName(error)
-  const timedOut = errorName === 'TimeoutError' || errorName === 'AbortError'
+  const transportErrorName = readSafeErrorName(error)
+  const transportErrorCode = readSafeErrorCode(error)
+  const timedOut = transportErrorName === 'TimeoutError'
+    || transportErrorName === 'AbortError'
+  const message = timedOut
+    ? `${config.searchDescription} response body timed out (HTTP ${status}).`
+    : `${config.searchDescription} received a response whose body could not be read (HTTP ${status}).`
 
   return new VaultCliError(
     timedOut
       ? `${config.errorCodePrefix}_response_body_timed_out`
       : `${config.errorCodePrefix}_response_body_failed`,
-    timedOut
-      ? `${config.searchDescription} response body timed out (HTTP ${status}).`
-      : `${config.searchDescription} received a response whose body could not be read (HTTP ${status}).`,
+    appendLabelsTransportClassification(
+      message,
+      transportErrorName,
+      transportErrorCode,
+    ),
     {
       failureStage: 'response_body',
       retryable: true,
       stage: 'response',
       status,
-      ...(timedOut ? { timedOut: true } : {}),
+      timedOut,
+      transportErrorName,
+      transportErrorCode,
     },
   )
 }
@@ -642,15 +645,17 @@ function createLabelsHttpError<TSource extends string>(
   )
 }
 
-function classifyLabelsHttpFailure(
-  searchDescription: string,
-  status: number,
-): {
+interface LabelsHttpFailure {
   codeSuffix: string
   message: string
   retryable: boolean
   timedOut?: true
-} {
+}
+
+function classifyLabelsHttpFailure(
+  searchDescription: string,
+  status: number,
+): LabelsHttpFailure {
   if (status === 401 || status === 403) {
     return {
       codeSuffix: 'auth_failed',
@@ -659,20 +664,19 @@ function classifyLabelsHttpFailure(
     }
   }
 
+  if (status === 429) {
+    return {
+      codeSuffix: 'rate_limited',
+      message: `${searchDescription} was rate limited by the hosted data API (HTTP ${status}).`,
+      retryable: true,
+    }
+  }
   if (status === 408) {
     return {
       codeSuffix: 'request_timed_out',
       message: `${searchDescription} request timed out at the hosted data API (HTTP ${status}).`,
       retryable: true,
       timedOut: true,
-    }
-  }
-
-  if (status === 429) {
-    return {
-      codeSuffix: 'rate_limited',
-      message: `${searchDescription} was rate limited by the hosted data API (HTTP ${status}).`,
-      retryable: true,
     }
   }
 
@@ -710,6 +714,23 @@ function createLabelsInvalidResponseError<TSource extends string>(
   )
 }
 
+function appendLabelsTransportClassification(
+  message: string,
+  errorName: string | undefined,
+  errorCode: string | undefined,
+): string {
+  const classification = [
+    errorName ? `name=${errorName}` : undefined,
+    errorCode ? `code=${errorCode}` : undefined,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(', ')
+
+  return classification
+    ? `${message} Transport classification: ${classification}.`
+    : message
+}
+
 function readSafeErrorName(error: unknown): string | undefined {
   if (
     typeof error !== 'object'
@@ -723,5 +744,21 @@ function readSafeErrorName(error: unknown): string | undefined {
   const name = normalizeNullableString(error.name)
   return name && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name)
     ? name
+    : undefined
+}
+
+function readSafeErrorCode(error: unknown): string | undefined {
+  if (
+    typeof error !== 'object'
+    || error === null
+    || !('code' in error)
+    || typeof error.code !== 'string'
+  ) {
+    return undefined
+  }
+
+  const code = normalizeNullableString(error.code)
+  return code && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u.test(code)
+    ? code
     : undefined
 }
