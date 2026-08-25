@@ -577,63 +577,78 @@ resolve_test_diff_vitest_max_workers_default
     expect(result.stdout).toBe("1\n1\n8\n4\n2\n50%\n");
   });
 
-  it("returns a workspace boundary failure after overlapping typechecks finish", () => {
-    const harnessDir = mkdtempSync(
-      path.join(os.tmpdir(), "murph-workspace-boundary-status-"),
-    );
-    const cycleMarkerPath = path.join(harnessDir, "cycle-check-ran");
-    const nodeShimPath = path.join(harnessDir, "node");
-    const pnpmShimPath = path.join(harnessDir, "pnpm");
+  it.each([
+    {
+      auditor: "workspace boundary auditor",
+      failingCommand: "scripts/verify-workspace-boundaries.mjs",
+      failureMessage:
+        "Workspace boundary verification failed: synthetic invalid internal import",
+    },
+    {
+      auditor: "package-cycle auditor",
+      failingCommand: "scripts/check-workspace-package-cycles.mjs",
+      failureMessage: "Workspace package-cycle verification failed: synthetic cycle",
+    },
+  ])(
+    "returns a $auditor failure after overlapping typechecks finish",
+    ({ failingCommand, failureMessage }) => {
+      const harnessDir = mkdtempSync(
+        path.join(os.tmpdir(), "murph-workspace-boundary-status-"),
+      );
+      const cycleMarkerPath = path.join(harnessDir, "cycle-check-ran");
+      const nodeShimPath = path.join(harnessDir, "node");
+      const pnpmShimPath = path.join(harnessDir, "pnpm");
 
-    try {
-      writeFileSync(
-        nodeShimPath,
-        `#!/usr/bin/env bash
-if [[ "\${1:-}" == "scripts/verify-workspace-boundaries.mjs" ]]; then
-  printf '%s\n' 'Workspace boundary verification failed: synthetic invalid internal import' >&2
-  exit 23
-fi
+      try {
+        writeFileSync(
+          nodeShimPath,
+          `#!/usr/bin/env bash
 if [[ "\${1:-}" == "scripts/check-workspace-package-cycles.mjs" ]]; then
   : >"\${MURPH_BOUNDARY_TEST_CYCLE_MARKER}"
 fi
+if [[ "\${1:-}" == "\${MURPH_BOUNDARY_TEST_FAIL_COMMAND}" ]]; then
+  printf '%s\n' "\${MURPH_BOUNDARY_TEST_FAILURE_MESSAGE}" >&2
+  exit 23
+fi
 exit 0
 `,
-        "utf8",
-      );
-      writeFileSync(pnpmShimPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
-      chmodSync(nodeShimPath, 0o755);
-      chmodSync(pnpmShimPath, 0o755);
+          "utf8",
+        );
+        writeFileSync(pnpmShimPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+        chmodSync(nodeShimPath, 0o755);
+        chmodSync(pnpmShimPath, 0o755);
 
-      const result = spawnSync(
-        "bash",
-        [path.join(repoRoot, "scripts", "workspace-verify.sh"), "typecheck"],
-        {
-          cwd: repoRoot,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            PATH: `${harnessDir}${path.delimiter}${process.env.PATH ?? ""}`,
-            MURPH_BOUNDARY_TEST_CYCLE_MARKER: cycleMarkerPath,
-            MURPH_TYPECHECK_PREFLIGHT_PARALLEL: "1",
-            MURPH_TYPECHECK_WORKSPACE_CONCURRENCY: "1",
-            MURPH_VERIFY_SHARED_HOST: "0",
-            MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+        const result = spawnSync(
+          "bash",
+          [path.join(repoRoot, "scripts", "workspace-verify.sh"), "typecheck"],
+          {
+            cwd: repoRoot,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              PATH: `${harnessDir}${path.delimiter}${process.env.PATH ?? ""}`,
+              MURPH_BOUNDARY_TEST_CYCLE_MARKER: cycleMarkerPath,
+              MURPH_BOUNDARY_TEST_FAIL_COMMAND: failingCommand,
+              MURPH_BOUNDARY_TEST_FAILURE_MESSAGE: failureMessage,
+              MURPH_TYPECHECK_PREFLIGHT_PARALLEL: "1",
+              MURPH_TYPECHECK_WORKSPACE_CONCURRENCY: "1",
+              MURPH_VERIFY_SHARED_HOST: "0",
+              MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+            },
           },
-        },
-      );
+        );
 
-      expect(result.status, result.stderr).toBe(1);
-      expect(result.stderr).toContain(
-        "Workspace boundary verification failed: synthetic invalid internal import",
-      );
-      expect(result.stderr).toContain(
-        "[workspace-verify] done Workspace package/app typecheck",
-      );
-      expect(readFileSync(cycleMarkerPath, "utf8")).toBe("");
-    } finally {
-      rmSync(harnessDir, { force: true, recursive: true });
-    }
-  });
+        expect(result.status, result.stderr).toBe(1);
+        expect(result.stderr).toContain(failureMessage);
+        expect(result.stderr).toContain(
+          "[workspace-verify] done Workspace package/app typecheck",
+        );
+        expect(readFileSync(cycleMarkerPath, "utf8")).toBe("");
+      } finally {
+        rmSync(harnessDir, { force: true, recursive: true });
+      }
+    },
+  );
 
   it("keeps ordinary shared-host typecheck capped while capable acceptance composes", () => {
     const resolveTypecheckDefault = extractWorkspaceVerifyFunction(
