@@ -6485,6 +6485,116 @@ describe("runHostedDeviceSyncWakeLane", () => {
     ]);
   });
 
+  it("emits only the 16 slowest device-sync job timings in descending order", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const elapsedMsByClaim = [
+      3_000,
+      18_000,
+      1_000,
+      17_000,
+      5_000,
+      16_000,
+      7_000,
+      15_000,
+      9_000,
+      14_000,
+      11_000,
+      13_000,
+      2_000,
+      12_000,
+      4_000,
+      10_000,
+      6_000,
+      8_000,
+    ];
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount: vi.fn(() => []),
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker: vi.fn().mockResolvedValue(0),
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z",
+      getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listJobTimingDiagnostics: vi.fn(() => elapsedMsByClaim.map((elapsedMs) => ({
+        at: "2026-04-08T00:00:45.000Z",
+        attempts: 1,
+        connectionSourceReadCount: 0,
+        connectionSourceReadElapsedMs: 0,
+        credentialRefreshCount: 0,
+        credentialRefreshElapsedMs: 0,
+        durableProgressCommitted: true,
+        elapsedMs,
+        jobCount: 1,
+        jobKind: "resource",
+        outcome: "completed",
+        provider: "junction",
+        providerExecutionElapsedMs: elapsedMs,
+        providerUnattributedElapsedMs: elapsedMs,
+        resource: "sleep",
+        snapshotImportCount: 0,
+        snapshotImportElapsedMs: 0,
+      }))),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+
+    await runHostedDeviceSyncWakeLane({
+      deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: {
+        deviceSync: DEVICE_SYNC_CONFIG,
+      },
+      runtimeLogPlatform: {
+        logPort: {
+          async write(request) {
+            const parsed = parseHostedRuntimeLogRequest(request);
+            logRequests.push(parsed);
+            return { loggedCount: parsed.entries.length };
+          },
+        },
+      },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_device_sync_timing_sample",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "reconcile_due",
+        userId: "member_123",
+      },
+    });
+    await drainHostedRuntimeLogWritesBestEffort();
+
+    const finishedEntry = logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "device-sync.pass_finished");
+    const timingSummaries = finishedEntry?.redactedJson
+      ?.deviceSyncJobTimingSummaries;
+    assert(finishedEntry);
+    assert(Array.isArray(timingSummaries));
+    const timingSummaryObjects = timingSummaries as Array<
+      Record<string, boolean | number | string | null>
+    >;
+    expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
+      deviceSyncJobTimingCount: 18,
+      deviceSyncJobTimingSampleLimit: 16,
+      deviceSyncJobTimingTruncated: true,
+    }));
+    expect(timingSummaryObjects).toHaveLength(16);
+    expect(timingSummaryObjects.map((summary) => summary.elapsedMs)).toEqual(
+      Array.from({ length: 16 }, (_, index) => 18_000 - index * 1_000),
+    );
+    expect(timingSummaryObjects).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ elapsedMs: 1_000 }),
+        expect.objectContaining({ elapsedMs: 2_000 }),
+      ]),
+    );
+    expect(() => parseHostedRuntimeLogRequest({
+      entries: [finishedEntry],
+    })).not.toThrow();
+  });
+
   it("retains queue snapshots when the worker drain yields to its timeout", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));

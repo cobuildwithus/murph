@@ -61,5 +61,16 @@ Updated: 2026-08-25
   fragment, and page rerun passed all 54 tests.
 - Cloudflare app verification passed its typecheck, 2,668 Node tests, and 15
   Workers-runtime tests.
-- PR ReviewGPT, exact-head CI, merge, ordered production deployment, and live
-  runtime verification remain pending.
+- The preliminary specialist pass returned two accepted non-production
+  findings: narrow the public privacy wording to the implemented guarantee and
+  directly prove the slowest-16 sample bound. The wording is corrected, and a
+  new out-of-order 18-item wake-lane test proves descending selection, exact
+  sample size, truthful truncation, omission of the two fastest items, and
+  strict-parser acceptance. The corrected runtime file passed 95 tests, its
+  package typecheck passed, and the exact changelog rerun passed 54 tests.
+- Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no findings on the
+  exact first-reviewed head. Its exact response and requested-model-compatible
+  sidecar were captured after the full-audit trust floor. The first-reviewed
+  head's PR evidence check passed.
+- Corrected-head CI, merge, ordered production deployment, and live runtime
+  verification remain pending.
