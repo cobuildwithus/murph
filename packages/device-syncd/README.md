@@ -99,8 +99,9 @@ Current providers:
   that same code-owned production set. ECG voltage uses one-day grouped windows capped at
   100,000 admitted samples and 64 recordings, then reduces each recording to one
   clinically neutral feature record before a sync snapshot exists. Workout stream
-  runs only for connected sources whose stored availability advertises that
-  capability. It uses the ordinary workout index to admit at most 32 eligible,
+  runs only for sources that the control plane reports connected and whose
+  current Junction provider inventory advertises that capability. It uses the
+  ordinary workout index to admit at most 32 eligible,
   attributed workouts per one-day window, then reads Junction's dedicated
   per-workout stream endpoint serially and caps each stream at 100,000 points.
   The exact production assembly has

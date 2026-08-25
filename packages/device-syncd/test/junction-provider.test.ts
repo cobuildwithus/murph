@@ -498,6 +498,7 @@ function readJunctionWorkoutProgressIdentities(
 }
 
 function createJunctionWorkoutStreamTestProvider(input: {
+  listProviders?: () => readonly Record<string, unknown>[];
   listWorkoutIds(indexRequest: number): readonly string[];
   listWorkoutSummaries?: (indexRequest: number) => readonly Record<string, unknown>[];
   listResponse?: (indexRequest: number) => Promise<Response> | Response;
@@ -511,7 +512,11 @@ function createJunctionWorkoutStreamTestProvider(input: {
     const parsed = new URL(readUrl(request));
     requestUrls.push(parsed.toString());
     if (parsed.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
+      return createJsonResponse({
+        providers: input.listProviders?.() ?? [
+          createJunctionWorkoutStreamProviderConnection("garmin", true),
+        ],
+      });
     }
     if (parsed.pathname === "/v2/summary/activity/junction-user-1") {
       return createJsonResponse({ data: [] });
@@ -553,6 +558,22 @@ function createJunctionWorkoutStreamTestProvider(input: {
     provider,
     requestUrls,
     streamRequests,
+  };
+}
+
+function createJunctionWorkoutStreamProviderConnection(
+  sourceProviderSlug = "garmin",
+  workoutStreamAvailable = true,
+): Record<string, unknown> {
+  return {
+    id: `provider-${sourceProviderSlug}`,
+    slug: sourceProviderSlug,
+    name: sourceProviderSlug,
+    status: "connected",
+    resource_availability: {
+      workouts: true,
+      workout_stream: workoutStreamAvailable,
+    },
   };
 }
 
@@ -21837,8 +21858,12 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(maximumActiveStreams, 1);
 });
 
-test("Junction workout_stream completes without provider egress when no connected source advertises it", async () => {
+test("Junction workout_stream completes without workout egress when no connected source is live capable", async () => {
   const harness = createJunctionWorkoutStreamTestProvider({
+    listProviders: () => [
+      createJunctionWorkoutStreamProviderConnection("garmin", false),
+      createJunctionWorkoutStreamProviderConnection("polar", true),
+    ],
     listWorkoutIds: () => ["unsupported-workout"],
   });
 
@@ -21846,7 +21871,7 @@ test("Junction workout_stream completes without provider egress when no connecte
     harness.provider,
     createJunctionWorkoutStreamJobContext({
       listConnectionSources: async () => [
-        createJunctionWorkoutStreamSource("garmin", false),
+        createJunctionWorkoutStreamSource("garmin", true),
         {
           ...createJunctionWorkoutStreamSource("polar", true),
           status: "disconnected",
@@ -21871,11 +21896,15 @@ test.each([
   sourceProviderSlug,
 }) => {
   const harness = createJunctionWorkoutStreamTestProvider({
+    listProviders: () => [
+      createJunctionWorkoutStreamProviderConnection("garmin", true),
+      createJunctionWorkoutStreamProviderConnection("polar", false),
+    ],
     listWorkoutIds: () => ["scoped-workout"],
   });
   const sources = [
     createJunctionWorkoutStreamSource("garmin", true),
-    createJunctionWorkoutStreamSource("polar", false),
+    createJunctionWorkoutStreamSource("polar", true),
   ];
 
   await executeJunctionJob(
@@ -21896,6 +21925,10 @@ test.each([
 test("Junction workout_stream filters mixed-source candidates before stream progress", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
+    listProviders: () => [
+      createJunctionWorkoutStreamProviderConnection("garmin", true),
+      createJunctionWorkoutStreamProviderConnection("polar", false),
+    ],
     listWorkoutIds: () => [],
     listWorkoutSummaries: () => [
       createJunctionWorkoutSummary("garmin-workout", undefined, "garmin"),
@@ -21919,7 +21952,7 @@ test("Junction workout_stream filters mixed-source candidates before stream prog
       },
       listConnectionSources: async () => [
         createJunctionWorkoutStreamSource("garmin", true),
-        createJunctionWorkoutStreamSource("polar", false),
+        createJunctionWorkoutStreamSource("polar", true),
       ],
     }),
     createJunctionWorkoutStreamResourceJob(),
@@ -21927,6 +21960,50 @@ test("Junction workout_stream filters mixed-source candidates before stream prog
 
   assert.deepEqual(harness.streamRequests, ["garmin-workout"]);
   assert.deepEqual(importedWorkoutIds, ["garmin-workout"]);
+});
+
+test("Junction full-job workout_stream uses live capability before Web projection catches up", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listProviders: () => [
+      createJunctionWorkoutStreamProviderConnection("garmin", true),
+    ],
+    listWorkoutIds: () => ["current-capability-workout"],
+  });
+  const connectedWebSource = {
+    ...createJunctionWorkoutStreamSource("garmin", false),
+    resourceAvailabilitySummary: {},
+  };
+  const context = createJunctionWorkoutStreamJobContext({
+    listConnectionSources: async () => [connectedWebSource],
+  });
+
+  const initial = await executeJunctionJob(
+    harness.provider,
+    context,
+    createJob("reconcile", {
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  const continuation = requireValue(
+    initial.scheduledJobs?.[0],
+    "The setup pass should schedule workout_stream directly.",
+  );
+  assert.equal(continuation.payload?.timeseriesResourceCursor, "workout_stream");
+
+  await executeJunctionJob(
+    harness.provider,
+    context,
+    createJobFromInput(continuation),
+  );
+
+  assert.equal(
+    harness.requestUrls.filter((url) =>
+      new URL(url).pathname === "/v2/user/providers/junction-user-1"
+    ).length,
+    2,
+  );
+  assert.deepEqual(harness.streamRequests, ["current-capability-workout"]);
 });
 
 test("Junction workout_stream fails closed without a source-capability projection", async () => {
@@ -22393,7 +22470,9 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
     const parsed = new URL(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
+      return createJsonResponse({
+        providers: [createJunctionWorkoutStreamProviderConnection("garmin", true)],
+      });
     }
     if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
       const start = parsed.searchParams.get("start_date") ?? "2026-04-01T06:00:00.000Z";

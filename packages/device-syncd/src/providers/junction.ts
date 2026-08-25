@@ -4790,14 +4790,6 @@ export function createJunctionDeviceSyncProvider(
     const resource = resourceCursor.resource;
     const policy = resolveJunctionTimeseriesResourcePolicy(resource);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
-    const sourceProviders = sourceProviderSlug
-      ? (await client.listUserProviders(context.account.externalAccountId, {
-          signal: context.signal ?? null,
-        })).filter((provider) => areJunctionProviderSlugsDataEquivalent(
-          provider.origin.sourceProviderSlug ?? provider.slug,
-          sourceProviderSlug,
-        ))
-      : [];
     let historicalProviderRecordsSeen = sourceProviderSlug !== null
       && job.payload.historicalProviderRecordsSeen === true;
     let historicalRecordsSeen = sourceProviderSlug !== null
@@ -4814,6 +4806,17 @@ export function createJunctionDeviceSyncProvider(
     ) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
+    const listedSourceProviders = sourceProviderSlug || resource === "workout_stream"
+      ? await client.listUserProviders(context.account.externalAccountId, {
+          signal: context.signal ?? null,
+        })
+      : [];
+    const sourceProviders = sourceProviderSlug
+      ? listedSourceProviders.filter((provider) => areJunctionProviderSlugsDataEquivalent(
+          provider.origin.sourceProviderSlug ?? provider.slug,
+          sourceProviderSlug,
+        ))
+      : listedSourceProviders;
 
     const executionWindowEnd = new Date(Math.min(
       Date.parse(timeseriesCursor) + timeseriesWindowHours * TIMESERIES_HOUR_MS,
@@ -5199,6 +5202,7 @@ export function createJunctionDeviceSyncProvider(
 
     const eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
       input.context,
+      input.sourceProviders,
     );
     const sourceScopeProvided = input.sourceProviderSlug !== undefined
       && input.sourceProviderSlug !== null;
@@ -9965,23 +9969,29 @@ function isJunctionResourceAvailableInSummary(
 
 async function resolveJunctionWorkoutStreamEligibleSources(
   context: ProviderJobContext,
+  providers: readonly JunctionProviderConnection[],
 ): Promise<ReadonlySet<string>> {
   const sources = context.listConnectionSources
     ? await context.listConnectionSources()
     : [];
-  return new Set(sources.flatMap((source) => {
-    const sourceProviderSlug = canonicalizeJunctionProviderSlug(
-      source.sourceProviderSlug,
-    );
-    return sourceProviderSlug
-        && source.status === "connected"
-        && isJunctionResourceAvailableInSummary(
-          source.resourceAvailabilitySummary,
-          "workout_stream",
-        )
-      ? [sourceProviderSlug]
-      : [];
+  const connectedSourceProviderSlugs = new Set(sources.flatMap((source) => {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(source.sourceProviderSlug);
+    return sourceProviderSlug && source.status === "connected" ? [sourceProviderSlug] : [];
   }));
+
+  return new Set(projectJunctionSourcesByProviderSlug(
+    context.account.id,
+    providers,
+  ).flatMap((source) =>
+    connectedSourceProviderSlugs.has(source.sourceProviderSlug)
+      && source.status === "connected"
+      && isJunctionResourceAvailableInSummary(
+        source.resourceAvailabilitySummary,
+        "workout_stream",
+      )
+      ? [source.sourceProviderSlug]
+      : []
+  ));
 }
 
 function isJunctionSourceResourceCurrentlyAvailable(input: {

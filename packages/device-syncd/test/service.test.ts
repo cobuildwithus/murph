@@ -183,22 +183,17 @@ function createJunctionWorkoutStreamServiceProvider(
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
       if (url.pathname === "/v2/user/providers/junction-workout-stream-service") {
-        const includesOrdinaryTimeseries = options.timeseriesResources?.some(
-          (resource) => resource !== "workout_stream",
-        ) ?? false;
         return createJsonResponse({
-          providers: includesOrdinaryTimeseries
-            ? [{
-                id: "provider-garmin-1",
-                slug: "garmin",
-                name: "Garmin",
-                status: "connected",
-                resource_availability: Object.fromEntries(
-                  (options.timeseriesResources ?? ["workout_stream"])
-                    .map((resource) => [resource, true]),
-                ),
-              }]
-            : [],
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: Object.fromEntries(
+              (options.timeseriesResources ?? ["workout_stream"])
+                .map((resource) => [resource, true]),
+            ),
+          }],
         });
       }
       if (url.pathname === "/v2/summary/workouts/junction-workout-stream-service") {
