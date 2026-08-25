@@ -93,6 +93,12 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain("run-with-workspace-artifact-lock.mjs");
     expect(bundleAssemblyScript).toContain('const shouldSkipBuild = process.argv.includes("--skip-build");');
     expect(bundleAssemblyScript).toContain(
+      "const expectedReleaseSha = process.env.MURPH_RUNNER_BUNDLE_EXPECTED_RELEASE_SHA;",
+    );
+    expect(bundleAssemblyScript).toContain(
+      "const releaseSha = resolvePublicRunnerReleaseSha(repoRoot, expectedReleaseSha);",
+    );
+    expect(bundleAssemblyScript).toContain(
       'import { resolveCloudflareDeployPaths } from "./deploy-automation.js";',
     );
     expect(bundleAssemblyScript).toContain(
