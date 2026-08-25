@@ -138,20 +138,24 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
-    expect(groupPrompt).toContain('reason over the whole current beat')
+    const completeGroupReplyRule =
+      'Answer all still-relevant, unanswered requests that these rules assign to Murph across the accepted messages in one reply.'
+    expect(groupPrompt.split(completeGroupReplyRule)).toHaveLength(2)
+    expect(groupPrompt).toContain(
+      'A clear correction or replacement supersedes only what it changes',
+    )
     expect(groupPrompt).toContain('do not repeat completed effects')
     expect(groupPrompt).toContain(scopedSafety)
     expect(directPrompt).toContain(scopedSafety)
     expect(groupPrompt).not.toContain('replaces the earlier answer')
     expect(groupPrompt).not.toContain('carry forward anything still worth saying')
+    expect(groupPrompt).not.toContain('answer only that new ask')
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
       'Take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
-    expect(groupPrompt).toContain(
-      'Do not answer each accepted message separately or recap the burst point by point.',
-    )
+    expect(groupPrompt).not.toContain('Do not answer each accepted message separately')
     expect(groupPrompt).not.toContain('sleep 8')
     expect(groupPrompt).not.toContain('sleep 6')
     expect(directPrompt).not.toContain('Group texting rhythm:')
@@ -242,7 +246,7 @@ describe('assistant execution prompt contract', () => {
       'Read immediate same-purpose same-sender elaborations as one beat.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
+      'A later factual or task request or direct Murph address reopens the floor under the ordinary rule, even inside the same accepted provider turn.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Floor follows authority, not punctuation.',
