@@ -294,9 +294,9 @@ afterEach(() => {
 })
 
 describe('worktree storage guard', () => {
-  it('defaults the regular worktree ceiling to 100', () => {
+  it('defaults the regular worktree ceiling to 200', () => {
     expect(readFileSync(path.join(sourceRoot, 'scripts', 'worktree-storage-guard'), 'utf8')).toContain(
-      'MURPH_WORKTREE_MAX_LIVE:-100',
+      'MURPH_WORKTREE_MAX_LIVE:-200',
     )
   })
 
