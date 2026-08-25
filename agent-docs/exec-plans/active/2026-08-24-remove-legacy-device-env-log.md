@@ -53,7 +53,8 @@ Updated: 2026-08-24
 
 1. Confirm exclusive ownership and trace the diagnostic's introduction and
    current call/config owners.
-2. Delete the obsolete per-pass diagnostic and its contract/test references.
+2. Delete the obsolete per-pass writer and its dedicated test while preserving
+   and directly testing reader-side compatibility.
 3. Run focused runtime and hosted-execution tests plus relevant typechecks;
    inspect the complete diff and privacy boundary.
 4. Commit, push, open the draft PR, run required ReviewGPT/CI gates, resolve
