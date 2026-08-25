@@ -329,6 +329,7 @@ import {
   filterHostedRuntimeGroupToolResponseProjectionScopes,
 } from "@/src/lib/hosted-groups/group-tool-scope-filter";
 import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
@@ -383,6 +384,12 @@ const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountPro
 });
 const COMPLETE_ACCESS_OFFER_SCOPES =
   resolveHostedGroupAccessOfferProjectionScopes(undefined);
+const EXPLICIT_COMPREHENSIVE_ACCESS_OFFER_SCOPES =
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.map((projectionKind) => ({
+    projectionKind,
+  }));
+const COMPLETE_ACCESS_OFFER_MESSAGE =
+  "Sounds good. Like or heart this message to share your Murph profile (name, email, and time zone), sleep, activity, workouts, heart and fitness, nutrition, and health source connections (recent data covers the last 7 days; source details, sleep-stage times, and connected-app meals are included) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.";
 const GROUP_RUNTIME_LINQ_THREAD = {
   authority: {
     accountLookupKey: "hplk_group_runtime",
@@ -4108,7 +4115,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        message: expect.stringContaining("workout details"),
+        message: COMPLETE_ACCESS_OFFER_MESSAGE,
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4456,7 +4463,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }));
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining("workout details"),
+        message: COMPLETE_ACCESS_OFFER_MESSAGE,
       }),
     );
   });
@@ -4609,10 +4616,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
   });
 
-  it("posts the comprehensive canonical offer when the legacy template is missing", async () => {
+  it("compacts an explicit comprehensive offer without changing its permission snapshot", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
-      request: { action: "post_join_offer", linqThread: LINQ_THREAD },
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          projectionKinds: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
+        },
+        linqThread: LINQ_THREAD,
+      },
     })).resolves.toMatchObject({
       action: "post_join_offer",
       result: { status: "sent" },
@@ -4620,7 +4633,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining("workout details"),
+        message: COMPLETE_ACCESS_OFFER_MESSAGE,
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4628,7 +4641,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
-      projectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
+      projectionScopes: EXPLICIT_COMPREHENSIVE_ACCESS_OFFER_SCOPES,
       tx: fakeTx,
     });
   });
