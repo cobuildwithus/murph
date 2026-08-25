@@ -2,7 +2,6 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseEnv } from "node:util";
 
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
@@ -21,6 +20,9 @@ const hostedWebDevLockMetadataFileName = "owner.json";
 const hostedWebDevOwnerPidEnvVarName = "MURPH_HOSTED_WEB_DEV_OWNER_PID";
 const hostedWebDevSourceMapsEnvVarName = "MURPH_NEXT_DEV_SOURCE_MAPS";
 const ownerWatchdogPollIntervalMs = 2_000;
+const hostedLocalPersistedStateEnvNames = new Set<string>(
+  HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+);
 
 interface HostedWebDevServerLockMetadata {
   command: string;
@@ -123,13 +125,37 @@ export function loadHostedWebDevCryptoState(
     return;
   }
 
-  const state = parseEnv(readFileSync(statePath, "utf8"));
+  const state = parseHostedWebDevCryptoState(readFileSync(statePath, "utf8"));
   for (const name of HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES) {
     const value = state[name];
     if (value !== undefined) {
       environment[name] = value;
     }
   }
+}
+
+function parseHostedWebDevCryptoState(raw: string): Record<string, string> {
+  const state: Record<string, string> = {};
+
+  for (const line of raw.split(/\r?\n/u)) {
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = line.slice(0, separatorIndex);
+    if (!hostedLocalPersistedStateEnvNames.has(name)) {
+      continue;
+    }
+
+    const parsedValue: unknown = JSON.parse(line.slice(separatorIndex + 1));
+    if (typeof parsedValue !== "string") {
+      throw new TypeError(`${name} must contain a serialized string value.`);
+    }
+    state[name] = parsedValue;
+  }
+
+  return state;
 }
 
 function resolveHostedWebDevCryptoStatePath(

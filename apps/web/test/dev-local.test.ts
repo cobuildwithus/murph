@@ -73,6 +73,13 @@ test("hosted web dev loads local env before checking required database config", 
 test("hosted web dev uses the exact crypto state shared with the local Worker", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-crypto-"));
   const statePath = path.join(tempDir, "hosted-local-crypto-state.dev.vars");
+  const exactSharedValue = JSON.stringify({
+    crv: "P-256",
+    d: "private-value",
+    kty: "EC",
+    x: "public-x",
+    y: "public-y",
+  });
   const environment = createEnv({
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: "stale-value-with-whitespace\n",
   });
@@ -80,7 +87,7 @@ test("hosted web dev uses the exact crypto state shared with the local Worker", 
   try {
     await writeFile(
       statePath,
-      'HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK="exact-shared-value"\n',
+      `HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK=${JSON.stringify(exactSharedValue)}\n`,
       "utf8",
     );
 
@@ -88,7 +95,11 @@ test("hosted web dev uses the exact crypto state shared with the local Worker", 
 
     assert.equal(
       environment.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK,
-      "exact-shared-value",
+      exactSharedValue,
+    );
+    assert.deepEqual(
+      JSON.parse(environment.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK ?? ""),
+      JSON.parse(exactSharedValue),
     );
   } finally {
     await rm(tempDir, { force: true, recursive: true });

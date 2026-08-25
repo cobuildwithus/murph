@@ -13,7 +13,7 @@ The preview can start the Web server and Worker with different internal Web port
 
 ## Possible Solution
 
-Document the supported worker-only profile as the third long-lived preview process. Pass the Web host and port to that profile. Load its generated crypto state in the Web process, and require a signed-in data-page check.
+Document the supported worker-only profile as the third long-lived preview process. Pass the Web host and port to that profile. Load its generated crypto state with the state file's JSON-string format, and require a signed-in data-page check.
 
 ## Minimal Reproducible Example
 
