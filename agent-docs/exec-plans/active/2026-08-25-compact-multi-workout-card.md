@@ -100,12 +100,19 @@ Updated: 2026-08-25
   current-branch preview remains the reviewer-openable browser proof.
 - Candidate: draft PR #2285 is open with the implementation commit and
   member-visible changelog item.
-- Remaining gates: preliminary ReviewGPT, final ReviewGPT, exact-head CI, final
-  parent review, plan closure, and current-base merge-tree.
+- Review gates: final ReviewGPT passed with no code findings. Preliminary
+  ReviewGPT found one accepted external evidence gap and returned no patch:
+  only a physical no-extension iPhone/macOS send can prove Linq's final
+  provider-owned balloon composition.
+- CI: every required check on the reviewed candidate head passed.
+- Remaining gate: perform the privacy-safe synthetic send through the normal
+  Linq path on physical app-absent clients, including the existing
+  image-unavailable recovery, before rollout. Then complete final parent review,
+  plan closure, and current-base merge-tree.
 
 ## Product UX walkthrough
 
-- Result: Ready.
+- Result: Hold pending physical provider/device proof.
 - Person and entry point: a private-direct member receives a generic response
   card in an app-absent iMessage client after asking for a small workout
   comparison.
@@ -118,3 +125,7 @@ Updated: 2026-08-25
 - Difference from plan: none. The patch reuses the existing grid/stacked owner
   and removes duplicated provider chrome without adding a card kind, heuristic,
   or state owner.
+- Hold reason: source-level raster, provider-payload, recovery, and responsive
+  proof are green, but those separate seams cannot establish Linq rehosting and
+  Apple's final no-extension balloon composition. Do not replace the required
+  physical check with a simulator or another fallback owner.
