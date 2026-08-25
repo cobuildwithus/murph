@@ -7893,6 +7893,14 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
             createConnectLink: (connectInput) =>
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
+            ...(platform.deviceSyncPort.configureNoDataOutreach
+              ? {
+                  configureNoDataOutreach: (configureInput) =>
+                    guard(() =>
+                      platform.deviceSyncPort!.configureNoDataOutreach!(configureInput)
+                    ),
+                }
+              : {}),
             ...(platform.deviceSyncPort.completeFitbitMigration
               ? {
                   completeFitbitMigration: (cutoverInput) =>

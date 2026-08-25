@@ -134,6 +134,7 @@ import {
   resetRunnerOutboundSharedCachesForTest,
 } from "../src/runner-outbound/shared.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -304,6 +305,16 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync reconcile",
     path: "/api/internal/device-sync/reconcile",
+  },
+  {
+    body: {
+      assistantInputId: `ain_${"a".repeat(32)}`,
+      afterDays: 10,
+      mode: "after_days",
+      sourceProviderSlug: "garmin",
+    },
+    name: "device-sync no-data outreach",
+    path: HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   },
   {
     body: {
