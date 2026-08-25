@@ -106,6 +106,46 @@ test("hosted web dev uses the exact crypto state shared with the local Worker", 
   }
 });
 
+test("hosted web dev derives the callback public key from the shared keyring", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-callback-key-"));
+  const statePath = path.join(tempDir, "hosted-local-crypto-state.dev.vars");
+  const currentPublicJwk = {
+    crv: "P-256",
+    kty: "EC",
+    x: "current-public-x",
+    y: "current-public-y",
+  };
+  const environment = createEnv({
+    HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: JSON.stringify({
+      ...currentPublicJwk,
+      x: "stale-public-x",
+    }),
+  });
+
+  try {
+    await writeFile(
+      statePath,
+      [
+        `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID=${JSON.stringify("v1")}`,
+        `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON=${JSON.stringify(JSON.stringify({
+          v1: currentPublicJwk,
+        }))}`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    loadHostedWebDevCryptoState(tempDir, environment, statePath);
+
+    assert.deepEqual(
+      JSON.parse(environment.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK ?? ""),
+      currentPublicJwk,
+    );
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("hosted web dev rejects the removed Webpack fallback", () => {
   assert.throws(
     () => buildHostedWebDevArgv(["--port", "3000", "--webpack"]),

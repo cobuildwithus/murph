@@ -132,6 +132,34 @@ export function loadHostedWebDevCryptoState(
       environment[name] = value;
     }
   }
+
+  alignHostedWebDevCallbackPublicJwk(environment);
+}
+
+function alignHostedWebDevCallbackPublicJwk(environment: NodeJS.ProcessEnv): void {
+  const keyId = environment.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim() || "v1";
+  const keyringJson = environment.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON?.trim();
+  if (!keyringJson) {
+    return;
+  }
+
+  const keyring: unknown = JSON.parse(keyringJson);
+  if (!isJsonObject(keyring)) {
+    throw new TypeError("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON must be an object.");
+  }
+
+  const currentPublicJwk = keyring[keyId];
+  if (!isJsonObject(currentPublicJwk)) {
+    throw new TypeError(
+      `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON must contain key ${keyId}.`,
+    );
+  }
+
+  environment.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK = JSON.stringify(currentPublicJwk);
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseHostedWebDevCryptoState(raw: string): Record<string, string> {
