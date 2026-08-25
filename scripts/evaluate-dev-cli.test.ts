@@ -66,7 +66,6 @@ function createHarness() {
     lockfile,
     root,
     rootManifest,
-    scriptPath,
   };
 }
 
@@ -78,7 +77,7 @@ describe("temporary development CLI evaluation", () => {
   it("uses isolated scriptless public-registry dlx without touching workspace dependency files", () => {
     const harness = createHarness();
     const result = spawnSync(
-      harness.scriptPath,
+      "../../scripts/evaluate-dev-cli",
       ["@fixture/tool@1.2.3", "--", "inspect", "--format", "json"],
       {
         cwd: harness.appDir,
@@ -115,6 +114,28 @@ describe("temporary development CLI evaluation", () => {
     );
   });
 
+  it("rejects execution from outside the repository before pnpm runs", () => {
+    const harness = createHarness();
+    const sharedTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!sharedTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    const outsideDir = mkdtempSync(path.join(sharedTempRoot, "evaluate-dev-cli-outside-"));
+    roots.push(outsideDir);
+
+    const result = spawnSync(
+      path.join(harness.root, "scripts", "evaluate-dev-cli"),
+      ["@fixture/tool@1.2.3"],
+      {
+        cwd: outsideDir,
+        encoding: "utf8",
+        env: harness.environment,
+      },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("must run from inside the Murph repository");
+    expect(() => readFileSync(harness.capturePath, "utf8")).toThrow();
+  });
+
   it.each([
     "@fixture/tool@latest",
     "@fixture/tool@^1.2.3",
@@ -123,7 +144,7 @@ describe("temporary development CLI evaluation", () => {
     "https://example.invalid/tool.tgz@1.2.3",
   ])("rejects non-exact or non-registry package spec %s before pnpm runs", (packageSpec) => {
     const harness = createHarness();
-    const result = spawnSync(harness.scriptPath, [packageSpec], {
+    const result = spawnSync("../../scripts/evaluate-dev-cli", [packageSpec], {
       cwd: harness.appDir,
       encoding: "utf8",
       env: harness.environment,

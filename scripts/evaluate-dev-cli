@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: scripts/evaluate-dev-cli <package>@<exact-version> [-- <cli-args...>]
+Usage: ../../scripts/evaluate-dev-cli <package>@<exact-version> [-- <cli-args...>]
 
 Run an exact public-registry CLI with pnpm dlx without editing the workspace
 manifest or lockfile. Invoke this script from the workspace directory the CLI
