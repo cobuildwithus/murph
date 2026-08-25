@@ -79,7 +79,8 @@ Updated: 2026-08-25
 - Keep subscription access explicit through `MURPH_REAL_CODEX_AUTH=subscription`;
   provider-key execution remains the default low-level harness behavior.
 - Require the runner's test-name pattern so local convenience cannot fan out to
-  every paid scenario accidentally.
+  every paid scenario accidentally. Enumerate tagged live tests first and run
+  only one exact, escaped leaf name.
 
 ## Progress
 
@@ -90,10 +91,22 @@ Updated: 2026-08-25
 - Added the guarded runner, explicit subscription auth mode, skill, and durable
   workflow routing. Focused runner and harness tests pass, and the skill
   validator accepts the package.
-- The focused adaptive-wearable live journey passed on `gpt-5.6-terra` through
-  local subscription auth. All six synthetic paths produced the exact tool or
-  silence effects; manual reply review is `Ready` for correctness, clarity,
-  warmth, non-repetition, autonomy, and truthful recovery.
+- ReviewGPT found that a regular-expression selector could match several paid
+  journeys. The runner now enumerates only tagged live tests and refuses zero
+  or multiple matches before login or model execution; the accepted live leaf
+  is then run with one exact escaped matcher. Focused tests cover both refusal
+  paths, the single-match path, and subscription/provider auth behavior.
+- The corrected focused adaptive-wearable journey passed on `gpt-5.6-terra`
+  through local subscription auth. All six synthetic paths produced the
+  required effects: private timing/off preferences were saved once, a group
+  mutation was blocked and redirected to private chat, unsupported Fitbit
+  stayed unchanged, ordinary stale data stayed quiet, and reauthorization sent
+  one reconnect link. Manual reply review found one overly cautious save
+  confirmation despite the successful effect; the operator accepted that
+  stochastic wording as non-blocking for this tooling-only PR.
+- ReviewGPT's proposal to copy the normal Codex profile into an isolated home
+  was rejected by the operator. Normal local subscription auth is intentional
+  for this developer-only command; the provider-key lane remains isolated.
 
 ## Verification
 

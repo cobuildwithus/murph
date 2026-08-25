@@ -142,7 +142,11 @@ import type {
 } from '../src/assistant/providers/types.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
-const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
+const REAL_CODEX_E2E_TAG = 'real-codex-live'
+function describeRealCodex(name: string, factory: () => void): void {
+  const suite = RUN_REAL_CODEX_E2E ? describe : describe.skip
+  suite(name, { tags: [REAL_CODEX_E2E_TAG] }, factory)
+}
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
 const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
@@ -4063,6 +4067,12 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
               action.kind === 'dynamic'
               && action.argumentsValue.action === 'connect'
             )
+            process.stdout.write(
+              `[adaptive-wearable-outreach-e2e] ${JSON.stringify({
+                finalMessage: result.finalMessage,
+                scenario: probe.kind,
+              })}\n`,
+            )
 
             if (probe.kind === 'wait-ten-days') {
               expect(configureActions).toHaveLength(1)
@@ -4097,10 +4107,10 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                 sourceProvider: 'garmin',
               }])
               expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
-            } else if (
-              probe.kind === 'group-preference'
-              || probe.kind === 'unsupported-provider'
-            ) {
+            } else if (probe.kind === 'group-preference') {
+              expect(deviceRequests, probe.kind).toHaveLength(0)
+              expect(result.finalMessage).toMatch(/direct|private|message me/iu)
+            } else if (probe.kind === 'unsupported-provider') {
               expect(deviceActions, probe.kind).toHaveLength(0)
               expect(deviceRequests, probe.kind).toHaveLength(0)
             } else if (probe.kind === 'scheduled-stale-only') {
@@ -4128,12 +4138,6 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
               })
               expect(result.finalMessage).toMatch(/connect|authorization/iu)
             }
-            process.stdout.write(
-              `[adaptive-wearable-outreach-e2e] ${JSON.stringify({
-                finalMessage: result.finalMessage,
-                scenario: probe.kind,
-              })}\n`,
-            )
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)
           }

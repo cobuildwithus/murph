@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantRealCodexListArgs,
+  buildAssistantRealCodexLoginEnv,
   buildAssistantRealCodexRunEnv,
   buildAssistantRealCodexVitestArgs,
+  executeAssistantRealCodexRun,
   parseAssistantRealCodexRunArgs,
+  type AssistantRealCodexCommandRequest,
 } from './run-assistant-real-codex-e2e.ts'
 
 describe('assistant real Codex local runner', () => {
@@ -42,6 +46,7 @@ describe('assistant real Codex local runner', () => {
     expect(buildAssistantRealCodexRunEnv({
       options,
       sourceEnv: {
+        CODEX_HOME: '/alternate-codex-home',
         MURPH_REAL_CODEX_COMMAND: 'legacy-wrapper',
         MURPH_REAL_CODEX_MODEL_PROVIDER: 'openai-env',
         OPENAI_API_KEY: 'provider-value',
@@ -53,10 +58,35 @@ describe('assistant real Codex local runner', () => {
       OPENAI_API_KEY: 'provider-value',
       PATH: '/usr/bin:/bin',
     })
+    expect(buildAssistantRealCodexLoginEnv({
+      CODEX_HOME: '/alternate-codex-home',
+      HOME: '/normal-home',
+      PATH: '/usr/bin:/bin',
+    })).toEqual({
+      HOME: '/normal-home',
+      PATH: '/usr/bin:/bin',
+    })
   })
 
-  it('builds the package-relative focused Vitest invocation', () => {
-    expect(buildAssistantRealCodexVitestArgs('adaptive wearable')).toEqual([
+  it('builds package-relative list and focused run invocations', () => {
+    expect(buildAssistantRealCodexListArgs('adaptive wearable')).toEqual([
+      '--dir',
+      'packages/assistant-engine',
+      'exec',
+      'vitest',
+      'list',
+      '--config',
+      'vitest.config.ts',
+      'test/assistant-codex-real-e2e.test.ts',
+      '--testNamePattern',
+      'adaptive wearable',
+      '--tagsFilter',
+      'real-codex-live',
+      '--json',
+    ])
+    expect(buildAssistantRealCodexVitestArgs(
+      'real Codex adaptive wearable > saves (10 days)',
+    )).toEqual([
       '--dir',
       'packages/assistant-engine',
       'exec',
@@ -67,7 +97,124 @@ describe('assistant real Codex local runner', () => {
       '--no-coverage',
       'test/assistant-codex-real-e2e.test.ts',
       '--testNamePattern',
-      'adaptive wearable',
+      '^real Codex adaptive wearable saves \\(10 days\\)$',
+      '--tagsFilter',
+      'real-codex-live',
     ])
+  })
+
+  it.each([
+    {
+      listed: [],
+      message: 'did not match a live journey',
+    },
+    {
+      listed: [
+        { name: 'real Codex journey one' },
+        { name: 'real Codex journey two' },
+      ],
+      message: 'matched 2 live journeys',
+    },
+  ])('blocks $message before login or a paid run', ({ listed, message }) => {
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const errors: string[] = []
+    const status = executeAssistantRealCodexRun(
+      parseAssistantRealCodexRunArgs(['real Codex']),
+      {
+        runCommand: (request) => {
+          requests.push(request)
+          return {
+            status: 0,
+            stdout: JSON.stringify(listed),
+          }
+        },
+        sourceEnv: {
+          CODEX_HOME: '/alternate-codex-home',
+          PATH: '/usr/bin:/bin',
+        },
+        writeStderr: (value) => errors.push(value),
+        writeStdout: () => undefined,
+      },
+    )
+
+    expect(status).toBe(2)
+    expect(errors.join('')).toContain(message)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.stdio).toBe('capture')
+  })
+
+  it('starts exactly one subscription journey after a one-match preflight', () => {
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const status = executeAssistantRealCodexRun(
+      parseAssistantRealCodexRunArgs(['adaptive wearable']),
+      {
+        runCommand: (request) => {
+          requests.push(request)
+          return request.stdio === 'capture'
+            ? {
+                status: 0,
+                stdout: JSON.stringify([
+                  { name: 'real Codex adaptive wearable journey' },
+                ]),
+              }
+            : { status: 0 }
+        },
+        sourceEnv: {
+          CODEX_HOME: '/alternate-codex-home',
+          HOME: '/normal-home',
+          PATH: '/usr/bin:/bin',
+        },
+        writeStderr: () => undefined,
+        writeStdout: () => undefined,
+      },
+    )
+
+    expect(status).toBe(0)
+    expect(requests.map(({ command, stdio }) => ({ command, stdio }))).toEqual([
+      { command: 'pnpm', stdio: 'capture' },
+      { command: 'codex', stdio: 'ignore' },
+      { command: 'pnpm', stdio: 'inherit' },
+    ])
+    for (const request of requests) {
+      expect(request.env.CODEX_HOME).toBeUndefined()
+      expect(request.env.HOME).toBe('/normal-home')
+    }
+    expect(requests[2]?.args).toContain(
+      '^real Codex adaptive wearable journey$',
+    )
+  })
+
+  it('keeps provider mode free of a subscription login preflight', () => {
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const status = executeAssistantRealCodexRun(
+      parseAssistantRealCodexRunArgs([
+        'provider journey',
+        '--auth',
+        'provider',
+      ]),
+      {
+        runCommand: (request) => {
+          requests.push(request)
+          return request.stdio === 'capture'
+            ? {
+                status: 0,
+                stdout: JSON.stringify([{ name: 'provider journey' }]),
+              }
+            : { status: 0 }
+        },
+        sourceEnv: {
+          CODEX_HOME: '/ambient-provider-home',
+          OPENAI_API_KEY: 'provider-value',
+          PATH: '/usr/bin:/bin',
+        },
+        writeStderr: () => undefined,
+        writeStdout: () => undefined,
+      },
+    )
+
+    expect(status).toBe(0)
+    expect(requests).toHaveLength(2)
+    expect(requests.every(({ command }) => command === 'pnpm')).toBe(true)
+    expect(requests[1]?.env.CODEX_HOME).toBe('/ambient-provider-home')
   })
 })

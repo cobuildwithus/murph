@@ -10,12 +10,35 @@ export interface AssistantRealCodexRunOptions {
   testPattern: string | null
 }
 
+export interface AssistantRealCodexCommandRequest {
+  args: string[]
+  command: string
+  env: NodeJS.ProcessEnv
+  stdio: 'capture' | 'ignore' | 'inherit'
+}
+
+export interface AssistantRealCodexCommandResult {
+  error?: Error
+  status: number | null
+  stdout?: string
+}
+
+export interface AssistantRealCodexRunDependencies {
+  runCommand: (
+    request: AssistantRealCodexCommandRequest,
+  ) => AssistantRealCodexCommandResult
+  sourceEnv: NodeJS.ProcessEnv
+  writeStderr: (message: string) => void
+  writeStdout: (message: string) => void
+}
+
 const DEFAULT_OPTIONS: AssistantRealCodexRunOptions = {
   authMode: 'subscription',
   help: false,
   model: null,
   testPattern: null,
 }
+const REAL_CODEX_E2E_TAG = 'real-codex-live'
 
 const USAGE = [
   'Usage: pnpm test:assistant:live -- --test <name-pattern> [options]',
@@ -79,7 +102,10 @@ export function buildAssistantRealCodexRunEnv(input: {
   options: AssistantRealCodexRunOptions
   sourceEnv?: NodeJS.ProcessEnv
 }): NodeJS.ProcessEnv {
-  const env = { ...(input.sourceEnv ?? process.env) }
+  const sourceEnv = input.sourceEnv ?? process.env
+  const env = input.options.authMode === 'subscription'
+    ? buildNormalCodexHomeEnv(sourceEnv)
+    : { ...sourceEnv }
   env.MURPH_RUN_REAL_CODEX_E2E = '1'
 
   if (input.options.authMode === 'subscription') {
@@ -98,9 +124,36 @@ export function buildAssistantRealCodexRunEnv(input: {
   return env
 }
 
-export function buildAssistantRealCodexVitestArgs(
+export function buildAssistantRealCodexLoginEnv(
+  sourceEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return buildNormalCodexHomeEnv(sourceEnv)
+}
+
+export function buildAssistantRealCodexListArgs(
   testPattern: string,
 ): string[] {
+  return [
+    '--dir',
+    'packages/assistant-engine',
+    'exec',
+    'vitest',
+    'list',
+    '--config',
+    'vitest.config.ts',
+    'test/assistant-codex-real-e2e.test.ts',
+    '--testNamePattern',
+    testPattern,
+    '--tagsFilter',
+    REAL_CODEX_E2E_TAG,
+    '--json',
+  ]
+}
+
+export function buildAssistantRealCodexVitestArgs(
+  fullTestName: string,
+): string[] {
+  const matcherName = fullTestName.replaceAll(' > ', ' ')
   return [
     '--dir',
     'packages/assistant-engine',
@@ -112,8 +165,120 @@ export function buildAssistantRealCodexVitestArgs(
     '--no-coverage',
     'test/assistant-codex-real-e2e.test.ts',
     '--testNamePattern',
-    testPattern,
+    `^${escapeRegularExpression(matcherName)}$`,
+    '--tagsFilter',
+    REAL_CODEX_E2E_TAG,
   ]
+}
+
+export function requireSingleAssistantRealCodexTest(
+  listOutput: string,
+): string {
+  let listed: unknown
+  try {
+    listed = JSON.parse(listOutput)
+  } catch {
+    throw new Error('Vitest returned an unreadable focused-test list.')
+  }
+  if (!Array.isArray(listed)) {
+    throw new Error('Vitest returned an unreadable focused-test list.')
+  }
+
+  const names = listed.flatMap((entry) => {
+    if (
+      entry
+      && typeof entry === 'object'
+      && typeof (entry as { name?: unknown }).name === 'string'
+    ) {
+      return [(entry as { name: string }).name]
+    }
+    return []
+  })
+  if (names.length === 0) {
+    throw new Error('The test-name pattern did not match a live journey.')
+  }
+  if (names.length !== 1) {
+    throw new Error(
+      `The test-name pattern matched ${names.length} live journeys; make it more specific.`,
+    )
+  }
+  return names[0] as string
+}
+
+export function executeAssistantRealCodexRun(
+  options: AssistantRealCodexRunOptions,
+  dependencies: AssistantRealCodexRunDependencies,
+): number {
+  const testPattern = options.testPattern
+  if (!testPattern) {
+    throw new Error('Test pattern was not resolved.')
+  }
+
+  const liveEnv = buildAssistantRealCodexRunEnv({
+    options,
+    sourceEnv: dependencies.sourceEnv,
+  })
+  const listCommand = buildPnpmCommand(
+    buildAssistantRealCodexListArgs(testPattern),
+    dependencies.sourceEnv,
+  )
+  const listed = dependencies.runCommand({
+    ...listCommand,
+    env: liveEnv,
+    stdio: 'capture',
+  })
+  if (listed.error || listed.status !== 0) {
+    dependencies.writeStderr('Could not enumerate the focused live journey.\n')
+    return 1
+  }
+  let fullTestName: string
+  try {
+    fullTestName = requireSingleAssistantRealCodexTest(listed.stdout ?? '')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    dependencies.writeStderr(`${message}\n`)
+    return 2
+  }
+
+  if (options.authMode === 'subscription') {
+    const loginStatus = dependencies.runCommand({
+      args: ['login', 'status'],
+      command: 'codex',
+      env: buildAssistantRealCodexLoginEnv(dependencies.sourceEnv),
+      stdio: 'ignore',
+    })
+    if (loginStatus.status !== 0) {
+      dependencies.writeStderr(
+        'Codex is not logged in with ChatGPT. Run `codex login`, then retry.\n',
+      )
+      return 1
+    }
+  }
+
+  const effectiveModel =
+    options.model
+    ?? dependencies.sourceEnv.MURPH_REAL_CODEX_MODEL?.trim()
+    ?? 'gpt-5.6-terra'
+  dependencies.writeStdout(
+    `Running one real Murph assistant journey with ${effectiveModel} via ${options.authMode} auth.\n`,
+  )
+
+  const liveCommand = buildPnpmCommand(
+    buildAssistantRealCodexVitestArgs(fullTestName),
+    dependencies.sourceEnv,
+  )
+  const child = dependencies.runCommand({
+    ...liveCommand,
+    env: liveEnv,
+    stdio: 'inherit',
+  })
+  if (child.error) {
+    dependencies.writeStderr(
+      `Could not start the focused test: ${child.error.message}\n`,
+    )
+    return 1
+  }
+  return child.status ?? 1
 }
 
 function readRequiredValue(
@@ -126,6 +291,54 @@ function readRequiredValue(
     throw new Error(`${option} requires a value.`)
   }
   return value
+}
+
+function buildNormalCodexHomeEnv(
+  sourceEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const env = { ...sourceEnv }
+  delete env.CODEX_HOME
+  return env
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function buildPnpmCommand(
+  args: string[],
+  sourceEnv: NodeJS.ProcessEnv,
+): Pick<AssistantRealCodexCommandRequest, 'args' | 'command'> {
+  const npmExecPath = sourceEnv.npm_execpath?.trim()
+  return npmExecPath
+    ? {
+        args: [npmExecPath, ...args],
+        command: process.execPath,
+      }
+    : {
+        args,
+        command: 'pnpm',
+      }
+}
+
+function runAssistantRealCodexCommand(
+  request: AssistantRealCodexCommandRequest,
+): AssistantRealCodexCommandResult {
+  const result = request.stdio === 'capture'
+    ? spawnSync(request.command, request.args, {
+        encoding: 'utf8',
+        env: request.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    : spawnSync(request.command, request.args, {
+        env: request.env,
+        stdio: request.stdio,
+      })
+  return {
+    error: result.error,
+    status: result.status,
+    stdout: typeof result.stdout === 'string' ? result.stdout : undefined,
+  }
 }
 
 function run(): void {
@@ -144,51 +357,12 @@ function run(): void {
     return
   }
 
-  if (options.authMode === 'subscription') {
-    const loginStatus = spawnSync('codex', ['login', 'status'], {
-      env: process.env,
-      stdio: 'ignore',
-    })
-    if (loginStatus.status !== 0) {
-      process.stderr.write(
-        'Codex is not logged in with ChatGPT. Run `codex login`, then retry.\n',
-      )
-      process.exitCode = 1
-      return
-    }
-  }
-
-  const testPattern = options.testPattern
-  if (!testPattern) {
-    throw new Error('Test pattern was not resolved.')
-  }
-  const effectiveModel =
-    options.model
-    ?? process.env.MURPH_REAL_CODEX_MODEL?.trim()
-    ?? 'gpt-5.6-terra'
-  process.stdout.write(
-    `Running one real Murph assistant journey with ${effectiveModel} via ${options.authMode} auth.\n`,
-  )
-
-  const pnpmArgs = buildAssistantRealCodexVitestArgs(testPattern)
-  const npmExecPath = process.env.npm_execpath?.trim()
-  const child = npmExecPath
-    ? spawnSync(process.execPath, [npmExecPath, ...pnpmArgs], {
-        env: buildAssistantRealCodexRunEnv({ options }),
-        stdio: 'inherit',
-      })
-    : spawnSync('pnpm', pnpmArgs, {
-        env: buildAssistantRealCodexRunEnv({ options }),
-        stdio: 'inherit',
-      })
-  if (child.error) {
-    process.stderr.write(
-      `Could not start the focused test: ${child.error.message}\n`,
-    )
-    process.exitCode = 1
-    return
-  }
-  process.exitCode = child.status ?? 1
+  process.exitCode = executeAssistantRealCodexRun(options, {
+    runCommand: runAssistantRealCodexCommand,
+    sourceEnv: process.env,
+    writeStderr: (message) => process.stderr.write(message),
+    writeStdout: (message) => process.stdout.write(message),
+  })
 }
 
 const invokedPath = process.argv[1]
