@@ -656,9 +656,17 @@ direct-Starter gate is fully exhausted again.
 - Observability work never adds user latency. Diagnostics never block provider
   start or delivery. Once the active reply cannot continue, a bounded
   best-effort crash record may run.
-- Capture structured errors at the root boundary, apply shared redaction, and
-  preserve a stable code plus useful redacted cause. Never expose secrets,
-  message content, private identifiers, or local paths in external artifacts.
+- Capture structured errors at the root boundary and preserve a stable code,
+  stage, retryability, and useful bounded cause or detail. Do not collapse
+  ordinary diagnostic prose or build speculative exhaustive redaction or
+  allowlist machinery merely because the prose could theoretically contain
+  sensitive content.
+- Redact at concrete boundaries: actual credentials, authentication material,
+  and secrets; direct identifiers or local paths escaping externally; and raw
+  private payloads, transcripts, health data, or vault content. Private
+  operator diagnostics and model/tool errors authorized for the same user and
+  context may retain bounded raw detail. Proven higher-risk shapes remain
+  governed by their stricter owner rules in `agent-docs/SECURITY.md`.
 - Growing persisted collections declare ownership, retention, indexing or
   pagination, snapshot treatment, and cardinality or byte limits. Hosted
   workspace files also follow `docs/contracts/06-hosted-workspace-file-count.md`.

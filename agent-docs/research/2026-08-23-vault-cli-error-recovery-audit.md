@@ -16,12 +16,16 @@ and returns only `code`, `message`, `retryable`, and `exitCode`. The model then
 sees messages such as `Food payload is invalid.` or `Invalid workout session
 fields.` even though the failing paths already exist in memory.
 
-This is primarily a **model-facing error-envelope problem**, not a request to log
-more private data. The primary implementation surface is one bounded,
-value-free repair-detail contract carried through the final machine JSON so the
-model can correct its call. Increasing durable log verbosity alone would not
-make the model recover. Durable logs should remain much smaller and contain
-only safe categories.
+This is primarily a **model-facing error-envelope problem**, not a request for
+unbounded log verbosity. The primary implementation surface is typed
+classification plus bounded original diagnostic and repair detail carried
+through the final machine JSON so the model can correct its call. Ordinary
+diagnostic prose should not be genericized merely because it could
+theoretically contain sensitive content. Scrubbing should target concrete
+credential, identifier/path, and raw private-content boundaries; private
+operator diagnostics and model/tool errors authorized for the same user and
+context may retain bounded raw detail. Durable logs can remain smaller than the
+recovery envelope while preserving useful categorical cause detail.
 
 Two other cross-cutting problems deserve immediate attention:
 
@@ -111,15 +115,20 @@ renderer path, an existing test, or a focused synthetic reproduction.
 
 ## What a recoverable error must contain
 
-For a machine caller, an error is recoverable when it answers four questions
-without disclosing private input:
+For a machine caller, an error is recoverable when it answers five questions:
 
 1. **What failed?** A stable code and operation stage.
 2. **Can the current model repair it?** Field paths and expected form, or a
    precise next command.
 3. **Should it retry unchanged?** An evidence-based `retryable` value.
-4. **What must remain private?** No submitted values, health content, provider
-   response bodies, absolute paths, tokens, or arbitrary nested context.
+4. **What diagnostic detail helps?** Useful bounded original cause or detail by
+   default, rather than generic fallback prose.
+5. **What crosses a concrete privacy boundary?** Scrub actual credentials,
+   authentication material, and secrets; direct identifiers or local paths
+   escaping externally; and raw private payloads, transcripts, health data, or
+   vault content. Private operator diagnostics and model/tool errors authorized
+   for the same user and context may retain bounded raw detail. Stricter owner
+   rules in `agent-docs/SECURITY.md` still govern proven higher-risk shapes.
 
 Native Incur argument validation already demonstrates the desired shape with
 `VALIDATION_ERROR` and structured `fieldErrors`. The gaps are concentrated in
@@ -171,7 +180,7 @@ Support a fixed maximum issue count and message length, report the omitted
 count, and add non-echo tests for submitted values, content, paths, causes, and
 provider bodies.
 
-### VCE-002 — Redact and classify unknown exceptions at the root boundary
+### VCE-002 — Classify unknown exceptions and scrub concrete boundaries
 
 **Evidence.** Non-`VaultCliError` exceptions are rethrown by the bridge and
 become `UNKNOWN`. A synthetic permission failure preserved the operating-system
@@ -179,11 +188,16 @@ message and absolute local path. Raw filesystem errors can escape from sample,
 query, export, operator-config, exercise-catalog, Commons-catalog, progress-card,
 and other file boundaries.
 
-**Smallest safe change.** Map expected errors nearest their domain owner, then
-apply a final root redactor for all remaining unknown exceptions. Safely bucket
-known Node codes such as `ENOENT`, `EACCES`, `EISDIR`, and storage exhaustion.
-Return a stable category and action without the raw path. Keep unexpected
-details only in private, value-free diagnostics.
+**Smallest safe change.** Map expected errors nearest their domain owner and
+safely bucket known Node codes such as `ENOENT`, `EACCES`, `EISDIR`, and storage
+exhaustion. Return a stable category, stage, retryability, action, and bounded
+original diagnostic detail by default. At the external renderer, remove raw
+local paths and scrub actual credentials, authentication material, secrets,
+direct identifiers, and raw private payloads, transcripts, health data, or
+vault content. Do not genericize all unknown prose or build a speculative
+exhaustive redactor/allowlist. Private operator diagnostics and model/tool
+errors authorized for the same user and context may retain bounded raw detail;
+proven higher-risk shapes keep the stricter rules in `agent-docs/SECURITY.md`.
 
 This is both a recovery defect and a privacy boundary; it should ship with
 VCE-001 or immediately after it.
