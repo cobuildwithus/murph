@@ -1,6 +1,7 @@
 import { VaultError, appendBloodTest, upsertEvent } from "@murphai/core";
 import {
   BLOOD_TEST_FASTING_STATUSES,
+  BLOOD_TEST_RESULT_FLAGS,
   BLOOD_TEST_CATEGORY,
   EVENT_SOURCES,
   TEST_RESULT_STATUSES,
@@ -22,6 +23,7 @@ import {
   type VaultServices,
 } from "@murphai/vault-usecases";
 import { Cli, z } from "incur";
+import type { ZodIssue } from "zod";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
@@ -174,12 +176,16 @@ function parseKeyValueSpec(
     }
 
     if (fields.has(key)) {
+      const publicPath =
+        key === "type" || key === "targetId"
+          ? ["link", occurrence, key]
+          : ["link", occurrence];
       throw new VaultCliError(
         "invalid_option",
         `Duplicate --${optionName} field.`,
         bloodTestOptionValidationContext({
           optionName: "link",
-          publicPath: ["link", occurrence],
+          publicPath,
           code: "custom",
         }),
       );
@@ -228,21 +234,142 @@ function parseJsonBloodTestResult(
 
   const parsed = bloodTestResultSchema.safeParse(value);
   if (!parsed.success) {
+    const recovery = bloodTestResultValidationRecovery(
+      parsed.error.issues,
+      occurrence,
+    );
     throw new VaultCliError(
       "invalid_option",
-      "Invalid --result blood-test analyte payload.",
+      recovery.message,
       {
-        issues: parsed.error.issues.map((issue) =>
-          publicValidationIssue(
-            issue,
-            bloodTestResultPublicPath(issue.path, occurrence),
-          )),
+        issues: recovery.issues,
         stage: "validation",
       },
     );
   }
 
   return parsed.data;
+}
+
+function matchesStaticIssue(
+  issue: ZodIssue,
+  code: ZodIssue["code"],
+  path: readonly PropertyKey[],
+): boolean {
+  return (
+    issue.code === code &&
+    issue.path.length === path.length &&
+    issue.path.every((segment, index) => segment === path[index])
+  );
+}
+
+function matchesReferenceRangeAlternatives(issue: ZodIssue): boolean {
+  if (
+    issue.code !== "invalid_union" ||
+    !matchesStaticIssue(issue, "invalid_union", ["referenceRange"]) ||
+    issue.errors.length !== 3
+  ) {
+    return false;
+  }
+
+  return (["low", "high", "text"] as const).every((field, index) =>
+    issue.errors[index]?.some((nestedIssue) =>
+      matchesStaticIssue(nestedIssue, "invalid_type", [field])) === true);
+}
+
+function matchesMissingResultAlternative(issue: ZodIssue): boolean {
+  return (
+    matchesStaticIssue(issue, "invalid_type", ["value"]) ||
+    matchesStaticIssue(issue, "invalid_type", ["textValue"])
+  );
+}
+
+function bloodTestResultValidationRecovery(
+  issues: readonly ZodIssue[],
+  occurrence: number,
+) {
+  const resultUnion = issues.find(
+    (issue) =>
+      issue.code === "invalid_union" &&
+      matchesStaticIssue(issue, "invalid_union", []) &&
+      issue.errors.length > 0,
+  );
+
+  if (resultUnion?.code === "invalid_union") {
+    if (
+      resultUnion.errors.every((branch) =>
+        branch.some((issue) =>
+          matchesStaticIssue(issue, "invalid_value", ["flag"])) &&
+        branch.every(
+          (issue) =>
+            matchesStaticIssue(issue, "invalid_value", ["flag"]) ||
+            matchesReferenceRangeAlternatives(issue) ||
+            matchesMissingResultAlternative(issue),
+        ))
+    ) {
+      return {
+        message: `Set flag to one of: ${BLOOD_TEST_RESULT_FLAGS.join(", ")}.`,
+        issues: [
+          publicValidationIssue(
+            { code: "invalid_value" },
+            ["result", occurrence, "flag"],
+          ),
+        ],
+      };
+    }
+
+    if (
+      resultUnion.errors.every((branch) =>
+        branch.some(matchesReferenceRangeAlternatives) &&
+        branch.every(
+          (issue) =>
+            matchesReferenceRangeAlternatives(issue) ||
+            matchesMissingResultAlternative(issue),
+        ))
+    ) {
+      return {
+        message:
+          "Provide at least one of low, high, or text.",
+        issues: [
+          publicValidationIssue(
+            { code: "invalid_union" },
+            ["result", occurrence, "referenceRange"],
+          ),
+        ],
+      };
+    }
+
+    if (
+      resultUnion.errors.length === 2 &&
+      resultUnion.errors[0]?.length === 1 &&
+      resultUnion.errors[1]?.length === 1 &&
+      matchesStaticIssue(resultUnion.errors[0][0], "invalid_type", ["value"]) &&
+      matchesStaticIssue(
+        resultUnion.errors[1][0],
+        "invalid_type",
+        ["textValue"],
+      )
+    ) {
+      return {
+        message: "Provide either value or textValue.",
+        issues: [
+          publicValidationIssue(
+            { code: "invalid_union" },
+            ["result", occurrence],
+          ),
+        ],
+      };
+    }
+  }
+
+  return {
+    message: "Invalid --result blood-test analyte payload.",
+    issues: issues.map((issue) =>
+      publicValidationIssue(
+        issue,
+        bloodTestResultPublicPath(issue.path, occurrence),
+      )),
+  };
 }
 
 function parseBloodTestResult(spec: string, occurrence: number): BloodTestResult {

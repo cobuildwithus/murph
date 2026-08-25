@@ -1277,7 +1277,67 @@ test("blood-test save collapses unknown link keys without echoing submitted valu
   }
 });
 
-test("built CLI reports blood-test result field paths without echoing values or writing", async () => {
+test("blood-test save reports known duplicate link fields without echoing values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-duplicate-link-",
+  );
+  const cases = [
+    {
+      privateValue: "private-duplicate-type-value",
+      spec: "type=related_to;type=private-duplicate-type-value",
+      path: "link.0.type",
+    },
+    {
+      privateValue: "private-duplicate-target-value",
+      spec: "targetId=goal_01JNY0B2W4VG5C2A0G9S8M7R6S;targetId=private-duplicate-target-value",
+      path: "link.0.targetId",
+    },
+  ];
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    for (const entry of cases) {
+      const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+        "blood-test",
+        "save",
+        "Synthetic duplicate link panel",
+        "--occurred-at",
+        "2026-03-12T13:00:00.000Z",
+        "--test-name",
+        "synthetic_duplicate_link_panel",
+        "--result",
+        JSON.stringify({ analyte: "Ferritin", value: 45, unit: "ng/mL" }),
+        "--link",
+        entry.spec,
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, 1, entry.path);
+      assert.equal(result.envelope.ok, false, entry.path);
+      assert.equal(result.envelope.error.code, "invalid_option", entry.path);
+      assert.equal(result.envelope.error.message, "Duplicate --link field.", entry.path);
+      assert.equal(result.envelope.error.stage, "validation", entry.path);
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, entry.path);
+      assert.equal(
+        JSON.stringify(result.envelope).includes(entry.privateValue),
+        false,
+        entry.path,
+      );
+      assert.equal(
+        await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+        false,
+        entry.path,
+      );
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("built CLI reports blood-test alternatives and enum choices without echoing values or writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-repair-alternatives-",
   );
@@ -1285,7 +1345,8 @@ test("built CLI reports blood-test result field paths without echoing values or 
     {
       privateValue: "private-missing-result-marker",
       result: { analyte: "private-missing-result-marker" },
-      path: "result.0",
+      message: "Provide either value or textValue.",
+      path: "result.1",
       code: "invalid_union",
     },
     {
@@ -1295,7 +1356,8 @@ test("built CLI reports blood-test result field paths without echoing values or 
         value: 45,
         referenceRange: {},
       },
-      path: "result.0",
+      message: "Provide at least one of low, high, or text.",
+      path: "result.1.referenceRange",
       code: "invalid_union",
     },
     {
@@ -1304,9 +1366,11 @@ test("built CLI reports blood-test result field paths without echoing values or 
         analyte: "Synthetic analyte",
         value: 45,
         flag: "private-invalid-flag",
+        referenceRange: {},
       },
-      path: "result.0",
-      code: "invalid_union",
+      message: "Set flag to one of: low, normal, high, abnormal, critical, unknown.",
+      path: "result.1.flag",
+      code: "invalid_value",
     },
   ];
 
@@ -1323,6 +1387,8 @@ test("built CLI reports blood-test result field paths without echoing values or 
         "--test-name",
         "synthetic_repair_panel",
         "--result",
+        JSON.stringify({ analyte: "Glucose", value: 92, unit: "mg/dL" }),
+        "--result",
         JSON.stringify(entry.result),
         "--vault",
         vaultRoot,
@@ -1331,6 +1397,7 @@ test("built CLI reports blood-test result field paths without echoing values or 
       assert.equal(result.ok, false, entry.path);
       assert.equal(result.error?.code, "invalid_option", entry.path);
       assert.equal(result.error?.stage, "validation", entry.path);
+      assert.equal(result.error?.message, entry.message, entry.path);
       assert.deepEqual(result.error?.fieldErrors, [
         {
           path: entry.path,

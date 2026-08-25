@@ -827,6 +827,12 @@ test("goal import-json validates payloads through the shared goal schema", async
       "--vault",
       vaultRoot,
     ]);
+    const listAfterInvalid = await runCli<{ count: number }>([
+      "goal",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
 
     assert.equal(upsertResult.ok, false);
     assert.equal(upsertResult.error?.code, "invalid_payload");
@@ -843,6 +849,8 @@ test("goal import-json validates payloads through the shared goal schema", async
     );
     assert.equal(JSON.stringify(qualifierResult).includes(privateQualifierKey), false);
     assert.equal(JSON.stringify(qualifierResult).includes(privateQualifierValue), false);
+    assert.equal(listAfterInvalid.ok, true);
+    assert.equal(requireData(listAfterInvalid).count, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
