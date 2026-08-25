@@ -1308,6 +1308,17 @@ Last verified: 2026-08-23
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
   due, only a connection mailbox wake may admit it, so a generic runtime timer
   cannot self-rearm from stale local cadence.
+- Generated-delivery cleanup is fail-closed on an untrusted outbox or malformed
+  staging structure, but a trusted active reference whose file is already absent
+  does not make unrelated regular files ambiguous. Snapshot maintenance counts
+  that missing reference, retains every observed active file, prunes the safe
+  remainder, and emits only bounded counts, byte totals, and a closed failure
+  code. Ordinary idle checkpoint construction remains foreground-interruptible
+  before canonical publication. A shutdown-signal checkpoint instead preserves
+  dirty retiring-container state; its wake endpoint reports the shutdown
+  rejection explicitly and UserRunner retries the durable wake after one second
+  rather than the generic fifteen-second delay. A mixed rollout is additive:
+  old containers omit the header and continue using the prior fallback.
 - A successful hosted checkpoint gets one best-effort, wake-raced vault-share
   projection opportunity before device-sync dirty acknowledgement or the next
   complete device-sync-only maintenance prefix. A conversation wake preempts

@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -9,6 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
+import {
+  createAssistantOutboxIntent,
+  resolveAssistantVaultFileResponseMedia,
+} from "@murphai/assistant-engine/assistant-outbox";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
@@ -22,6 +26,9 @@ import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
+import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
@@ -33,6 +40,9 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+import {
+  ensureProcessingAfterSyntheticMailboxAppendForTest,
+} from "./helpers/hosted-local-wake.js";
 import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
@@ -53,6 +63,16 @@ const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.6-terra";
 const idleCheckpointDelayMs = 180_000;
 const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
+const generatedDeliveryResidueContents = [
+  "synthetic completed delivery one\n",
+  "synthetic completed delivery two\n",
+  "synthetic completed delivery three\n",
+  "synthetic completed delivery four\n",
+] as const;
+const generatedDeliveryResidueBytes = generatedDeliveryResidueContents.reduce(
+  (total, contents) => total + Buffer.byteLength(contents),
+  0,
+);
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -108,7 +128,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     });
   }, 300_000);
 
-  it("commits one shutdown snapshot and cold-restores the appended conversation once", async () => {
+  it("reclaims unrelated delivery residue, commits once, and cold-restores appended conversation", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const firstReplyMatcher = matchLinqMessageText(firstReplyText);
@@ -209,6 +229,12 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     ).resolves.toEqual({ ok: true, released: true });
     await expect(gracefulStopPromise).resolves.toEqual({ ok: true });
     gracefulStopPromise = null;
+    await expect(ensureProcessingAfterSyntheticMailboxAppendForTest({
+      harness: requireScenario().harness,
+      userId,
+    })).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
     await expect(
       requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(userId),
     ).resolves.toEqual({ state: "unarmed" });
@@ -223,6 +249,15 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(countIdleShutdownSnapshotLogs(committedShutdownStatus)).toBe(
       shutdownBaselineIdleSnapshotCount + 1,
     );
+    expect(committedShutdownStatus.recentLogs?.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryActiveFilesMissing === 1
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryFilesScanned === 4
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 4
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === generatedDeliveryResidueBytes
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed !== true
+    )).toBe(true);
     const committedShutdownSnapshotAtMs = requireLatestIdleShutdownSnapshotAtMs(
       committedShutdownStatus,
     );
@@ -293,6 +328,7 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
     timezone: "America/New_York",
     vault: vaultRoot,
   });
+  await seedGeneratedDeliveryCleanupBlocker(vaultRoot);
 
   const snapshot = await snapshotHostedExecutionContext({
     operatorHomeRoot,
@@ -327,6 +363,35 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
     },
   );
   expect(uploadResponse.status).toBe(200);
+}
+
+async function seedGeneratedDeliveryCleanupBlocker(vaultRoot: string): Promise<void> {
+  const stagingRoot = path.join(
+    vaultRoot,
+    ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+  );
+  await mkdir(stagingRoot, { recursive: true });
+  const missingActivePath = path.join(stagingRoot, "missing-active.pdf");
+  await writeFile(missingActivePath, "synthetic active delivery\n");
+  const missingActiveMedia = await resolveAssistantVaultFileResponseMedia({
+    ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing-active.pdf`,
+    vaultRoot,
+  });
+  await createAssistantOutboxIntent({
+    channel: "linq",
+    identityId: "identity-local-shutdown-cleanup",
+    media: [missingActiveMedia],
+    message: "Synthetic generated delivery",
+    sessionId: "session-local-shutdown-cleanup",
+    threadId: "thread-local-shutdown-cleanup",
+    threadIsDirect: true,
+    turnId: "turn-local-shutdown-cleanup",
+    vault: vaultRoot,
+  });
+  await rm(missingActivePath);
+  await Promise.all(generatedDeliveryResidueContents.map(async (contents, index) => {
+    await writeFile(path.join(stagingRoot, `completed-${index + 1}.zip`), contents);
+  }));
 }
 
 async function waitForShutdownCheckpointPublicationBarrier(): Promise<void> {

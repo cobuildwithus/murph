@@ -573,7 +573,7 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
-  it("keeps an exact wake unconfirmed while child admission is pending", async () => {
+  it("classifies an exact wake rejected by a shutting-down child", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();
     const request = createRunnerRequest("evt_wake_during_child_admission");
@@ -589,8 +589,8 @@ describe("RunnerContainer", () => {
       if (url.endsWith("/internal/runtime-wake")) {
         return new Response(null, {
           headers: {
-            "x-runtime-wake-absent": "1",
             "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-shutting-down": "1",
           },
           status: 204,
         });
@@ -622,7 +622,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual({
       kind: "unknown",
-      reason: "active-child-rejected",
+      reason: "container-shutting-down",
     });
     expect(containerFetch.mock.calls.some(([url]) =>
       String(url).endsWith("/internal/runtime-wake")

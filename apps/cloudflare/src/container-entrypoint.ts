@@ -439,6 +439,7 @@ export async function startHostedContainerEntrypoint(input: {
             phase: "failed",
           });
           response.setHeader("x-runtime-wake-accepted", "0");
+          response.setHeader("x-runtime-wake-shutting-down", "1");
           if (advertiseAbsent) {
             response.setHeader("x-runtime-wake-absent", "1");
           }

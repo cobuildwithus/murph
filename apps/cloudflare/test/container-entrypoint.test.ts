@@ -627,6 +627,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(lateWake.status).toBe(204);
       expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
       expect(lateWake.headers.get("x-runtime-wake-absent")).toBe("1");
+      expect(lateWake.headers.get("x-runtime-wake-shutting-down")).toBe("1");
     } finally {
       releaseDrain.resolve();
     }
@@ -706,6 +707,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(lateWake.status).toBe(204);
     expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
     expect(lateWake.headers.get("x-runtime-wake-absent")).toBeNull();
+    expect(lateWake.headers.get("x-runtime-wake-shutting-down")).toBe("1");
     expect(runtimeWakeCount).toBe(0);
     expect(invocationResponse.status).toBe(200);
     await vi.waitFor(() => {
