@@ -8923,10 +8923,13 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         process.stdout.write(
           `[interactive-nutrition-card-recovery-e2e] ${JSON.stringify({
             commands: result.commands,
+            firstActions: result.firstActions,
             firstCardAttached: result.firstCard !== null,
             firstMessage: result.firstMessage,
             firstProviderActionCount: result.firstProviderActionCount,
             followupCardAttached: result.card !== null,
+            followupActions: result.followupActions,
+            followupMessage: result.followupMessage,
             followupProviderActionCount: result.followupProviderActionCount,
             savedCalories: result.savedCalories,
           })}\n`,
@@ -9112,10 +9115,13 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   card: unknown
   commands: string[]
   firstCard: unknown
+  firstActions: ReturnType<typeof summarizeMealRecoveryActions>
   firstCommands: string[]
   firstMessage: string
   firstProviderActionCount: number
   followupCommands: string[]
+  followupActions: ReturnType<typeof summarizeMealRecoveryActions>
+  followupMessage: string
   followupProviderActionCount: number
   mealId: string
   savedCalories: number | null
@@ -9276,10 +9282,13 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       card: followup.responseCard,
       commands,
       firstCard: first.responseCard,
+      firstActions: summarizeMealRecoveryActions(first.jsonEvents),
       firstCommands,
       firstMessage: first.finalMessage,
       firstProviderActionCount: first.providerActionCount,
       followupCommands: commands.slice(firstCommands.length),
+      followupActions: summarizeMealRecoveryActions(followup.jsonEvents),
+      followupMessage: followup.finalMessage,
       followupProviderActionCount: followup.providerActionCount,
       mealId: meal.mealId,
       savedCalories: saved.savedCalories,
@@ -9287,6 +9296,22 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)
   }
+}
+
+function summarizeMealRecoveryActions(events: readonly unknown[]): Array<{
+  action: string
+  outputTail?: string
+}> {
+  return readCapabilityRoutingActions(events).map((action) =>
+    action.kind === 'command'
+      ? {
+          action: action.command,
+          ...(action.output === ''
+            ? {}
+            : { outputTail: action.output.slice(-500) }),
+        }
+      : { action: action.tool }
+  )
 }
 
 async function runRealAutomaticMealClarificationScenario(input: {
