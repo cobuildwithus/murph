@@ -18,9 +18,9 @@ Updated: 2026-08-25
 - Focused tests prove that email and phone labels and values are absent.
 - Architecture and security contracts explicitly prohibit contact details in
   this notification.
-- Focused local proof, exact-head CI, the preliminary coverage review, and the
-  final privacy-sensitive ReviewGPT gate complete with no unresolved accepted
-  finding.
+- Focused local proof, exact-head CI, the unified preliminary Product UX,
+  prompt, and coverage review, and the final privacy-sensitive ReviewGPT gate
+  complete with no unresolved accepted finding.
 
 ## Scope
 
@@ -69,16 +69,43 @@ Updated: 2026-08-25
 3. Update the architecture and security contracts at the existing notification
    boundary.
 4. Run focused Web tests, typecheck, durable-doc checks, and parent diff review.
-5. Commit and push a draft PR, then run the preliminary coverage pass and final
-   ReviewGPT gate concurrently with exact-head CI.
+5. Commit and push a draft PR, then run the unified preliminary specialist pass
+   and final ReviewGPT gate concurrently with exact-head CI.
 6. Resolve accepted findings, close this plan with `scripts/finish-task`, prove
    current-base mergeability, and hand off the completed PR/worktree.
 
-## Product UX classification
+## Product UX plan
 
-- Internal-only operational change. No member-facing journey or product-owned
-  dimension changes, so the Product UX, prompt, and frontend lenses are not
-  applicable. The coverage lens is applicable.
+- Classification: Product change. The existing internal-recipient journey
+  keeps its purpose while the data disclosed in the message becomes narrower.
+- Outcome: A configured internal recipient can recognize when, where, and
+  through which surface a signup occurred without receiving the member's
+  contact details.
+- Entry and promise: A completed activation schedules one post-response email;
+  it remains one-shot, plain text, and context-free when optional request
+  context is unavailable.
+- Affected people:
+  - The internal recipient keeps the operational time, source, and approximate
+    location needed to understand a signup.
+  - The member receives no new surface, but their email address and phone number
+    are not disclosed through this internal notification.
+- Proof path: The focused provider-boundary test exercises a representative
+  context-rich notification and proves the complete retained body, no contact
+  labels or selected address, and no email-authorization read. The fallback
+  test proves the sparse-context message remains useful.
+- Done when: Both message shapes send through the existing owner without contact
+  details and without changing delivery, attempt claiming, recipients, or
+  idempotency.
+
+## Preliminary specialist applicability
+
+- Product UX: applicable because the internal recipient reads a changed email
+  and the triggering member has a narrower privacy exposure.
+- Prompt: applicable because the patch changes live agent-facing architecture,
+  security, index, and execution-plan instructions.
+- Frontend: not applicable because no rendered Web UI changes.
+- Coverage: applicable because executable provider-bound email assembly and its
+  direct proof change.
 
 ## Deployment classification
 
@@ -96,3 +123,9 @@ Updated: 2026-08-25
 - The first focused test attempt reproduced the already-linked clean-worktree
   Prisma-generation friction. Running the required Web typecheck generated the
   client, and the unchanged focused test then passed.
+- Preliminary specialist review found one medium process-description issue:
+  the plan and PR body incorrectly treated Product UX and prompt review as not
+  applicable. Accepted and corrected as non-production plan/PR metadata; the
+  review found runtime coverage sufficient and returned no patch artifact.
+- Final ReviewGPT round 1 passed with no qualifying findings on the immutable
+  production candidate.
