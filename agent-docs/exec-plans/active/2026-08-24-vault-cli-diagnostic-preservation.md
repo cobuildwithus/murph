@@ -23,9 +23,11 @@ generic error.
 
 - In scope: the shared operator-config projector and path masking helper,
   assistant CLI recovery guidance, matching architecture guidance, and focused
-  CLI/setup/provider regression tests.
-- Out of scope: command-specific provider taxonomies, persisted error logs,
-  retry supervisors, or new recovery state.
+  CLI/setup/provider regression tests. The exact-head review also proved that
+  the existing read-only Mapbox and hosted-label owners need bounded transport
+  and HTTP retry classification before their failures reach that projector.
+- Out of scope: persisted error logs, retry supervisors, internal retry loops,
+  or new recovery state.
 
 ## Evidence
 
@@ -44,6 +46,12 @@ generic error.
   credential-shape masking.
 - Infer `validation` only from accepted owner issues or the stable core invalid
   input code.
+- Classify read-only provider transport and HTTP failures at the Mapbox and
+  hosted-label owners. Treat timeouts, ordinary transport failures, rate limits,
+  and 5xx responses as retryable; treat cancellation, credentials, and other
+  4xx responses as terminal.
+- Permit at most one unchanged retry of a read-only command in assistant
+  guidance. Never retry an unchanged write.
 
 ## Tasks
 
@@ -67,3 +75,20 @@ generic error.
 - Production bundle assembly and all eight parity probes pass. Vault CLI is
   9,454,722 of 9,467,648 bytes; the runner is 11,271,765 of 11,393,617
   bytes.
+- ReviewGPT round 2 found that untyped Mapbox failures and label failures with
+  no retry context were incorrectly projected as terminal. The finding was
+  accepted and remediated at the read-only owners. Timeouts, ordinary transport
+  failures, and 5xx responses are retryable; cancellation, credentials, and
+  non-transient 4xx responses are terminal. Assistant guidance permits at most
+  one unchanged read retry and forbids unchanged write retries.
+- Focused source proof passes 80 CLI tests and 15 assistant guidance tests;
+  affected CLI and assistant-engine typechecks pass.
+- Prepared-runtime proof passes 106 focused release-shaped CLI tests. An
+  additional compiled `dist/bin.js` battery passes all 21 route, food-label,
+  and supplement-label transport/status scenarios and proves they leave no
+  files behind.
+- Docs drift/gardening, workspace boundary/cycle checks, and CLI package shape
+  pass.
+- Production bundle assembly and all eight parity probes pass after the review
+  fix. Vault CLI is 9,457,933 of 9,467,648 bytes; the runner is 11,271,843 of
+  11,393,617 bytes.

@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 
 import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/env'
-import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -449,6 +449,7 @@ function assertHostedRuntime<TSource extends string>(
   throw new VaultCliError(
     `${config.errorCodePrefix}_hosted_only`,
     `${config.searchDescription} runs through the hosted Murph data API and is only available inside hosted assistant runtime.`,
+    { retryable: false, stage: 'configuration' },
   )
 }
 
@@ -478,10 +479,7 @@ async function fetchLabelsApi<TSource extends string>(
       signal: AbortSignal.timeout(resolveLabelTimeoutMs(env)),
     })
   } catch (error) {
-    throw new VaultCliError(
-      `${config.errorCodePrefix}_request_failed`,
-      `${config.searchDescription} request failed: ${errorMessage(error)}.`,
-    )
+    throw createLabelsTransportError(config, error)
   }
 
   if (response.status === 404 && options.allowNotFound === true) {
@@ -489,10 +487,8 @@ async function fetchLabelsApi<TSource extends string>(
   }
 
   if (!response.ok) {
-    throw new VaultCliError(
-      `${config.errorCodePrefix}_response_failed`,
-      `${config.searchDescription} request failed (${await describeFailedLabelsResponse(response)}).`,
-    )
+    await discardLabelsResponseBody(response)
+    throw createLabelsHttpError(config, response.status)
   }
 
   return response
@@ -510,6 +506,7 @@ function readHostedDataApiProviderCredential<TSource extends string>(
   throw new VaultCliError(
     `${config.errorCodePrefix}_credential_missing`,
     `${config.searchDescription} requires the hosted Murph data API provider credential.`,
+    { retryable: false, stage: 'configuration' },
   )
 }
 
@@ -543,19 +540,120 @@ function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
   return Math.min(parsed, MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS)
 }
 
-async function describeFailedLabelsResponse(response: Response): Promise<string> {
-  const fallback = `HTTP ${response.status}`
-
+async function discardLabelsResponseBody(response: Response): Promise<void> {
   try {
-    const payload = (await response.json()) as {
-      error?: unknown
-    }
-    const error = typeof payload.error === 'string'
-      ? normalizeNullableString(payload.error)
-      : null
-
-    return error ? `${fallback}: ${error}` : fallback
+    await response.body?.cancel()
   } catch {
-    return fallback
+    // The status is sufficient to classify the failure; disposal is best effort.
+  }
+}
+
+function createLabelsTransportError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  error: unknown,
+): VaultCliError {
+  const errorName = error instanceof Error ? error.name : undefined
+
+  if (errorName === 'TimeoutError') {
+    return new VaultCliError(
+      `${config.errorCodePrefix}_request_timed_out`,
+      `${config.searchDescription} request timed out.`,
+      {
+        failureStage: 'request',
+        retryable: true,
+        stage: 'transport',
+        timedOut: true,
+      },
+    )
+  }
+
+  if (errorName === 'AbortError') {
+    return new VaultCliError(
+      `${config.errorCodePrefix}_request_cancelled`,
+      `${config.searchDescription} request was cancelled.`,
+      {
+        failureStage: 'request',
+        retryable: false,
+        stage: 'transport',
+      },
+    )
+  }
+
+  return new VaultCliError(
+    `${config.errorCodePrefix}_request_failed`,
+    `${config.searchDescription} request failed before receiving a response.`,
+    {
+      failureStage: 'request',
+      retryable: true,
+      stage: 'transport',
+    },
+  )
+}
+
+function createLabelsHttpError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+): VaultCliError {
+  const failure = classifyLabelsHttpFailure(config.searchDescription, status)
+
+  return new VaultCliError(
+    `${config.errorCodePrefix}_${failure.codeSuffix}`,
+    failure.message,
+    {
+      failureStage: 'response',
+      retryable: failure.retryable,
+      stage: 'response',
+      status,
+      ...(failure.timedOut === true ? { timedOut: true } : {}),
+    },
+  )
+}
+
+function classifyLabelsHttpFailure(
+  searchDescription: string,
+  status: number,
+): {
+  codeSuffix: string
+  message: string
+  retryable: boolean
+  timedOut?: true
+} {
+  if (status === 401 || status === 403) {
+    return {
+      codeSuffix: 'auth_failed',
+      message: `${searchDescription} authorization was rejected by the hosted data API (HTTP ${status}).`,
+      retryable: false,
+    }
+  }
+
+  if (status === 408) {
+    return {
+      codeSuffix: 'request_timed_out',
+      message: `${searchDescription} request timed out at the hosted data API (HTTP ${status}).`,
+      retryable: true,
+      timedOut: true,
+    }
+  }
+
+  if (status === 429) {
+    return {
+      codeSuffix: 'rate_limited',
+      message: `${searchDescription} was rate limited by the hosted data API (HTTP ${status}).`,
+      retryable: true,
+    }
+  }
+
+  if (status >= 500 && status <= 599) {
+    return {
+      codeSuffix: 'service_unavailable',
+      message: `${searchDescription} is temporarily unavailable (HTTP ${status}).`,
+      retryable: true,
+    }
+  }
+
+  return {
+    codeSuffix: 'response_failed',
+    message: `${searchDescription} request was rejected by the hosted data API (HTTP ${status}).`,
+    retryable: false,
   }
 }

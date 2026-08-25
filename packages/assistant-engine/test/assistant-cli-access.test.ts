@@ -203,10 +203,11 @@ describe("prepareAssistantDirectCliEnv", () => {
       "`stage` names the failure",
     );
     expect(guidance).toContain(
-      "`retryable: true` permits an unchanged retry",
+      "For a read-only command, `retryable: true` permits at most one unchanged retry in the turn",
     );
+    expect(guidance).toContain("never retry an unchanged write");
     expect(guidance).toContain(
-      "fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt",
+      "Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt",
     );
     expect(guidance).toContain(
       "Otherwise stop",
