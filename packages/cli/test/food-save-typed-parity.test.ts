@@ -598,7 +598,7 @@ test('food label response-body transport recovery survives the final machine env
   }
 })
 
-test('food label schema failures expose a static repair field without echoes', async () => {
+test('food label schema failures stay fieldless without echoes', async () => {
   const restoreHostedDataApiEnv = setHostedDataApiEnv()
   const providerBody = 'private-schema-provider-body'
   const submittedQuery = 'private-schema-food-query'
@@ -625,13 +625,7 @@ test('food label schema failures expose a static repair field without echoes', a
         result.envelope.error.message ?? '',
         /expected label schema.*HTTP 200/u,
       )
-      assert.deepEqual(result.envelope.error.fieldErrors, [{
-        code: 'invalid_type',
-        expected: '',
-        message: 'This field is invalid.',
-        path: 'items',
-        received: 'invalid',
-      }])
+      assert.equal(result.envelope.error.fieldErrors, undefined)
     }
     assert.doesNotMatch(
       JSON.stringify(result.envelope),

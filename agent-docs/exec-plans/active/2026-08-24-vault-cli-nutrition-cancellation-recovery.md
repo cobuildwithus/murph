@@ -54,6 +54,83 @@ Updated: 2026-08-25
   deleting the downstream raw-response parser. Provider-schema failures remain
   fieldless because they are not model-correctable inputs; the nutrition branch
   continues to add only bounded transport name/code diagnostics.
+- Keep one food payload validation-path owner. The typed CLI command constructs
+  the payload and the Vault use-case parser validates it before any Vault write;
+  the duplicate CLI field allowlist and schema parse were deleted.
+
+## Round-three retrospective
+
+### Growth attribution
+
+- The immutable first-reviewed head changed 17 files and 922 lines, with 396
+  lines of authored source churn. Before this retrospective, the current head
+  changed 26 files and 2,231 lines, with 612 lines of authored source churn.
+- The accepted response-body correction consolidated header, body, JSON, and
+  schema handling into the existing hosted-label request owner. Its additional
+  tests distinguish retryable body acquisition from terminal completed-body
+  validation for single and batch food and supplement lookups.
+- The accepted protocol correction added submitted-candidate versus
+  stored-vault-state provenance in Core, mapped that provenance once in the
+  explicit protocol use case, and added no-write regression coverage for the
+  public constraints.
+- Foundation integration removed the raw `Response` handoff and both downstream
+  response parsers, migrated producers to the shared context/issues envelope,
+  and retained one shared projector. The accompanying config hash and runner
+  budget changes are generated or measured release-shape updates, not new
+  runtime concepts.
+- The protocol privacy follow-up made Core discard submitted unknown key names
+  while retaining their fixed structural parent path. The cancellation
+  follow-up distinguishes terminal request cancellation from retryable body
+  timeout or transport failure inside the same hosted-label owner.
+- The initial public-path work covered food, recipe, protocol, and meal timezone
+  recovery. This retrospective deletes the duplicated food allowlist and parse
+  from the typed CLI command, removing 74 production lines while retaining the
+  authoritative Vault use-case path.
+
+### Production owner inventory
+
+- Contract schemas own accepted food and recipe payload shapes. CLI command
+  schemas own only their public flags and argument types; their builders do not
+  own a second payload-validation policy.
+- `parseFoodPayload` and `parseRecipePayload` are the authoritative pre-write
+  payload parsers and public field-path owners for imports, typed saves, and
+  edits.
+- Core protocol validation owns constraint metadata and validation provenance.
+  The explicit protocol use case owns the single mapping from that metadata to
+  `VaultCliError`; unknown submitted keys never become public paths.
+- The meal edit command reuses the existing IANA timezone schema at its command
+  boundary.
+- The hosted-label client owns request construction, fetch, status
+  classification, body acquisition, JSON/schema validation, and typed return.
+  There is no downstream raw-response parser or internal retry loop.
+- The operator-config projector owns the final model-facing envelope. The
+  Cloudflare bundle script and generated CLI skill hash describe release shape
+  only and own no error behavior.
+
+### Direction
+
+- Direction: delete and continue. Delete the duplicate typed-food payload parse
+  and allowlist; retain the existing use-case parser, shared projector, Core
+  protocol validator, and hosted-label request owner. Splitting or redesigning
+  these owners would add indirection without removing another demonstrated
+  duplication.
+- This keeps package dependencies one-way: CLI constructs public command input,
+  Vault use-cases validate and orchestrate writes, Core supplies protocol facts,
+  and operator-config projects the common envelope.
+
+### Retained regression proof
+
+- Food and recipe failures retain bounded nested field paths; protocol failures
+  retain safe public constraints and distinguish submitted input from stored
+  corruption.
+- Provider queries, credentials, bodies, exception messages, submitted values,
+  unknown protocol keys, local paths, and Vault record paths remain absent.
+- Request cancellation remains terminal. Timeouts, disconnects, throttling, and
+  server failures remain truthfully retryable; completed malformed provider
+  responses remain terminal and fieldless.
+- Invalid food and protocol mutations are rejected before any Vault or audit
+  write. The focused food suite passes through the single use-case validation
+  owner after deletion.
 
 ## Verification
 
@@ -78,3 +155,8 @@ Updated: 2026-08-25
 - Production bundle assembly and all eight parity probes passed after the
   integration. Vault CLI is 9,467,768 of 9,477,676 bytes; the runner is
   11,277,949 of 11,393,617 bytes.
+- After the owner deletion, `pnpm exec vitest run
+  packages/cli/test/food-save-typed-parity.test.ts` passed all 18 tests,
+  including nested repair paths and no-write behavior. The same run exposed and
+  corrected a stale assertion so provider schema failures match their retained
+  fieldless runtime contract.
