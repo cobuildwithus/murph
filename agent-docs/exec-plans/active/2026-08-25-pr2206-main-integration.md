@@ -18,6 +18,15 @@ shared error projector and no partial writes or submitted-value echo.
   `ROUND_OUTCOME: PASS`.
 - The later foundation integration has local proof but has not received a
   post-`main` exact-head ReviewGPT round.
+- Current `main` was merged at `96c70a3d64`; the resulting tree differs from
+  `main` only in the samples/import slice, its authored plan history, and the
+  measured bundle allowance.
+- Focused verification passes: 268 sample and shared-boundary tests, 14 runner
+  bundle tests, all six affected package typechecks, prepared runtime, CLI
+  package shape, and both docs gates.
+- Canonical runner assembly passes all eight parity probes. The Vault CLI is
+  9,501,363 bytes against a 9,508,867-byte budget; the runner is 11,334,389
+  bytes against an 11,393,617-byte budget.
 
 ## Design
 
@@ -30,9 +39,9 @@ shared error projector and no partial writes or submitted-value echo.
 
 ## Tasks
 
-1. Merge current `main`, resolving duplicate foundation history by ownership.
-2. Prove the resulting tree is current `main` plus only the samples slice.
-3. Run focused tests, affected typechecks, prepared/package-shape checks, docs
+1. [done] Merge current `main`, resolving duplicate foundation history by ownership.
+2. [done] Prove the resulting tree is current `main` plus only the samples slice.
+3. [done] Run focused tests, affected typechecks, prepared/package-shape checks, docs
    gates, and production runner bundle/parity proof.
 4. Push the exact candidate, update the PR contract, and run the sensitive
    post-integration ReviewGPT round with the prior finding ledger.
