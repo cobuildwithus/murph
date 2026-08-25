@@ -81,6 +81,8 @@ vi.mock('@murphai/runtime-state/node', async (importOriginal) => {
 })
 
 const tempRoots: string[] = []
+const productionRuntimeAttemptId =
+  'runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda'
 
 afterEach(async () => {
   vi.resetModules()
@@ -752,7 +754,7 @@ describe('assistant product small seams', () => {
         hosted: {
           memberId: 'member-1',
           releaseSha: '0123456789ABCDEF0123456789ABCDEF01234567',
-          runtimeAttemptId: 'attempt_evt_123',
+          runtimeAttemptId: productionRuntimeAttemptId,
           runtimeName: 'cloudflare-hosted-runner',
           userEnvKeys: [],
         },
@@ -762,7 +764,7 @@ describe('assistant product small seams', () => {
       environment: 'hosted',
       privateIssueCaptureEnabled: true,
       releaseSha: '0123456789abcdef0123456789abcdef01234567',
-      runtimeAttemptId: 'attempt_evt_123',
+      runtimeAttemptId: productionRuntimeAttemptId,
       runtimeName: 'cloudflare-hosted-runner',
       surface: 'telegram',
     })
@@ -777,7 +779,7 @@ describe('assistant product small seams', () => {
         hosted: {
           memberId: 'member-1',
           releaseSha: '0123456789abcdef0123456789abcdef01234567',
-          runtimeAttemptId: 'attempt_evt_occurrence',
+          runtimeAttemptId: productionRuntimeAttemptId,
           runtimeName: 'cloudflare-hosted-runner',
           userEnvKeys: [],
         },
@@ -800,7 +802,7 @@ describe('assistant product small seams', () => {
     expect(runtimeStateMocks.writePendingAssistantRuntimeIssueRecord).toHaveBeenCalledWith({
       record: expect.objectContaining({
         releaseSha: '0123456789abcdef0123456789abcdef01234567',
-        runtimeAttemptId: 'attempt_evt_occurrence',
+        runtimeAttemptId: productionRuntimeAttemptId,
         runtimeName: 'cloudflare-hosted-runner',
       }),
       vault: '/vaults/test',

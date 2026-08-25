@@ -1,6 +1,7 @@
 import {
   createAssistantRuntimeIssueFingerprint,
   createAssistantRuntimeIssueId,
+  normalizeAssistantRuntimeIssueIdentifier,
   writePendingAssistantRuntimeIssueRecord,
   type AssistantRuntimeIssueKind,
   type AssistantRuntimeIssuePhase,
@@ -63,7 +64,7 @@ export function resolveAssistantDiagnosticsPolicy(input: {
       ? normalizeAssistantIssueReleaseSha(executionContext.hosted?.releaseSha)
       : null,
     runtimeAttemptId: environment === 'hosted'
-      ? sanitizeNullableIssueField(executionContext.hosted?.runtimeAttemptId)
+      ? normalizeTrustedIssueIdentifier(executionContext.hosted?.runtimeAttemptId)
       : null,
     runtimeName: environment === 'hosted'
       ? sanitizeNullableIssueField(executionContext.hosted?.runtimeName)
@@ -188,6 +189,12 @@ function normalizeAssistantIssueReleaseSha(value: unknown): string | null {
   }
   const normalized = value.trim().toLowerCase()
   return RELEASE_SHA_PATTERN.test(normalized) ? normalized : null
+}
+
+function normalizeTrustedIssueIdentifier(value: unknown): string | null {
+  return typeof value === 'string'
+    ? normalizeAssistantRuntimeIssueIdentifier(value)
+    : null
 }
 
 function extractAssistantToolFailureRuntimeIssues(

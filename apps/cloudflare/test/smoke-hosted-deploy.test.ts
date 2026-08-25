@@ -929,6 +929,7 @@ describe("runSmokeHostedDeploy", () => {
       `${JSON.stringify({
         buildSkipped: false,
         bundleFingerprint: "expected-bundle",
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
         sourceFingerprint: "expected-source",
       }, null, 2)}\n`,
       "utf8",
@@ -956,11 +957,13 @@ describe("runSmokeHostedDeploy", () => {
               ? {
                   buildSkipped: false,
                   bundleFingerprint: "stale-bundle",
+                  releaseSha: "89abcdef0123456789abcdef0123456789abcdef",
                   sourceFingerprint: "stale-source",
                 }
               : {
                   buildSkipped: false,
                   bundleFingerprint: "expected-bundle",
+                  releaseSha: TEST_PUBLIC_RELEASE_SHA,
                   sourceFingerprint: "expected-source",
                 },
             service: "cloudflare-hosted-runner-node",
@@ -998,6 +1001,7 @@ describe("runSmokeHostedDeploy", () => {
       `${JSON.stringify({
         buildSkipped: false,
         bundleFingerprint: "expected-bundle",
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
         sourceFingerprint: "expected-source",
       }, null, 2)}\n`,
       "utf8",
@@ -1045,11 +1049,13 @@ describe("runSmokeHostedDeploy", () => {
               ? {
                   buildSkipped: false,
                   bundleFingerprint: "stale-bundle",
+                  releaseSha: "89abcdef0123456789abcdef0123456789abcdef",
                   sourceFingerprint: "stale-source",
                 }
               : {
                   buildSkipped: false,
                   bundleFingerprint: "expected-bundle",
+                  releaseSha: TEST_PUBLIC_RELEASE_SHA,
                   sourceFingerprint: "expected-source",
                 },
             service: "cloudflare-hosted-runner-node",
@@ -1314,6 +1320,7 @@ describe("runSmokeHostedDeploy", () => {
       `${JSON.stringify({
         buildSkipped: false,
         bundleFingerprint: "expected-bundle",
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
         sourceFingerprint: "expected-source",
       }, null, 2)}\n`,
       "utf8",
@@ -1345,12 +1352,14 @@ describe("runSmokeHostedDeploy", () => {
             runnerBundle: smokeAttempt === 1
               ? {
                   buildSkipped: false,
-                  bundleFingerprint: "stale-bundle",
-                  sourceFingerprint: "stale-source",
+                  bundleFingerprint: "expected-bundle",
+                  releaseSha: "89abcdef0123456789abcdef0123456789abcdef",
+                  sourceFingerprint: "expected-source",
                 }
               : {
                   buildSkipped: false,
                   bundleFingerprint: "expected-bundle",
+                  releaseSha: TEST_PUBLIC_RELEASE_SHA,
                   sourceFingerprint: "expected-source",
                 },
             service: "cloudflare-hosted-runner-node",
@@ -1382,6 +1391,7 @@ describe("runSmokeHostedDeploy", () => {
     expect(logs.some((message) =>
       message.startsWith("Runner container smoke attempt 1/2 failed (")
       && message.includes("did not run the expected runner bundle")
+      && message.includes("release=89abcdef0123456789abcdef0123456789abcdef")
       && message.endsWith("; retrying in 0ms.")
     )).toBe(true);
   });

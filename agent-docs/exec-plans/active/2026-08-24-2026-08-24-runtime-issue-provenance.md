@@ -87,6 +87,15 @@ Updated: 2026-08-24
   substitutes.
 - `runtimeName` is the stable `cloudflare-hosted-runner` identity; release
   versioning remains in `releaseSha` rather than overloading the name.
+- A source checkout is release-attributable only when it is clean. Local dirty
+  assembly writes a null SHA for honest diagnostics, while production deploy
+  validation rejects that manifest before upload.
+- Runtime attempt ids use the existing strict identifier grammar rather than
+  free-text/phone redaction, which can corrupt production-shaped UUID values.
+- Accepted preliminary/final review findings are covered at the existing seams:
+  real image occurrence capture and pending/export retry preservation, exact
+  release-only smoke skew, and smoke-result release passthrough. No replay or
+  lifecycle owner was added.
 
 ## Verification
 
@@ -100,3 +109,10 @@ Updated: 2026-08-24
   malformed release metadata fails closed, no private identifiers or payloads
   enter the diff, both review gates resolve with zero accepted findings, and
   required CI is green on the final head.
+- Remediation proof: Cloudflare focused tests passed 293/293; Web import passed
+  4/4; runtime-state passed 6/6; assistant-engine passed 21/21; image generation
+  passed 4/4; hosted issue retry/export passed 5/5; and the exact workspace
+  export case passed. Cloudflare, assistant-runtime, assistant-engine,
+  runtime-state, and full Web typechecks passed. One broader assistant-runtime
+  run completed 660 tests and hit one unrelated mixed-mailbox timing timeout;
+  the changed export case passed independently.

@@ -359,7 +359,9 @@ function sanitizeRequiredField(
   label: string,
   fallback: string,
 ): string {
-  const field = normalizeSafeIdentifier(normalizeRequiredString(value, label));
+  const field = normalizeAssistantRuntimeIssueIdentifier(
+    normalizeRequiredString(value, label),
+  );
   return field ?? fallback;
 }
 
@@ -370,7 +372,7 @@ function sanitizeOptionalField(value: unknown, label: string): string | null {
     return null;
   }
 
-  return normalizeSafeIdentifier(normalized);
+  return normalizeAssistantRuntimeIssueIdentifier(normalized);
 }
 
 function sanitizeDetails(value: unknown): Record<string, unknown> {
@@ -432,7 +434,9 @@ function sanitizeDetailValue(value: unknown): unknown | undefined {
   return undefined;
 }
 
-function normalizeSafeIdentifier(value: string): string | null {
+export function normalizeAssistantRuntimeIssueIdentifier(
+  value: string,
+): string | null {
   const normalized = value.trim();
 
   if (

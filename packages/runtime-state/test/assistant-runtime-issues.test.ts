@@ -357,13 +357,13 @@ test("assistant runtime issue parsing preserves summaries, redacts text, and cov
       ...baseRecord,
       issueKind: "tool_error",
       releaseSha: "0123456789ABCDEF0123456789ABCDEF01234567",
-      runtimeAttemptId: "attempt_evt_123",
+      runtimeAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
       runtimeName: "cloudflare-hosted-runner",
     }),
     {
       ...redacted,
       releaseSha: "0123456789abcdef0123456789abcdef01234567",
-      runtimeAttemptId: "attempt_evt_123",
+      runtimeAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
       runtimeName: "cloudflare-hosted-runner",
     },
   );

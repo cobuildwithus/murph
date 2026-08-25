@@ -9828,6 +9828,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const exportedIssueIds: string[] = [];
+    const exportedIssues: unknown[] = [];
     const issueRecord = {
       component: "assistant.codex-action",
       details: {
@@ -9844,6 +9845,10 @@ describe("hosted workspace runtime entrypoint", () => {
       occurredAt: "2026-04-27T00:00:00.000Z",
       operation: "command.execution",
       phase: "provider_turn" as const,
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
+      runtimeAttemptId:
+        "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeName: "cloudflare-hosted-runner",
       schema: "murph.assistant-runtime-issue.v1" as const,
       severity: "warning" as const,
       summary: "Codex command execution failed during provider turn.",
@@ -9895,6 +9900,7 @@ describe("hosted workspace runtime entrypoint", () => {
             issueExportPort: {
               async recordIssues(issues) {
                 events.push("issue.export");
+                exportedIssues.push(...issues);
                 const issueIds = issues.map((issue) => {
                   const issueId = (issue as { issueId?: unknown }).issueId;
                   if (typeof issueId !== "string") {
@@ -9932,6 +9938,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "idle_shutdown",
       ]);
       assert.deepEqual(exportedIssueIds, [issueRecord.issueId]);
+      assert.deepEqual(exportedIssues, [issueRecord]);
       assert.ok(
         events.indexOf("snapshot") < events.indexOf("workspace.checkpoint"),
         "workspace checkpoint should commit the dirty workspace snapshot before telemetry",

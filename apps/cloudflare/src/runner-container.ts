@@ -398,6 +398,7 @@ interface HostedExecutionContainerSmokeHealthResult {
     buildSkipped?: boolean;
     bundleFingerprint?: string;
     generatedAt?: string;
+    releaseSha?: string;
     schemaVersion?: number;
     sourceFingerprint?: string;
   } | null;
@@ -5038,6 +5039,7 @@ function parseRunnerContainerSmokeBundle(
     ...(typeof record.buildSkipped === "boolean" ? { buildSkipped: record.buildSkipped } : {}),
     ...(typeof record.bundleFingerprint === "string" ? { bundleFingerprint: record.bundleFingerprint } : {}),
     ...(typeof record.generatedAt === "string" ? { generatedAt: record.generatedAt } : {}),
+    ...(typeof record.releaseSha === "string" ? { releaseSha: record.releaseSha } : {}),
     ...(typeof record.schemaVersion === "number" ? { schemaVersion: record.schemaVersion } : {}),
     ...(typeof record.sourceFingerprint === "string" ? { sourceFingerprint: record.sourceFingerprint } : {}),
   };

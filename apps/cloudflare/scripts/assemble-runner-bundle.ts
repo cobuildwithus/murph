@@ -5,7 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
-import { writeRunnerBundleManifest } from "./deploy-artifacts.js";
+import {
+  resolvePublicRunnerReleaseSha,
+  writeRunnerBundleManifest,
+} from "./deploy-artifacts.js";
 import {
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerRuntimePackageName,
@@ -104,7 +107,7 @@ async function assembleRunnerBundle(): Promise<void> {
     includeBundleOnlyDependencies,
   });
   const packedWorkspacePackageNames = [...hostedRunnerWorkspacePackageNames].sort();
-  const releaseSha = readPublicReleaseSha();
+  const releaseSha = resolvePublicRunnerReleaseSha(repoRoot);
 
   try {
     if (!shouldSkipBuild) {
@@ -168,23 +171,6 @@ async function assembleRunnerBundle(): Promise<void> {
   } finally {
     await rm(stagingRoot, { force: true, recursive: true });
   }
-}
-
-function readPublicReleaseSha(): string {
-  const result = spawnSync(
-    "git",
-    ["rev-parse", "--verify", "HEAD^{commit}"],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  const releaseSha = result.stdout.trim().toLowerCase();
-  if (result.error || result.status !== 0 || !/^[a-f0-9]{40}$/u.test(releaseSha)) {
-    throw new Error("Could not resolve the public Murph release SHA for the runner bundle.");
-  }
-  return releaseSha;
 }
 
 async function writeHostedLocalE2eParserToolchain(bundleRoot: string): Promise<void> {

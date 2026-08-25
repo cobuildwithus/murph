@@ -867,12 +867,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      requestAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
+      },
+    }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
           memberId: "member_synthetic_phase",
+          releaseSha: "0123456789abcdef0123456789abcdef01234567",
+          runtimeAttemptId:
+            "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+          runtimeName: "cloudflare-hosted-runner",
           userEnvKeys: [],
         }),
       },
@@ -886,6 +896,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
             defaultTarget: hostedDefaultTarget,
+            releaseSha: "0123456789abcdef0123456789abcdef01234567",
+            runtimeAttemptId:
+              "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+            runtimeName: "cloudflare-hosted-runner",
           }),
         }),
       }),
@@ -15738,9 +15752,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => "2026-04-27T00:03:00.000Z",
+      requestAttemptId:
+        "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
         return Promise.resolve();
+      },
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
       },
       runtimeUsageRecordPort: usageRecordPort,
     });
@@ -15762,6 +15782,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           executionContext: {
             hosted: expect.objectContaining({
               memberId: "member_synthetic_phase",
+              releaseSha: "0123456789abcdef0123456789abcdef01234567",
+              runtimeAttemptId:
+                "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+              runtimeName: "cloudflare-hosted-runner",
               usageRecorder: {
                 recordUsage: expect.any(Function),
               },
@@ -20240,6 +20264,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"]
   >;
   runtimeEnv?: Record<string, string>;
+  runtimeIssueProvenance?: HostedWorkspaceRuntimeAssistantPhaseInput["runtimeIssueProvenance"];
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   signal?: HostedWorkspaceRuntimeAssistantPhaseInput["signal"];
@@ -20254,6 +20279,7 @@ function createPhaseInput(input: {
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
+  requestAttemptId?: string;
   vaultRoot?: string;
   workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
@@ -20349,7 +20375,7 @@ function createPhaseInput(input: {
         : {}),
     },
     request: {
-      attemptId: "attempt_synthetic_phase",
+      attemptId: input.requestAttemptId ?? "attempt_synthetic_phase",
       leaseGeneration: "3",
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
@@ -20446,6 +20472,7 @@ function createPhaseInput(input: {
       userEnv: input.runtimeUserEnv ?? {},
     },
     runtimeEnv: input.runtimeEnv ?? {},
+    runtimeIssueProvenance: input.runtimeIssueProvenance,
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     signal: input.signal,
     workspace: input.workspace ?? null,

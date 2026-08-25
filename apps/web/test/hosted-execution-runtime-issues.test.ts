@@ -116,7 +116,7 @@ describe('importHostedAssistantRuntimeIssues', () => {
           operation: 'provider.turn',
           phase: 'provider_turn',
           releaseSha: '0123456789abcdef0123456789abcdef01234567',
-          runtimeAttemptId: 'attempt_evt_occurrence',
+          runtimeAttemptId: 'runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda',
           runtimeName: 'cloudflare-hosted-runner',
           schema: 'murph.assistant-runtime-issue.v1',
           severity: 'error',
@@ -129,7 +129,7 @@ describe('importHostedAssistantRuntimeIssues', () => {
 
     expect(createMany.mock.calls[0]?.[0]?.data[0]).toEqual(expect.objectContaining({
       releaseSha: '0123456789abcdef0123456789abcdef01234567',
-      runtimeAttemptId: 'attempt_evt_occurrence',
+      runtimeAttemptId: 'runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda',
       runtimeName: 'cloudflare-hosted-runner',
     }))
   })
