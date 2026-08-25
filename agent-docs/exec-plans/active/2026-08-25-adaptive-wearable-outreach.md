@@ -70,6 +70,7 @@ Updated: 2026-08-25
 - Focused Assistant Runtime device-port behavior: 1 passed with 304 unrelated tests skipped.
 - Focused Web preference, notice materialization, and Linq provider-entry behavior: 62 tests passed.
 - Focused Cloudflare device port and proxy allowlist behavior: 6 tests passed with 217 unrelated tests skipped in the allowlist module.
+- The generated changelog module was refreshed and all 7 changelog-fragment tests passed for the PR-number-bound member-facing entry.
 - Device Sync, Assistant Engine, Assistant Runtime, Cloudflare, and Web typechecks passed. Prisma validation passed.
 - Complete initial provider requests were captured through the pinned real Codex App Server with identical synthetic direct/group fixtures and `gpt-tokenizer` 3.4.0 `o200k_harmony`. Direct changed from 31,676 tokens / 143,991 bytes to 31,795 / 144,510; group changed from 27,982 / 127,221 to 28,101 / 127,740. Each route adds 119 tokens / 519 bytes (+0.376% direct, +0.425% group tokens): 309 bytes are the device-tool description and 210 are its generated declaration/schema; other provider-visible fields are unchanged. The weekly automation instruction is loaded only for that scheduled occurrence, not these initial ordinary turns. Measurement-only instrumentation was removed.
 
