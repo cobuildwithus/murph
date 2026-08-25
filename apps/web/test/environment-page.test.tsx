@@ -398,10 +398,20 @@ test("letter grades follow the scale a US reader expects", () => {
       {
         id: "sleep",
         title: "Sleep",
-        grade: { letter: null, pct: null, met, graded, eligible: graded, redFlags: 0 },
+        known: graded,
+        total: graded,
+        grade: {
+          letter: null,
+          pct: null,
+          met,
+          graded,
+          eligible: graded,
+          redFlags: 0,
+        },
         rows: [],
-        missing: [],
-        note: null,
+        optionalFacts: [],
+        unknownFacts: [],
+        skippedFacts: [],
       },
     ]);
 

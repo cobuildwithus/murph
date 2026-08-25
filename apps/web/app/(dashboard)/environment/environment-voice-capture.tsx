@@ -1712,18 +1712,20 @@ export function EnvironmentVoiceCapture({
               </div>
 
               <div className="shrink-0 pt-5">
-                <div
-                  className="mb-3 h-20 overflow-y-auto overscroll-contain pr-2 [mask-image:linear-gradient(to_bottom,transparent,black_1.5rem)] sm:h-24"
-                  ref={transcriptViewportRef}
-                >
+                <div className="mb-3 h-[5.5rem]">
                   {transcript ? (
                     <div className="border-l-2 border-primary/40 pl-3">
                       <p className="font-mono text-[9px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
                         Live transcript
                       </p>
-                      <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-foreground">
-                        {transcript}
-                      </p>
+                      <div
+                        className="mt-1 h-[4.5rem] overflow-y-auto overscroll-contain pr-2"
+                        ref={transcriptViewportRef}
+                      >
+                        <p className="whitespace-pre-line text-sm leading-6 text-foreground">
+                          {transcript}
+                        </p>
+                      </div>
                     </div>
                   ) : null}
                 </div>
