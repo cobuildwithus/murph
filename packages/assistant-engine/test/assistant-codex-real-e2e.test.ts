@@ -8383,6 +8383,9 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(multiAgentConfigToml).toContain('[features.multi_agent_v2]')
     expect(multiAgentConfigToml).toContain('enabled = true')
     expect(multiAgentConfigToml).toContain(
+      'expose_spawn_agent_model_overrides = true',
+    )
+    expect(multiAgentConfigToml).toContain(
       'max_concurrent_threads_per_session = 4',
     )
   })
@@ -12978,6 +12981,7 @@ function buildRealCodexConfigToml(input: {
       ? [
           '[features.multi_agent_v2]',
           'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
           'max_concurrent_threads_per_session = 4',
           '',
         ]
