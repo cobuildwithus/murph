@@ -1,6 +1,7 @@
 ---
 title: 'Changelog-only PR skips the preview required for current design proof'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2252'
 ---
 
 ## Expected Behavior

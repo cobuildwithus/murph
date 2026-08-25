@@ -1,6 +1,7 @@
 ---
 title: 'Batch worktree retirement repeats global safety scans per target'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2245'
 ---
 
 ## Expected Behavior

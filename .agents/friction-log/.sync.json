@@ -429,8 +429,24 @@
       "path": ".agents/friction-log/20260820095405-reviewgpt-replayable-wake/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2116",
+      "path": ".agents/friction-log/20260821113348-production-migration-guard/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2141",
+      "path": ".agents/friction-log/20260821194229-typecheck-exits-zero/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2169",
       "path": ".agents/friction-log/20260822030752-hosted-runtime-triage/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2176",
+      "path": ".agents/friction-log/20260822030145-provider-guard-classifies/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2178",
+      "path": ".agents/friction-log/20260822152746-finish-task-retains/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2180",
@@ -447,6 +463,10 @@
     {
       "issue": "cobuildwithus/murph#2191",
       "path": ".agents/friction-log/20260823193431-reviewgpt-complete-marker-missed/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2192",
+      "path": ".agents/friction-log/20260823204401-pr-draft-reset-permission/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2197",
@@ -467,6 +487,10 @@
     {
       "issue": "cobuildwithus/murph#2221",
       "path": ".agents/friction-log/20260823233210-deep-review-skill/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2222",
+      "path": ".agents/friction-log/20260824093757-friction/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2223",
