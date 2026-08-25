@@ -190,9 +190,9 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
-  'Your previous response was held and was not sent. New messages arrived before delivery.',
-  'Reconsider the current group beat. Return the one final response to send now, or finish without a reply if Murph should no longer speak.',
-  'You may return the prior response unchanged. Do not mention this review or repeat completed effects.',
+  'New messages arrived before delivery.',
+  'Re-evaluate all accepted messages under the group turn rules and return one final result.',
+  'Do not mention this review or repeat completed effects.',
 ].join(' ')
 
 function shouldHoldAssistantGroupReplyDraft(input: {
@@ -1307,7 +1307,14 @@ export async function sendAssistantMessageLocal(
             acceptedInput: acceptanceInput.activeTurnInput,
             input: previousInput,
           })
-          currentInput = nextInput
+          currentInput =
+            holdGroupReplyDraft &&
+            acceptanceInput.providerRequestOrdinal === 0
+              ? {
+                  ...nextInput,
+                  prompt: `${previousInput.prompt}\n\n${nextInput.prompt}`,
+                }
+              : nextInput
           acceptedInputIdsForProviderRequest = acceptedInputJournal.inputIds
           acceptedInputItemsForProviderRequest = acceptedInputJournal.inputs
           return {

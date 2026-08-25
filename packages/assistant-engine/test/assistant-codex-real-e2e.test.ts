@@ -971,7 +971,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A 54:A 55:B 56:A 57:B 58:A 59:B 60:A 61:B 62:A 63:A 64:A 65:A 66:B 67:B 68:B 69:B',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A 54:A 55:B 56:A 57:B 58:A 59:B 60:A 61:B 62:A 63:A 64:A 65:A 66:B 67:B 68:B 69:B 70:A 71:A',
         )
         expect(
           actions.some((action) =>
@@ -10587,8 +10587,8 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
     'Each candidate describes the complete action for that transcript.',
-    'For transcripts 14-22, 30-35, and 46-69, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B> 54:<A-or-B> 55:<A-or-B> 56:<A-or-B> 57:<A-or-B> 58:<A-or-B> 59:<A-or-B> 60:<A-or-B> 61:<A-or-B> 62:<A-or-B> 63:<A-or-B> 64:<A-or-B> 65:<A-or-B> 66:<A-or-B> 67:<A-or-B> 68:<A-or-B> 69:<A-or-B>` with no explanation.',
+    'For transcripts 14-22, 30-35, and 46-71, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B> 54:<A-or-B> 55:<A-or-B> 56:<A-or-B> 57:<A-or-B> 58:<A-or-B> 59:<A-or-B> 60:<A-or-B> 61:<A-or-B> 62:<A-or-B> 63:<A-or-B> 64:<A-or-B> 65:<A-or-B> 66:<A-or-B> 67:<A-or-B> 68:<A-or-B> 69:<A-or-B> 70:<A-or-B> 71:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -10767,15 +10767,15 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'A: Return one text reply in one bubble; the host owns any pre-send cadence.',
     'B: Run a shell sleep, then split the answer across two short bubbles.',
     '',
-    '50. Murph is told its previous response was held and not sent because another ordinary human message arrived. The refreshed beat still calls for a text reply.',
+    '50. New messages arrive before delivery, and the refreshed beat still calls for a text reply.',
     'A: Return the old response and then a separate response to the new message.',
     'B: Reconsider the whole current beat and return one final response.',
     '',
-    '51. Murph is told its previous response was held and not sent. The new message introduces genuinely urgent safety information.',
+    '51. New messages arrive before delivery, including genuinely urgent safety information.',
     'A: Reconsider the current beat and answer the urgent information once.',
     'B: Preserve the old response and defer the urgent information to another turn.',
     '',
-    '52. Murph is told its previous response was held and not sent. Another human has now fully answered the room question and taken the floor.',
+    '52. New messages arrive before delivery. Another human has now fully answered the room question and taken the floor.',
     'A: Send Murph\'s held answer too so the original asker gets two answers.',
     'B: Re-evaluate the floor and finish without the stale text reply.',
     '',
@@ -10846,6 +10846,14 @@ function buildGroupPointOfViewCandidateProbe(): string {
     '69. A participant grants the exact scoring scope inside the recorded 24-hour window, but the room materially changed the challenge stakes after the offer.',
     'A: Record the participant as `in` under the changed terms.',
     'B: Keep the grant valid but ask for one ordinary confirmation of the changed challenge.',
+    '',
+    '70. Two accepted messages in one group turn each make a separate direct request to Murph. Both remain relevant and unanswered.',
+    'A: Return one reply that answers both requests.',
+    'B: Answer only the later request.',
+    '',
+    '71. A participant asks Murph to recommend a vegetarian restaurant. A later accepted message corrects only the diet requirement to vegan.',
+    'A: Return one vegan recommendation without a separate vegetarian answer.',
+    'B: Answer both the superseded vegetarian request and the vegan correction.',
   ].join('\n')
 }
 
