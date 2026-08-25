@@ -154,11 +154,13 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/connect-completion", () => ({
+  DEVICE_SYNC_COMPLETION_HOME_MARKER: "deviceSyncCompletion",
   resolveDeviceSyncCompletionDialogModel:
     mocks.resolveDeviceSyncCompletionDialogModel,
 }));
 
 vi.mock("@/src/lib/connected-apps/connect-completion", () => ({
+  CONNECTED_APP_COMPLETION_HOME_MARKER: "connectedAppCompletion",
   resolveConnectedAppCompletionDialogModel:
     mocks.resolveConnectedAppCompletionDialogModel,
 }));
@@ -1064,6 +1066,86 @@ test("HomePage presents connection results before canonical onboarding", async (
     plainHomeMarkup,
     /data-home-initial-visit-persona-picker="shown"/,
   );
+});
+
+test("HomePage starts callback messaging alongside canonical onboarding", async () => {
+  type InitialState = {
+    preferences: { persona: null; tone: null; voice: null };
+    status: "pending";
+  };
+  type MessagingState = {
+    identity: { phoneLookupKey: string };
+    routing: null;
+  };
+  const resolveInitialState = vi.fn<(value: InitialState) => void>();
+  const resolveMessagingState = vi.fn<(value: MessagingState) => void>();
+  const signalInitialStarted = vi.fn<() => void>();
+  const signalMessagingStarted = vi.fn<() => void>();
+  const initialStarted = new Promise<void>((resolve) => {
+    signalInitialStarted.mockImplementation(resolve);
+  });
+  const messagingStarted = new Promise<void>((resolve) => {
+    signalMessagingStarted.mockImplementation(resolve);
+  });
+  mocks.readHostedInitialOnboardingState.mockImplementationOnce(() => {
+    signalInitialStarted();
+    return new Promise<InitialState>((resolve) => {
+      resolveInitialState.mockImplementation(resolve);
+    });
+  });
+  mocks.readHostedMemberMessagingSetupState.mockImplementationOnce(() => {
+    signalMessagingStarted();
+    return new Promise<MessagingState>((resolve) => {
+      resolveMessagingState.mockImplementation(resolve);
+    });
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const page = HomePage({
+    searchParams: Promise.resolve({ deviceSyncCompletion: "1" }),
+  });
+
+  await Promise.all([initialStarted, messagingStarted]);
+  assert.equal(mocks.readHostedInitialOnboardingState.mock.calls.length, 1);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+
+  resolveMessagingState({
+    identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+    routing: null,
+  });
+  resolveInitialState({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
+  const markup = renderToStaticMarkup(await page);
+
+  assert.match(markup, /Device connection complete/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+});
+
+test("HomePage retains callback completion when canonical onboarding fails", async () => {
+  mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
+    new Error("initial onboarding unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        connectedAppCompletion: "1",
+        connectedAppStatus: "success",
+        toolkit: "gmail",
+      }),
+    }),
+  );
+
+  assert.match(markup, /Gmail is connected/);
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });
 
 test("HomePage skips the losing connected-app resolver after device completion", async () => {
