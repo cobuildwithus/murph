@@ -153,9 +153,10 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // 65de007f50ed05b3f5abbd2dc142a23223364828 measured 9,477,676 B in canonical
 // local production assembly, a 3,875 B total-only increase in the existing lazy
 // error and protocol-validation graph. Entry and static-startup limits stay put.
-// Compose both measured nutrition deltas with the current foundation and exact-
-// workout graph. None of these changes alter startup topology.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_510_683;
+// Knowledge, memory, Query, Commons, and Exa recovery add 14,844 B to the lazy
+// graph. Compose that reviewed allowance with both nutrition deltas and the
+// current foundation/exact-workout graph; none alter startup topology.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_525_527;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

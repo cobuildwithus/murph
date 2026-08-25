@@ -25,6 +25,21 @@ fields, terminal read semantics, and no failed-read writes.
 - The existing exact-head branch proof covers memory no-echo/no-write behavior,
   Query and Commons classification, research provider failures, CLI package
   shape, and runner parity, but predates current `main` integration.
+- Current `main` was merged at `3823c788fd`. Shared projector, bridge,
+  assistant guidance, bundle scaffolding, and generic redaction conflicts were
+  resolved to `main`; Query strict/tolerant parsing was composed with current
+  AbortSignal ownership in the Query reader.
+- Stale branch-only expectations that arbitrary errors and a fixed provider
+  route be redacted were deleted. Query and Commons retain their finite typed
+  projection, while invalid typed detail falls back to current `main` without
+  serializing the untrusted detail object.
+- Focused proof passes: 130 Query tests, 65 CLI knowledge-domain tests, 80
+  supporting domain tests, all six affected package typechecks, prepared
+  runtime generation, CLI package shape, and the 14-test runner bundle suite.
+- Canonical runner assembly passes all eight parity probes. The Vault CLI is
+  9,516,785 bytes against a composed 9,525,527-byte budget; the runner is
+  11,346,601 bytes against an 11,393,617-byte budget. Entry and static-startup
+  limits remain unchanged.
 
 ## Design
 
@@ -51,10 +66,10 @@ fields, terminal read semantics, and no failed-read writes.
 
 ## Tasks
 
-1. Merge current `main` and resolve duplicate foundation history by ownership.
-2. Prove the resulting diff contains only the knowledge-domain slice, authored
+1. [done] Merge current `main` and resolve duplicate foundation history by ownership.
+2. [done] Prove the resulting diff contains only the knowledge-domain slice, authored
    plan history, and measured bundle allowance.
-3. Run focused domain and shared-boundary tests, affected typechecks, prepared
+3. [done] Run focused domain and shared-boundary tests, affected typechecks, prepared
    runtime/package-shape checks, docs gates, and canonical runner parity proof.
 4. Push the exact candidate, update the PR contract, and run a sensitive full
    ReviewGPT round with the immutable prior-finding ledger.
