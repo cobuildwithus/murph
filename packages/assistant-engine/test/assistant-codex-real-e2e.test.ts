@@ -39,7 +39,9 @@ import { describe, expect, it } from 'vitest'
 import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
+  stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
+  waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
 import {
   executeReadOnlyAssistantAsk,
@@ -139,6 +141,7 @@ import type {
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
+  AssistantProviderUsageDraft,
 } from '../src/assistant/providers/types.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
@@ -295,6 +298,77 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+
+describeRealCodex('real Codex child model selection e2e', () => {
+  it(
+    'runs a Luna child through native collaboration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig({
+        multiAgentV2: true,
+      })
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-codex-luna-child-e2e-'),
+      )
+      const childUsages: AssistantProviderUsageDraft[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          env: config.env,
+          excludeResumeTurns: true,
+          model: DEFAULT_REAL_CODEX_MODEL,
+          modelProvider: config.modelProvider,
+          onAdditionalUsage: async (usage) => {
+            childUsages.push(usage)
+          },
+          prompt: [
+            'Run one native collaboration child for this synthetic smoke check.',
+            'Call spawn_agent once with model gpt-5.6-luna and a small task that needs no tools.',
+            'Do not wait for the child; finish the parent response after launching it.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        expect(result.finalMessage.trim()).not.toBe('')
+        const parentUsage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+            model: DEFAULT_REAL_CODEX_MODEL,
+            modelProvider: config.modelProvider,
+            oss: false,
+          }),
+          rawEvents: result.jsonEvents,
+        })
+        expect(parentUsage.servedModel).not.toBeNull()
+        expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
+        await waitForWarmCodexBackgroundWork()
+        expect(childUsages).toHaveLength(1)
+        expect(childUsages[0]).toMatchObject({
+          provider: 'codex-cli',
+          providerRequestOutcome: 'succeeded',
+          usage: {
+            requestedModel: 'gpt-5.6-luna',
+            servedModel: 'gpt-5.6-luna',
+          },
+        })
+      } finally {
+        await stopWarmCodexAppServer('real-codex-luna-child-e2e-complete')
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
@@ -8309,6 +8383,22 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('[model_providers.openai-env]')
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
+    expect(configToml).not.toContain('[features.multi_agent_v2]')
+
+    const multiAgentConfigToml = buildRealCodexConfigToml({
+      apiKeyEnv: 'PROVIDER_KEY',
+      model: 'gpt-5.6-terra',
+      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+      multiAgentV2: true,
+    })
+    expect(multiAgentConfigToml).toContain('[features.multi_agent_v2]')
+    expect(multiAgentConfigToml).toContain('enabled = true')
+    expect(multiAgentConfigToml).toContain(
+      'expose_spawn_agent_model_overrides = true',
+    )
+    expect(multiAgentConfigToml).toContain(
+      'max_concurrent_threads_per_session = 4',
+    )
   })
 
   it('sanitizes live provider failures before Vitest prints them', () => {
@@ -12766,7 +12856,9 @@ function summarizeCodexEventSequence(
   })
 }
 
-async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
+async function resolveRealCodexE2eConfig(
+  input: { multiAgentV2?: boolean } = {},
+): Promise<RealCodexE2eConfig> {
   const model =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
@@ -12826,6 +12918,7 @@ async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
       apiKeyEnv,
       model,
       modelProvider,
+      multiAgentV2: input.multiAgentV2,
     }),
     {
       encoding: 'utf8',
@@ -12860,6 +12953,7 @@ function buildRealCodexConfigToml(input: {
   apiKeyEnv: string
   model: string
   modelProvider: string
+  multiAgentV2?: boolean
 }): string {
   const baseUrl =
     input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
@@ -12894,6 +12988,15 @@ function buildRealCodexConfigToml(input: {
     'stream_max_retries = 5',
     'supports_websockets = false',
     '',
+    ...(input.multiAgentV2
+      ? [
+          '[features.multi_agent_v2]',
+          'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
+          'max_concurrent_threads_per_session = 4',
+          '',
+        ]
+      : []),
   ].join('\n')
 }
 
