@@ -26922,6 +26922,11 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-preemption-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const exportedIssues: unknown[] = [];
+    const releaseSha = "0123456789abcdef0123456789abcdef01234567";
+    const runtimeAttemptId =
+      "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda";
+    const runtimeName = "cloudflare-hosted-runner";
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_image_completion_preemption_origin",
       laneSeq: "1",
@@ -27039,9 +27044,29 @@ describe("hosted workspace runtime entrypoint", () => {
                   async run() {
                     await imageReady.promise;
                     return {
-                      media,
-                      runtimeIssue: null,
-                      savedImageRef: media.ref,
+                      ...(index === 0
+                        ? {
+                            failureDiagnostic:
+                              "synthetic generated image private delivery failure",
+                            media: null,
+                            runtimeIssue: {
+                              component: "assistant.generated-image",
+                              errorCode:
+                                "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
+                              issueKind: "tool_error" as const,
+                              operation: "generated_image_private_delivery",
+                              phase: "tool_call" as const,
+                              severity: "warning" as const,
+                              summary:
+                                "Generated image private delivery failed.",
+                            },
+                            savedImageRef: null,
+                          }
+                        : {
+                            media,
+                            runtimeIssue: null,
+                            savedImageRef: media.ref,
+                          }),
                     };
                   },
                 }),
@@ -27124,7 +27149,7 @@ describe("hosted workspace runtime entrypoint", () => {
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_image_completion_preemption",
+            attemptId: runtimeAttemptId,
             budget: { maxMailboxItems: 10 },
             idleCheckpointDelayMs: 180_000,
             leaseGeneration: "7",
@@ -27158,6 +27183,22 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           platform: createPlatform({
+            issueExportPort: {
+              async recordIssues(issues) {
+                exportedIssues.push(...issues);
+                const issueIds = issues.map((issue) => {
+                  const issueId = (issue as { issueId?: unknown }).issueId;
+                  if (typeof issueId !== "string") {
+                    throw new Error("expected exported image runtime issue id");
+                  }
+                  return issueId;
+                });
+                return {
+                  issueIds,
+                  recorded: issues.length,
+                };
+              },
+            },
             mailboxPort: createMailboxPort({
               events,
               items: mailboxItems,
@@ -27168,6 +27209,10 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          runtimeIssueProvenance: {
+            releaseSha,
+            runtimeName,
+          },
           runtimeWakeSignal,
           shutdownSignal: runtimeAbortController.signal,
           vaultRoot,
@@ -27182,6 +27227,15 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
       assert.equal(completionInputIds.length, 2);
+      expect(exportedIssues).toEqual([
+        expect.objectContaining({
+          environment: "hosted",
+          errorCode: "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
+          releaseSha,
+          runtimeAttemptId,
+          runtimeName,
+        }),
+      ]);
     } finally {
       runtimeAbortController.abort(
         new DOMException("Synthetic test cleanup.", "AbortError"),
