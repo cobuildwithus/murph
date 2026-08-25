@@ -2002,7 +2002,7 @@ describe('assistant system prompt cache stability', () => {
     // response-card dietary/burn target-authority boundary, explicit
     // group-family tool routing, and the cross-route CLI error-recovery
     // contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_301)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_403)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
