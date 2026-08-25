@@ -1291,6 +1291,12 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /current private member message/u,
+    )
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /Never call it from a group or scheduled turn or for another provider/u,
+    )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',

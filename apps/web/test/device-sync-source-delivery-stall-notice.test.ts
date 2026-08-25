@@ -194,7 +194,9 @@ describe("hosted source delivery-stall notice materialization", () => {
         deliveryIdempotencyKey: notificationKey,
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: expect.stringMatching(/Garmin Connect.*how long/su),
+          text: expect.stringMatching(
+            /Garmin Connect.*wait 5–30 days or stop these check-ins/su,
+          ),
         },
         route: DIRECT_LINQ_DESTINATION.route,
       },

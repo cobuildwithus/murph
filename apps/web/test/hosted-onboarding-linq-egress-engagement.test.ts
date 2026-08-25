@@ -1714,7 +1714,9 @@ describe("hosted Linq egress authority", () => {
     "revalidates a queued wearable silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
     async ({ expectedStatus, recovered, reminderAfterDays }) => {
       const sourceId = "dcs_abcdefghijklmnop";
-      const originalLastDataAt = "2026-08-01T00:00:00.000Z";
+      const originalLastDataAt = new Date(
+        Date.now() - 6 * 24 * 60 * 60_000,
+      ).toISOString();
       const notificationKey = buildHostedSourceDeliveryStallNoticeKey({
         connectionId: "connection-1",
         lastDataAt: originalLastDataAt,

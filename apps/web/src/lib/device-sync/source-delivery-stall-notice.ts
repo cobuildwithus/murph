@@ -159,7 +159,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         key: "linq.device_delivery_stalled",
         seed: notificationKey,
       }).text;
-      const text = `${checkIn} If this gap is expected, tell me how long you'd like me to wait before checking again.`;
+      const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;
       return appendHostedMailboxEnvelopeWithPreparedCryptoTx({
         envelope: buildHostedExecutionAssistantNotificationRequestedWake({
           eventId: dedupeKey,

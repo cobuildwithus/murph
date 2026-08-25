@@ -47,6 +47,7 @@ import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
@@ -95,6 +96,7 @@ import {
 } from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
+  AssistantHostedDeviceToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_MANAGED_AUTOMATIONS,
@@ -3763,6 +3765,310 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
       }
     },
     720_000,
+  )
+})
+
+describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
+  it(
+    'maps private preferences and keeps unsupported, group, and stale-only turns quiet',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      )
+      if (!weeklyHealthDigest) {
+        throw new Error('Expected the managed weekly health digest automation.')
+      }
+      const checkIn = [
+        'Fresh Garmin data hasn\'t come through lately.',
+        'Can you open Garmin Connect and check the Garmin device\'s battery and sync?',
+        'If this gap is expected, tell me to wait 5–30 days or stop these check-ins.',
+      ].join(' ')
+      const probes = [
+        {
+          conversationScope: 'direct',
+          kind: 'wait-ten-days',
+          prompt: [
+            `The exact prior assistant message was: "${checkIn}"`,
+            'The current private member message is: "Wait ten days."',
+            'Honor that preference and briefly confirm the saved result.',
+          ].join('\n'),
+          scheduled: false,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'stop-checking',
+          prompt: [
+            `The exact prior assistant message was: "${checkIn}"`,
+            'The current private member message is: "Stop checking."',
+            'Honor that preference and briefly confirm the saved result.',
+          ].join('\n'),
+          scheduled: false,
+        },
+        {
+          conversationScope: 'group',
+          kind: 'group-preference',
+          prompt:
+            'A group member says: "I take my Garmin off sometimes, so wait ten days before checking in." Respond safely in this group.',
+          scheduled: false,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'unsupported-provider',
+          prompt:
+            'My Fitbit is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Fitbit.',
+          scheduled: false,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'scheduled-stale-only',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Garmin account status is active and authorization is healthy.',
+            '- Its source is active but its lastDate is six days ago; ordinary missing data is the only issue.',
+            '- The week is otherwise ordinary, with no notable behavior, experiment movement, or manual logs.',
+            '- Complete the terminal scheduled decision.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
+        {
+          conversationScope: 'direct',
+          kind: 'scheduled-reauthorization',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence from the completed required reads:',
+            '- Garmin account status is reauthorization_required.',
+            '- There is no digest-worthy behavior or experiment movement.',
+            '- Complete the required reconnect action and terminal scheduled decision.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
+      ] as const
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-adaptive-wearable-${probe.kind}-e2e-`),
+          )
+          const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+          const deviceTool: NonNullable<
+            AssistantHostedToolContext['deviceTool']
+          > = {
+            async request(request) {
+              deviceRequests.push(request)
+              if (request.action === 'list_accounts') {
+                return {
+                  accounts: [{
+                    accountId: 'device-account-garmin',
+                    displayName: 'Garmin',
+                    lastErrorCode:
+                      probe.kind === 'scheduled-reauthorization'
+                        ? 'TOKEN_REFRESH_FAILED'
+                        : null,
+                    lastSyncCompletedAt: '2026-08-19T12:00:00.000Z',
+                    provider: 'garmin',
+                    status:
+                      probe.kind === 'scheduled-reauthorization'
+                        ? 'reauthorization_required'
+                        : 'active',
+                  }],
+                  action: 'list_accounts',
+                  provider: request.provider ?? null,
+                  sourceProvider: request.sourceProvider ?? null,
+                }
+              }
+              if (request.action === 'connect') {
+                return {
+                  action: 'connect',
+                  link: {
+                    authorizationUrl:
+                      'https://connect.example.test/garmin/authorize',
+                    connectUrl: 'https://connect.example.test/garmin',
+                    expiresAt: '2026-08-25T12:05:00.000Z',
+                    provider: 'garmin',
+                    providerLabel: 'Garmin',
+                  },
+                }
+              }
+              if (request.action === 'reconcile') {
+                return {
+                  accountId: request.accountId,
+                  action: 'reconcile',
+                  occurredAt: '2026-08-25T12:00:00.000Z',
+                  status: 'queued',
+                }
+              }
+              if (request.sourceProvider !== 'garmin') {
+                throw new Error('Unsupported no-data outreach source.')
+              }
+              return {
+                action: 'configure_no_data_outreach',
+                effectiveAfterDays:
+                  request.mode === 'after_days'
+                    ? request.afterDays
+                    : request.mode === 'default'
+                      ? 5
+                      : null,
+                setting:
+                  request.mode === 'after_days'
+                    ? 'custom'
+                    : request.mode,
+                sourceProvider: request.sourceProvider,
+                status: 'saved',
+              }
+            },
+          }
+
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              allowFinishWithoutReply: probe.scheduled,
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildAdaptiveWearableDeveloperInstructions({
+                  conversationScope: probe.conversationScope,
+                  scheduled: probe.scheduled,
+                }),
+              dynamicTools: [
+                MURPH_DEVICE_TOOL,
+                ...(probe.scheduled ? [MURPH_FINISH_WITHOUT_REPLY_TOOL] : []),
+              ],
+              env: config.env,
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => null,
+                currentHostedMailboxItemIds: () => [],
+                currentInvocationScope: () =>
+                  probe.scheduled
+                    ? {
+                        conversationScope: 'direct',
+                        origin: {
+                          automationId:
+                            MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+                          kind: 'automation_occurrence',
+                          occurrenceAt: '2026-08-25T12:00:00.000Z',
+                        },
+                        originSessionId: 'session-adaptive-wearable',
+                      }
+                    : {
+                        conversationScope: probe.conversationScope,
+                        origin: {
+                          assistantInputId:
+                            'ain_00000000000000000000000000000025',
+                          kind: 'accepted_input',
+                          sessionId: 'session-adaptive-wearable',
+                        },
+                        originSessionId: 'session-adaptive-wearable',
+                      },
+                deviceTool,
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const deviceActions = actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_DEVICE_TOOL.name
+            )
+            const configureActions = deviceActions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.argumentsValue.action
+                === 'configure_no_data_outreach'
+            )
+            const connectActions = deviceActions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.argumentsValue.action === 'connect'
+            )
+
+            if (probe.kind === 'wait-ten-days') {
+              expect(configureActions).toHaveLength(1)
+              expect(configureActions[0]).toMatchObject({
+                argumentsValue: {
+                  action: 'configure_no_data_outreach',
+                  afterDays: 10,
+                  mode: 'after_days',
+                  sourceProvider: 'garmin',
+                },
+              })
+              expect(deviceRequests).toEqual([{
+                action: 'configure_no_data_outreach',
+                afterDays: 10,
+                mode: 'after_days',
+                sourceProvider: 'garmin',
+              }])
+              expect(result.finalMessage).toMatch(/10|ten/iu)
+              expect(result.finalMessage).toMatch(/day|wait|check-in/iu)
+            } else if (probe.kind === 'stop-checking') {
+              expect(configureActions).toHaveLength(1)
+              expect(configureActions[0]).toMatchObject({
+                argumentsValue: {
+                  action: 'configure_no_data_outreach',
+                  mode: 'off',
+                  sourceProvider: 'garmin',
+                },
+              })
+              expect(deviceRequests).toEqual([{
+                action: 'configure_no_data_outreach',
+                mode: 'off',
+                sourceProvider: 'garmin',
+              }])
+              expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
+            } else if (
+              probe.kind === 'group-preference'
+              || probe.kind === 'unsupported-provider'
+            ) {
+              expect(deviceActions, probe.kind).toHaveLength(0)
+              expect(deviceRequests, probe.kind).toHaveLength(0)
+            } else if (probe.kind === 'scheduled-stale-only') {
+              expect(connectActions).toHaveLength(0)
+              expect(configureActions).toHaveLength(0)
+              const finishActions = actions.filter((action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+              )
+              expect(finishActions.length).toBeLessThanOrEqual(1)
+              if (result.finalMessage !== '') {
+                expect(JSON.parse(result.finalMessage.trim())).toEqual({
+                  kind: 'skip',
+                  privateSummary:
+                    'No weekly digest cleared the memorability bar.',
+                })
+              }
+            } else {
+              expect(connectActions).toHaveLength(1)
+              expect(connectActions[0]).toMatchObject({
+                argumentsValue: {
+                  action: 'connect',
+                  provider: 'garmin',
+                },
+              })
+              expect(result.finalMessage).toMatch(/connect|authorization/iu)
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    900_000,
   )
 })
 
@@ -10937,6 +11243,37 @@ function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: scheduled ? 'automation-cron' : null,
+  })
+}
+
+function buildAdaptiveWearableDeveloperInstructions(input: {
+  conversationScope: 'direct' | 'group'
+  scheduled: boolean
+}): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: true,
+    assistantHostedDeviceConnectProviders: [
+      { label: 'Garmin', provider: 'garmin' },
+    ],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: input.conversationScope,
+    currentLocalDate: '2026-08-25',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: !input.scheduled,
+    scheduledOccurrenceAt: input.scheduled
+      ? '2026-08-25T12:00:00.000Z'
+      : undefined,
+    turnTrigger: input.scheduled ? 'automation-cron' : null,
   })
 }
 
