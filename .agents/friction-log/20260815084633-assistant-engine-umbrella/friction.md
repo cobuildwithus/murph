@@ -1,6 +1,7 @@
 ---
 title: 'Assistant-engine umbrella tests exceed the default worker heap'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1949'
 ---
 
 ## Expected Behavior

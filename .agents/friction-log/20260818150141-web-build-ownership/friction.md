@@ -1,6 +1,7 @@
 ---
 title: 'Web build ownership change left the WAF assertion stale'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1996'
 ---
 
 ## Expected Behavior

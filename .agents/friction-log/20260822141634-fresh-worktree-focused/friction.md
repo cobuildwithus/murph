@@ -1,6 +1,7 @@
 ---
 title: 'Fresh worktree focused Web Vitest requires undeclared Prisma generation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2167'
 ---
 
 ## Expected Behavior

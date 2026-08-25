@@ -1,6 +1,7 @@
 ---
 title: 'Prisma format rewrites unrelated schema layout during focused validation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1916'
 ---
 
 ## Expected Behavior

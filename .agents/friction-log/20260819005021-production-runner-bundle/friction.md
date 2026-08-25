@@ -1,6 +1,7 @@
 ---
 title: 'Production runner bundle budget is absent from pre-merge checks'
 severity: 'major'
+issue: 'cobuildwithus/murph#2017'
 ---
 
 ## Expected Behavior

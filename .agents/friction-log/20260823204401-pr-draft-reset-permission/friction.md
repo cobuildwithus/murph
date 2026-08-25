@@ -1,6 +1,7 @@
 ---
 title: 'Pull request draft reset lacks mutation permission'
 severity: 'major'
+issue: 'cobuildwithus/murph#2192'
 ---
 
 ## Expected Behavior

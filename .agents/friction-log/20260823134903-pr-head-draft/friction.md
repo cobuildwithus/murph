@@ -1,6 +1,7 @@
 ---
 title: 'PR head draft-reset controller cannot convert pull requests'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2217'
 ---
 
 ## Expected Behavior

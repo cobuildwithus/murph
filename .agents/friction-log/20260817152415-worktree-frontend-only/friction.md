@@ -1,6 +1,7 @@
 ---
 title: 'Worktree frontend-only dev example omits required hosted URL overrides'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1963'
 ---
 
 ## Expected Behavior

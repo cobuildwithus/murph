@@ -1,6 +1,7 @@
 ---
 title: 'Training week-bucket test depends on wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1941'
 ---
 
 ## Expected Behavior

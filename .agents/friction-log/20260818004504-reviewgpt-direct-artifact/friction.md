@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT direct artifact download silently succeeds after waited target closes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1987'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Provider action retries can hide the failing authorization phase'
 severity: 'major'
+issue: 'cobuildwithus/murph#2186'
 ---
 
 ## Expected Behavior

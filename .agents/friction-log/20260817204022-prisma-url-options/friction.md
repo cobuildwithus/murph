@@ -1,6 +1,7 @@
 ---
 title: 'Native E2E owner option test normalized away its transport encoding'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1973'
 ---
 
 ## Expected Behavior

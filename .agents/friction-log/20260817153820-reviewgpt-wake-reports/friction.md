@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT wake reports failure while its child keeps editing'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2031'
 ---
 
 ## Expected Behavior

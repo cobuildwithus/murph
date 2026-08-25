@@ -1,6 +1,7 @@
 ---
 title: 'Retire-worktree cannot retire a clean detached benchmark checkout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2026'
 ---
 
 ## Expected Behavior

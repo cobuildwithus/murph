@@ -1,6 +1,7 @@
 ---
 title: 'browser training week-bucket test depends on the current Monday'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2030'
 ---
 
 ## Friction

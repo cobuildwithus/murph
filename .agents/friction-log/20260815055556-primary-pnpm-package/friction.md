@@ -1,6 +1,7 @@
 ---
 title: 'Primary pnpm package links can point into retired worktrees'
 severity: 'major'
+issue: 'cobuildwithus/murph#1913'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Provider guard classifies GitHub controller HTTP as Temporal'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2176'
 ---
 
 ## Expected Behavior

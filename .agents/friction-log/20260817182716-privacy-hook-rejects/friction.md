@@ -1,6 +1,7 @@
 ---
 title: 'Privacy hook rejects synthetic Git fixture identity'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1965'
 ---
 
 ## Expected Behavior

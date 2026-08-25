@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT local config overrides valid per-run lane count'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1962'
 ---
 
 ## Expected Behavior

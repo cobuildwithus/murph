@@ -1,6 +1,7 @@
 ---
 title: 'Vercel Ready deployment can leave production domains on previous build'
 severity: 'major'
+issue: 'cobuildwithus/murph#2084'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT can commit a turn after its staged ZIP disappears'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1945'
 ---
 
 ## Expected Behavior

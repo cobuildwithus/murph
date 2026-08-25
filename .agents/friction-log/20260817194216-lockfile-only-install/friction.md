@@ -1,6 +1,7 @@
 ---
 title: 'Lockfile-only install re-resolves unrelated optional peers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1968'
 ---
 
 ## Expected Behavior

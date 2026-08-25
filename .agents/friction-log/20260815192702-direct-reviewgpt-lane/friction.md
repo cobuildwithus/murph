@@ -1,6 +1,7 @@
 ---
 title: 'Direct ReviewGPT lane-count override loses to local config'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1939'
 ---
 
 ## Expected Behavior

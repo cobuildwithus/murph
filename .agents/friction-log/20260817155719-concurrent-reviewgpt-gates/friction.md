@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent ReviewGPT gates race while refreshing origin/main'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1952'
 ---
 
 ## Expected Behavior

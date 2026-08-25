@@ -1,6 +1,7 @@
 ---
 title: 'create-worktree returns before checkout index stabilizes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2064'
 ---
 
 ## Expected Behavior

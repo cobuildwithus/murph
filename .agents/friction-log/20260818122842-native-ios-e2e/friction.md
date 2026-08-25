@@ -1,6 +1,7 @@
 ---
 title: 'Native iOS E2E docs omit the custom-environment OIDC subject'
 severity: 'major'
+issue: 'cobuildwithus/murph#1999'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Worktree pool at the ceiling has no releasable candidate'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2037'
 ---
 
 ## Expected Behavior

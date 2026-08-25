@@ -1,6 +1,7 @@
 ---
 title: 'Prisma mutation-method changes can silently stale concurrency pause hooks'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2033'
 ---
 
 ## Expected Behavior

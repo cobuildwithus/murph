@@ -1,6 +1,7 @@
 ---
 title: 'Runner bundle budget can lag clean current main'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2025'
 ---
 
 ## Expected Behavior

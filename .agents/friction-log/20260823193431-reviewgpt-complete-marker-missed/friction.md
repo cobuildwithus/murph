@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT wait misses a completed marked response'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2191'
 ---
 
 ## Expected Behavior

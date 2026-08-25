@@ -1,6 +1,7 @@
 ---
 title: 'Garmin browser canary validates consent controls before navigation settles'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2197'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Native iOS E2E lifecycle discards both cleanup failure causes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1966'
 ---
 
 ## Expected Behavior

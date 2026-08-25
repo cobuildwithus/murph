@@ -1,6 +1,7 @@
 ---
 title: 'Clean Web verification can resolve a new package subpath only from stale dist'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2027'
 ---
 
 ## Expected Behavior

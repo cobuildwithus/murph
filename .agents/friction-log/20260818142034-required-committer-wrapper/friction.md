@@ -1,6 +1,7 @@
 ---
 title: 'Required committer wrapper rejects merge commits'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1995'
 ---
 
 ## Expected Behavior

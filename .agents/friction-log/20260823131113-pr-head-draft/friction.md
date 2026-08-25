@@ -1,6 +1,7 @@
 ---
 title: 'PR head draft-reset controller cannot perform its GraphQL mutation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2181'
 ---
 
 ## Expected Behavior

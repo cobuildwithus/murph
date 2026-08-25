@@ -1,6 +1,7 @@
 ---
 title: 'Native iOS Vercel deploy test did not cover the strict request body'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1970'
 ---
 
 ## Expected Behavior

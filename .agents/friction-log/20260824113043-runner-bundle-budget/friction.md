@@ -1,6 +1,7 @@
 ---
 title: 'Runner bundle budget rejects valid PR when main advances'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2223'
 ---
 
 ## Expected Behavior

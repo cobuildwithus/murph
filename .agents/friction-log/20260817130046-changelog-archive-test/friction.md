@@ -1,6 +1,7 @@
 ---
 title: 'Changelog archive test pins a corrected edition to the first page'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1959'
 ---
 
 ## Expected Behavior

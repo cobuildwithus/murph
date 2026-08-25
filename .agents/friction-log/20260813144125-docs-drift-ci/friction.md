@@ -1,6 +1,7 @@
 ---
 title: 'Docs drift CI mode destroys the local merge-base proof in shallow worktrees'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1918'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Completion audit skill references removed coordination ledger'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2213'
 ---
 
 ## Expected Behavior

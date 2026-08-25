@@ -1,6 +1,7 @@
 ---
 title: 'Changelog page test pins a historical edition to the first page'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1944'
 ---
 
 ## Expected Behavior

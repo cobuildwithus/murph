@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT lane-count preference can override the supported repo cap'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2029'
 ---
 
 ## What happened

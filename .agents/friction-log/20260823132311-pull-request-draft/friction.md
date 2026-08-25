@@ -1,6 +1,7 @@
 ---
 title: 'Pull request draft reset controller lacks permission to convert exact-head PRs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2180'
 ---
 
 ## Expected Behavior

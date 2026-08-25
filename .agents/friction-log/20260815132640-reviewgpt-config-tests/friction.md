@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT config tests invoke live Spotlight app discovery'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2015'
 ---
 
 ## Expected Behavior

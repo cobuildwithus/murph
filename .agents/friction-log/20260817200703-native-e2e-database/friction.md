@@ -1,6 +1,7 @@
 ---
 title: 'Native E2E database reset bypasses the canonical migration owner'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1971'
 ---
 
 ## Expected Behavior

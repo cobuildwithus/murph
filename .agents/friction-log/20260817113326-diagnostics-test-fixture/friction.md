@@ -1,6 +1,7 @@
 ---
 title: 'Diagnostics test fixture bypasses the marked Vitest temp root'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1940'
 ---
 
 ## Expected Behavior

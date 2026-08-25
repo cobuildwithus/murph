@@ -1,6 +1,7 @@
 ---
 title: 'Browser training canonical-date test depends on the wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2016'
 ---
 
 ## Expected Behavior

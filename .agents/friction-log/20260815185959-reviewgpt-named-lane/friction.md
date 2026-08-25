@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT named lane can stall in unbounded Spotlight lookup from a task worktree'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1921'
 ---
 
 ## Expected Behavior

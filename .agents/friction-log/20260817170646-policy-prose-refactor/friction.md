@@ -1,6 +1,7 @@
 ---
 title: 'Policy prose refactor can leave release coverage assertions stale'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1956'
 ---
 
 ## Expected Behavior

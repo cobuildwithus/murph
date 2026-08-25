@@ -1,6 +1,7 @@
 ---
 title: 'Protected main can fail a release-only workspace boundary guard'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2018'
 ---
 
 ## Expected Behavior

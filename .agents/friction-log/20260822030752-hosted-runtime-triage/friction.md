@@ -1,6 +1,7 @@
 ---
 title: 'Hosted runtime triage skill references retired repo paths'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2169'
 ---
 
 ## Expected Behavior

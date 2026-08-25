@@ -1,6 +1,7 @@
 ---
 title: 'Viewport overflow referral fixture expires with the wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2065'
 ---
 
 ## Expected Behavior

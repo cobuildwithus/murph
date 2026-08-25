@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT capture records a coverage artifact without a downloadable attachment'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1990'
 ---
 
 ## Expected Behavior

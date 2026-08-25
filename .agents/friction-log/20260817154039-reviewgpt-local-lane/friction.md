@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT local lane count overrides explicit task value'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1960'
 ---
 
 ## Expected Behavior

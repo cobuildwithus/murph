@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT replayable wake command points to missing global binary'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2093'
 ---
 
 ## Expected Behavior

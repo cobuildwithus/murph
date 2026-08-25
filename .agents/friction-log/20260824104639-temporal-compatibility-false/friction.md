@@ -1,6 +1,7 @@
 ---
 title: 'Temporal compatibility false-fails before an accepted private run becomes visible'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2220'
 ---
 
 ## Expected Behavior

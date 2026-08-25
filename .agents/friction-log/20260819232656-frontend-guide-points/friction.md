@@ -1,6 +1,7 @@
 ---
 title: 'Frontend guide points to removed repo-local design skill paths'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2045'
 ---
 
 ## Expected Behavior

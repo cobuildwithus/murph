@@ -1,6 +1,7 @@
 ---
 title: 'PR launch guidance splits body guards from the ReviewGPT baseline'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2019'
 ---
 
 ## Expected Behavior

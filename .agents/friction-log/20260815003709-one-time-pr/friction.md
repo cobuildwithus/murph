@@ -1,6 +1,7 @@
 ---
 title: 'One-time PR finalizer writes a migration before creating its directory'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1947'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Next production runner couples TypeScript and Webpack heap budgets'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1950'
 ---
 
 ## Expected Behavior

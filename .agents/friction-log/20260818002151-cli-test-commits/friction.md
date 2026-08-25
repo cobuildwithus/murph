@@ -1,6 +1,7 @@
 ---
 title: 'CLI test commits trigger an unprepared config-schema build'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2041'
 ---
 
 ## Expected Behavior

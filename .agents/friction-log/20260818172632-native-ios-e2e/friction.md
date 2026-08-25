@@ -1,6 +1,7 @@
 ---
 title: 'Native iOS E2E reruns retain stale concurrency priority'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2000'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Frontend design proof treats metadata-only route edits as UI changes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1964'
 ---
 
 ## Expected Behavior

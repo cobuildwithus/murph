@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT closes exact capture target before verified artifact download'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2032'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Deep-review skill requires removed coordination ledger'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2221'
 ---
 
 ## Expected Behavior

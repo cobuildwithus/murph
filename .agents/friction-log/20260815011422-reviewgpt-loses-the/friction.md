@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT loses the accepted thread URL after confirmed auto-send'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1948'
 ---
 
 ## Expected Behavior
