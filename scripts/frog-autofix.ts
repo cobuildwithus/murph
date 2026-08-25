@@ -1663,7 +1663,7 @@ export const trustedReviewControlPaths = [
   ".agents/skills/frog/SKILL.md",
   ".npmrc",
   ".pnpmfile.cjs",
-  "agent-docs/prompts/coverage-write.md",
+  "agent-docs/prompts/coverage-review.md",
   "agent-docs/prompts/frontend-review.md",
   "agent-docs/operations/product-ux.md",
   "agent-docs/prompts/prompt-review.md",

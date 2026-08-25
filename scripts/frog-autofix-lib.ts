@@ -339,8 +339,8 @@ export function reviewResponseStructureIsValid(options: {
     return matches.length === 1 ? pattern.exec(matches[0] ?? "") : null;
   };
   const product = exact(
-    "Product experience lens:",
-    /^Product experience lens: (applicable|not applicable) — \S.*$/u,
+    "Product UX lens:",
+    /^Product UX lens: (applicable|not applicable) — \S.*$/u,
   );
   if (!product) return false;
   for (const lens of ["Prompt", "Frontend", "Coverage"] as const) {
@@ -356,10 +356,7 @@ export function reviewResponseStructureIsValid(options: {
         || !/^Product purpose verdict: \S.*$/u.test(purposeLines[0] ?? "")))
     || (product[1] === "not applicable" && purposeLines.length !== 0)
   ) return false;
-  return Boolean(exact(
-    "Patch artifact:",
-    /^Patch artifact: (?:none|reviewgpt-coverage\.patch)$/u,
-  ));
+  return true;
 }
 
 export function reviewRequiresHumanHandoff(

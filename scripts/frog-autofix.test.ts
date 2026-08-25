@@ -303,11 +303,10 @@ describe("Frog autofix guards", () => {
     const specialist = [
       `Checked preliminary specialists: PR #99 @ ${head.slice(0, 7)}`,
       `Issue #42 at ${head.slice(0, 12)}`,
-      "Product experience lens: not applicable — no product-owned behavior changes.",
+      "Product UX lens: not applicable — no product-owned behavior changes.",
       "Prompt lens: applicable — worker instructions change.",
       "Frontend lens: not applicable — no web surface changes.",
-      "Coverage lens: applicable — executable orchestration changes.",
-      "Patch artifact: none",
+      "Coverage lens: applicable — runtime-boundary proof is a primary outcome.",
       "SPECIALIST_OUTCOME: PASS",
       "SPECIALIST_REVIEW_COMPLETE",
       "",
@@ -372,7 +371,7 @@ describe("Frog autofix guards", () => {
   it("keeps every ReviewGPT prompt authority in the trusted parent control inventory", () => {
     const specialistPromptPaths = [
       "agent-docs/operations/product-ux.md",
-      "agent-docs/prompts/coverage-write.md",
+      "agent-docs/prompts/coverage-review.md",
       "agent-docs/prompts/frontend-review.md",
       "agent-docs/prompts/prompt-review.md",
     ];

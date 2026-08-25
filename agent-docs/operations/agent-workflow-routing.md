@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 This doc is the durable workflow map behind `AGENTS.md`.
 Use it to classify the task, load only the relevant docs, and choose the right verification, audit, and commit path.
@@ -132,7 +132,7 @@ Then load only the task-relevant docs listed below.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
 - The 1,000-line touch-time split policy is paused. Do not treat oversized hand-authored files as an automatic split/refactor requirement unless the current user task asks for giant-file cleanup or the split is independently the simplest durable fix.
 - Product UX, prompt, frontend, and coverage audits run together in the preliminary `completion-specialists` ReviewGPT pass. The fallback local `deep-review` remains the only routed audit subagent pass; treat this workflow doc plus `AGENTS.md` as standing permission to spawn it only when its trigger applies and the final ReviewGPT gate will not run.
-- Run the preliminary specialist ReviewGPT pass on an exact pushed candidate head before the parent's final review. When the final ReviewGPT gate also applies, its full-patch round 1 may start concurrently against that same head after focused local proof and the parent's candidate review. The stages stay independent: the preliminary pass does not establish or advance the final baseline, and accepted findings from either stage must be resolved before completion. Inspect, path-scope, and verify any returned `reviewgpt-coverage.patch` before applying it.
+- Run the review-only preliminary specialist ReviewGPT pass on an exact pushed candidate head before the parent's final review. When the final ReviewGPT gate also applies, its full-patch round 1 may start concurrently against that same head after focused local proof and the parent's candidate review. The stages stay independent: the preliminary pass does not establish or advance the final baseline, and accepted findings from either stage must be resolved before completion.
 - Give a long-running ReviewGPT job one wait owner. Prefer its completion-returning
   `--wait` process; if the review must outlive the active turn, use the detached
   exact-thread wake handoff defined in
