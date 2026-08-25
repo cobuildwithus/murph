@@ -653,9 +653,9 @@ supported provider credential.
 - `apps/web/test/hosted-ai-usage-overshoot-alert-monitor.test.ts` proves the
   five-minute runtime-alert cron reuses the operational Resend incident owner
   under a distinct allowance-overshoot identity. Its privacy-safe `EXISTS`
-  query reads only current blocked allowance periods, stops at the first period
-  more than twenty percent over its configured cap, and does not count or join
-  private usage rows.
+  query reads only current blocked periods with a positive configured
+  allowance, stops at the first period more than twenty percent over that cap,
+  and does not count or join private usage rows.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
   opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
   latency monitor. It runs the production query against 50,000 stale rows per
