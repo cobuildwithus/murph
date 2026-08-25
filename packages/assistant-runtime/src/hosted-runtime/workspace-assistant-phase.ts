@@ -75,7 +75,6 @@ import {
   AutomationAvailabilityConflictBlockError,
   patchAutomation,
   reconcileAutomationSupportSeries,
-  resolveAutomationUpsertSlug,
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
@@ -1497,10 +1496,6 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
-        const requestedSlug = resolveAutomationUpsertSlug({
-          slug: request.slug,
-          title: request.title,
-        });
         const existingTarget = request.automationId
           ? await showAutomation({
               automationId: request.automationId,
@@ -1510,7 +1505,7 @@ function createHostedAssistantAutomationTool(input: {
         const targetsOnboardingFirstRead =
           request.automationId ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
-          || requestedSlug ===
+          || request.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
           || existingTarget?.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG;

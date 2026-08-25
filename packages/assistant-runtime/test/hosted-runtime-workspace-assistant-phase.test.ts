@@ -5413,6 +5413,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expect(repeatedTitleReminder.automationId).not.toBe(
             reminderRoot.automationId,
           );
+          const reservedTitleReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              instructions: "Send this ordinary synthetic reminder.",
+              schedule: { kind: "dailyLocal", localTime: "08:30" },
+              title: "Onboarding first personal read",
+            });
+          expect(reservedTitleReminder).toEqual(expect.objectContaining({
+            action: "save",
+            created: true,
+            status: "active",
+          }));
+          if (!reservedTitleReminder || reservedTitleReminder.action !== "save") {
+            throw new Error("Expected ordinary reserved-title reminder save.");
+          }
+          expect(reservedTitleReminder.automationId).not.toBe(
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          );
           const archivedReminder =
             await executionContext.hosted?.automationTool?.request({
               action: "inspect",
