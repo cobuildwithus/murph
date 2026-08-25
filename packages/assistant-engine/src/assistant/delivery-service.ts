@@ -50,6 +50,11 @@ import {
 } from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
+  /**
+   * Per-response override: undefined inherits its ordinal; null/empty clears;
+   * non-empty replaces.
+   */
+  contextReferences?: AssistantMessageInput['outboxAutomationContextReferences']
   deliveryContextOrdinal?: number
   deliveryContext?: AssistantReplyDeliveryContext | null
   media?: readonly AssistantResponseMedia[] | null
@@ -471,13 +476,19 @@ export async function deliverAssistantPrecedingReplies(input: {
         context: segment.deliveryContext ?? null,
         input: input.input,
       })
+      const referencedSegmentInput = segment.contextReferences === undefined
+        ? baseSegmentInput
+        : {
+            ...baseSegmentInput,
+            outboxAutomationContextReferences: segment.contextReferences,
+          }
       const segmentInput = input.resolveSegmentDeliveryInput
         ? await input.resolveSegmentDeliveryInput({
-            input: baseSegmentInput,
+            input: referencedSegmentInput,
             segment,
             session,
           })
-        : baseSegmentInput
+        : referencedSegmentInput
       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
         input: segmentInput,
         session,
@@ -525,16 +536,9 @@ function normalizeAssistantPrecedingReplySegments(input: {
   segments?: readonly AssistantPrecedingReplySegment[]
 }): AssistantPrecedingReplySegment[] {
   return (input.segments ?? []).map((segment) => ({
-    ...(segment.deliveryContextOrdinal === undefined
-      ? {}
-      : { deliveryContextOrdinal: segment.deliveryContextOrdinal }),
+    ...segment,
     deliveryContext: segment.deliveryContext ?? null,
-    response: segment.response,
-    ...(segment.transcriptResponse === undefined
-      ? {}
-      : { transcriptResponse: segment.transcriptResponse }),
     media: normalizeAssistantResponseMediaList(segment.media ?? []),
-    ...(segment.targetInputId ? { targetInputId: segment.targetInputId } : {}),
   }))
 }
 

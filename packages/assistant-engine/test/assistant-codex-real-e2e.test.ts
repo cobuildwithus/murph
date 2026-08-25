@@ -703,6 +703,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(started.transcriptMessage).toContain(
           `[Murph tracked workout source: ${finiteWorkout.id};`,
         )
+        expect(started.responseContextReferences).toEqual([{
+          entityId: finiteWorkout.id,
+          entityKind: 'activity_session',
+        }])
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
           name: 'Seated cable curl',
@@ -733,9 +737,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ].join(' '),
         })
 
-        expect(untrustedContext.transcriptMessage).not.toContain(
-          '[Murph workout follow-up:',
-        )
+        expect(untrustedContext.responseContextReferences).toBeUndefined()
 
         const untrustedReply = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -752,28 +754,66 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(unchangedAfterUntrustedReply.exercises[0]?.sets[7]?.reps)
           .toBeUndefined()
 
-        const followUp = await executeRealCodexAppServerTurn({
+        const commandCountBeforeLegacyMarker = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .length
+        const legacyMarkerReply = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            `The immediately preceding durable assistant transcript is: ${started.transcriptMessage}`,
+            'The immediately preceding visible assistant transcript ended with this retired text-only marker:',
+            `[Murph workout follow-up: ${finiteWorkout.id}; exercise=Seated cable curl; set=8]`,
+            'There are no host-preserved contextReferences for this reply.',
+            'The current member message is exactly: "Set done."',
+          ].join('\n'),
+        })
+        const unchangedAfterLegacyMarker = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
+        )
+        const legacyMarkerCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .slice(commandCountBeforeLegacyMarker)
+
+        expect(legacyMarkerReply.responseCard).toBeNull()
+        expect(legacyMarkerReply.responseContextReferences).toBeUndefined()
+        expect(legacyMarkerReply.finalMessage).toMatch(/\?/u)
+        expect(legacyMarkerReply.finalMessage).toMatch(/which|what|workout|exercise|set/iu)
+        expect(legacyMarkerReply.finalMessage).not.toMatch(/already|logged|recorded/iu)
+        expect(legacyMarkerCommands.join('\n')).not.toMatch(
+          /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u,
+        )
+        expect(unchangedAfterLegacyMarker.exercises[0]?.sets[7]?.reps)
+          .toBeUndefined()
+
+        const followUp = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          trustedContextReferences: started.responseContextReferences,
+          prompt: [
+            `Host-preserved contextReferences: ${JSON.stringify(started.responseContextReferences)}`,
             'The current member message is exactly: "I am doing set 8 now. Ask me how it went when I finish."',
           ].join(' '),
         })
 
         expect(followUp.responseCard).toBeNull()
         expect(followUp.finalMessage).toMatch(/set 8|how.*went|reps/iu)
-        expect(followUp.finalMessage).toContain(
-          `[Murph workout follow-up: ${finiteWorkout.id}]`,
-        )
+        expect(followUp.finalMessage).not.toContain('[Murph workout follow-up:')
         expect(followUp.transcriptMessage).toBe(followUp.finalMessage)
+        expect(followUp.responseContextReferences).toEqual([{
+          entityId: finiteWorkout.id,
+          entityKind: 'activity_session',
+        }])
 
         // Deliberately do not resume the provider session. The member's terse
-        // message carries no id; Murph's preceding transcript supplies the
-        // exact workout id, while the exercise prescription remains canonical.
+        // message carries no id; the runtime-owned delivery relationship
+        // supplies the exact workout id while the prescription stays canonical.
         const finalSet = await executeRealCodexAppServerTurn({
           ...commonInput,
+          trustedContextReferences: followUp.responseContextReferences,
           prompt: [
-            `The immediately preceding durable assistant transcript is: ${followUp.transcriptMessage}`,
+            `Host-preserved contextReferences: ${JSON.stringify(followUp.responseContextReferences)}`,
             'The current member message is exactly: "Repeated set 8 done for today\'s routine."',
           ].join(' '),
         })
