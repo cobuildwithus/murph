@@ -3236,6 +3236,7 @@ export interface HostedWorkspaceReadResponse {
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
+  hostedAssistantSubagentModelOverridesAllowed?: boolean;
   platformAiUsageAllowed?: boolean;
   workspace: HostedWorkspaceState | null;
 }

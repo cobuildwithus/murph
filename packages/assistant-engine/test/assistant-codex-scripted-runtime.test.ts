@@ -3379,6 +3379,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
+              model: 'gpt-5.6-luna',
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3425,6 +3426,9 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
+      expect(
+        scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
+      ).toContain('gpt-5.6-luna')
       await delay(100)
 
       scenario.stub.queue({
@@ -11983,6 +11987,7 @@ function buildScriptedCodexConfigToml(
       ? [
           '[features.multi_agent_v2]',
           'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
           'max_concurrent_threads_per_session = 4',
           '',
         ]

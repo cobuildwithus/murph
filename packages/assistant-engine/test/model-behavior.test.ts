@@ -198,10 +198,13 @@ describe('assistant execution prompt contract', () => {
     )
 
     expect(prompt).toContain(
-      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+      'The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only',
     )
     expect(prompt).toContain(
-      'a saved model starts on the next turn',
+      'A saved Luna, Terra, or Sol model starts next turn',
+    )
+    expect(prompt).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -1034,10 +1037,13 @@ describe('assistant execution prompt contract', () => {
       'Voice memos keep the running-turn voice unless this user names another',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model, core-reply provider, or reasoning changes',
+      'changes future conversation model, provider, or reasoning only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'a saved change starts on the next turn',
+      'one-task child models use `spawn_agent.model` and are never saved',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never switch them automatically',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -3141,7 +3147,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'A saved Luna, Terra, or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',

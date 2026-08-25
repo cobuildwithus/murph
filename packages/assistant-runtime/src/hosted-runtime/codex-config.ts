@@ -14,6 +14,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   parseHostedLocalCodexSubscriptionHostAuth,
@@ -263,6 +264,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
       chatGptAuth,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       contextWindowTokens,
+      exposeSpawnAgentModelOverrides:
+        !customInferenceProvider
+        && input.runtimeEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]
+          === "1",
       provider: providerConfig,
       reasoningEffort: customInferenceProvider
         ? null
@@ -567,6 +572,7 @@ function requireHostedCustomInferenceContextWindowTokens(value: unknown): number
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
   contextWindowTokens?: number | null;
+  exposeSpawnAgentModelOverrides: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string | null;
@@ -647,7 +653,9 @@ export function buildHostedCodexConfigToml(input: {
     "# A CLI boolean override would replace the table and silently drop them.",
     "[features.multi_agent_v2]",
     "enabled = true",
-    "expose_spawn_agent_model_overrides = true",
+    `expose_spawn_agent_model_overrides = ${
+      input.exposeSpawnAgentModelOverrides ? "true" : "false"
+    }`,
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,

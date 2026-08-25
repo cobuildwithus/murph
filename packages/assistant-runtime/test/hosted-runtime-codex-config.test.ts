@@ -33,6 +33,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   buildHostedRuntimeForwardedEnv,
@@ -108,6 +109,7 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
 
 test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: false,
     model: "gpt-5.2",
     provider: {
       id: "hosted-openai",
@@ -181,6 +183,7 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
+  assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
   assert.match(
     config,
     /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
@@ -221,6 +224,7 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
+  assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(
     config,
@@ -240,6 +244,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]: "1",
       OPENAI_API_KEY: "secret-openai-key",
     },
   });
@@ -1739,6 +1744,29 @@ test("hosted runtime launch env policy forwards the test-only model provider bas
   );
 });
 
+test("hosted runtime launch env policy forwards subagent model authority", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    HOSTED_RUNTIME_ENV_KEY_NAMES.includes(
+      HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]: "1",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV],
+    "1",
+  );
+});
+
 test("hosted runtime launch env policy forwards the neutral hosted Codex command override", () => {
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
@@ -1815,6 +1843,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
 
 test("hosted Codex config TOML omits credential values and runtime authority headers", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: true,
     model: null,
     provider: {
       id: "openai",
@@ -1980,6 +2009,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
 
 test("hosted Codex config keeps skill instructions and native memory disabled", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: true,
     model: "gpt-5.6-terra",
     provider: {
       id: "openai",
@@ -2026,6 +2056,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
 
 test("hosted Codex config promotes permitted leaf delegation with native per-spawn model selection", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: true,
     model: "gpt-5.6-terra",
     provider: {
       id: "openai",

@@ -586,8 +586,8 @@ function buildAssistantStyleSettingsGuidanceText(input: {
       ? "- Use `murph.personalization` to read or save the room's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
       : "- Use `murph.personalization` to read or save this member's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
     groupConversation
-      ? "- For an explicit current-room request, use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room; a saved model starts on the next turn. Provider and reasoning controls remain unavailable in a group. Never switch the room model automatically."
-      : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
+      ? "- The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only; one-task child models use `spawn_agent.model` and are never saved. A saved Luna, Terra, or Sol model starts next turn. Provider and reasoning controls remain unavailable in a group. Never switch either automatically."
+      : "- `murph.assistant_configuration` changes future conversation model, provider, or reasoning only; one-task child models use `spawn_agent.model` and are never saved. Never switch them automatically.",
     "- Read tool schemas; never guess ids. Voice memos keep the running-turn voice unless this user names another; same-turn demos do not activate it.",
     groupConversation
       ? "- Never send a personal Settings URL as a way to configure this room. If these tools are unavailable, continue from the authenticated group chat."
