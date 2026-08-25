@@ -50,6 +50,16 @@ describe("foods query helpers", () => {
     expect(schemaSql).toContain(
       "ON foods (canonical_key, data_origin_priority, id)",
     );
+
+    const liveRolloutSql = await readFile(
+      new URL("../sql/foods/private-search-indexes.sql", import.meta.url),
+      "utf8",
+    );
+    expect(liveRolloutSql.match(/CREATE INDEX CONCURRENTLY IF NOT EXISTS/gu))
+      .toHaveLength(3);
+    expect(liveRolloutSql).toContain("foods_name_rank_idx");
+    expect(liveRolloutSql).toContain("foods_name_exact_rank_idx");
+    expect(liveRolloutSql).toContain("foods_canonical_rank_idx");
   });
 
   it("projects meal nutrition and bounded contaminant evidence without unrelated payloads", () => {

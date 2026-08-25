@@ -25,7 +25,7 @@ describe("product label runtime env preflight", () => {
           MURPH_SUPPLEMENT_DB_URL: "postgres://legacy.example.test/supplements",
         },
         {
-          async readMissingRequiredSchemaColumns() {
+          async readRequiredSchemaProblems() {
             throw new Error("local builds should not query labels schema");
           },
         },
@@ -42,7 +42,7 @@ describe("product label runtime env preflight", () => {
           MURPH_SUPPLEMENT_DB_URL: "postgres://legacy.example.test/supplements",
         },
         {
-          async readMissingRequiredSchemaColumns(connectionString) {
+          async readRequiredSchemaProblems(connectionString) {
             expect(connectionString).toBe("postgres://labels.example.test/labels");
             return [];
           },
@@ -60,7 +60,7 @@ describe("product label runtime env preflight", () => {
             "postgres://labels.example.test/labels?sslrootcert=system&sslcert=system&sslkey=system&connect_timeout=10",
         },
         {
-          async readMissingRequiredSchemaColumns(connectionString) {
+          async readRequiredSchemaProblems(connectionString) {
             expect(connectionString).toBe(
               "postgres://labels.example.test/labels?connect_timeout=10",
             );
@@ -79,30 +79,68 @@ describe("product label runtime env preflight", () => {
           MURPH_LABELS_DB_URL: "postgres://labels.example.test/labels",
         },
         {
-          async readMissingRequiredSchemaColumns() {
+          async readRequiredSchemaProblems() {
             return [
               {
-                tableName: "foods",
-                columnName: "serving_grams",
+                kind: "column",
+                name: "foods.serving_grams",
+                reason: "missing",
               },
               {
-                tableName: "contaminant_thresholds",
-                columnName: "threshold_name",
+                kind: "column",
+                name: "contaminant_thresholds.threshold_name",
+                reason: "missing",
               },
               {
-                tableName: "contaminant_thresholds",
-                columnName: "threshold_value",
+                kind: "column",
+                name: "contaminant_thresholds.threshold_value",
+                reason: "missing",
               },
               {
-                tableName: "product_tests",
-                columnName: "source_key",
+                kind: "column",
+                name: "product_tests.source_key",
+                reason: "missing",
               },
             ];
           },
         },
       ),
     ).rejects.toThrow(
-      `${PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE} Missing columns: foods.serving_grams, contaminant_thresholds.threshold_name, contaminant_thresholds.threshold_value, product_tests.source_key.`,
+      `${PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE} Missing or invalid objects: foods.serving_grams (missing), contaminant_thresholds.threshold_name (missing), contaminant_thresholds.threshold_value (missing), product_tests.source_key (missing).`,
+    );
+  });
+
+  it("fails production builds for missing, interrupted, or wrong food-search indexes", async () => {
+    await expect(
+      assertProductLabelRuntimeEnv(
+        {
+          VERCEL_ENV: "production",
+          MURPH_LABELS_DB_URL: "postgres://labels.example.test/labels",
+        },
+        {
+          async readRequiredSchemaProblems() {
+            return [
+              {
+                kind: "index",
+                name: "foods_name_rank_idx",
+                reason: "missing",
+              },
+              {
+                kind: "index",
+                name: "foods_name_exact_rank_idx",
+                reason: "not_live",
+              },
+              {
+                kind: "index",
+                name: "foods_canonical_rank_idx",
+                reason: "wrong_definition",
+              },
+            ];
+          },
+        },
+      ),
+    ).rejects.toThrow(
+      "foods_name_rank_idx (missing), foods_name_exact_rank_idx (not_live), foods_canonical_rank_idx (wrong_definition)",
     );
   });
 
@@ -114,7 +152,7 @@ describe("product label runtime env preflight", () => {
           MURPH_LABELS_DB_URL: "postgres://labels.example.test/labels",
         },
         {
-          async readMissingRequiredSchemaColumns() {
+          async readRequiredSchemaProblems() {
             throw new Error("network unavailable");
           },
         },

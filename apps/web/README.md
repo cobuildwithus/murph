@@ -758,9 +758,12 @@ window sorting. Ranking is deterministic within that admitted set; it is
 intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
 continue to use direct lookup paths.
 
-For an existing labels database, create the foods exact-name-rank, GiST
-name-rank, and canonical-rank indexes concurrently before deploying web code
-that uses this query shape.
+For an existing labels database, run
+`psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
+create the foods exact-name-rank, GiST name-rank, and canonical-rank indexes
+concurrently before deploying web code that uses this query shape. The
+production build preflight validates all three exact definitions plus their
+live/ready/valid state and fails closed if the rollout is missing or incomplete.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new
