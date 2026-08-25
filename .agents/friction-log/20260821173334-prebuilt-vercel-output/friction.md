@@ -1,6 +1,7 @@
 ---
 title: 'Prebuilt Vercel output omits Workflow queue consumer triggers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2149'
 ---
 
 ## Expected Behavior

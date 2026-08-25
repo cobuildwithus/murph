@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local doctor misses required Temporal worker package'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2124'
 ---
 
 ## Expected Behavior
