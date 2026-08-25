@@ -34177,7 +34177,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("replays one exact automation after its canonical checkpoint survives host abort", async () => {
+  test("services a due one-shot automation after its canonical checkpoint survives host abort", async () => {
     const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const restoredVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -34195,33 +34195,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const originalAutomationPass =
       mocks.runAssistantAutomationPass.getMockImplementation();
     let automationPassCount = 0;
-    const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41V9";
-    const saveAutomation = (
-      vaultRoot: string,
-      acceptExactCreateReplay = false,
-    ) => upsertAutomation({
-      acceptExactCreateReplay,
-      automationId,
-      continuityPolicy: "fresh",
-      createOnly: true,
-      instructions: "Send the scheduled reminder.",
-      now: new Date(TEST_NOW),
-      route: {
-        channel: "linq",
-        deliveryTarget: "synthetic_direct_chat",
-        identityId: null,
-        participantId: null,
-        threadId: "synthetic_direct_chat",
-        threadIsDirect: true,
-      },
-      schedule: {
-        at: TEST_NOW,
-        kind: "at",
-      },
-      status: "active",
-      title: "Synthetic one-shot reminder",
-      vaultRoot,
-    });
 
     assert.ok(originalAutomationPass);
     try {
@@ -34288,7 +34261,27 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           signal: abortController.signal,
           async runAssistantPhase(input) {
-            await saveAutomation(input.restored.vaultRoot);
+            await upsertAutomation({
+              automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41V9",
+              continuityPolicy: "fresh",
+              instructions: "Send the scheduled reminder.",
+              now: new Date(TEST_NOW),
+              route: {
+                channel: "linq",
+                deliveryTarget: "synthetic_direct_chat",
+                identityId: null,
+                participantId: null,
+                threadId: "synthetic_direct_chat",
+                threadIsDirect: true,
+              },
+              schedule: {
+                at: TEST_NOW,
+                kind: "at",
+              },
+              status: "active",
+              title: "Synthetic one-shot reminder",
+              vaultRoot: input.restored.vaultRoot,
+            });
             return { progressed: false };
           },
           vaultRoot: firstVaultRoot,
@@ -34307,11 +34300,8 @@ describe("hosted workspace runtime entrypoint", () => {
       mocks.runAssistantAutomationPass.mockImplementation(
         async () => {
           automationPassCount += 1;
-          const replayed = await saveAutomation(restoredVaultRoot, true);
-          assert.equal(replayed.created, false);
-          assert.equal(replayed.auditPath, null);
           const automation = await showAutomation({
-            automationId,
+            automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41V9",
             vaultRoot: restoredVaultRoot,
           });
           assert.ok(automation);

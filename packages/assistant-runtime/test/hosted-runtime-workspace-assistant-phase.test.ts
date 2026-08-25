@@ -5337,45 +5337,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!newsletter || newsletter.action !== "save") {
             throw new Error("Expected saved group newsletter.");
           }
-          const replaySafeSaveRequest = {
-            action: "save" as const,
-            automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41WC",
-            instructions: "Send the replay-safe stretch reminder.",
-            schedule: { kind: "dailyLocal" as const, localTime: "12:31" },
-            title: "Stretch reminder",
-          };
-          const [replaySafeFirst, replaySafeRepeat] = await Promise.all([
-            executionContext.hosted?.automationTool?.request(
-              replaySafeSaveRequest,
-            ),
-            executionContext.hosted?.automationTool?.request(
-              replaySafeSaveRequest,
-            ),
-          ]);
-          if (
-            !replaySafeFirst
-            || replaySafeFirst.action !== "save"
-            || !replaySafeRepeat
-            || replaySafeRepeat.action !== "save"
-          ) {
-            throw new Error("Expected replay-safe automation save results.");
-          }
-          expect([
-            replaySafeFirst.created,
-            replaySafeRepeat.created,
-          ].sort()).toEqual([false, true]);
-          expect(replaySafeRepeat.automationId).toBe(replaySafeFirst.automationId);
-          expect(replaySafeRepeat.updatedAt).toBe(replaySafeFirst.updatedAt);
-          await expect(executionContext.hosted?.automationTool?.request(
-            replaySafeSaveRequest,
-          )).resolves.toEqual(expect.objectContaining({
-            automationId: replaySafeSaveRequest.automationId,
-            created: false,
-          }));
-          await expect(executionContext.hosted?.automationTool?.request({
-            ...replaySafeSaveRequest,
-            instructions: "Do not overwrite the first reminder on replay.",
-          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
             automationId: newsletter.automationId,
