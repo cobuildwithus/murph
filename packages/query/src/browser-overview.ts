@@ -6,8 +6,10 @@ export {
 export type {
   JournalDay,
   JournalEvent,
+  JournalEventTiming,
   JournalRecord,
   JournalView,
+  JournalWeekSummary,
 } from "./journal-view.ts";
 export {
   selectBrowserVaultExperimentSummary,

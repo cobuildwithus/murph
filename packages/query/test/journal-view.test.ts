@@ -52,6 +52,7 @@ test("Journal groups canonical records into human events without copying source 
   const sleepEvent = events.find((entry) => entry.kind === "sleep");
   const activityEvent = events.find((entry) => entry.kind === "activity");
   const testEvent = events.find((entry) => entry.kind === "test");
+  assert.deepEqual(events.map((entry) => entry.kind), ["sleep", "test", "activity"]);
   assert.deepEqual(sleepEvent?.records.map((record) => record.label).sort(), [
     "HRV",
     "Sleep",
@@ -88,8 +89,137 @@ test("Journal remains useful with notes only and keeps independent facts separat
   assert.equal(view.eventCount, 2);
   assert.deepEqual(
     view.days[0]?.events.map((entry) => entry.title),
-    ["Late dinner", "Sauna"],
+    ["Sauna", "Late dinner"],
   );
+});
+
+test("Journal turns dense wearable records into main sleep, naps, and grouped activity", () => {
+  const view = buildJournalView(createVaultReadModel({
+    entities: [
+      event("main_sleep", "sleep_session", "2026-08-25T08:57:00.000Z", {
+        durationMinutes: 450,
+        sleepType: "main_sleep",
+        source: "oura",
+      }, "Sleep"),
+      event("nap", "sleep_session", "2026-08-25T15:30:00.000Z", {
+        durationMinutes: 25,
+        sleepType: "nap",
+        source: "oura",
+      }, "Sleep"),
+      event("yard_1", "activity_session", "2026-08-25T10:00:00.000Z", {
+        activityType: "yardwork",
+        durationMinutes: 81,
+        source: "oura",
+      }, "yardwork"),
+      event("yard_2", "activity_session", "2026-08-25T13:00:00.000Z", {
+        activityType: "yardwork",
+        durationMinutes: 41,
+        source: "oura",
+      }, "yardwork"),
+      event("yard_3", "activity_session", "2026-08-25T17:00:00.000Z", {
+        activityType: "yardwork",
+        durationMinutes: 48,
+        source: "oura",
+      }, "yardwork"),
+      event("profile", "observation", "2026-08-25T20:45:00.000Z", {
+        metric: "profile",
+        source: "oura",
+        summary: "Biological sex: male.",
+      }, "Junction profile"),
+    ],
+    vaultRoot: "test://journal-wearable-density",
+  }), [
+    metric("total-sleep", "2026-08-25", 450, "min"),
+    metric("sleep-efficiency", "2026-08-25", 89, "percent"),
+    metric("hrv-rmssd", "2026-08-25", 68.1429, "ms"),
+    metric("readiness-score", "2026-08-25", 71, "score"),
+    metric("recovery-score", "2026-08-25", 71, "score"),
+    metric("sleep-score", "2026-08-25", 78, "score"),
+  ], { asOf: "2026-08-25T22:00:00.000Z" });
+
+  assert.equal(view.eventCount, 3);
+  const events = view.days[0]?.events ?? [];
+  const mainSleep = events.find((entry) => entry.kind === "sleep");
+  const nap = events.find((entry) => entry.kind === "nap");
+  const yardWork = events.find((entry) => entry.kind === "activity");
+
+  assert.equal(mainSleep?.timing, "night");
+  assert.equal(mainSleep?.summary, "7 h 30 · score 78");
+  assert.deepEqual(mainSleep?.details, [
+    "89% efficiency",
+    "HRV 68 ms",
+    "readiness 71",
+  ]);
+  assert.equal(mainSleep?.records.some((record) => record.label === "Recovery score"), false);
+  assert.equal(mainSleep?.records.some((record) => record.label === "Total sleep"), false);
+
+  assert.equal(nap?.timing, "timed");
+  assert.equal(nap?.title, "Nap");
+  assert.equal(nap?.summary, "25 min");
+
+  assert.equal(yardWork?.title, "Yard work");
+  assert.equal(yardWork?.summary, "2 h 50 across 3 sessions");
+  assert.deepEqual(yardWork?.records.map((record) => record.id).sort(), [
+    "yard_1",
+    "yard_2",
+    "yard_3",
+  ]);
+  assert.equal(events.some((entry) => entry.id.includes("profile")), false);
+  assert.deepEqual(view.weeks, [{
+    activityMinutes: 170,
+    averageSleepMinutes: 450,
+    averageSleepScore: 78,
+    endDate: "2026-08-30",
+    sleepNights: 1,
+    startDate: "2026-08-24",
+  }]);
+});
+
+test("Journal uses the longest unknown sleep as the night and keeps shorter sleep separate", () => {
+  const view = buildJournalView(createVaultReadModel({
+    entities: [
+      event("unknown_main", "sleep_session", "2026-08-23T09:00:00.000Z", {
+        durationMinutes: 507,
+        source: "oura",
+      }, "Sleep"),
+      event("unknown_nap", "sleep_session", "2026-08-23T14:07:00.000Z", {
+        durationMinutes: 25,
+        source: "oura",
+      }, "Sleep"),
+    ],
+    vaultRoot: "test://journal-unknown-sleep",
+  }), [], { asOf: "2026-08-23T22:00:00.000Z" });
+
+  const events = view.days[0]?.events ?? [];
+  assert.equal(events.find((entry) => entry.kind === "sleep")?.summary, "8 h 27");
+  assert.equal(events.find((entry) => entry.kind === "nap")?.summary, "25 min");
+});
+
+test("Journal folds a long unknown provider duplicate into explicit main sleep", () => {
+  const view = buildJournalView(createVaultReadModel({
+    entities: [
+      event("explicit_main", "sleep_session", "2026-08-23T08:50:00.000Z", {
+        durationMinutes: 495,
+        sleepType: "main_sleep",
+        source: "oura",
+      }, "Sleep"),
+      event("unknown_duplicate", "sleep_session", "2026-08-23T09:00:00.000Z", {
+        durationMinutes: 507,
+        source: "oura",
+      }, "Sleep"),
+      event("unknown_nap", "sleep_session", "2026-08-23T14:07:00.000Z", {
+        durationMinutes: 25,
+        source: "oura",
+      }, "Sleep"),
+    ],
+    vaultRoot: "test://journal-explicit-sleep-duplicate",
+  }), [], { asOf: "2026-08-23T22:00:00.000Z" });
+
+  const events = view.days[0]?.events ?? [];
+  assert.equal(events.filter((entry) => entry.kind === "sleep").length, 1);
+  assert.equal(events.find((entry) => entry.kind === "sleep")?.summary, "8 h 27");
+  assert.equal(events.filter((entry) => entry.kind === "nap").length, 1);
+  assert.equal(events.find((entry) => entry.kind === "nap")?.summary, "25 min");
 });
 
 function event(

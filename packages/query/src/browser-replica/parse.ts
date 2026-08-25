@@ -6,6 +6,7 @@ import type {
   JournalEvent,
   JournalRecord,
   JournalView,
+  JournalWeekSummary,
 } from "../journal-view.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import {
@@ -186,7 +187,28 @@ function parseJournalView(value: unknown, label: string): JournalView {
     ),
     eventCount: requireNonNegativeInteger(record.eventCount, `${label}.eventCount`),
     recordCount: requireNonNegativeInteger(record.recordCount, `${label}.recordCount`),
+    weeks: record.weeks === undefined
+      ? []
+      : requireArray(record.weeks, `${label}.weeks`).map((entry, index) =>
+        parseJournalWeekSummary(entry, `${label}.weeks[${index}]`)
+      ),
     windowDays: requirePositiveSafeInteger(record.windowDays, `${label}.windowDays`),
+  };
+}
+
+function parseJournalWeekSummary(value: unknown, label: string): JournalWeekSummary {
+  const record = requireRecord(value, label);
+  const activityMinutes = requireFiniteNumber(record.activityMinutes, `${label}.activityMinutes`);
+  if (activityMinutes < 0) {
+    throw new TypeError(`${label}.activityMinutes must be non-negative.`);
+  }
+  return {
+    activityMinutes,
+    averageSleepMinutes: readNullableFiniteNumber(record.averageSleepMinutes),
+    averageSleepScore: readNullableFiniteNumber(record.averageSleepScore),
+    endDate: requireString(record.endDate, `${label}.endDate`),
+    sleepNights: requireNonNegativeInteger(record.sleepNights, `${label}.sleepNights`),
+    startDate: requireString(record.startDate, `${label}.startDate`),
   };
 }
 
@@ -204,15 +226,26 @@ function parseJournalEvent(value: unknown, label: string): JournalEvent {
   const record = requireRecord(value, label);
   return {
     date: requireString(record.date, `${label}.date`),
+    details: record.details === undefined
+      ? []
+      : requireStringArray(record.details, `${label}.details`),
     id: requireString(record.id, `${label}.id`),
     kind: requireString(record.kind, `${label}.kind`),
     occurredAt: requireIsoDateTime(record.occurredAt, `${label}.occurredAt`),
     records: requireArray(record.records, `${label}.records`).map((entry, index) =>
       parseJournalRecord(entry, `${label}.records[${index}]`)
     ),
+    summary: readNullableString(record.summary),
+    timing: parseJournalEventTiming(record.timing),
     timeZone: readNullableString(record.timeZone),
     title: requireString(record.title, `${label}.title`),
   };
+}
+
+function parseJournalEventTiming(value: unknown): JournalEvent["timing"] {
+  return value === "all_day" || value === "night" || value === "timed"
+    ? value
+    : "timed";
 }
 
 function parseJournalRecord(value: unknown, label: string): JournalRecord {

@@ -179,11 +179,13 @@ test("PatternsPage renders personal comparisons on their own route", () => {
 test("JournalPage renders the derived private health timeline", () => {
   const journalClient = createBrowserVaultQueryClient({
     ...clientFixture.replica,
+    generatedAt: "2026-08-12T12:00:00.000Z",
     journal: {
       days: [{
         date: "2026-08-12",
         events: [{
           date: "2026-08-12",
+          details: [],
           id: "morning-walk",
           kind: "activity",
           occurredAt: "2026-08-12T08:00:00.000Z",
@@ -197,12 +199,22 @@ test("JournalPage renders the derived private health timeline", () => {
             tags: [],
             timeZone: "Europe/Warsaw",
           }],
+          summary: "30 min",
+          timing: "timed",
           timeZone: "Europe/Warsaw",
           title: "Morning walk",
         }],
       }],
       eventCount: 1,
       recordCount: 1,
+      weeks: [{
+        activityMinutes: 30,
+        averageSleepMinutes: null,
+        averageSleepScore: null,
+        endDate: "2026-08-16",
+        sleepNights: 0,
+        startDate: "2026-08-10",
+      }],
       windowDays: 120,
     },
   });
@@ -217,10 +229,11 @@ test("JournalPage renders the derived private health timeline", () => {
   });
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /Private health timeline/u);
+  assert.match(markup, /Your Journal/u);
   assert.match(markup, /Journal/u);
+  assert.match(markup, /10–16 August 2026/u);
   assert.match(markup, /Morning walk/u);
-  assert.match(markup, /To add, correct, or remove something, tell Murph/u);
+  assert.match(markup, /To add, correct, or remove an entry, tell Murph/u);
 });
 
 test("JournalPage renders its empty state after Browser Vault finishes without data", () => {
@@ -236,7 +249,7 @@ test("JournalPage renders its empty state after Browser Vault finishes without d
 
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /No Journal events yet/u);
+  assert.match(markup, /Your timeline starts with one useful detail/u);
   assert.doesNotMatch(markup, /Preparing your Journal/u);
 });
 

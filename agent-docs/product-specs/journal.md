@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 ## Product boundary
 
@@ -42,6 +42,20 @@ The Journal projection reads canonical events and metric points from the last
 context, symptoms, and tests. It groups linked records and related sleep metrics
 into one human event. It does not copy records or write a daily summary.
 
+Journal shows one main sleep for each local date. Main sleep has no clock time.
+Shorter sleep stays visible as a timed nap. When a provider does not label sleep
+type, the longest session becomes main sleep. A long duplicate stays with main
+sleep instead of becoming a nap.
+
+Repeated activities of the same kind on one day become one display event. The
+event keeps all source sessions and shows their combined time. Personal Patterns
+still receives the full source records. Journal hides static profile records,
+duplicate recovery values, and total-sleep metrics already represented by a
+sleep session.
+
+Weekly sleep averages use main sleep only. Weekly activity uses the grouped
+source sessions once.
+
 The old `journal_day` surface stays untouched. The new Journal view does not
 depend on it.
 
@@ -51,13 +65,21 @@ start a new analysis.
 
 ## Web experience
 
-`/journal` shows days, grouped events, times, sources, and the underlying source
-records. A record with a canonical time zone keeps its local event time during
-travel. The page supports loading, unavailable, empty, error, and ready states.
+`/journal` shows one week as a calm timeline. Day bands separate the days.
+Main sleep uses `Night`, naps use their time, and context can span a full day.
+Event text is readable without opening a detail view. Source labels stay
+available as secondary hover and screen-reader detail. A record with a canonical
+time zone keeps its local event time during travel.
 
-The web does not provide edit controls. A member asks Murph to add, correct, or
-remove an entry. Voice capture can later reuse the planned web voice composer.
-Calendar follow-ups and email travel capture are later features.
+The right rail shows a small calendar, weekly sleep and activity statistics,
+and a current Personal Pattern when one is ready. A Pattern is an insight about
+the week, not a health event, so it does not appear on the daily timeline. The
+page supports loading, unavailable, empty, error, and ready states.
+
+The web does not provide edit controls or a placeholder add button. A member
+asks Murph to add, correct, or remove an entry. Voice capture can later reuse
+the planned web voice composer. Calendar follow-ups and email travel capture
+are later features.
 
 ## Ownership
 
