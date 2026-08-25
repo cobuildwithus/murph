@@ -5200,10 +5200,15 @@ export function createJunctionDeviceSyncProvider(
       throw error;
     };
 
-    const eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
-      input.context,
-      input.sourceProviders,
-    );
+    let eligibleSourceProviderSlugs: ReadonlySet<string>;
+    try {
+      eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
+        input.context,
+        input.sourceProviders,
+      );
+    } catch (error) {
+      return carryTerminalProgressOrThrow(error);
+    }
     const sourceScopeProvided = input.sourceProviderSlug !== undefined
       && input.sourceProviderSlug !== null;
     const scopedSourceProviderSlug = canonicalizeJunctionProviderSlug(

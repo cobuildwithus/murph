@@ -23242,6 +23242,57 @@ test("Junction workout_stream carries terminal progress across cancellation", as
   assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });
 
+test("Junction workout_stream carries completed-day progress across source-authority cancellation", async () => {
+  const importedWorkoutIds: string[] = [];
+  const abortController = new AbortController();
+  const cancellation = new Error("cancel workout source authority");
+  let cancelled = false;
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: (requestCount) => [requestCount === 1 ? "day-one-workout" : "day-two-workout"],
+  });
+  const listConnectionSources = async () => {
+    if (importedWorkoutIds.includes("day-one-workout") && !cancelled) {
+      cancelled = true;
+      abortController.abort(cancellation);
+      throw cancellation;
+    }
+    return [createJunctionWorkoutStreamSource("garmin", true)];
+  };
+  const importSnapshot = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    importedWorkoutIds.push(String(feature?.workoutId));
+    return { imported: true };
+  };
+
+  const first = await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({
+      importSnapshot,
+      listConnectionSources,
+      signal: abortController.signal,
+    }),
+    createJunctionWorkoutStreamResourceJob({
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    }),
+  );
+  const continuation = readScheduledWorkoutStreamContinuation(first.scheduledJobs);
+  assert.equal(continuation.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+  assert.deepEqual(importedWorkoutIds, ["day-one-workout"]);
+
+  const second = await executeJunctionJob(
+    harness.provider,
+    createJunctionWorkoutStreamJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
+  );
+  assert.deepEqual(importedWorkoutIds, ["day-one-workout", "day-two-workout"]);
+  assert.deepEqual(harness.streamRequests, ["day-one-workout", "day-two-workout"]);
+  assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
 test("Junction webhook jobs use complete migration provenance and retry mixed sources", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

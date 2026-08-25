@@ -83,6 +83,13 @@ Updated: 2026-08-25
   ran before source eligibility. Delete that premature override so existing
   generic collection safety remains separate from the existing 32-eligible
   candidate selector.
+- Accepted the locally proven source-authority progress finding: route the
+  per-day eligibility read through the existing workout progress handler so a
+  retryable failure or cancellation after a completed day resumes at the next
+  day. Add no checkpoint, cursor owner, retry mechanism, or abstraction.
+- Rejected a separate hosted listed-only service fixture as duplicate proof:
+  existing service wiring, generic listed-only admission, and workout zero-
+  egress tests already cover its unchanged owner composition.
 
 ## Verification
 
