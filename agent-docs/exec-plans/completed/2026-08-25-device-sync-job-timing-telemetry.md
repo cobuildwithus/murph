@@ -1,6 +1,6 @@
 # Hosted Device-Sync Job Timing Telemetry
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -72,5 +72,9 @@ Updated: 2026-08-25
   exact first-reviewed head. Its exact response and requested-model-compatible
   sidecar were captured after the full-audit trust floor. The first-reviewed
   head's PR evidence check passed.
-- Corrected-head CI, merge, ordered production deployment, and live runtime
-  verification remain pending.
+- Corrected-head PR evidence passed. Parent final review re-walked the full
+  base-to-head service, runtime-log, parser, test, and rollout paths and found
+  no remaining accepted issue or proof gap.
+- Merge, ordered production deployment, and live runtime verification follow
+  the repository's post-review release handoff.
+Completed: 2026-08-25
