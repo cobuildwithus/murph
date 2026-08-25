@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Goal
 
@@ -53,3 +53,13 @@ retain bounded stored scheduled-log schema reasons for operator/model recovery.
   805/25,155 bytes. Runner bundle is 11,272,688 bytes of 11,393,617;
   entry/static closure are 1,740,666/8,596,587 bytes. All eight parity probes
   pass.
+- Integrated current `main` without retaining duplicate shared error projection
+  or path-masking policy. The resulting tree is current `main` plus only this
+  activity slice.
+- Current-main proof passes 103 activity-focused tests, 188 shared-boundary
+  tests, 14 bundle-budget tests, all seven affected package typechecks, prepared
+  runtime, CLI package shape, docs drift, and docs gardening.
+- The integrated Vault CLI bundle is 9,506,988 bytes of 9,515,546; entry/static
+  closure are 805/25,155 bytes. The runner bundle is 11,329,361 bytes of
+  11,393,617; entry/static closure are 1,751,098/8,648,745 bytes. All eight
+  parity probes pass.
