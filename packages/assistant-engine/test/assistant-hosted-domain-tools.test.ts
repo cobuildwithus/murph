@@ -1297,6 +1297,9 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_DEVICE_TOOL.description).toMatch(
       /Never call it from a group or scheduled turn or for another provider/u,
     )
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /at most once for that message; after any result, do not retry/u,
+    )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',
