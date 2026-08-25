@@ -87,6 +87,11 @@ Updated: 2026-08-25
   per-day eligibility read through the existing workout progress handler so a
   retryable failure or cancellation after a completed day resumes at the next
   day. Add no checkpoint, cursor owner, retry mechanism, or abstraction.
+- Accepted the bounded-continuation inventory finding after a direct unscoped
+  full-job continuation reproduced three retryable provider reads before any
+  workout egress. Reuse the existing one-attempt inventory work limit only for
+  the PR-added unscoped `workout_stream` branch; preserve preexisting source-
+  scoped continuation behavior and add no helper, constant, cache, or state.
 - Rejected a separate hosted listed-only service fixture as duplicate proof:
   existing service wiring, generic listed-only admission, and workout zero-
   egress tests already cover its unchanged owner composition.

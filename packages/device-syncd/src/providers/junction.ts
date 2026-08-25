@@ -4808,6 +4808,9 @@ export function createJunctionDeviceSyncProvider(
     }
     const listedSourceProviders = sourceProviderSlug || resource === "workout_stream"
       ? await client.listUserProviders(context.account.externalAccountId, {
+          ...(!sourceProviderSlug && resource === "workout_stream"
+            ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+            : {}),
           signal: context.signal ?? null,
         })
       : [];

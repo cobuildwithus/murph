@@ -22127,6 +22127,78 @@ test.each([{
   assert.deepEqual(harness.streamRequests, [workoutId]);
 });
 
+test("Junction full-job workout_stream bounds provider inventory", async () => {
+  let inventoryRequests = 0;
+  const continuationRequestUrls: string[] = [];
+  const provider = createJunctionProvider(async (request) => {
+    const url = new URL(readUrl(request));
+    continuationRequestUrls.push(url.toString());
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      inventoryRequests += 1;
+      return new Response(JSON.stringify({ code: "unavailable" }), {
+        status: 503,
+        headers: {
+          "content-type": "application/json",
+          "retry-after": "0",
+        },
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/summary/workouts/junction-user-1") {
+      return createJsonResponse({
+        data: [createJunctionWorkoutSummary("workout-after-inventory-retry")],
+      });
+    }
+    if (url.pathname.startsWith("/v2/summary/")) {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname.startsWith("/v2/timeseries/workouts/")) {
+      return createJsonResponse({
+        time: [1_775_131_200],
+        heartrate: [120],
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+  const context = createJunctionWorkoutStreamJobContext({
+    shouldYield: () => false,
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      context,
+      createJob("reconcile", {
+        timeseriesCursor: "2026-04-02T00:00:00.000Z",
+        timeseriesResourceCursor: "workout_stream",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+
+  assert.equal(inventoryRequests, 1);
+  assert.equal(
+    continuationRequestUrls.some((url) => url.includes("/v2/summary/workouts/")),
+    false,
+  );
+  assert.equal(
+    continuationRequestUrls.some((url) => url.includes("/v2/timeseries/workouts/")),
+    false,
+  );
+});
+
 test("Junction workout_stream fails closed without a source-capability projection", async () => {
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["unattributed-workout"],
