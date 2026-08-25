@@ -273,6 +273,7 @@ describe('read-only provider recovery envelopes', () => {
 
       assert.equal(fetchMock.mock.calls.length, 1)
       assert.equal(serialized.includes(providerBody), false)
+      assert.equal(serialized.includes('fieldErrors'), false)
     })
 
     it(`${providerCase.name} keeps schema-invalid provider output terminal`, async () => {
@@ -292,6 +293,7 @@ describe('read-only provider recovery envelopes', () => {
 
       assert.equal(fetchMock.mock.calls.length, 1)
       assert.equal(serialized.includes(providerBody), false)
+      assert.equal(serialized.includes('fieldErrors'), false)
     })
 
     it(`${providerCase.name} shares response-body recovery with batch reads`, async () => {
@@ -443,6 +445,9 @@ describe.skipIf(!preparedRuntime)('prepared built read-only provider recovery', 
         assert.equal(envelope.error.code, failure.code)
         assert.equal(envelope.error.retryable, failure.retryable)
         assert.equal(envelope.error.stage, 'response')
+        if (failure.mode === 'invalid-json' || failure.mode === 'invalid-schema') {
+          assert.equal(envelope.error.fieldErrors, undefined)
+        }
         assert.doesNotMatch(
           JSON.stringify(envelope),
           /private built|private-built|private-mapbox-token|private-data-api-credential/u,

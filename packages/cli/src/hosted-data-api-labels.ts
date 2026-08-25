@@ -13,7 +13,6 @@ export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH = 256
 const MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES = 32 * 1024
 const DEFAULT_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 10_000
 const MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 30_000
-const MAX_HOSTED_DATA_API_LABEL_RESPONSE_ISSUES = 12
 const HOSTED_DATA_API_LABELS_BASE_URL = 'http://murph-data-api.worker'
 
 export const hostedDataApiLabelSearchInputSchema = z.object({
@@ -355,7 +354,6 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       url,
       env,
       apiResponseSchema,
-      'items',
     )
 
     return searchResultSchema.parse({
@@ -402,7 +400,6 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       url,
       env,
       batchApiResponseSchema,
-      'results',
       {
         body,
         headers: {
@@ -473,7 +470,6 @@ async function fetchLabelsApiPayload<TSource extends string, TPayload>(
   url: URL,
   env: NodeJS.ProcessEnv,
   responseSchema: z.ZodType<TPayload>,
-  publicResponsePath: 'items' | 'results',
   options: {
     body?: BodyInit
     headers?: HeadersInit
@@ -511,18 +507,12 @@ async function fetchLabelsApiPayload<TSource extends string, TPayload>(
       throw createLabelsResponseBodyTransportError(config, response.status, error)
     }
 
-    throw createLabelsInvalidResponseError(config, response.status, error, {
-      responseKind: 'json',
-    })
+    throw createLabelsInvalidResponseError(config, response.status, 'json')
   }
 
   const parsed = responseSchema.safeParse(payload)
   if (!parsed.success) {
-    throw createLabelsInvalidResponseError(config, response.status, parsed.error, {
-      issues: parsed.error.issues,
-      publicResponsePath,
-      responseKind: 'schema',
-    })
+    throw createLabelsInvalidResponseError(config, response.status, 'schema')
   }
 
   return parsed.data
@@ -704,34 +694,18 @@ function classifyLabelsHttpFailure(
 function createLabelsInvalidResponseError<TSource extends string>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   status: number,
-  error: unknown,
-  details: {
-    issues?: readonly { code: string }[]
-    publicResponsePath?: 'items' | 'results'
-    responseKind: 'json' | 'schema'
-  },
+  responseKind: 'json' | 'schema',
 ): VaultCliError {
-  const issues = details.publicResponsePath === undefined
-    ? undefined
-    : details.issues
-      ?.slice(0, MAX_HOSTED_DATA_API_LABEL_RESPONSE_ISSUES)
-      .map(issue => ({
-        code: issue.code,
-        publicPath: [details.publicResponsePath],
-      }))
-
   return new VaultCliError(
     `${config.errorCodePrefix}_invalid_response`,
-    details.responseKind === 'json'
+    responseKind === 'json'
       ? `${config.searchDescription} received a successful response that was not valid JSON (HTTP ${status}).`
       : `${config.searchDescription} received a successful response that did not match the expected label schema (HTTP ${status}).`,
     {
       failureStage: 'response_validation',
-      ...(issues && issues.length > 0 ? { issues } : {}),
       retryable: false,
       stage: 'response',
       status,
-      validationErrorName: readSafeErrorName(error),
     },
   )
 }
