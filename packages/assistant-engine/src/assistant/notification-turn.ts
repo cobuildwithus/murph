@@ -636,6 +636,12 @@ export async function sendAssistantNotificationLocal(
           providerResult.providerAuthoredResponse !== null &&
             providerResult.providerAuthoredResponse !== undefined &&
             providerResult.response !== providerResult.providerAuthoredResponse
+        const hasAppendOnlyRuntimePresentation =
+          (providerResult.responseCard === null ||
+            providerResult.responseCard === undefined) &&
+          providerAuthoredResponse.length > 0 &&
+          providerResult.response !== providerAuthoredResponse &&
+          providerResult.response.startsWith(providerAuthoredResponse)
         let decision: AssistantNotificationDecision
         try {
           decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
@@ -645,9 +651,17 @@ export async function sendAssistantNotificationLocal(
               }
             : resolveAssistantNotificationDecision({
                 providerAuthoredResponse,
-                runtimeOwnsFinalPresentation,
+                runtimeReplacesFinalPresentation:
+                  runtimeOwnsFinalPresentation &&
+                  !hasAppendOnlyRuntimePresentation,
                 runtimeResponse: providerResult.response,
               })
+          if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
+            throw new VaultCliError(
+              'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+              'A runtime-owned notification presentation requires a send_message decision.',
+            )
+          }
         } catch (error) {
           throw annotateAssistantNotificationError(
             error,
@@ -714,6 +728,7 @@ export async function sendAssistantNotificationLocal(
         const { responseText, transcriptText } =
           resolveAssistantNotificationPresentation({
             decision,
+            hasAppendOnlyRuntimePresentation,
             providerAuthoredResponse,
             providerResult,
             runtimeOwnsFinalPresentation,
@@ -934,6 +949,7 @@ export async function sendAssistantNotificationLocal(
 
 function resolveAssistantNotificationPresentation(input: {
   decision: AssistantNotificationSendDecision
+  hasAppendOnlyRuntimePresentation: boolean
   providerAuthoredResponse: string
   providerResult: {
     response: string
@@ -950,16 +966,9 @@ function resolveAssistantNotificationPresentation(input: {
     return { responseText, transcriptText: responseText }
   }
 
-  const authoredResponse = input.providerAuthoredResponse
   const runtimeResponse = input.providerResult.response
-  const hasAppendOnlyRuntimePresentation =
-    (input.providerResult.responseCard === null ||
-      input.providerResult.responseCard === undefined) &&
-    authoredResponse.length > 0 &&
-    runtimeResponse !== authoredResponse &&
-    input.decision.text !== runtimeResponse &&
-    runtimeResponse.startsWith(authoredResponse)
-  if (hasAppendOnlyRuntimePresentation) {
+  if (input.hasAppendOnlyRuntimePresentation) {
+    const authoredResponse = input.providerAuthoredResponse
     const responseText = normalizeRequiredText(
       `${input.decision.text}${runtimeResponse.slice(authoredResponse.length)}`,
       'runtime-extended notification response',
@@ -2006,10 +2015,10 @@ export function parseAssistantNotificationDecision(
 
 function resolveAssistantNotificationDecision(input: {
   providerAuthoredResponse: string
-  runtimeOwnsFinalPresentation: boolean
+  runtimeReplacesFinalPresentation: boolean
   runtimeResponse: string
 }): AssistantNotificationDecision {
-  if (!input.runtimeOwnsFinalPresentation) {
+  if (!input.runtimeReplacesFinalPresentation) {
     return parseAssistantNotificationDecision(input.providerAuthoredResponse)
   }
 

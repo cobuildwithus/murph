@@ -3696,6 +3696,44 @@ test.each([
   },
 )
 
+test('sendAssistantNotificationLocal rejects an append-only clarification after a skip decision', async () => {
+  const providerAuthoredResponse = JSON.stringify({
+    kind: 'skip',
+    privateSummary: 'Nothing should be sent.',
+  })
+  const clarification =
+    'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+  const runtimeResponse = `${providerAuthoredResponse}\n\n${clarification}`
+  const providerResult = createProviderResult({
+    providerAuthoredResponse,
+    response: runtimeResponse,
+    transcriptResponse: runtimeResponse,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-scheduled-local-time-clarification-skip',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryTarget: 'direct-scheduled-local-time-clarification-skip',
+    instructions: 'Create the requested local-time reminder or ask for correction.',
+    scheduledInvocationAuthority: {
+      automationId: 'scheduled-local-time-clarification-skip',
+      occurrenceAt: '2026-03-01T14:00:00.000-05:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/scheduled-local-time-clarification-skip',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+  })
+
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+})
+
 test.each(['linq', 'telegram', 'email'] as const)(
   'sendAssistantNotificationLocal delivers a $channel cardless recovery despite a superseded skip',
   async (channel) => {
