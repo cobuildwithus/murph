@@ -433,8 +433,20 @@
       "path": ".agents/friction-log/20260821113348-production-migration-guard/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2124",
+      "path": ".agents/friction-log/20260821050736-hosted-local-doctor/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2141",
       "path": ".agents/friction-log/20260821194229-typecheck-exits-zero/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2149",
+      "path": ".agents/friction-log/20260821173334-prebuilt-vercel-output/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2167",
+      "path": ".agents/friction-log/20260822141634-fresh-worktree-focused/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2169",
@@ -495,6 +507,14 @@
     {
       "issue": "cobuildwithus/murph#2223",
       "path": ".agents/friction-log/20260824113043-runner-bundle-budget/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2245",
+      "path": ".agents/friction-log/20260824235937-batch-worktree-retirement/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2252",
+      "path": ".agents/friction-log/20260824234256-changelog-only-pr/friction.md"
     }
   ],
   "version": 1
