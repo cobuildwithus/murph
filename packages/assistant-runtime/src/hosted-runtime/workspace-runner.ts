@@ -1495,13 +1495,21 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
           const hasForegroundConversationWork =
             hasHostedMailboxImportForegroundConversationWork(result);
-          if (hasForegroundConversationWork) {
+          const hasImportedSystemPostCheckpointEffects =
+            (result.importResult.importedSystemMailboxItemIds?.length ?? 0) > 0
+            && result.afterCheckpointEffects.length > 0;
+          if (
+            hasForegroundConversationWork
+            || hasImportedSystemPostCheckpointEffects
+          ) {
             await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
               checkpointRequestBuilder: input.checkpointRequestBuilder,
               input: input.input,
               phase: "active_turn_input",
               signal: outerSignal,
             });
+          }
+          if (hasForegroundConversationWork) {
             observeForegroundConversationWork();
           }
           await notifyHostedActiveTurnInputForMailboxImport({

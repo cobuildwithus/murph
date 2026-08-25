@@ -5656,6 +5656,74 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("foreground system lane import runs its post-checkpoint effect during the active phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items: HostedMailboxItem[] = [];
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_system_wake_effect",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.lane}`);
+          return {
+            afterCheckpoint: async () => {
+              events.push("effect");
+              return createInboxProjectionEffectResult();
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_system_wake_effect",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_system_wake_effect",
+            kind: "runtime.pending-effects-reconcile-requested",
+            lane: "system",
+            laneSeq: "1",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => events.includes("effect"));
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(events, ["import:system", "effect"]);
+      assert.deepEqual(yieldStates, [false, false]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("runtime wake interrupts post-checkpoint background maintenance after late assistant input import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [

@@ -13,14 +13,6 @@ import {
   buildHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import {
-  isHostedWorkspaceSnapshotV2Ref,
-  readHostedExecutionSnapshotDeltaRef,
-  readHostedExecutionSnapshotHotRef,
-} from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
-import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "@murphai/runtime-state/assistant-generated-deliveries";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -102,7 +94,7 @@ describe("hosted local vault-file approval resume e2e", () => {
     linqStub = null;
   }, 180_000);
 
-  it("resumes an approved vault file through the real Linq upload and reply path", async () => {
+  it("resumes an approved vault file inside the active invocation", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -124,8 +116,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     });
     const attachmentUploadBaseline = countAttachmentUploadLogs();
     const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
-    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
-    const preTurnStatus = await requireScenario().harness.readUserStatus(userId);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
         `mkdir -p '${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}' && printf '%s\\n' '%PDF-1.7 synthetic hosted-local report' > '${reportRef}'`,
@@ -134,6 +124,15 @@ describe("hosted local vault-file approval resume e2e", () => {
       pendingReplyText,
     ], {
       matchInputContains: requestInboundText,
+    });
+    requireLinqStub().armNextRequestDelay({
+      delayMs: 10_000,
+      expectedMethod: "POST",
+      expectedPath: replyPath,
+      matchRequest: (request) =>
+        requireLinqStub().readObservedMessageText(request)?.includes(
+          pendingReplyText,
+        ) === true,
     });
 
     const requestResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -152,8 +151,6 @@ describe("hosted local vault-file approval resume e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    await requireScenario().waitForHostedCompletion(userId);
-
     const challenge = await waitForLatestChallenge((candidate) =>
       candidate.approvalStatus === "pending"
       && candidate.consumedAt === null
@@ -177,16 +174,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     })).toBe(attachmentCreateBaseline);
     expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline);
     const approvalEffectId = buildApprovalOutcomeEffectId(challenge);
-    const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
-      baselineCleanupCount: baselineIdleShutdownCleanupCount,
-      previousWorkspaceVersion: requireWorkspaceVersion(preTurnStatus),
-    });
-    expect(readHostedExecutionSnapshotHotRef(
-      idleShutdownStatus.workspace?.snapshotRef ?? null,
-    )).toBeNull();
-    expect(readHostedExecutionSnapshotDeltaRef(
-      idleShutdownStatus.workspace?.snapshotRef ?? null,
-    )).toBeNull();
 
     const providerRequestCountBeforeResume = countAssistantProviderResponsesApiRequests();
     const containerStartCountBeforeResume = countStructuredLogMessage(
@@ -199,7 +186,7 @@ describe("hosted local vault-file approval resume e2e", () => {
     expect(approvedChallenge.approvalStatus).toBe("approved");
 
     const approvedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
-    await requireScenario().runWake(
+    const resumed = await requireScenario().runWake(
       buildHostedExecutionPendingEffectsReconcileRequestedWake({
         effectId: approvalEffectId,
         eventId: `runtime-control:pending-effects-reconcile:local:${runId}`,
@@ -208,6 +195,10 @@ describe("hosted local vault-file approval resume e2e", () => {
       }),
       userId,
     );
+    expect(resumed.wakeResult).toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+    });
     const attachedReply = await requireLinqStub().waitForAdditionalSend({
       baselineCount: approvedReplyBaseline,
       expectedPath: replyPath,
@@ -232,7 +223,7 @@ describe("hosted local vault-file approval resume e2e", () => {
       providerRequestCountBeforeResume,
     );
     expect(countStructuredLogMessage("Hosted execution container starting."))
-      .toBeGreaterThan(containerStartCountBeforeResume);
+      .toBe(containerStartCountBeforeResume);
     const consumedChallenge = await waitForLatestChallenge((candidate) =>
       candidate.tokenHash === challenge.tokenHash && candidate.consumedAt !== null
     );
@@ -337,84 +328,8 @@ function buildApprovalOutcomeEffectId(
   });
 }
 
-async function waitForIdleShutdownCheckpoint(input: {
-  baselineCleanupCount: number;
-  previousWorkspaceVersion: string;
-}): Promise<HostedRunnerStatusResponse> {
-  const startedAt = Date.now();
-  let lastActivityExpiryError: unknown = null;
-  let lastStatus: HostedRunnerStatusResponse | null = null;
-  let lastStatusReadError: unknown = null;
-
-  while (Date.now() - startedAt < 120_000) {
-    let status: HostedRunnerStatusResponse;
-    try {
-      status = await requireScenario().harness.readUserStatus(userId);
-      lastStatusReadError = null;
-    } catch (error) {
-      lastStatusReadError = error;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      continue;
-    }
-    lastStatus = status;
-    const hotRef = status.workspace
-      ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
-      : null;
-    const deltaRef = status.workspace
-      ? readHostedExecutionSnapshotDeltaRef(status.workspace.snapshotRef)
-      : null;
-    if (
-      status.workspace
-      && status.workspace.version !== input.previousWorkspaceVersion
-      && isHostedWorkspaceSnapshotV2Ref(status.workspace.snapshotRef)
-      && hotRef === null
-      && deltaRef === null
-      && !status.inFlight
-      && !status.lastErrorCode
-      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
-    ) {
-      return status;
-    }
-
-    try {
-      await requireScenario().harness.expireRunnerActivityForTest(userId);
-      lastActivityExpiryError = null;
-    } catch (error) {
-      lastActivityExpiryError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the approval-pending idle-shutdown checkpoint.",
-    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
-    ...(lastActivityExpiryError
-      ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
-      : []),
-    ...(lastStatusReadError
-      ? [`last status read error: ${formatErrorMessage(lastStatusReadError)}`]
-      : []),
-  ]));
-}
-
-function requireWorkspaceVersion(status: HostedRunnerStatusResponse): string {
-  const version = status.workspace?.version ?? null;
-  if (!version) {
-    throw new Error("Hosted status did not include a workspace version.");
-  }
-  return version;
-}
-
-function countActivityExpiredDestroyRequestLogs(): number {
-  return countStructuredLogMessage(
-    "Hosted execution container destroy requested.",
-    (record) => record.details?.destroyRequestReason === "activity-expired",
-  );
-}
-
 function countStructuredLogMessage(
   message: string,
-  predicate: (record: HostedStructuredLogRecord) => boolean = () => true,
 ): number {
   const output = [
     requireScenario().harness.stdoutTail(2_000_000),
@@ -436,7 +351,7 @@ function countStructuredLogMessage(
       continue;
     }
     const record = parsed as HostedStructuredLogRecord;
-    if (record.message === message && predicate(record)) {
+    if (record.message === message) {
       count += 1;
     }
   }
@@ -444,9 +359,6 @@ function countStructuredLogMessage(
 }
 
 interface HostedStructuredLogRecord {
-  details?: {
-    destroyRequestReason?: unknown;
-  };
   message?: unknown;
 }
 
@@ -454,10 +366,6 @@ function countAssistantProviderResponsesApiRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
   ).length;
-}
-
-function formatErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

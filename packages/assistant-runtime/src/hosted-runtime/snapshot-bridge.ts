@@ -460,6 +460,8 @@ async function createHostedWorkspaceV2Snapshot(
         assistantGeneratedDeliveryPruneResult
           .generatedDeliveryActiveFilesMissing > 0 ||
         assistantGeneratedDeliveryPruneResult
+          .generatedDeliveryNestedEntriesRetained > 0 ||
+        assistantGeneratedDeliveryPruneResult
           .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
         const generatedDeliveryCleanupSkipped =
@@ -468,6 +470,9 @@ async function createHostedWorkspaceV2Snapshot(
         const generatedDeliveryActiveFilesMissing =
           assistantGeneratedDeliveryPruneResult
             .generatedDeliveryActiveFilesMissing > 0;
+        const generatedDeliveryNestedEntriesRetained =
+          assistantGeneratedDeliveryPruneResult
+            .generatedDeliveryNestedEntriesRetained > 0;
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
@@ -477,13 +482,17 @@ async function createHostedWorkspaceV2Snapshot(
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
           level:
-            generatedDeliveryCleanupSkipped || generatedDeliveryActiveFilesMissing
+            generatedDeliveryCleanupSkipped ||
+                generatedDeliveryActiveFilesMissing ||
+                generatedDeliveryNestedEntriesRetained
               ? "warn"
               : "info",
           message: generatedDeliveryCleanupSkipped
             ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
             : generatedDeliveryActiveFilesMissing
               ? "Hosted workspace generated-delivery cleanup found active references without staging files."
+            : generatedDeliveryNestedEntriesRetained
+              ? "Hosted workspace generated-delivery cleanup retained legacy nested entries."
             : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
           phase: "checkpoint",
           userId: input.userId,
@@ -1363,6 +1372,7 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
       result.generatedDeliveryFilesPruned === 0 &&
       result.generatedDeliveryFilesScanned === 0 &&
       result.generatedDeliveryActiveFilesMissing === 0 &&
+      result.generatedDeliveryNestedEntriesRetained === 0 &&
       !result.generatedDeliveryCleanupSkippedUntrustedOutbox
     )
   ) {
@@ -1379,6 +1389,8 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
       result.generatedDeliveryBytesPruned,
     assistantRuntimeGeneratedDeliveryFilesScanned:
       result.generatedDeliveryFilesScanned,
+    assistantRuntimeGeneratedDeliveryNestedEntriesRetained:
+      result.generatedDeliveryNestedEntriesRetained,
     prunedAssistantRuntimeGeneratedDeliveryFileCount:
       result.generatedDeliveryFilesPruned,
     assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
