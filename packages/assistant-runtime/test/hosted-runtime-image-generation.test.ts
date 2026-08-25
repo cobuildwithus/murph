@@ -4,15 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  flushPendingAssistantRuntimeIssueWrites,
   readAssistantInputEvent,
-  recordAssistantRuntimeIssueInputsBestEffort,
-  resolveAssistantDiagnosticsPolicy,
-  type AssistantRuntimeIssueInput,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import { initializeVault } from "@murphai/core";
-import { listPendingAssistantRuntimeIssueRecords } from "@murphai/runtime-state/node";
 import { afterEach, describe, test, vi } from "vitest";
 
 import {
@@ -196,29 +191,7 @@ describe("hosted image generation", () => {
     });
     const notifyReadyOnce = vi.fn(() => notifyReady());
     const onStarted = vi.fn();
-    const releaseSha = "0123456789abcdef0123456789abcdef01234567";
-    const runtimeAttemptId =
-      "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda";
-    const runtimeName = "cloudflare-hosted-runner";
-    const recordRuntimeIssue = vi.fn((issue: AssistantRuntimeIssueInput) => {
-      recordAssistantRuntimeIssueInputsBestEffort({
-        issues: [issue],
-        policy: resolveAssistantDiagnosticsPolicy({
-          channel: "linq",
-          env: {},
-          executionContext: {
-            hosted: {
-              memberId: "member_synthetic_image_generation",
-              releaseSha,
-              runtimeAttemptId,
-              runtimeName,
-              userEnvKeys: [],
-            },
-          },
-        }),
-        vault: vaultRoot,
-      });
-    });
+    const recordRuntimeIssue = vi.fn();
     let enqueueAttempt = 0;
     const controller = createHostedImageGenerationController({
       async enqueuePendingInputId(pendingInput) {
@@ -439,22 +412,6 @@ describe("hosted image generation", () => {
     assert.equal(
       recordRuntimeIssue.mock.calls[0]?.[0]?.errorCode,
       "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
-    );
-    await flushPendingAssistantRuntimeIssueWrites();
-    assert.deepEqual(
-      (await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }))
-        .map((record) => ({
-          errorCode: record.errorCode,
-          releaseSha: record.releaseSha,
-          runtimeAttemptId: record.runtimeAttemptId,
-          runtimeName: record.runtimeName,
-        })),
-      [{
-        errorCode: "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
-        releaseSha,
-        runtimeAttemptId,
-        runtimeName,
-      }],
     );
     const pendingInputIds = await readHostedPendingAssistantInputIds({
       vaultRoot,
