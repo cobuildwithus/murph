@@ -97,6 +97,10 @@ Updated: 2026-08-24
   publishes or leaves one visible, future retry instead of checkpoint churn.
 - Walkthrough proof: focused runtime tests cover foreground preemption, timeout,
   retry, oversized output, and success without exposing private replica data.
+- Post-remediation review: Ready. An already-preempted owner starts no local
+  query work; an in-flight production metric query receives the same abort and
+  settles before the lane returns; the existing mailbox tests retain the one
+  future retry and foreground-first journey. No product promise was narrowed.
 
 ## Verification
 

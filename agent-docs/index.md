@@ -7,8 +7,8 @@ Last verified: 2026-08-24
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Hosted Browser Vault retry and joined-cancellation ownership is specified by
-`agent-docs/references/hosted-runtime-protocol.md`.
+Hosted Browser Vault retry, joined-cancellation ownership, and direct proof
+expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
 Every pull request carries one mechanically validated, field-complete
 deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
