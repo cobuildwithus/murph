@@ -1726,3 +1726,46 @@ test("scheduled-log save identifies missing meal food input before writing", asy
     await rm(parentRoot, { force: true, recursive: true });
   }
 });
+
+test("scheduled-log save identifies missing meal food input before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-missing-food-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Private meal template",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "meal.add",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "foodId");
+      assert.doesNotMatch(
+        JSON.stringify(result.envelope.error),
+        /Private meal template/u,
+      );
+    }
+
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
+    assert.deepEqual(writtenFiles, []);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});

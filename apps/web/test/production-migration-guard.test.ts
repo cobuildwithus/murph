@@ -335,6 +335,83 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("keeps nullable ADD COLUMN independent from a later trigger function body", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        "20260825000000_nullable_column_then_trigger",
+        [
+          'ALTER TABLE "hosted_member" ADD COLUMN "note" TEXT;',
+          "CREATE FUNCTION preserve_note() RETURNS trigger LANGUAGE plpgsql AS $$",
+          "BEGIN",
+          '  IF NEW."note" IS NOT NULL THEN',
+          "    RETURN NEW;",
+          "  END IF;",
+          "END;",
+          "$$;",
+        ].join("\n"),
+      );
+
+      assert.deepEqual(
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir),
+        [],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test.each([
+    [
+      "single-quoted values",
+      "ALTER TABLE \"hosted_member\" ADD COLUMN \"required_value\" TEXT DEFAULT 'still;one statement' NOT NULL;",
+    ],
+    [
+      "escape-string values",
+      "ALTER TABLE \"hosted_member\" ADD COLUMN \"required_value\" TEXT DEFAULT E'escaped\\';still one statement' NOT NULL;",
+    ],
+    [
+      "quoted identifiers",
+      'ALTER TABLE "hosted;member" ADD COLUMN "required;value" TEXT NOT NULL;',
+    ],
+    [
+      "line comments",
+      'ALTER TABLE "hosted_member" ADD COLUMN "required_value" TEXT -- comment;\nNOT NULL;',
+    ],
+    [
+      "block comments",
+      'ALTER TABLE "hosted_member" ADD COLUMN "required_value" TEXT /* comment; */ NOT NULL;',
+    ],
+    [
+      "dollar-quoted values",
+      'ALTER TABLE "hosted_member" ADD COLUMN "required_value" TEXT DEFAULT $value$still;one statement$value$ NOT NULL;',
+    ],
+  ])("preserves semicolons inside %s when classifying one statement", async (
+    _context,
+    sql,
+  ) => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260825000001_required_column";
+
+    try {
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "ADD COLUMN NOT NULL" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("keeps existing hosted web Prisma migration history exempt", async () => {
     await assert.doesNotReject(() =>
       assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
@@ -1108,6 +1185,24 @@ describe("hosted web production migration guard", () => {
 
     assert.ok(migration, `Expected contract migration ${migrationId}`);
     assert.equal(migration.sql, predeploySql);
+  });
+
+  test("pins the wearable outreach preference Web rollback floor in operator docs", async () => {
+    const readme = await readFile(path.join(appRoot, "README.md"), "utf8");
+
+    assert.match(
+      readme,
+      /Apply the additive preference-table migration, deploy the preference-aware Web,[\s\S]*only then deploy the Worker\/runtime operation/u,
+    );
+    assert.match(
+      readme,
+      /Once the operation can produce its first durable row, the preference-aware Web\s+is the hard rollback floor/u,
+    );
+    assert.match(
+      readme,
+      /A\s+preference-unaware Web is not a valid rollback target while preference rows may\s+exist/u,
+    );
+    assert.match(readme, /Recovery is a forward\s+deploy of a compatible Web/u);
   });
 
   test("pins the Linq invite deletion producer rollback floor in operator docs", async () => {

@@ -398,6 +398,7 @@ interface HostedExecutionContainerSmokeHealthResult {
     buildSkipped?: boolean;
     bundleFingerprint?: string;
     generatedAt?: string;
+    releaseSha?: string;
     schemaVersion?: number;
     sourceFingerprint?: string;
   } | null;
@@ -1360,6 +1361,23 @@ export class RunnerContainer extends Container {
               return { kind: "not-wakeable", reason: "no-active-child" };
             }
           }
+          return { kind: "unknown", reason: "active-child-rejected" };
+        }
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
+      if (
+        response.ok
+        && active
+        && explicitlyRejected
+        && !absent
+        && !mismatch
+        && active.result
+      ) {
+        await active.result.catch(() => undefined);
+        if (
+          this.pointerlessWakeBlockingLifecycleCount > 0
+          || this.workspaceInvocationCoordinationChanged(null)
+        ) {
           return { kind: "unknown", reason: "active-child-rejected" };
         }
         return { kind: "not-wakeable", reason: "no-active-child" };
@@ -5038,6 +5056,7 @@ function parseRunnerContainerSmokeBundle(
     ...(typeof record.buildSkipped === "boolean" ? { buildSkipped: record.buildSkipped } : {}),
     ...(typeof record.bundleFingerprint === "string" ? { bundleFingerprint: record.bundleFingerprint } : {}),
     ...(typeof record.generatedAt === "string" ? { generatedAt: record.generatedAt } : {}),
+    ...(typeof record.releaseSha === "string" ? { releaseSha: record.releaseSha } : {}),
     ...(typeof record.schemaVersion === "number" ? { schemaVersion: record.schemaVersion } : {}),
     ...(typeof record.sourceFingerprint === "string" ? { sourceFingerprint: record.sourceFingerprint } : {}),
   };

@@ -95,18 +95,24 @@ recovery, and a failure to evaluate or report must not fail the sync pass. A
 source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.
 
-Member recovery checks are a separate, opt-in field on that same provider
-policy. Garmin currently admits one direct Linq check after 72 hours without a
-delivery, only for an active member with a recent inbound and an established
-direct thread. The existing mailbox dedupe key is scoped to source lifecycle
-and `last_data_at`, so repeated stale passes preserve one message per silence
-episode; a later delivery naturally creates a new episode. Materialization
-rechecks canonical source, connection, access, engagement, and route state
+Member no-data checks are a separate, opt-in field on that same provider policy.
+Garmin currently admits one direct Linq check after five days without a delivery,
+only for an active member with a recent inbound and an established direct thread.
+Canonical member-plus-source-provider preference state may extend that wait to
+5–30 days or disable it; missing preference state means the five-day default.
+Only accepted input from the member's current direct conversation may change the
+preference. The existing mailbox dedupe key is scoped to source lifecycle and
+`last_data_at`, so repeated stale passes preserve one message per silence episode;
+a later delivery naturally creates a new episode. Materialization rechecks
+canonical source, connection, access, engagement, route, and preference state
 after the sync transaction. The same episode key carries its opaque source-row
 locator to the existing Linq provider-entry transaction, which locks and
-rebuilds the current episode before claiming dispatch; a resumed, replaced, or
-disconnected source therefore ends as a terminal no-send. No recovery message
-is sent. Providers without an explicit recovery-check policy remain unchanged.
+rebuilds the current episode and effective preference before claiming dispatch;
+a resumed, replaced, disconnected, deferred, or disabled source therefore ends
+as a terminal no-send. Exact automated text uses the ordinary committed
+notification transcript, so a later member reply and attended turn can see the
+check and update the preference without separate assistant memory. Providers
+without an explicit no-data-check policy remain unchanged.
 
 Recovering a dead push carrier cannot be done by pulling, because there is
 nothing to pull and a data refresh cannot make the provider push again. The only

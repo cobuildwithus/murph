@@ -76,6 +76,4 @@ export function redactSensitivePathSegments(value: string): string {
     .replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')
     .replace(/\/home\/[^/\s]+/gu, '<HOME_DIR>')
     .replace(/[A-Za-z]:\\Users\\[^\\\s]+/gu, '<HOME_DIR>')
-    .replace(/(^|[\s("'`,:=])\/(?!\/)[^\s"'`),;]*/gu, '$1<PATH>')
-    .replace(/(^|[\s("'`,:=])[A-Za-z]:\\[^\s"'`),;]*/gu, '$1<PATH>')
 }

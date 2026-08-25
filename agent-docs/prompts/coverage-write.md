@@ -35,6 +35,11 @@ Mode:
 Review priorities:
 
 - Prefer proof at the highest stable behavior boundary available.
+- For a feature composed across owners, first map the complete production path
+  from accepted input through every material transformation, retry, accounting,
+  authorization, and external-effect boundary. Prefer one stable composed or
+  end-to-end test of the feature invariant; seam-level unit tests complement
+  that proof but do not substitute for it.
 - Prefer focused assertions over broad fixture churn or snapshot-heavy tests.
 - Reuse existing helpers, fixtures, and test patterns before proposing new
   scaffolding.

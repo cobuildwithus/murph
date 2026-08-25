@@ -246,7 +246,6 @@ describe("hosted signup notification email", () => {
         status: "skipped",
       });
 
-      expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
       expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).not.toHaveBeenCalled();
     },
   );
@@ -351,48 +350,11 @@ describe("hosted signup notification email", () => {
     expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
   });
 
-  it("claims and sends the fallback when optional email authorization is unreadable", async () => {
-    mocks.readHostedMemberSignupNotificationContext.mockResolvedValue({
-      context: null,
-      createdAt: new Date("2026-05-01T00:00:00.000Z"),
-    });
-    mocks.readHostedMemberEmailAuthorization.mockRejectedValue(
-      new Error("synthetic email authorization decrypt failure"),
-    );
-    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-      const payload = JSON.parse(String(init?.body));
-      expect(payload.text).toBe([
-        "New Murph signup.",
-        "",
-        "Signed up: May 1, 2026, 12:00 AM (UTC)",
-        "Activated via: Telegram",
-      ].join("\n"));
-      expect(payload.text).not.toContain("Email:");
-
-      return new Response(JSON.stringify({ id: "resend_email_123" }), {
-        status: 200,
-      });
-    });
-
-    await expect(sendHostedSignupNotificationEmailForMember({
-      activationSurface: "telegram",
-      env: {
-        HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
-        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
-        RESEND_API_KEY: "re_test",
-      },
-      fetchImpl: fetchMock,
-      memberId: "member_123",
-    })).resolves.toMatchObject({ status: "sent" });
-    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("includes verified email when available", async () => {
+  it("does not read or include member contact details", async () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
-      expect(payload.text).toContain("Email: verified@example.com");
-      expect(payload.text).not.toContain("payer@example.com");
+      expect(payload.text).not.toMatch(/^(?:Email|Phone):/mu);
+      expect(payload.text).not.toContain("member-contact@example.test");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -403,11 +365,11 @@ describe("hosted signup notification email", () => {
       directPublicSender: null,
       memberId: "member_123",
       stripeCheckoutEmail: {
-        address: "payer@example.com",
+        address: "checkout-contact@example.test",
         collectedAt: new Date("2026-05-01T00:00:00.000Z"),
       },
       verifiedEmail: {
-        address: "verified@example.com",
+        address: "member-contact@example.test",
         lookupKey: "lookup",
         verifiedAt: new Date("2026-05-02T00:00:00.000Z"),
       },
@@ -424,39 +386,7 @@ describe("hosted signup notification email", () => {
     })).resolves.toMatchObject({
       status: "sent",
     });
-  });
-
-  it("falls back to Stripe checkout email", async () => {
-    const fetchMock: typeof fetch = async (_input, init) => {
-      const payload = JSON.parse(String(init?.body));
-      expect(payload.text).toContain("Email: payer@example.com");
-
-      return new Response(JSON.stringify({ id: "resend_email_123" }), {
-        status: 200,
-      });
-    };
-
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      stripeCheckoutEmail: {
-        address: "payer@example.com",
-        collectedAt: new Date("2026-05-01T00:00:00.000Z"),
-      },
-      verifiedEmail: null,
-    });
-
-    await expect(sendHostedSignupNotificationEmailForMember({
-      env: {
-        HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
-        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
-        RESEND_API_KEY: "re_test",
-      },
-      fetchImpl: fetchMock,
-      memberId: "member_123",
-    })).resolves.toMatchObject({
-      status: "sent",
-    });
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
   });
 
   it("does not throw from the best-effort wrapper when Resend fails", async () => {

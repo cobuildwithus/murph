@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  runHostedAiUsageOvershootAlertMonitor: vi.fn(),
   runHostedRuntimeLatencyAlertMonitor: vi.fn(),
   runHostedRuntimeProgressAlertMonitor: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-overshoot-alert-monitor", () => ({
+  runHostedAiUsageOvershootAlertMonitor:
+    mocks.runHostedAiUsageOvershootAlertMonitor,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/alert-monitor", () => ({
@@ -22,6 +28,14 @@ const originalCronSecret = process.env.CRON_SECRET;
 describe("hosted runtime latency alert cron", () => {
   beforeEach(() => {
     process.env.CRON_SECRET = "latency-cron-secret";
+    mocks.runHostedAiUsageOvershootAlertMonitor.mockReset();
+    mocks.runHostedAiUsageOvershootAlertMonitor.mockResolvedValue({
+      configured: true,
+      health: {
+        anomalous: false,
+      },
+      outcome: "healthy",
+    });
     mocks.runHostedRuntimeLatencyAlertMonitor.mockReset();
     mocks.runHostedRuntimeLatencyAlertMonitor.mockResolvedValue({
       configured: true,
@@ -65,6 +79,9 @@ describe("hosted runtime latency alert cron", () => {
     expect(mocks.runHostedRuntimeProgressAlertMonitor).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
+    expect(mocks.runHostedAiUsageOvershootAlertMonitor).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("rejects unauthenticated requests without evaluating latency", async () => {
@@ -75,6 +92,7 @@ describe("hosted runtime latency alert cron", () => {
     expect(response.status).toBe(401);
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeProgressAlertMonitor).not.toHaveBeenCalled();
+    expect(mocks.runHostedAiUsageOvershootAlertMonitor).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -83,6 +101,9 @@ describe("hosted runtime latency alert cron", () => {
     },
     {
       failing: "latency",
+    },
+    {
+      failing: "usage_overshoot",
     },
   ] as const)(
     "awaits the sibling monitor before reporting a $failing failure",
@@ -107,6 +128,9 @@ describe("hosted runtime latency alert cron", () => {
       mocks.runHostedRuntimeProgressAlertMonitor.mockReturnValue(
         failing === "progress" ? failedMonitor : heldMonitor,
       );
+      mocks.runHostedAiUsageOvershootAlertMonitor.mockReturnValue(
+        failing === "usage_overshoot" ? failedMonitor : heldMonitor,
+      );
 
       let routeSettled = false;
       const responsePromise = GET(new Request(
@@ -124,6 +148,7 @@ describe("hosted runtime latency alert cron", () => {
       await vi.waitFor(() => {
         expect(mocks.runHostedRuntimeLatencyAlertMonitor).toHaveBeenCalled();
         expect(mocks.runHostedRuntimeProgressAlertMonitor).toHaveBeenCalled();
+        expect(mocks.runHostedAiUsageOvershootAlertMonitor).toHaveBeenCalled();
       });
       await Promise.resolve();
       expect(routeSettled).toBe(false);

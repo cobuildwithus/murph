@@ -553,6 +553,14 @@ export class HostedUserRunner {
     };
   }
 
+  async revokeActiveRuntimePlatformAiUsage(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.stateStore.revokeActiveRuntimePlatformAiUsage(input);
+  }
+
   async validateRuntimeProviderEgressCredential(input: {
     providerKind: string;
     runnerContainerName: string;

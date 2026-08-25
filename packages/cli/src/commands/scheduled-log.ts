@@ -51,6 +51,7 @@ import { publicValidationIssue } from "./public-validation-issue.js";
 import {
   buildWorkoutFromParsedOptions,
 } from "./workout-typed-options.js";
+
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const scheduledLogActionKindValues = [
   "meal.add",

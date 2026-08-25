@@ -20,6 +20,29 @@ describe('projectVaultCliError', () => {
     })
   })
 
+  test('preserves a bounded owner hint and infers validation from owner issues', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        hint: 'Correct the named field and submit a new attempt.',
+        issues: [{
+          code: 'invalid_type',
+          expected: 'string',
+          path: ['schedule', 'timeZone'],
+        }],
+      }),
+    )
+
+    expect(projection).toMatchObject({
+      hint: 'Correct the named field and submit a new attempt.',
+      stage: 'validation',
+      fieldErrors: [{
+        code: 'invalid_type',
+        path: 'schedule.timeZone',
+        expected: 'string',
+      }],
+    })
+  })
+
   test('projects Zod-like VaultCliError details without raw issue text', () => {
     const submittedValue = 'private-submitted-value'
     const providerBody = 'private-provider-response'
@@ -183,7 +206,7 @@ describe('projectVaultCliError', () => {
     expect(JSON.stringify(projection)).not.toContain('schedule')
   })
 
-  test('ignores raw paths and rejects malformed public paths', () => {
+  test('uses ordinary owner issue paths while public paths remain authoritative', () => {
     const projection = projectVaultCliError(
       new VaultCliError('invalid_payload', 'Payload is invalid.', {
         issues: [
@@ -202,15 +225,23 @@ describe('projectVaultCliError', () => {
       }),
     )
 
-    expect(projection.fieldErrors).toEqual([{
-      code: 'invalid_type',
-      path: 'safeOption.2',
-      expected: '',
-      received: 'invalid',
-      message: 'This field is invalid.',
-    }])
-    expect(projection.stage).toBeUndefined()
-    expect(JSON.stringify(projection)).not.toContain('rawOnly')
+    expect(projection.fieldErrors).toEqual([
+      {
+        code: 'invalid_type',
+        path: 'rawOnly',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+      {
+        code: 'invalid_type',
+        path: 'safeOption.2',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ])
+    expect(projection.stage).toBe('validation')
     expect(JSON.stringify(projection)).not.toContain('unsafe submitted key')
   })
 
@@ -269,36 +300,65 @@ describe('projectVaultCliError', () => {
 
       expect(projection).toMatchObject({
         code: expectedCode,
+        message: `${nodeCode}: filesystem failure at '${privatePath}'`,
         hint: expectedHint,
         stage: 'filesystem',
         retryable: false,
       })
-      expect(JSON.stringify(projection)).not.toContain(privatePath)
-      expect(JSON.stringify(projection)).not.toContain('filesystem failure at')
+      expect(JSON.stringify(projection)).toContain(privatePath)
+      expect(JSON.stringify(projection)).toContain('filesystem failure at')
     },
   )
 
-  test('returns one value-free message for every unhandled failure', () => {
+  test('preserves bounded diagnostic text for unhandled failures', () => {
     const submittedValue = 'private-submitted-value'
     const providerBody = 'private-provider-response'
     for (const message of [
       `Unexpected parser failure for ${submittedValue}`,
       `Mapbox address resolution request failed (HTTP 400: ${providerBody} echoed ${submittedValue}).`,
-      `Bearer <REDACTED_TOKEN> while processing ${submittedValue}`,
     ]) {
       const projection = projectVaultCliError(new Error(message))
 
       expect(projection).toMatchObject({
         code: 'UNKNOWN',
-        message: 'The command failed without a safe recoverable detail.',
+        message,
         retryable: false,
         stage: 'command',
       })
       expect(projection.hint).toBeUndefined()
-      expect(JSON.stringify(projection)).not.toContain(submittedValue)
-      expect(JSON.stringify(projection)).not.toContain(providerBody)
-      expect(JSON.stringify(projection)).not.toContain('<REDACTED_TOKEN>')
     }
+  })
+
+  test('keeps stable error codes and validation messages from core errors', () => {
+    const projection = projectVaultCliError(
+      Object.assign(
+        new Error('targetAt must be on or after startAt.'),
+        { code: 'VAULT_INVALID_INPUT' },
+      ),
+    )
+
+    expect(projection).toEqual({
+      code: 'VAULT_INVALID_INPUT',
+      message: 'targetAt must be on or after startAt.',
+      retryable: false,
+      stage: 'validation',
+    })
+  })
+
+  test('bounds diagnostics while masking home directories and credential shapes', () => {
+    const projection = projectVaultCliError(
+      Object.assign(
+        new Error(`/Users/example/vault failed with Bearer secret-credential ${'x'.repeat(800)}`),
+        { code: 'CUSTOM_FAILURE' },
+      ),
+    )
+
+    expect(projection.code).toBe('CUSTOM_FAILURE')
+    expect(projection.message).toContain('<HOME_DIR>/vault')
+    expect(projection.message).toContain('Bearer <REDACTED_CREDENTIAL>')
+    expect(projection.message).not.toContain('secret-credential')
+    expect(Array.from(projection.message)).toHaveLength(640)
+    expect(projection.message.endsWith('…')).toBe(true)
   })
 })
 

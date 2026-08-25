@@ -48,6 +48,9 @@ export interface AssistantRuntimeIssueRecord {
   occurredAt: string;
   operation: string | null;
   phase: AssistantRuntimeIssuePhase;
+  releaseSha?: string | null;
+  runtimeAttemptId?: string | null;
+  runtimeName?: string | null;
   schema: typeof ASSISTANT_RUNTIME_ISSUE_SCHEMA;
   severity: AssistantRuntimeIssueSeverity;
   summary: string;
@@ -68,6 +71,7 @@ const DETAIL_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/u;
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/u;
 const ASSISTANT_RUNTIME_ISSUE_ID_PATTERN = /^ari_[0-9a-f]{16}_[0-9a-f]{24}$/u;
 const ASSISTANT_RUNTIME_ISSUE_FINGERPRINT_PATTERN = /^[0-9a-f]{24}$/u;
+const ASSISTANT_RUNTIME_ISSUE_RELEASE_SHA_PATTERN = /^[a-f0-9]{40}$/u;
 const BARE_SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\b(?:sk|pk|rk)-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gu,
   /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]{8,}\b/gu,
@@ -224,6 +228,9 @@ export function parseAssistantRuntimeIssueRecord(value: unknown): AssistantRunti
     occurredAt,
     operation,
     phase,
+    releaseSha: normalizeOptionalReleaseSha(record.releaseSha),
+    runtimeAttemptId: sanitizeOptionalField(record.runtimeAttemptId, "runtimeAttemptId"),
+    runtimeName: sanitizeOptionalField(record.runtimeName, "runtimeName"),
     schema: normalizeIssueSchema(record.schema),
     severity: normalizeSeverity(record.severity),
     summary: sanitizeSummary(record.summary, {
@@ -233,6 +240,16 @@ export function parseAssistantRuntimeIssueRecord(value: unknown): AssistantRunti
     }),
     surface: sanitizeOptionalField(record.surface, "surface"),
   };
+}
+
+function normalizeOptionalReleaseSha(value: unknown): string | null {
+  const normalized = normalizeOptionalString(value, "releaseSha")?.toLowerCase() ?? null;
+  if (!normalized) {
+    return null;
+  }
+  return ASSISTANT_RUNTIME_ISSUE_RELEASE_SHA_PATTERN.test(normalized)
+    ? normalized
+    : null;
 }
 
 function resolveAssistantRuntimeIssuePaths(
@@ -342,7 +359,9 @@ function sanitizeRequiredField(
   label: string,
   fallback: string,
 ): string {
-  const field = normalizeSafeIdentifier(normalizeRequiredString(value, label));
+  const field = normalizeAssistantRuntimeIssueIdentifier(
+    normalizeRequiredString(value, label),
+  );
   return field ?? fallback;
 }
 
@@ -353,7 +372,7 @@ function sanitizeOptionalField(value: unknown, label: string): string | null {
     return null;
   }
 
-  return normalizeSafeIdentifier(normalized);
+  return normalizeAssistantRuntimeIssueIdentifier(normalized);
 }
 
 function sanitizeDetails(value: unknown): Record<string, unknown> {
@@ -415,7 +434,9 @@ function sanitizeDetailValue(value: unknown): unknown | undefined {
   return undefined;
 }
 
-function normalizeSafeIdentifier(value: string): string | null {
+export function normalizeAssistantRuntimeIssueIdentifier(
+  value: string,
+): string | null {
   const normalized = value.trim();
 
   if (

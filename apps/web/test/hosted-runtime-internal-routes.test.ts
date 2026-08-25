@@ -1672,6 +1672,7 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedWorkspaceReadResponse(await response.json());
 
     expect(response.status).toBe(200);
+    expect(payload.hostedAssistantSubagentModelOverridesAllowed).toBe(false);
     expect(payload.platformAiUsageAllowed).toBe(false);
     expect(payload.hostedAssistantCustomInferenceOverride).toBeUndefined();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
@@ -1722,6 +1723,7 @@ describe("hosted runtime internal web routes", () => {
         protocol: "responses",
         revision: 3,
       },
+      hostedAssistantSubagentModelOverridesAllowed: false,
       platformAiUsageAllowed: false,
     });
     expect(payload.hostedAssistantModelOverride).toBeUndefined();
@@ -1831,6 +1833,7 @@ describe("hosted runtime internal web routes", () => {
     ));
     expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
+        hostedAssistantSubagentModelOverridesAllowed: true,
         hostedAssistantModelOverride: "gpt-5.6-sol",
         hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",

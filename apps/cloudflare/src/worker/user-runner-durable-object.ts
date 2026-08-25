@@ -96,6 +96,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async revokeActiveRuntimePlatformAiUsage(
+    input: Parameters<HostedUserRunner["revokeActiveRuntimePlatformAiUsage"]>[0],
+  ): ReturnType<HostedUserRunner["revokeActiveRuntimePlatformAiUsage"]> {
+    return this.runner.revokeActiveRuntimePlatformAiUsage(input);
+  }
+
   async recordRuntimeCompletionFromContainer(
     input: Parameters<HostedUserRunner["recordRuntimeCompletionFromContainer"]>[0],
   ): ReturnType<HostedUserRunner["recordRuntimeCompletionFromContainer"]> {

@@ -41,10 +41,11 @@ describe('assistant dynamic context prompt blocks', () => {
       prompt.match(/`stage` names the failure/gu) ?? [],
     ).toHaveLength(1)
     expect(prompt).toContain(
-      '`retryable: true` permits an unchanged retry',
+      'For a read-only command, `retryable: true` permits at most one unchanged retry in the turn',
     )
+    expect(prompt).toContain('never retry an unchanged write')
     expect(prompt).toContain(
-      'fixing a `fieldErrors` field or `hint` prerequisite is a new attempt',
+      'Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt',
     )
     expect(prompt).toContain('Otherwise stop')
     expect(prompt).toContain('never guess or echo omitted details')
