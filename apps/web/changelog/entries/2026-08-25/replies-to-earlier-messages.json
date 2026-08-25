@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "replies-to-earlier-messages",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer replies to earlier messages",
+    "summary": "When you reply to an earlier Murph message in a direct conversation, Murph now uses that exact message to understand what you mean.",
+    "details": "The selected message is treated as the reply target without changing ordinary conversation context or tapback handling.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": [2279]
+  }
+}

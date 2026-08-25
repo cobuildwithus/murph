@@ -61,6 +61,7 @@ describe("hosted AI usage overshoot alert monitor", () => {
     const sql = query.strings.join(" ").replace(/\s+/gu, " ");
     expect(sql).toContain("SELECT EXISTS");
     expect(sql).toContain("period.blocked_at IS NOT NULL");
+    expect(sql).toContain("period.limit_usd_micros > 0");
     expect(sql).toContain(
       "period.spent_usd_micros * 5 > period.limit_usd_micros * 6",
     );

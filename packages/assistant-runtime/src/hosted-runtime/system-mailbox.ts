@@ -118,6 +118,7 @@ export type HostedSystemMailboxCheckpointPreparation =
       status: "processed";
     }
   | {
+      checkpointRequired: boolean;
       item: HostedSystemMailboxPendingItem;
       itemId: string;
       status: "recording";
@@ -362,6 +363,16 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
+      if (shouldResumeHostedBrowserVaultRecordingItemReadOnly(pending)) {
+        return {
+          result: {
+            disposition: "prepared",
+            item: pending,
+          },
+          write: false,
+        };
+      }
+
       const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
         pending: state.pending,
         selected: pending,
@@ -426,6 +437,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
 
   if (prepared.status === "recording") {
     return {
+      checkpointRequired: !shouldResumeHostedBrowserVaultRecordingItemReadOnly(
+        prepared,
+      ),
       item: prepared,
       itemId: prepared.itemId,
       status: "recording",
@@ -558,6 +572,20 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       wakeKind: prepared.wake.kind,
     };
   }
+}
+
+function shouldResumeHostedBrowserVaultRecordingItemReadOnly(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.status === "recording"
+    && item.postCheckpointRecord === null
+    && (
+      item.routeAction === "run-device-sync-wake"
+      || (
+        item.routeAction === "apply-runtime-control-request"
+        && item.wake.kind === "runtime.browser-vault-refresh-requested"
+      )
+    );
 }
 
 function shouldStopHostedGroupContextHandoffRetry(input: {

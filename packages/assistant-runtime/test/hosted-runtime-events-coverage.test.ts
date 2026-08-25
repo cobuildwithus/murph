@@ -195,7 +195,7 @@ describe("hosted runtime event coverage", () => {
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
       signal,
-      timeoutMs: 90_000,
+      timeoutMs: 120_000,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
     });

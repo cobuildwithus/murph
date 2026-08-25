@@ -1204,7 +1204,7 @@ printf 'clean\\n'
       .toBeLessThan(runNextBuild!.indexOf('"${next_build_command[@]}"'));
   });
 
-  it("gives only the Assistant Engine root project the repository-owned heap", () => {
+  it("runs every root project together on the caller's Node heap", () => {
     const runRepoVitest = extractWorkspaceVerifyFunction("run_repo_vitest");
     const result = runShellHarness(`#!/usr/bin/env bash
 set -euo pipefail
@@ -1222,8 +1222,7 @@ run_repo_vitest --no-coverage
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "heap=unset command=exec vitest run --config vitest.config.ts --project=!assistant-engine --no-coverage\n" +
-        "heap=--max-old-space-size=6144 command=exec vitest run --config vitest.config.ts --project=assistant-engine --no-coverage\n",
+      "heap=unset command=exec vitest run --config vitest.config.ts --no-coverage\n",
     );
   });
 
@@ -1236,7 +1235,7 @@ run_repo_vitest --no-coverage
     expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
   });
 
-  it("gives only Assistant Engine package coverage the repository-owned heap", () => {
+  it("runs ordinary package coverage on the caller's Node heap", () => {
     const runWorkspacePackageCoverage = extractWorkspaceVerifyFunction(
       "run_workspace_package_coverage",
     );
@@ -1270,7 +1269,7 @@ run_workspace_package_coverage packages/core 'Core coverage'
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "heap=--max-old-space-size=6144 workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
+      "heap=unset workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
         "heap=unset workers=2 command=pnpm --dir packages/core test:coverage\n",
     );
   });
@@ -1528,7 +1527,7 @@ run_test_diff_package_tests ${selectedPackageDirs}
     );
   });
 
-  it("gives affected Assistant Engine tests the proven heap ceiling", () => {
+  it("batches affected Assistant Engine tests with ordinary package owners", () => {
     const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
       "run_test_diff_package_tests",
     );
@@ -1558,10 +1557,7 @@ run_test_diff_package_tests packages/assistant-engine packages/core
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(
-      "Affected package test for packages/assistant-engine | env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=1 pnpm --dir packages/assistant-engine test\n",
-    );
-    expect(result.stdout).toContain(
-      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/core test\n",
+      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/assistant-engine --filter ./packages/core test\n",
     );
   });
 

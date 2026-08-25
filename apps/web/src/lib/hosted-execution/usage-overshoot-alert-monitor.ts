@@ -128,6 +128,7 @@ export async function readHostedAiUsageOvershootHealth(input: {
       WHERE period.blocked_at IS NOT NULL
         AND period.period_start <= ${now}
         AND period.period_end > ${now}
+        AND period.limit_usd_micros > 0
         AND period.spent_usd_micros * 5 > period.limit_usd_micros * 6
       LIMIT 1
     ) AS "exceeded"

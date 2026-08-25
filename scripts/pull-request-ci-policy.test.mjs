@@ -152,7 +152,8 @@ function inspectDraftReset(source) {
     source,
     /^    environment:\n      name: frog-reconciliation\n      deployment: false$/mu,
   );
-  assert.doesNotMatch(source, /contents: write|actions\/checkout|pull_request_target/u);
+  assert.doesNotMatch(source, /actions\/checkout|pull_request_target/u);
+  assert.doesNotMatch(jobBlock(source, "return-to-draft"), /^    permissions:/mu);
   const appTokenInputs =
     /^        uses: actions\/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3\.2\.0\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
       .exec(source)?.groups?.inputs;
@@ -161,6 +162,7 @@ function inspectDraftReset(source) {
     [
       "client-id: ${{ vars.FROG_APP_CLIENT_ID }}",
       "private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}",
+      "permission-contents: write",
       "permission-pull-requests: write",
     ],
   );
@@ -211,7 +213,7 @@ test("weakening exact-head draft reset is detected", async () => {
   assert.throws(() => inspectDraftReset(mutation), /current_head_sha/u);
 });
 
-test("draft reset rejects workflow-token fallback and broader App authority", async () => {
+test("draft reset rejects workflow-token fallback and App authority drift", async () => {
   const source = await workflow("pr-head-draft-reset.yml");
   assert.throws(
     () => inspectDraftReset(source.replace(
@@ -222,8 +224,14 @@ test("draft reset rejects workflow-token fallback and broader App authority", as
   );
   assert.throws(
     () => inspectDraftReset(source.replace(
+      "          permission-contents: write\n",
+      "",
+    )),
+  );
+  assert.throws(
+    () => inspectDraftReset(source.replace(
       "          permission-pull-requests: write",
-      "          permission-contents: write\n          permission-pull-requests: write",
+      "          permission-issues: write\n          permission-pull-requests: write",
     )),
   );
   assert.throws(
