@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: scripts/evaluate-dev-cli <package>@<exact-version> [-- <cli-args...>]
+
+Run an exact public-registry CLI with pnpm dlx without editing the workspace
+manifest or lockfile. Invoke this script from the workspace directory the CLI
+should evaluate. Dependency lifecycle scripts stay disabled.
+USAGE
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 2
+fi
+
+package_spec="$1"
+shift
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+package_name="${package_spec%@*}"
+package_version="${package_spec##*@}"
+exact_semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+unscoped_name='^[a-z0-9][a-z0-9._-]*$'
+scoped_name='^@[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$'
+
+if [[ "$package_name" == "$package_spec" || -z "$package_name" || -z "$package_version" ]] \
+  || [[ ! "$package_version" =~ $exact_semver ]] \
+  || { [[ ! "$package_name" =~ $unscoped_name ]] && [[ ! "$package_name" =~ $scoped_name ]]; }; then
+  echo "evaluate-dev-cli requires an exact public-registry package spec such as @scope/tool@1.2.3." >&2
+  exit 2
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(cd "$script_dir/.." && pwd -P)"
+current_dir="$(pwd -P)"
+case "$current_dir/" in
+  "$repo_root/"*) ;;
+  *)
+    echo "evaluate-dev-cli must run from inside the Murph repository." >&2
+    exit 2
+    ;;
+esac
+
+pnpm_args=(
+  --config.ignore-scripts=true
+  --config.registry=https://registry.npmjs.org/
+  dlx
+  "$package_spec"
+)
+if [[ $# -gt 0 ]]; then
+  pnpm_args+=(-- "$@")
+fi
+
+exec pnpm "${pnpm_args[@]}"
