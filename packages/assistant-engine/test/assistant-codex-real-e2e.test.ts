@@ -8923,12 +8923,10 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         process.stdout.write(
           `[interactive-nutrition-card-recovery-e2e] ${JSON.stringify({
             commands: result.commands,
-            firstActions: result.firstActions,
             firstCardAttached: result.firstCard !== null,
             firstMessage: result.firstMessage,
             firstProviderActionCount: result.firstProviderActionCount,
             followupCardAttached: result.card !== null,
-            followupActions: result.followupActions,
             followupProviderActionCount: result.followupProviderActionCount,
             savedCalories: result.savedCalories,
           })}\n`,
@@ -9114,12 +9112,10 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   card: unknown
   commands: string[]
   firstCard: unknown
-  firstActions: CapabilityRoutingAction[]
   firstCommands: string[]
   firstMessage: string
   firstProviderActionCount: number
   followupCommands: string[]
-  followupActions: CapabilityRoutingAction[]
   followupProviderActionCount: number
   mealId: string
   savedCalories: number | null
@@ -9217,7 +9213,11 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       vaultRoot,
       window: { startAt: '2026-08-01' },
     })
-    await materializeAutomaticMealClarificationVaultCli({ binDirectory })
+    await materializeAutomaticMealClarificationVaultCli({
+      binDirectory,
+      commandLog,
+      vaultRoot,
+    })
 
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
     const sharedTurn = {
@@ -9235,11 +9235,6 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
       env: {
         ...input.config.env,
-        AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT:
-          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-        AUTOMATIC_MEAL_E2E_COMMAND_LOG: commandLog,
-        AUTOMATIC_MEAL_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-        AUTOMATIC_MEAL_E2E_VAULT: vaultRoot,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
         PATH: inheritedPath
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
@@ -9281,12 +9276,10 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       card: followup.responseCard,
       commands,
       firstCard: first.responseCard,
-      firstActions: readCapabilityRoutingActions(first.jsonEvents),
       firstCommands,
       firstMessage: first.finalMessage,
       firstProviderActionCount: first.providerActionCount,
       followupCommands: commands.slice(firstCommands.length),
-      followupActions: readCapabilityRoutingActions(followup.jsonEvents),
       followupProviderActionCount: followup.providerActionCount,
       mealId: meal.mealId,
       savedCalories: saved.savedCalories,
@@ -9343,7 +9336,11 @@ async function runRealAutomaticMealClarificationScenario(input: {
       source: 'device',
       vaultRoot,
     })
-    await materializeAutomaticMealClarificationVaultCli({ binDirectory })
+    await materializeAutomaticMealClarificationVaultCli({
+      binDirectory,
+      commandLog,
+      vaultRoot,
+    })
 
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
     const sharedTurn = {
@@ -9355,11 +9352,6 @@ async function runRealAutomaticMealClarificationScenario(input: {
       dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
       env: {
         ...input.config.env,
-        AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT:
-          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-        AUTOMATIC_MEAL_E2E_COMMAND_LOG: commandLog,
-        AUTOMATIC_MEAL_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-        AUTOMATIC_MEAL_E2E_VAULT: vaultRoot,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
         PATH: inheritedPath
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
@@ -9488,6 +9480,8 @@ function buildAutomaticMealClarificationDeveloperInstructions(input: {
 
 async function materializeAutomaticMealClarificationVaultCli(input: {
   binDirectory: string
+  commandLog: string
+  vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -9496,11 +9490,8 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
     [
       '#!/bin/sh',
       'set -eu',
-      'if [ -z "$AUTOMATIC_MEAL_E2E_COMMAND_LOG" ] || [ -z "$AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT" ] || [ -z "$AUTOMATIC_MEAL_E2E_TSX_BIN" ] || [ -z "$AUTOMATIC_MEAL_E2E_VAULT" ]; then',
-      '  exit 70',
-      'fi',
-      'printf \'%s\\n\' "$*" >> "$AUTOMATIC_MEAL_E2E_COMMAND_LOG"',
-      'exec "$AUTOMATIC_MEAL_E2E_TSX_BIN" "$AUTOMATIC_MEAL_E2E_CLI_ENTRYPOINT" "$@" --vault "$AUTOMATIC_MEAL_E2E_VAULT"',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      `exec ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_BIN)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
