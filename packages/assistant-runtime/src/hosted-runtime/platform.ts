@@ -96,6 +96,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -118,6 +120,8 @@ import type {
   HostedExecutionDeviceSyncDirtyAckResponse,
   HostedExecutionDeviceSyncDirtyPendingRequest,
   HostedExecutionDeviceSyncDirtyPendingResponse,
+  HostedExecutionDeviceSyncNoDataOutreachRequest,
+  HostedExecutionDeviceSyncNoDataOutreachResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
@@ -479,6 +483,9 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  configureNoDataOutreach?(input: HostedExecutionDeviceSyncNoDataOutreachRequest & {
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse>;
   completeFitbitMigration?(input: {
     connectionId: string;
     signal?: AbortSignal | null;
@@ -620,6 +627,12 @@ export interface HostedRuntimePhoneCallPort {
 }
 
 export interface HostedRuntimePhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>;
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {

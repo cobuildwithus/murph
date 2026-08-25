@@ -1,6 +1,9 @@
 import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  projectHostedRuntimeReconciliationFactsWireResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -42,12 +45,7 @@ export const GET = withJsonError(async (
     factsRequest,
   );
 
-  return jsonOk({
-    blocked: facts.blocked,
-    environmentInterviewPending: facts.environmentInterviewPending,
-    mailboxLag: facts.mailboxLag,
-    workspace: facts.workspace,
-  });
+  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(facts));
 });
 
 function assertHostedOrchestrationUserMatches(input: {

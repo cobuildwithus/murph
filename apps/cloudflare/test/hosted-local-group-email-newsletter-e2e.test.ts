@@ -228,12 +228,12 @@ describe("hosted local group email newsletter e2e", () => {
     });
 
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("group", {
+      buildAssistantProviderMurphToolCall("group_data", {
         action: "read_shared",
         audience: "group_email",
         projectionScopes,
       }),
-      buildAssistantProviderMurphToolCall("group", {
+      buildAssistantProviderMurphToolCall("group_email", {
         action: "send_email",
         html: newsletterHtml,
         subject: newsletterSubject,

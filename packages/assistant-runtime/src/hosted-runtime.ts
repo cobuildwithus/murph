@@ -1207,6 +1207,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
 ): Promise<HostedWorkspaceInvocationResult> {
+  const result = await runHostedWorkspaceRuntimeJobInProcessImpl(input, options);
+  void writeHostedRuntimeLogBestEffort({
+    entry: {
+      attemptId: input.request.attemptId,
+      component: "runtime",
+      eventCode: "runtime.invocation_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        processingMode: input.request.processingMode ?? "default",
+      },
+    },
+    platform: options.platform,
+  });
+  return result;
+}
+
+async function runHostedWorkspaceRuntimeJobInProcessImpl(
+  input: HostedAssistantWorkspaceRuntimeJobInput,
+  options: HostedWorkspaceRuntimeJobOptions,
+): Promise<HostedWorkspaceInvocationResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const mailboxPort = runtime.platform.mailboxPort ?? null;
   const workspacePort = runtime.platform.workspacePort ?? null;
@@ -7872,6 +7893,14 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
             createConnectLink: (connectInput) =>
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
+            ...(platform.deviceSyncPort.configureNoDataOutreach
+              ? {
+                  configureNoDataOutreach: (configureInput) =>
+                    guard(() =>
+                      platform.deviceSyncPort!.configureNoDataOutreach!(configureInput)
+                    ),
+                }
+              : {}),
             ...(platform.deviceSyncPort.completeFitbitMigration
               ? {
                   completeFitbitMigration: (cutoverInput) =>

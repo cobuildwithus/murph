@@ -1,20 +1,21 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
-  createHostedAssistantConversationIdentifierBlind,
   createHostedMailboxAssistantInputId,
-  hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderShellCommandCall,
   buildStableNumericSuffix,
   expectAdvertisedMurphDynamicTools,
+  readHostedLocalAssistantProviderToolOutputs,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -42,6 +43,9 @@ const telegramBotToken = "telegram-local-test-token";
 const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const telegramHeartEmoji = "\u2764";
 const defaultTelegramInboundText = "yo murph telegram first contact e2e";
+const onboardingStateProbeInboundText =
+  "Verify the persisted onboarding follow-up after first contact.";
+const onboardingStateProbeReplyText = "Onboarding follow-up state verified.";
 const reactionReplyText = "Heart reaction test sent.";
 const reactionEventId =
   `telegram.message.received:local:${reactionUserId}:evt_telegram_reaction`;
@@ -76,15 +80,25 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
   it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
-    await requireScenario().runWake(buildSignupWelcomeActivationWake(userId), userId);
+    const activationOccurredAt = new Date().toISOString();
+    await requireScenario().runWake(
+      buildActivationWake(userId, activationOccurredAt),
+      userId,
+    );
 
     await requireScenario().waitForHostedCompletion(userId);
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
     });
+    expect(requireTelegramStub().countObservedRequests(
+      `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
+      requireTelegramStub().createSendMessageMatcher(userId),
+    )).toBe(0);
 
-    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
+    requireScenario().queueAssistantResponses([
+      HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
+    ], {
       matchInputContains: defaultTelegramInboundText,
     });
     const assistantProviderRequestCountBeforeInbound =
@@ -158,10 +172,75 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(readAssistantProviderRequestText(firstInboundProviderRequest)).not.toContain(
       MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     );
+
+    // Route-later onboarding enrollment is reconciled after the first direct
+    // turn's durability checkpoint. Inspect it from the next real turn so the
+    // production CLI reads committed canonical state instead of racing that
+    // checkpoint.
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderShellCommandCall(
+        buildOnboardingFollowupStateProbeCommand({
+          activationOccurredAt,
+          userId,
+        }),
+      ),
+      onboardingStateProbeReplyText,
+    ], {
+      matchInputContains: onboardingStateProbeInboundText,
+    });
+    const stateProbeWake = buildInboundTelegramWake(userId, {
+      eventId: `telegram.message.received:local:${userId}:evt_onboarding_state_probe`,
+      messageId: `${buildTelegramMessageId(userId)}9`,
+      text: onboardingStateProbeInboundText,
+    });
+    const assistantProviderRequestCountBeforeStateProbe =
+      requireScenario().assistantProviderRequests.length;
+    await requireScenario().runWake(stateProbeWake, userId);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const stateProbeStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(stateProbeStatus.lastErrorCode ?? null).toBeNull();
+    expect(stateProbeStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    await requireTelegramStub().waitForRequest({
+      expectedPath: `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
+      matchRequest: (request) =>
+        requireTelegramStub().createSendMessageMatcher(userId)(request)
+        && requireTelegramStub().parseObservedJson(request.body)?.text ===
+          onboardingStateProbeReplyText,
+      scenario: requireScenario(),
+      userId,
+    });
+    const onboardingFollowupState = readOnboardingFollowupStateMarker(
+      requireScenario().assistantProviderRequests
+        .slice(assistantProviderRequestCountBeforeStateProbe)
+        .flatMap(readHostedLocalAssistantProviderToolOutputs),
+    );
+    expect(onboardingFollowupState).toMatchObject({
+      activationOccurredAt,
+      deliveryTarget: buildTelegramThreadId(userId),
+    });
+    expect(onboardingFollowupState.automationId).not.toHaveLength(0);
+    expect(Date.parse(onboardingFollowupState.activeUntil)).toBeGreaterThan(
+      Date.parse(activationOccurredAt),
+    );
+    const providerRequestCountBeforeReplay =
+      requireScenario().assistantProviderRequests.length;
+    const replySendCountBeforeReplay = requireTelegramStub().countObservedRequests(
+      `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
+      requireTelegramStub().createSendMessageMatcher(userId),
+    );
+    await requireScenario().runWake(stateProbeWake, userId);
+    await requireScenario().waitForHostedCompletion(userId);
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
     });
+    expect(requireScenario().assistantProviderRequests).toHaveLength(
+      providerRequestCountBeforeReplay,
+    );
+    expect(requireTelegramStub().countObservedRequests(
+      `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
+      requireTelegramStub().createSendMessageMatcher(userId),
+    )).toBe(replySendCountBeforeReplay);
     expect(requireTelegramStub().countObservedRequests(
       `/bot${hostedLocalTelegramRequestToken}/deleteMessages`,
     )).toBe(0);
@@ -421,7 +500,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
   }, 300_000);
 });
 
-function buildActivationWake(userId: string) {
+function buildActivationWake(userId: string, occurredAt = new Date().toISOString()) {
   return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${userId}:evt_telegram_activation`,
     memberId: userId,
@@ -430,46 +509,7 @@ function buildActivationWake(userId: string) {
       linq: false,
       telegram: true,
     },
-    occurredAt: new Date().toISOString(),
-  });
-}
-
-function buildSignupWelcomeActivationWake(userId: string) {
-  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-    secret: buildTelegramThreadId(userId),
-    userId,
-  });
-  const threadId = buildTelegramThreadId(userId);
-
-  return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${userId}:evt_telegram_signup_welcome`,
-    memberId: userId,
-    memberChannels: {
-      email: false,
-      linq: false,
-      telegram: true,
-    },
-    occurredAt: new Date().toISOString(),
-    signupWelcome: {
-      route: {
-        actorId: null,
-        channel: "telegram",
-        delivery: {
-          kind: "thread",
-          target: threadId,
-        },
-        identityId: hashHostedAssistantConversationIdentifier(
-          identifierBlind,
-          "telegram:bot",
-        ),
-        threadId: hashHostedAssistantConversationIdentifier(
-          identifierBlind,
-          threadId,
-        ),
-        threadIsDirect: true,
-      },
-      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-    },
+    occurredAt,
   });
 }
 
@@ -509,6 +549,52 @@ function buildAcceptedTelegramMessageRef(userId: string, eventId: string): strin
 function readAssistantProviderRequestText(request: { body: string }): string {
   const body = JSON.parse(request.body) as Record<string, unknown>;
   return collectJsonStrings(body).join("\n\n");
+}
+
+function buildOnboardingFollowupStateProbeCommand(input: {
+  activationOccurredAt: string;
+  userId: string;
+}): string {
+  const script = [
+    'const fs = require("node:fs");',
+    'const { execFileSync } = require("node:child_process");',
+    `const activationOccurredAt = ${JSON.stringify(input.activationOccurredAt)};`,
+    `const deliveryTarget = ${JSON.stringify(buildTelegramThreadId(input.userId))};`,
+    `const slug = ${JSON.stringify(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug)};`,
+    'const shown = JSON.parse(execFileSync("vault-cli", ["automation", "show", slug, "--format", "json"], { encoding: "utf8" }));',
+    'const automation = shown && (shown.data || shown).automation;',
+    'const onboarding = JSON.parse(fs.readFileSync(".runtime/operations/assistant/state/onboarding/conversation.json", "utf8"));',
+    'if (!automation || automation.slug !== slug || automation.status !== "active") throw new Error("Canonical onboarding follow-up missing.");',
+    'if (!automation.schedule || automation.schedule.kind !== "dailyLocal") throw new Error("Canonical onboarding follow-up schedule mismatch.");',
+    'if (!automation.route || automation.route.channel !== "telegram" || automation.route.deliveryTarget !== deliveryTarget || automation.route.threadIsDirect !== true) throw new Error("Canonical onboarding follow-up route mismatch.");',
+    'if (onboarding.createdAt !== activationOccurredAt) throw new Error("Onboarding start lost its activation anchor.");',
+    'if (Date.parse(automation.activeUntil) <= Date.parse(activationOccurredAt)) throw new Error("Onboarding follow-up window is not live.");',
+    'console.log(["ONBOARDING_FOLLOWUP_STATE", automation.automationId, automation.activeUntil, automation.route.deliveryTarget, onboarding.createdAt].join("|"));',
+  ].join("");
+  return `node -e ${quoteShellArgument(script)}`;
+}
+
+function readOnboardingFollowupStateMarker(outputs: readonly string[]): {
+  activationOccurredAt: string;
+  activeUntil: string;
+  automationId: string;
+  deliveryTarget: string;
+} {
+  const match = /ONBOARDING_FOLLOWUP_STATE\|([^|\s]+)\|([^|\s]+)\|([^|\s]+)\|([^|\s]+)/u
+    .exec(outputs.join("\n"));
+  if (!match?.[1] || !match[2] || !match[3] || !match[4]) {
+    throw new Error("Hosted Telegram run omitted canonical onboarding follow-up state proof.");
+  }
+  return {
+    activationOccurredAt: match[4],
+    activeUntil: match[2],
+    automationId: match[1],
+    deliveryTarget: match[3],
+  };
+}
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function collectJsonStrings(value: unknown): string[] {

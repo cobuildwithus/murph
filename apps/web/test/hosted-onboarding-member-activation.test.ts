@@ -104,6 +104,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 import {
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
+  buildHostedMemberActivationOnboardingFollowupRoute,
   buildHostedMemberActivationWelcomeRoute,
   hasHostedMemberActivationProof,
   readHostedMemberActivationProofMemberIds,
@@ -376,6 +377,8 @@ describe("hosted onboarding member activation", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: expectedRoute,
         signupWelcome: expect.objectContaining({
           route: expectedRoute,
           text: expectedText,
@@ -602,6 +605,56 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("commits an exact maintenance handoff for established Family members", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(
+      new Set([member.core.id]),
+    );
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      item: {
+        dedupeKey: "runtime-control:access-restored:family",
+        id: "mailbox_access_restored",
+        userId: member.core.id,
+      },
+    });
+    const tx = makeTransactionHarness({
+      accountGroupMemberships: [{
+        group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+        status: "active",
+      }],
+      billingStatus: HostedBillingStatus.canceled,
+      suspendedAt: null,
+      threadContainer: null,
+    }) as never;
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      accessRestorationSourceEventId: "family-invite:invite_123",
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: tx,
+      sourceEventId: "family-invite:invite_123",
+    })).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
+      memberId: member.core.id,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.maintenance-requested",
+        userId: member.core.id,
+      }),
+      tx,
+    });
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
   });
 
   it("activates verified-email-only family members without assigning a Linq home line", async () => {
@@ -855,11 +908,16 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
+      member,
+      prisma: expect.anything(),
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         kind: "member.activated",
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: expectedLinqParticipantWelcomeRoute(),
         signupWelcome: null,
       }),
       tx: expect.anything(),
@@ -1072,6 +1130,19 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: true,
         },
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute:
+          buildHostedMemberActivationOnboardingFollowupRoute({
+            linqChatId: null,
+            linqContactLookupKey: "hbidx:email:v1:lookup",
+            linqRecipientPhone: null,
+            memberId: "member_123",
+            memberPhoneNumber: null,
+            phoneLookupKey: null,
+            telegramThreadId:
+              "telegram_user_123:business:biz-42:dm-topic:9",
+            telegramUserId: "telegram_user_123",
+          }),
         signupWelcome: null,
       }),
       tx: expect.anything(),

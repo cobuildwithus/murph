@@ -28,6 +28,20 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Hosted Runtime Terminal-Event Rollout
+
+When the runner adds a strict hosted runtime event code, deploy Web's shared
+hosted-execution reader first. Next deploy the Cloudflare runner bundle with
+immediate convergence and let older containers drain. A new runner must not
+write the event to an older Web reader because the older strict registry can
+reject the bounded runtime-log batch.
+
+Roll back the runner writer first and let the newer event drain before rolling
+back Web. After deployment, use a bounded time window to compare aggregate
+empty `mailbox.imported` attempts with `runtime.invocation_finished` attempts
+and confirm the Web ingest-rejection aggregate remains zero. Keep the proof
+deidentified: report only aggregate counts, not attempt IDs or row payloads.
+
 ## Gemini Video Analysis Rollout
 
 Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
@@ -60,6 +74,33 @@ direct conversation to verify a single Gemini request, explicit 1 FPS
 metadata, bounded output, and one usage
 record. Inspect only bounded status/error aggregates, never media, prompts,
 paths, response bodies, or credential values.
+
+### Hosted inbox video transience rollout
+
+Deploy the snapshot-excluding Worker and runner bundle with immediate
+convergence, then prove older containers have drained before deploying Web with
+`20260824010000_rearm_hosted_inbox_video_retention`. The migration advances the
+CAS version and makes every snapshot-bearing workspace due on the existing
+indexed inbox-media-retention lane; it does not scan members or introduce a new
+scheduler. Do not apply the migration while an older runner can still publish a
+snapshot containing ordinary inbound video bytes.
+
+After the migration, invoke the existing authenticated retention cron
+serially—not concurrently—until an aggregate database check reports zero due
+workspace retention wakes. Each invocation retains the existing five-workspace
+admission bound; serial repetition accelerates this one-time privacy drain
+without widening runtime concurrency. Confirm replacement checkpoints are
+advancing, snapshot failures remain bounded, and replaced snapshot objects are
+entering the existing orphan-cleanup lifecycle. Inspect only aggregate counts
+and redacted event codes.
+
+Once the first re-armed workspace publishes an exclusion-capable snapshot, that
+runner is the rollback floor until the due queue is zero and old snapshot
+objects have drained. Prefer a forward fix. A rollback below the floor requires
+stopping retention admission and proving no replacement or restored workspace
+can be written by the older runner. The ordinary video-analysis behavior,
+image/audio retention windows, and explicitly durable raw references remain
+unchanged.
 
 ## Assistant Turn-Profile V2 Rollout
 
@@ -645,6 +686,18 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+The private-to-group context-handoff exact-replay transport is a paired
+Web/runner change. Deploy the Web replay validator first; old runners remain
+safe but do not recover a lost successful handoff response. Then deploy the
+Worker and runner bundle with `container_rollout=immediate`, require managed
+container smoke to report the new bundle fingerprint, and exercise one
+handoff whose first response body is lost so the byte-identical retry returns
+the already accepted mailbox item. New runners against the preceding Web
+version fail closed on that retry but do not provide the intended truthful
+recovery, so this is not a supported steady state. Roll back the runner bundle
+before Web; if Web must roll back first, treat handoff replay as degraded until
+the runner rollback converges. No mailbox schema or record migration is needed.
+
 ## Phone-Call Result Deployment
 
 A completed phone call delivers its result as a proactive
@@ -1163,6 +1216,14 @@ runner. Its entries are compatibility material only; the required
 key.
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The versioned Temporal worker must not register pollers until both signed,
+uncached owner checks succeed: Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and this
+Worker at `/internal/temporal-worker/binding-admission`. Deploy Web and
+Cloudflare first, configure the two exact production URLs on both inactive
+Render colors, then allow the private exact-SHA blue/green controller to ramp.
+Rollback the Temporal candidate before either owner route; keep both owner
+routes through the whole retained-color rollback window.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
 hosted Web; the Worker and runner carry only the normalized semantic
@@ -1239,7 +1300,9 @@ Core execution tuning:
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `45000` and must exceed
   `CF_WEB_CONTROL_TIMEOUT_MS` by at least 5 seconds
-- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
+- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`. A shorter caller deadline
+  does not cancel a recent platform cold start; later readiness checks rejoin
+  that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
@@ -1726,7 +1789,7 @@ which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file` and `qpdf`, but no app bundle, worker secrets, or local speech models.
-The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
+The final app-layer image filters `codex debug models --bundled` to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI flex service-tier support to each, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. That image-owned catalog lets native Codex validation reject a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
 The runner bundle is root-owned and mode-normalized in an intermediate image
 stage, then copied once into a fresh final base stage. Keep that normalized-copy
 boundary instead of applying a recursive permission change after the final

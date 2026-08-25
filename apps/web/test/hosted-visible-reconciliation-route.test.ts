@@ -33,6 +33,7 @@ describe("visible reconciliation facts route", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.readHostedRuntimeReconciliationFactsWithVisibleAccess.mockResolvedValue({
       blocked: null,
+      environmentInterviewPending: true,
       mailboxLag: [],
       workspace: null,
     });
@@ -50,5 +51,11 @@ describe("visible reconciliation facts route", () => {
     expect(
       mocks.readHostedRuntimeReconciliationFactsWithVisibleAccess,
     ).toHaveBeenCalledWith({ userId: "member_123" });
+    await expect(response.json()).resolves.toEqual({
+      blocked: null,
+      environmentInterviewPending: true,
+      mailboxLag: [],
+      workspace: null,
+    });
   });
 });

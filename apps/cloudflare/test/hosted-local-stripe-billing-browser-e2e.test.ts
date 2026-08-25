@@ -134,10 +134,7 @@ async function proveStarterUsageStartsPaidPulseThroughCheckout(): Promise<void> 
   const actor = await createActor(member.session);
   try {
     await requireDriver().activateStarterUsage(actor, invite.inviteCode);
-    await requireDriver().assertSettingsText(
-      actor,
-      /non-expiring starter usage is active/iu,
-    );
+    await requireDriver().assertSettingsAvailableUsage(actor, "Starter AI usage");
 
     const checkout = await requireDriver().beginDirectPlanCheckout(actor, "Pulse");
     await requireDriver().assertStripeCheckoutReady(actor);
@@ -444,6 +441,7 @@ async function createMember(
     billingStatus,
     environment: requireScenario().runtimeEnv,
     memberId,
+    previouslyActivated: billingStatus === "canceled",
     privyUserId,
     verifiedEmail,
   });
@@ -476,6 +474,7 @@ async function bindDirectFixture(
     billingStatus,
     environment: requireScenario().runtimeEnv,
     memberId,
+    previouslyActivated: true,
   });
 }
 

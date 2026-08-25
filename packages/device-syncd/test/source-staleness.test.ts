@@ -8,6 +8,8 @@ import { SqliteDeviceSyncStore } from "../src/store.ts";
 import {
   evaluatePushPrimarySourceStaleness,
   isPushPrimarySourceProvider,
+  isPushPrimarySourceRecoveryNoticeEligible,
+  readPushPrimarySourceRecoveryNoticePolicy,
 } from "../src/source-staleness.ts";
 import { makeTempDirectory } from "./helpers.ts";
 
@@ -96,6 +98,62 @@ test("push-primary staleness ignores pull-capable sources and non-connected rows
     }),
     [],
   );
+});
+
+test("Garmin recovery notices start after five days of established delivery silence", () => {
+  assert.deepEqual(readPushPrimarySourceRecoveryNoticePolicy("GARMIN"), {
+    companionAppName: "Garmin Connect",
+    deviceDisplayName: "Garmin device",
+    providerDisplayName: "Garmin",
+    silentHours: 120,
+  });
+  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    lastDataAt: "2026-07-19T00:00:00.001Z",
+    now: "2026-07-24T00:00:00.000Z",
+    sourceProviderSlug: "garmin",
+    status: CONNECTED,
+  }), false);
+  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    lastDataAt: "2026-07-19T00:00:00.000Z",
+    now: "2026-07-24T00:00:00.000Z",
+    sourceProviderSlug: "garmin",
+    status: CONNECTED,
+  }), true);
+  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    lastDataAt: "2026-07-14T00:00:00.001Z",
+    now: "2026-07-24T00:00:00.000Z",
+    silentHours: 10 * 24,
+    sourceProviderSlug: "garmin",
+    status: CONNECTED,
+  }), false);
+  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    lastDataAt: "2026-07-14T00:00:00.000Z",
+    now: "2026-07-24T00:00:00.000Z",
+    silentHours: 10 * 24,
+    sourceProviderSlug: "garmin",
+    status: CONNECTED,
+  }), true);
+});
+
+test("recovery notices require prior delivery, a connected source, and explicit provider policy", () => {
+  for (const input of [
+    { lastDataAt: null, sourceProviderSlug: "garmin", status: CONNECTED },
+    {
+      lastDataAt: "2026-07-01T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+    },
+    {
+      lastDataAt: "2026-07-01T00:00:00.000Z",
+      sourceProviderSlug: "oura",
+      status: CONNECTED,
+    },
+  ] as const) {
+    assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+      ...input,
+      now: "2026-07-24T00:00:00.000Z",
+    }), false);
+  }
 });
 
 test("device sync store records source data arrival without letting reconcile move it", async () => {

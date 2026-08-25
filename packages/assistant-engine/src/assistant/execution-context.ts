@@ -66,6 +66,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from '@murphai/hosted-execution/physical-notes'
@@ -86,9 +88,6 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
-import type {
-  AssistantCronOccurrenceUnverifiedReason,
-} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -128,6 +127,22 @@ export type AssistantHostedDeviceToolRequest =
       accountId: string
       action: 'reconcile'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      afterDays: number
+      mode: 'after_days'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'default'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'off'
+      sourceProvider: string
+    }
 
 export interface AssistantHostedDeviceAccountSummary {
   accountId: string
@@ -155,11 +170,21 @@ export type AssistantHostedDeviceToolResponse =
       occurredAt: string
       status: 'queued'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      effectiveAfterDays: number | null
+      setting: 'custom' | 'default' | 'off'
+      sourceProvider: string
+      status: 'saved' | 'unchanged'
+    }
 
 export interface AssistantHostedDeviceTool {
   request(
     request: AssistantHostedDeviceToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      acceptedInputAuthority?: { assistantInputId: string }
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedDeviceToolResponse>
 }
 
@@ -219,11 +244,24 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
-export type AssistantAutomationTimingVerificationIssue =
-  | AssistantCronOccurrenceUnverifiedReason
+export type AssistantAutomationOccurrenceProjectionIssue =
   | 'default_timezone_unverified'
   | 'projection_unavailable'
   | 'record_readback_mismatch'
+  | 'stale_recurring_occurrence'
+
+export type AssistantAutomationOccurrenceProjection =
+  | {
+      nextOccurrenceAt: string | null
+      status: 'resolved'
+    }
+  | {
+      status: 'pending'
+    }
+  | {
+      issues: readonly AssistantAutomationOccurrenceProjectionIssue[]
+      status: 'unavailable'
+    }
 
 export type AssistantHostedAutomationToolResponse =
   | {
@@ -232,12 +270,10 @@ export type AssistantHostedAutomationToolResponse =
       contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -247,12 +283,10 @@ export type AssistantHostedAutomationToolResponse =
       created: boolean
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'current_conversation' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -428,6 +462,12 @@ export interface AssistantPhoneCallPort {
 }
 
 export interface AssistantPhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {
@@ -856,6 +896,9 @@ function normalizeAssistantPhysicalNotePort(
   }
 
   return {
+    ...(typeof input.resolve === 'function'
+      ? { resolve: input.resolve.bind(input) }
+      : {}),
     send: input.send.bind(input),
   }
 }

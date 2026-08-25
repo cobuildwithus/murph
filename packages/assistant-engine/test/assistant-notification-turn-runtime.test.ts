@@ -3445,6 +3445,56 @@ test.each(['linq', 'telegram', 'email'] as const)(
   },
 )
 
+test('sendAssistantNotificationLocal keeps a scheduled workout decision structured and delivers only its text', async () => {
+  const decision = JSON.stringify({
+    kind: 'send_message',
+    privateSummary: 'Prepared the exact workout check-in.',
+    text: 'How did the next set go?',
+  })
+  const providerResult = createProviderResult({
+    providerAuthoredResponse: decision,
+    response: decision,
+    transcriptResponse: decision,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-scheduled-workout-check-in',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deliveryTarget: 'direct-workout-check-in',
+    instructions: 'Ask how the next set in the exact workout went.',
+    scheduledInvocationAuthority: {
+      automationId: 'scheduled-workout-check-in',
+      occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/scheduled-workout-check-in',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Prepared the exact workout check-in.',
+      text: 'How did the next set go?',
+    },
+    response: 'How did the next set go?',
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'How did the next set go?',
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: 'How did the next set go?',
+    }),
+  )
+  expect(JSON.stringify(deliverMessage.mock.calls)).not.toMatch(
+    /privateSummary|evt_/u,
+  )
+})
+
 test.each(
   (['linq', 'telegram', 'email'] as const).flatMap((channel) => [
     { channel, responsePolicy: undefined },

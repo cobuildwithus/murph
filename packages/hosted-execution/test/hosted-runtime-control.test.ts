@@ -303,6 +303,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.snapshot_preempted");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.accepted_attempt_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.provider_egress_diagnostic");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.invocation_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
@@ -2219,15 +2220,22 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: true,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: true,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(() => parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: "true",
+      workspace: null,
+    })).toThrow(/hostedAssistantSubagentModelOverridesAllowed/u);
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -2531,6 +2539,24 @@ describe("hosted runtime control contracts", () => {
     }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
   });
 
+  it("accepts retired device-sync environment logs from warm runners", () => {
+    const entry = {
+      at: "2026-04-26T00:00:03.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.legacy_platform_env_present",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        junctionPlatformEnvPresent: true,
+        legacyPlatformEnvKeyCount: 4,
+      },
+    };
+
+    expect(parseHostedRuntimeLogRequest({ entries: [entry] })).toEqual({
+      entries: [entry],
+    });
+  });
+
   it("keeps runtime logs structured and privacy-bounded", () => {
     const entry = {
       at: "2026-04-26T00:00:03.000Z",
@@ -2545,6 +2571,9 @@ describe("hosted runtime control contracts", () => {
       phase: "import",
       redactedJson: {
         importedCount: 2,
+        junctionWorkoutStreamMaxTimestampCount: 100_000,
+        junctionWorkoutStreamTimestampCardinalityKind: "over_limit",
+        junctionWorkoutStreamTimestampCount: 100_127,
         messageReactionsAvailable: true,
         reasoningEffort: "low",
         retryable: false,

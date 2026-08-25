@@ -3236,6 +3236,7 @@ export interface HostedWorkspaceReadResponse {
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
+  hostedAssistantSubagentModelOverridesAllowed?: boolean;
   platformAiUsageAllowed?: boolean;
   workspace: HostedWorkspaceState | null;
 }
@@ -3402,6 +3403,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.lease_superseded",
   "runner.provider_egress_diagnostic",
   "runner.started",
+  "runtime.invocation_finished",
   "workspace.codex_home_snapshot",
 ] as const;
 

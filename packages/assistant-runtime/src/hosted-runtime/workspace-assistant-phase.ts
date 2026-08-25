@@ -46,10 +46,11 @@ import {
   resolveAssistantCronDefaultTimeZoneProjection,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
-  type AssistantCronStatusOptions,
-  type AssistantAutomationTimingVerificationIssue,
-  type AssistantBeforeProviderAcceptedInputsHook,
+  type AssistantAutomationOccurrenceProjection,
+  type AssistantAutomationOccurrenceProjectionIssue,
   type AssistantAutomationOperationScope,
+  type AssistantBeforeProviderAcceptedInputsHook,
+  type AssistantCronStatusOptions,
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
@@ -1705,7 +1706,7 @@ function stripHostedAssistantAvailabilityConflictBlock(
 
 function buildHostedAutomationTimingVerificationLogEntry(input: {
   action: "patch" | "save";
-  issues: readonly AssistantAutomationTimingVerificationIssue[];
+  issues: readonly AssistantAutomationOccurrenceProjectionIssue[];
   recovered: boolean;
   stage: "initial" | "readback";
 }): HostedExecutionRedactedLogEntry {
@@ -1799,9 +1800,11 @@ async function projectHostedAutomationResponseFields(input: {
       ? schedule.timeZone ?? null
       : null;
   let nextOccurrenceAt: string | null = null;
-  const timingVerificationIssues = new Set<
-    AssistantAutomationTimingVerificationIssue
+  const occurrenceProjectionIssues = new Set<
+    AssistantAutomationOccurrenceProjectionIssue
   >();
+  let occurrenceProjectionPending = false;
+  let occurrenceProjectionStale = false;
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1814,7 +1817,7 @@ async function projectHostedAutomationResponseFields(input: {
     ) {
       effectiveTimeZone = timeZoneProjection.timeZone;
       if (!timeZoneProjection.vaultTimeZoneVerified) {
-        timingVerificationIssues.add("default_timezone_unverified");
+        occurrenceProjectionIssues.add("default_timezone_unverified");
       }
     }
   }
@@ -1834,31 +1837,52 @@ async function projectHostedAutomationResponseFields(input: {
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        timingVerificationIssues.add(
-          projection.occurrenceUnverifiedReason ?? "projection_unavailable",
-        );
+        if (projection.occurrenceUnverifiedReason === "runtime_state_pending") {
+          occurrenceProjectionPending = true;
+        } else if (
+          projection.occurrenceUnverifiedReason === "stale_recurring_occurrence"
+        ) {
+          occurrenceProjectionStale = true;
+        } else {
+          occurrenceProjectionIssues.add("projection_unavailable");
+        }
       }
       if (
         job.updatedAt !== input.record.updatedAt
         || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
       ) {
-        timingVerificationIssues.add("record_readback_mismatch");
+        occurrenceProjectionIssues.add("record_readback_mismatch");
       }
     } catch {
-      timingVerificationIssues.add("projection_unavailable");
+      occurrenceProjectionIssues.add("projection_unavailable");
     }
   }
-  const timingVerificationIssueList = [...timingVerificationIssues];
+  if (occurrenceProjectionStale && occurrenceProjectionIssues.size === 0) {
+    occurrenceProjectionIssues.add("stale_recurring_occurrence");
+  }
+  const occurrenceProjectionIssueList = [...occurrenceProjectionIssues];
+  let occurrenceProjection: AssistantAutomationOccurrenceProjection;
+  if (occurrenceProjectionIssueList.length > 0) {
+    occurrenceProjection = {
+      issues: occurrenceProjectionIssueList,
+      status: "unavailable",
+    };
+  } else if (occurrenceProjectionPending) {
+    occurrenceProjection = { status: "pending" };
+  } else {
+    occurrenceProjection = {
+      nextOccurrenceAt,
+      status: "resolved",
+    };
+  }
   return {
     automationId: input.record.automationId,
     contextReferences: [...input.record.contextReferences],
     effectiveTimeZone,
     lookupId: input.record.slug,
-    nextOccurrenceAt,
+    occurrenceProjection,
     schedule,
     status: input.record.status,
-    timingVerificationIssues: timingVerificationIssueList,
-    timingVerified: timingVerificationIssueList.length === 0,
     updatedAt: input.record.updatedAt,
   };
 }
@@ -1885,13 +1909,13 @@ async function buildHostedAutomationToolResponse(
     created: input.result.created,
     routeBinding: input.routeBinding,
   };
-  if (response.timingVerified) {
+  if (response.occurrenceProjection.status !== "unavailable") {
     return response;
   }
   input.redactedLogEntries.push(
     buildHostedAutomationTimingVerificationLogEntry({
       action: input.action,
-      issues: response.timingVerificationIssues ?? [],
+      issues: response.occurrenceProjection.issues,
       recovered: false,
       stage: "initial",
     }),
@@ -1904,7 +1928,7 @@ async function buildHostedAutomationToolResponse(
       vaultRoot: input.vaultRoot,
     });
     if (!readbackRecord) {
-      readbackResponse = markHostedAutomationTimingUnverified(
+      readbackResponse = markHostedAutomationOccurrenceProjectionUnavailable(
         response,
         "record_readback_mismatch",
       );
@@ -1924,14 +1948,14 @@ async function buildHostedAutomationToolResponse(
         || JSON.stringify(readbackRecord.schedule)
           !== JSON.stringify(record.schedule);
       readbackResponse = recordChanged
-        ? markHostedAutomationTimingUnverified(
+        ? markHostedAutomationOccurrenceProjectionUnavailable(
             projectedReadback,
             "record_readback_mismatch",
           )
         : projectedReadback;
     }
   } catch {
-    readbackResponse = markHostedAutomationTimingUnverified(
+    readbackResponse = markHostedAutomationOccurrenceProjectionUnavailable(
       response,
       "projection_unavailable",
     );
@@ -1939,8 +1963,10 @@ async function buildHostedAutomationToolResponse(
   input.redactedLogEntries.push(
     buildHostedAutomationTimingVerificationLogEntry({
       action: input.action,
-      issues: readbackResponse.timingVerificationIssues ?? [],
-      recovered: readbackResponse.timingVerified,
+      issues: readbackResponse.occurrenceProjection.status === "unavailable"
+        ? readbackResponse.occurrenceProjection.issues
+        : [],
+      recovered: readbackResponse.occurrenceProjection.status !== "unavailable",
       stage: "readback",
     }),
   );
@@ -1952,18 +1978,19 @@ type HostedAssistantAutomationWriteResponse = Extract<
   { action: "patch" | "save" }
 >;
 
-function markHostedAutomationTimingUnverified(
+function markHostedAutomationOccurrenceProjectionUnavailable(
   response: HostedAssistantAutomationWriteResponse,
-  issue: AssistantAutomationTimingVerificationIssue,
+  issue: AssistantAutomationOccurrenceProjectionIssue,
 ): HostedAssistantAutomationWriteResponse {
+  const existingIssues = response.occurrenceProjection.status === "unavailable"
+    ? response.occurrenceProjection.issues
+    : [];
   return {
     ...response,
-    nextOccurrenceAt: null,
-    timingVerificationIssues: [...new Set([
-      ...(response.timingVerificationIssues ?? []),
-      issue,
-    ])],
-    timingVerified: false,
+    occurrenceProjection: {
+      issues: [...new Set([...existingIssues, issue])],
+      status: "unavailable",
+    },
   };
 }
 
@@ -1989,13 +2016,11 @@ export async function runHostedWorkspaceAssistantPhase(
   const recordDeferredUsage = (
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ): Promise<void> => {
+  ): Promise<void> =>
     input.recordDeferredUsage?.(
       record,
       providerRequestAcceptedInputIds,
-    );
-    return Promise.resolve();
-  };
+    ) ?? Promise.resolve();
   const usageRecorder =
     input.runtime.platform.usageRecordPort && input.recordDeferredUsage
       ? { recordUsage: recordDeferredUsage }
@@ -9259,6 +9284,40 @@ function resolveHostedWorkspaceDeviceTool(input: {
           accountId: result.connectionId,
           action: request.action,
           occurredAt: result.occurredAt,
+          status: result.status,
+        };
+      }
+
+      if (request.action === "configure_no_data_outreach") {
+        if (
+          !deviceSyncPort.configureNoDataOutreach
+          || !context?.acceptedInputAuthority
+        ) {
+          throw new VaultCliError(
+            "device_no_data_outreach_unavailable",
+            "No-data outreach can only be changed from current private member input.",
+          );
+        }
+        const common = {
+          assistantInputId: context.acceptedInputAuthority.assistantInputId,
+          signal: context.signal ?? null,
+          sourceProviderSlug: request.sourceProvider,
+        };
+        const result = request.mode === "after_days"
+          ? await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              afterDays: request.afterDays,
+              mode: request.mode,
+            })
+          : await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              mode: request.mode,
+            });
+        return {
+          action: request.action,
+          effectiveAfterDays: result.effectiveAfterDays,
+          setting: result.setting,
+          sourceProvider: result.sourceProviderSlug,
           status: result.status,
         };
       }

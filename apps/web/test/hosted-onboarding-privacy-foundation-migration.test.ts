@@ -90,6 +90,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'signupNotificationContextEncrypted String? @map("signup_notification_context_encrypted")',
     'signupNotificationContextExpiresAt DateTime? @map("signup_notification_context_expires_at")',
     "pendingGroupSetup HostedPendingGroupSetup?",
+    "physicalNoteRecoveries HostedPhysicalNoteRecovery[]",
     "physicalNotes HostedPhysicalNote[]",
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
@@ -1156,7 +1157,11 @@ describe("hosted Prisma baseline migration", () => {
       "20260815190000_outbound_message_volume_receipts",
       "20260820010000_hosted_email_public_bootstrap",
       "20260820020000_hosted_signup_notification_context",
+      "20260820170000_hosted_physical_note_recovery",
       "20260820190000_hosted_ops_usage_reset_receipt",
+      "20260821120000_hosted_group_sponsorship_fifty_cap",
+      "20260824010000_rearm_hosted_inbox_video_retention",
+      "20260825050000_device_source_no_data_outreach_preference",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

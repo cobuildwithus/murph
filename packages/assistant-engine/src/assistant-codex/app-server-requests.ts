@@ -44,11 +44,25 @@ export function buildCodexThreadStartParams(
     workingDirectory: string
   },
 ): Record<string, unknown> {
-  return buildCodexThreadContextParams({
-    includeInstructions: true,
-    includeServiceName: true,
-    input,
-  })
+  return {
+    ...buildCodexThreadContextParams({
+      includeInstructions: true,
+      includeServiceName: true,
+      input,
+    }),
+  }
+}
+
+export function buildCodexThreadMetadataResumeParams(
+  codexThreadId: string,
+): Record<string, unknown> {
+  return {
+    excludeTurns: true,
+    threadId: assertCodexRpcIdentifier({
+      field: 'threadId',
+      value: codexThreadId,
+    }),
+  }
 }
 
 export function buildCodexThreadResumeParams(input: {

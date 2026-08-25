@@ -303,11 +303,14 @@ describe('assistant Codex turn planning', () => {
     }
     const route = createRoute()
     const resolvePlan = async (input: {
+      channel?: 'email' | 'telegram'
       configured: boolean
       group?: boolean
+      progressAvailable?: boolean
       scheduled?: boolean
     }) => {
       const group = input.group ?? false
+      const channel = input.channel ?? 'telegram'
       return await resolveAssistantRouteTurnPlan({
         executionContext: group
           ? {
@@ -320,7 +323,7 @@ describe('assistant Codex turn planning', () => {
           : null,
         input: {
           ...createMessageInput(),
-          channel: 'telegram',
+          channel,
           threadIsDirect: !group,
           ...(input.scheduled
             ? {
@@ -336,6 +339,11 @@ describe('assistant Codex turn planning', () => {
         preferenceContext,
         profile,
         promptTimeContext,
+        progressDelivery: input.progressAvailable
+          ? {
+              send: async () => ({ kind: 'sent', source: 'model' }),
+            }
+          : null,
         route,
         session: createSession(),
         sharedPlan: createSharedPlan({
@@ -345,7 +353,7 @@ describe('assistant Codex turn planning', () => {
             setupCommand: 'murph',
           },
         }, {
-          channel: 'telegram',
+          channel,
           effectiveThreadIsDirect: !group,
           threadId: 'thread-test',
           threadIsDirect: !group,
@@ -374,6 +382,63 @@ describe('assistant Codex turn planning', () => {
         'never send a mode-less single-scout request',
       )
     }
+
+    const directProgressPlan = await resolvePlan({
+      configured: true,
+      progressAvailable: true,
+    })
+    const groupProgressPlan = await resolvePlan({
+      configured: true,
+      group: true,
+      progressAvailable: true,
+    })
+    const emailWithoutProgressPlan = await resolvePlan({
+      channel: 'email',
+      configured: true,
+    })
+    const directProgressPrompt = directProgressPlan.systemPrompt
+    const groupProgressPrompt = groupProgressPlan.systemPrompt
+    if (!directProgressPrompt || !groupProgressPrompt) {
+      throw new Error('Expected progress-capable conversation prompts.')
+    }
+
+    expect(directProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
+      'send_progress_update',
+    )
+    expect(directProgressPrompt.match(
+      /Use `murph\.send_progress_update` for interim updates/gu,
+    )).toHaveLength(1)
+    expect(groupProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
+      'send_progress_update',
+    )
+    expect(groupProgressPrompt.match(
+      /use `murph\.send_progress_update` much more sparingly/gu,
+    )).toHaveLength(1)
+    for (const plan of [directProgressPlan, groupProgressPlan]) {
+      expect(plan.systemPrompt).not.toContain(
+        'Before a noticeable foreground pass',
+      )
+      expect(plan.systemPrompt).not.toContain(
+        'a research lookup alone does not justify a status message',
+      )
+      expect(plan.systemPrompt).not.toContain(
+        'call `send_progress_update` before bounded local media tools',
+      )
+    }
+
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'Configured Exa research:',
+    )
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'For voice memos and audio/video, use transcript fragments directly',
+    )
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'Member-visible interim progress is unavailable on this route',
+    )
+    expect(emailWithoutProgressPlan.dynamicTools.map((tool) => tool.name))
+      .not.toContain('send_progress_update')
+    expect(emailWithoutProgressPlan.systemPrompt)
+      .not.toContain('send_progress_update')
 
     for (const unavailablePlan of await Promise.all([
       resolvePlan({ configured: false }),
@@ -2336,13 +2401,13 @@ describe('assistant Codex turn planning', () => {
         expect.arrayContaining([
           'assistant_style',
           'generate_image',
-          'group',
+          'group_chat',
           'personalization',
           'submit_product_feedback',
         ]),
       )
       expect(
-        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group'),
+        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group_chat'),
       ).toMatchObject({ deferLoading: true })
 
       const foregroundSession = await applyAssistantSessionCodexResumeStateAction({
@@ -3758,6 +3823,14 @@ describe('assistant Codex turn planning', () => {
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    for (const plan of [attendedPlan, scheduledPlan]) {
+      expect(plan.systemPrompt).toContain(
+        '`murph.group action="read_shared"`',
+      )
+      expect(plan.systemPrompt).not.toContain('`murph.group_data')
+      expect(plan.systemPrompt).not.toContain('`murph.group_membership')
+      expect(plan.systemPrompt).not.toContain('`murph.group_email')
+    }
     expect(attendedPlan.dynamicTools).toContainEqual(
       expect.objectContaining({
         namespace: 'murph',
@@ -3782,8 +3855,8 @@ describe('assistant Codex turn planning', () => {
     expect(attendedPlan.systemPrompt).toContain(
       '`murph.select_reply_target` annotates the one eventual group response',
     )
-    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 8`')
-    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 8')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 6')
     expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
@@ -3943,7 +4016,10 @@ describe('assistant Codex turn planning', () => {
       'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(plan.developerInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(plan.developerInstructions).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -4006,12 +4082,26 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_search',
         'connected_apps_execute',
         'automation',
-        'group',
+        'group_consult',
+        'group_data',
+        'group_membership',
+        'group_usage',
+        'group_chat',
+        'group_email',
         'assistant_configuration',
         'assistant_style',
         'personalization',
         'create_phone_call',
       ]),
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_data action="read_shared"`',
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_email action="send_email"`',
+    )
+    expect(plan.systemPrompt).not.toContain(
+      '`murph.group action="read_shared"`',
     )
     const groupAssistantConfigurationTool = plan.dynamicTools.find(
       (tool) => tool.name === 'assistant_configuration',
@@ -4514,6 +4604,8 @@ describe('assistant Codex turn planning', () => {
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
       expect(toolNames).not.toContain('submit_product_feedback')
+      expect(toolNames).not.toContain('send_progress_update')
+      expect(plan.systemPrompt).not.toContain('murph.send_progress_update')
       if (expectedAvailable) {
         expect(toolNames).toEqual(expect.arrayContaining([
           'assistant_style',
@@ -4522,7 +4614,6 @@ describe('assistant Codex turn planning', () => {
           'personalization',
           'send_physical_note',
         ]))
-        expect(toolNames).not.toContain('send_progress_update')
       }
       if (channel === 'email') {
         expect(toolNames).not.toContain('assistant_style')

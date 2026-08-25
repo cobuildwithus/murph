@@ -41,6 +41,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH =
+  "/api/internal/device-sync/no-data-outreach";
 export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =
   "/api/internal/device-sync/fitbit-migration/cutover";
 export const HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT = 100;
@@ -266,6 +268,23 @@ export interface HostedExecutionDeviceSyncReconcileResponse {
   connectionId: string;
   occurredAt: string;
   status: "queued";
+}
+
+export type HostedExecutionDeviceSyncNoDataOutreachRequest = {
+  assistantInputId: string;
+  sourceProviderSlug: string;
+} & (
+  | { mode: "after_days"; afterDays: number }
+  | { mode: "default" }
+  | { mode: "off" }
+);
+
+export interface HostedExecutionDeviceSyncNoDataOutreachResponse {
+  action: "configure_no_data_outreach";
+  effectiveAfterDays: number | null;
+  setting: "custom" | "default" | "off";
+  sourceProviderSlug: string;
+  status: "saved" | "unchanged";
 }
 
 export interface HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
@@ -781,6 +800,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   timeseriesWindowHours: "number",
   webhookDataJson: "string",
   workoutStreamCursor: "string",
+  workoutStreamEmptyReplay: "boolean",
+  workoutStreamEmptySeen: "boolean",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
@@ -902,6 +923,110 @@ export function parseHostedExecutionDeviceSyncReconcileResponse(
       "Hosted device-sync reconcile response occurredAt",
     ),
     status: "queued",
+  };
+}
+
+export function parseHostedExecutionDeviceSyncNoDataOutreachRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncNoDataOutreachRequest {
+  const record = requireObject(value, "Hosted device-sync no-data outreach request");
+  const mode = requireString(
+    record.mode,
+    "Hosted device-sync no-data outreach request mode",
+  );
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    "Hosted device-sync no-data outreach request assistantInputId",
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError(
+      "Hosted device-sync no-data outreach request assistantInputId is invalid.",
+    );
+  }
+  const common = {
+    assistantInputId,
+    sourceProviderSlug: requireString(
+      record.sourceProviderSlug,
+      "Hosted device-sync no-data outreach request sourceProviderSlug",
+    ),
+  };
+  if (mode === "after_days") {
+    assertSupportedFields(
+      record,
+      "Hosted device-sync no-data outreach request",
+      ["afterDays", "assistantInputId", "mode", "sourceProviderSlug"],
+    );
+    const afterDays = requirePositiveInteger(
+      record.afterDays,
+      "Hosted device-sync no-data outreach request afterDays",
+    );
+    if (afterDays < 5 || afterDays > 30) {
+      throw new TypeError(
+        "Hosted device-sync no-data outreach request afterDays must be between 5 and 30.",
+      );
+    }
+    return { ...common, afterDays, mode };
+  }
+  if (mode !== "default" && mode !== "off") {
+    throw new TypeError("Hosted device-sync no-data outreach request mode is invalid.");
+  }
+  assertSupportedFields(
+    record,
+    "Hosted device-sync no-data outreach request",
+    ["assistantInputId", "mode", "sourceProviderSlug"],
+  );
+  return { ...common, mode };
+}
+
+export function parseHostedExecutionDeviceSyncNoDataOutreachResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncNoDataOutreachResponse {
+  const record = requireObject(value, "Hosted device-sync no-data outreach response");
+  assertSupportedFields(
+    record,
+    "Hosted device-sync no-data outreach response",
+    ["action", "effectiveAfterDays", "setting", "sourceProviderSlug", "status"],
+  );
+  if (record.action !== "configure_no_data_outreach") {
+    throw new TypeError("Hosted device-sync no-data outreach response action is invalid.");
+  }
+  if (
+    record.setting !== "custom"
+    && record.setting !== "default"
+    && record.setting !== "off"
+  ) {
+    throw new TypeError("Hosted device-sync no-data outreach response setting is invalid.");
+  }
+  if (record.status !== "saved" && record.status !== "unchanged") {
+    throw new TypeError("Hosted device-sync no-data outreach response status is invalid.");
+  }
+  const effectiveAfterDays = record.effectiveAfterDays === null
+    ? null
+    : requirePositiveInteger(
+        record.effectiveAfterDays,
+        "Hosted device-sync no-data outreach response effectiveAfterDays",
+      );
+  if (
+    (record.setting === "off" && effectiveAfterDays !== null)
+    || (record.setting !== "off" && (
+      effectiveAfterDays === null
+      || effectiveAfterDays < 5
+      || effectiveAfterDays > 30
+    ))
+  ) {
+    throw new TypeError(
+      "Hosted device-sync no-data outreach response setting and effectiveAfterDays are inconsistent.",
+    );
+  }
+  return {
+    action: record.action,
+    effectiveAfterDays,
+    setting: record.setting,
+    sourceProviderSlug: requireString(
+      record.sourceProviderSlug,
+      "Hosted device-sync no-data outreach response sourceProviderSlug",
+    ),
+    status: record.status,
   };
 }
 

@@ -24,6 +24,8 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncDirtyStateResponse,
+  parseHostedExecutionDeviceSyncNoDataOutreachRequest,
+  parseHostedExecutionDeviceSyncNoDataOutreachResponse,
   parseHostedExecutionDeviceSyncReconcileRequest,
   parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -274,6 +276,61 @@ describe("hosted device-sync reconcile contract", () => {
       occurredAt: "2026-07-15T12:00:00.000Z",
       status: "disconnected",
     })).toThrow(/status must be queued/u);
+  });
+});
+
+describe("hosted device-sync no-data outreach contract", () => {
+  it("accepts explicit bounded settings and rejects ambiguous shapes", () => {
+    const authority = {
+      assistantInputId: "ain_00000000000000000000000000000001",
+      sourceProviderSlug: "garmin",
+    };
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      afterDays: 10,
+      mode: "after_days",
+    })).toEqual({ ...authority, afterDays: 10, mode: "after_days" });
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      mode: "off",
+    })).toEqual({ ...authority, mode: "off" });
+    for (const afterDays of [4, 31]) {
+      expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+        ...authority,
+        afterDays,
+        mode: "after_days",
+      })).toThrow(/between 5 and 30/u);
+    }
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      afterDays: 10,
+      mode: "off",
+    })).toThrow(/afterDays is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      assistantInputId: "not-an-input-id",
+      mode: "off",
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachResponse({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    })).toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    });
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachResponse({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "custom",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    })).toThrow(/inconsistent/u);
   });
 });
 
@@ -3286,9 +3343,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           kind: "resource",
           payload: {
             objectId: "",
-            resource: "heartrate",
+            resource: "workout_stream",
             resourceCategory: "timeseries",
             sourceProviderSlug: "",
+            workoutStreamEmptyReplay: true,
+            workoutStreamEmptySeen: true,
             windowStart: "2026-04-08T00:00:00Z",
           },
         },
@@ -3296,8 +3355,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
-      resource: "heartrate",
+      resource: "workout_stream",
       resourceCategory: "timeseries",
+      workoutStreamEmptyReplay: true,
+      workoutStreamEmptySeen: true,
       windowStart: "2026-04-08T00:00:00.000Z",
     });
   });

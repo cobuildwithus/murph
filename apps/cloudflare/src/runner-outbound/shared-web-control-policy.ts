@@ -13,6 +13,7 @@ import {
   HOSTED_PHONE_CALL_STOP_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
   HOSTED_PHYSICAL_NOTES_PATH,
 } from "@murphai/hosted-execution/physical-notes";
 import {
@@ -23,6 +24,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -71,6 +73,7 @@ export {
   HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
 };
@@ -97,6 +100,7 @@ export type HostedRunnerWebControlOperation =
   | "device_sync_connect_link"
   | "device_sync_fitbit_migration_cutover"
   | "device_sync_dirty_ack"
+  | "device_sync_no_data_outreach"
   | "device_sync_pending_dirty_state"
   | "device_sync_reconcile"
   | "device_sync_runtime_apply"
@@ -119,6 +123,7 @@ export type HostedRunnerWebControlOperation =
   | "phone_call_start"
   | "phone_call_status"
   | "phone_call_stop"
+  | "physical_note_recovery"
   | "physical_note_send"
   | "phone_call_result_delivery"
   | "runtime_latency_trace"
@@ -152,6 +157,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH, "device_sync_fitbit_migration_cutover"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH, "device_sync_no_data_outreach"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH, "device_sync_reconcile"],
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
@@ -183,6 +189,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
   [HOSTED_PHONE_CALL_STATUS_PATH, "phone_call_status"],
   [HOSTED_PHONE_CALL_STOP_PATH, "phone_call_stop"],
+  [HOSTED_PHYSICAL_NOTE_RECOVERY_PATH, "physical_note_recovery"],
   [HOSTED_PHYSICAL_NOTES_PATH, "physical_note_send"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

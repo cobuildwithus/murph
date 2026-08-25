@@ -319,14 +319,25 @@ interface RunnerContainerShellPrewarmOperation {
 
 interface RunnerContainerReadinessProof {
   checkedAtMs: number;
-  stopGeneration: number;
+  currentStart: RunnerContainerCurrentStart;
   userId: string;
 }
 
-type RunnerContainerStartObservation =
+type RunnerContainerReadinessObservation =
   | "cold-start-ready"
-  | "deploy-smoke-ready"
-  | "onStart";
+  | "deploy-smoke-ready";
+
+type RunnerContainerCleanupOwnership =
+  | "ambiguous"
+  | "current"
+  | "superseded";
+
+interface RunnerContainerCurrentStart {
+  pendingOnStartObservation: boolean;
+  pendingUntilMs: number | null;
+  readyObservedBy: RunnerContainerReadinessObservation | null;
+  startedAtMs: number;
+}
 
 export type RunnerWorkspaceInvocationAbortStatus =
   | "accepted"
@@ -556,8 +567,7 @@ export class RunnerContainer extends Container {
   protected readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
-  private containerStartedAtMs: number | null = null;
-  private containerStartObservedBy: RunnerContainerStartObservation | null = null;
+  private currentContainerStart: RunnerContainerCurrentStart | null = null;
   private currentLogContext: RunnerContainerLogContext | null = null;
   private lastActivityExpiryAtMs: number | null = null;
   private lastActivityObservedAtMs: number | null = null;
@@ -923,7 +933,7 @@ export class RunnerContainer extends Container {
 
     const abortController = new AbortController();
     const startedAtMs = Date.now();
-    const coldStartAlreadyObserved = this.containerStartedAtMs !== null;
+    const coldStartAlreadyObserved = this.currentContainerStart !== null;
     let retainForAuthoritativeReadiness = false;
     const result = this.withLifecycleLock(
       async (): Promise<RunnerContainerPrewarmShellResult> => {
@@ -1354,6 +1364,23 @@ export class RunnerContainer extends Container {
         }
         return { kind: "not-wakeable", reason: "no-active-child" };
       }
+      if (
+        response.ok
+        && active
+        && explicitlyRejected
+        && !absent
+        && !mismatch
+        && active.result
+      ) {
+        await active.result.catch(() => undefined);
+        if (
+          this.pointerlessWakeBlockingLifecycleCount > 0
+          || this.workspaceInvocationCoordinationChanged(null)
+        ) {
+          return { kind: "unknown", reason: "active-child-rejected" };
+        }
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -1705,7 +1732,10 @@ export class RunnerContainer extends Container {
   }
 
   override onStart(): void {
-    this.recordContainerStartObserved("onStart");
+    this.recordContainerStartObserved(
+      Date.now(),
+      readRunnerReadyTimeoutMs(this.environment),
+    );
     const context = this.currentLogContext;
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -1730,10 +1760,15 @@ export class RunnerContainer extends Container {
       destroyRequestPresent: this.lastDestroyRequest !== null,
       idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
     });
-    this.stopGeneration += 1;
-    this.clearRecentReadinessProof();
-    this.warmShellInvalidatedByUnsettledDestroy = false;
-    this.resolveStopObservers();
+    // onStop has no start identity. Preserve a bounded replacement start until
+    // its onStart hook or readiness deadline resolves which generation owns it.
+    const pendingReplacementStart =
+      this.currentContainerStart?.pendingOnStartObservation === true;
+    const stopAppliedToCurrentGeneration = !pendingReplacementStart && !(
+      this.isPlatformContainerDefinitelyRunning()
+      && this.currentContainerStart !== null
+    )
+      && this.recordCurrentContainerStopped();
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -1741,6 +1776,7 @@ export class RunnerContainer extends Container {
         exitCode: params.exitCode,
         lifecycleStage: "onStop",
         runnerPort: RUNNER_PORT,
+        stopAppliedToCurrentGeneration,
         stopClassification,
         stopReason: params.reason,
       },
@@ -1751,13 +1787,6 @@ export class RunnerContainer extends Container {
       phase: cleanExit ? "container.ready" : "failed",
       userId: context?.userId,
     });
-    this.containerStartedAtMs = null;
-    this.containerStartObservedBy = null;
-    this.shellPrewarmObservation = null;
-    this.lastActivityExpiryAtMs = null;
-    this.lastActivityObservedAtMs = null;
-    this.lastActivityObservedStage = null;
-    this.lastDestroyRequest = null;
   }
 
   override onError(error: unknown): never {
@@ -2204,15 +2233,17 @@ export class RunnerContainer extends Container {
     } = {},
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
-    const status = readContainerStatus(await this.getState());
+    const initialState = await this.getState();
+    const status = readContainerStatus(initialState);
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
     const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
     throwIfRunnerContainerOperationAborted(operationAbortSignal);
 
     if (isRunnerContainerStopped(status)) {
-      this.clearRecentReadinessProof();
+      this.recordCurrentContainerStopped();
       this.warmShellInvalidatedByUnsettledDestroy = false;
     } else if (this.warmShellInvalidatedByUnsettledDestroy) {
+      const invalidatedStart = this.currentContainerStart;
       this.clearRecentReadinessProof();
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -2229,11 +2260,13 @@ export class RunnerContainer extends Container {
       if (options.surfaceCleanupUnsettled) {
         await this.stopWarmContainerForReadiness({
           cause: new Error("Hosted runner warm shell was invalidated by unsettled cleanup."),
+          expectedStart: invalidatedStart,
           failClosed: true,
           reason: "warm-invalidated",
         });
       } else {
         await this.stopWarmContainer({
+          expectedStart: invalidatedStart,
           failClosed: true,
           reason: "warm-invalidated",
         });
@@ -2242,10 +2275,15 @@ export class RunnerContainer extends Container {
       !isRunnerContainerStopped(status)
       && !options.completeSupersededShellPrewarm
     ) {
+      const observedStart = this.observeRecentPlatformStart(
+        initialState,
+        readyTimeoutMs,
+      );
       if (isRunnerContainerRunning(status)) {
         const recentReadinessProof = this.readRecentReadinessProof(
           Date.now(),
           input.userId,
+          observedStart,
         );
         if (recentReadinessProof) {
           emitHostedExecutionStructuredLog({
@@ -2275,7 +2313,17 @@ export class RunnerContainer extends Container {
           this.environment,
           operationAbortSignal,
         );
-        this.recordRecentReadinessProof(input.userId);
+        const readyStart = this.recordContainerReady(
+          "cold-start-ready",
+          initialState,
+          observedStart,
+        );
+        if (!readyStart) {
+          throw new Error(
+            "Hosted runner container changed while warm readiness was recorded.",
+          );
+        }
+        this.recordRecentReadinessProof(input.userId, readyStart);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2290,6 +2338,28 @@ export class RunnerContainer extends Container {
         });
         return "already_warm";
       } catch (error) {
+        if (this.currentContainerStart !== observedStart) {
+          throw error;
+        }
+        const pendingColdStart = this.readPendingColdStart({
+          error,
+          expectedStart: observedStart,
+          maxAgeMs: readyTimeoutMs,
+          operationAbortSignal,
+          state: initialState,
+        });
+        if (pendingColdStart) {
+          this.logPendingColdStart({
+            ageMs: pendingColdStart.ageMs,
+            maxAgeMs: readyTimeoutMs,
+            readinessStartedAtMs: readinessStartedAt,
+            readinessTimeoutMs,
+            statusBeforeStart: status,
+            userId: input.userId,
+          });
+          throw error;
+        }
+        this.clearContainerPendingWindow(observedStart);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2307,11 +2377,13 @@ export class RunnerContainer extends Container {
         if (options.surfaceCleanupUnsettled) {
           await this.stopWarmContainerForReadiness({
             cause: error,
+            expectedStart: observedStart,
             failClosed: true,
             reason: "warm-health-failed",
           });
         } else {
           await this.stopWarmContainer({
+            expectedStart: observedStart,
             reason: "warm-health-failed",
           });
         }
@@ -2339,6 +2411,11 @@ export class RunnerContainer extends Container {
     const remainingTimeoutMs = Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
 
+    const coldStartWaitStartedAtMs = Date.now();
+    const currentStart = this.recordContainerStartIssued(
+      coldStartWaitStartedAtMs,
+      readyTimeoutMs,
+    );
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
@@ -2357,9 +2434,43 @@ export class RunnerContainer extends Container {
         this.environment,
         operationAbortSignal,
       );
-      this.recordRecentReadinessProof(input.userId);
-      this.recordContainerStartObserved("cold-start-ready");
+      const readyStart = this.recordContainerReady(
+        "cold-start-ready",
+        undefined,
+        currentStart,
+      );
+      if (!readyStart) {
+        throw new Error(
+          "Hosted runner container changed while cold readiness was recorded.",
+        );
+      }
+      this.recordRecentReadinessProof(input.userId, readyStart);
     } catch (error) {
+      if (this.currentContainerStart !== currentStart) {
+        throw error;
+      }
+      const pendingColdStart = this.readPendingColdStart({
+        error,
+        expectedStart: currentStart,
+        maxAgeMs: readyTimeoutMs,
+        operationAbortSignal,
+        state: {
+          lastChange: currentStart.startedAtMs,
+          status: "running",
+        },
+      });
+      if (pendingColdStart) {
+        this.logPendingColdStart({
+          ageMs: pendingColdStart.ageMs,
+          maxAgeMs: readyTimeoutMs,
+          readinessStartedAtMs: readinessStartedAt,
+          readinessTimeoutMs,
+          statusBeforeStart: status,
+          userId: input.userId,
+        });
+        throw error;
+      }
+      this.clearContainerPendingWindow(currentStart);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -2379,11 +2490,13 @@ export class RunnerContainer extends Container {
       if (options.surfaceCleanupUnsettled) {
         await this.stopWarmContainerForReadiness({
           cause: error,
+          expectedStart: currentStart,
           failClosed: false,
           reason: "cold-start-failure",
         });
       } else {
         await this.stopWarmContainer({
+          expectedStart: currentStart,
           failClosed: false,
           reason: "cold-start-failure",
         }).catch(() => undefined);
@@ -2409,6 +2522,71 @@ export class RunnerContainer extends Container {
     return "started";
   }
 
+  private readPendingColdStart(input: {
+    error: unknown;
+    expectedStart: RunnerContainerCurrentStart | null;
+    maxAgeMs: number;
+    operationAbortSignal: AbortSignal;
+    state: unknown;
+  }): { ageMs: number } | null {
+    const currentStart = input.expectedStart;
+    if (
+      isRunnerContainerFatalReadinessError(input.error)
+      || currentStart === null
+      || this.currentContainerStart !== currentStart
+      || currentStart.readyObservedBy !== null
+      || currentStart.pendingUntilMs === null
+      || (
+        input.operationAbortSignal.aborted
+        && !isRunnerContainerAbortHardTimeout(input.operationAbortSignal.reason)
+      )
+    ) {
+      return null;
+    }
+    const nowMs = Date.now();
+    const recentStart = readRecentContainerStart(
+      input.state,
+      nowMs,
+      input.maxAgeMs,
+    );
+    if (!recentStart) {
+      return null;
+    }
+    if (nowMs > currentStart.pendingUntilMs) {
+      return null;
+    }
+    return {
+      ageMs: Math.max(0, nowMs - currentStart.startedAtMs),
+    };
+  }
+
+  private logPendingColdStart(input: {
+    ageMs: number;
+    maxAgeMs: number;
+    readinessStartedAtMs: number;
+    readinessTimeoutMs: number;
+    statusBeforeStart: string | null;
+    userId: string;
+  }): void {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        pendingColdStartAgeMs: input.ageMs,
+        pendingColdStartMaxAgeMs: input.maxAgeMs,
+        readinessLatencyMs: Date.now() - input.readinessStartedAtMs,
+        readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
+        readinessTimeoutMs: input.readinessTimeoutMs,
+        runnerPort: RUNNER_PORT,
+        startMode: "cold-pending",
+        statusBeforeStart: input.statusBeforeStart,
+      },
+      level: "warn",
+      message: "Hosted execution container cold start is still pending after the caller readiness budget.",
+      phase: "container.starting",
+      userId: input.userId,
+    });
+  }
+
   private async ensureSmokeContainerReady(
     timeoutMs: number,
     options: {
@@ -2416,13 +2594,29 @@ export class RunnerContainer extends Container {
     } = {},
   ): Promise<void> {
     if (!options.forceColdStart) {
-      const status = readContainerStatus(await this.getState());
+      const state = await this.getState();
+      const status = readContainerStatus(state);
       if (!isRunnerContainerStopped(status)) {
+        const observedStart = this.observeRecentPlatformStart(state, timeoutMs);
         await assertRunnerHealthy(this, timeoutMs, this.environment);
+        if (!this.recordContainerReady(
+          "deploy-smoke-ready",
+          state,
+          observedStart,
+        )) {
+          throw new Error(
+            "Hosted runner container changed while smoke readiness was checked.",
+          );
+        }
         return;
       }
+      this.recordCurrentContainerStopped();
     }
 
+    const currentStart = this.recordContainerStartIssued(
+      Date.now(),
+      timeoutMs,
+    );
     await this.startAndWaitForPorts({
       cancellationOptions: {
         abort: AbortSignal.timeout(timeoutMs),
@@ -2431,12 +2625,21 @@ export class RunnerContainer extends Container {
         waitInterval: RUNNER_WAIT_INTERVAL_MS,
       },
     });
-    this.recordContainerStartObserved("deploy-smoke-ready");
+    if (!this.recordContainerReady(
+      "deploy-smoke-ready",
+      undefined,
+      currentStart,
+    )) {
+      throw new Error(
+        "Hosted runner container changed while smoke readiness was recorded.",
+      );
+    }
   }
 
   private async destroyIfRunning(input: {
     cleanupDeadlineAtMs?: number;
     expectedInteractionGeneration?: number;
+    expectedStart?: RunnerContainerCurrentStart | null;
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
@@ -2444,20 +2647,33 @@ export class RunnerContainer extends Container {
     const context = this.currentLogContext;
     const statusDeadlineAtMs = input.cleanupDeadlineAtMs
       ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
+    let stateBeforeDestroy: unknown = null;
     let statusBeforeDestroy: string | null = null;
 
     try {
-      statusBeforeDestroy = await readRunnerContainerStatusWithTimeout(
+      stateBeforeDestroy = await readRunnerContainerStateWithTimeout(
         this,
         Math.max(1, statusDeadlineAtMs - Date.now()),
       );
+      statusBeforeDestroy = readContainerStatus(stateBeforeDestroy);
+      const ownershipAfterStatus = this.readContainerCleanupOwnership(
+        input.expectedStart,
+        stateBeforeDestroy,
+      );
+      if (ownershipAfterStatus !== "current") {
+        return ownershipAfterStatus === "superseded";
+      }
       if (
         isRunnerContainerStopped(statusBeforeDestroy)
         && !this.isPlatformContainerDefinitelyRunning()
       ) {
+        this.recordCurrentContainerStopped();
         return true;
       }
     } catch (error) {
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+        return true;
+      }
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: null,
         error,
@@ -2478,6 +2694,13 @@ export class RunnerContainer extends Container {
       && this.containerInteractionGeneration !== input.expectedInteractionGeneration
     ) {
       return true;
+    }
+    const ownershipBeforeRequest = this.readContainerCleanupOwnership(
+      input.expectedStart,
+      stateBeforeDestroy,
+    );
+    if (ownershipBeforeRequest !== "current") {
+      return ownershipBeforeRequest === "superseded";
     }
 
     const destroyStartedAt = Date.now();
@@ -2507,6 +2730,13 @@ export class RunnerContainer extends Container {
     ) {
       return true;
     }
+    const ownershipBeforeDestroy = this.readContainerCleanupOwnership(
+      input.expectedStart,
+      stateBeforeDestroy,
+    );
+    if (ownershipBeforeDestroy !== "current") {
+      return ownershipBeforeDestroy === "superseded";
+    }
     this.pointerlessWakeBlockingLifecycleCount += 1;
     try {
       const destroyRequest = this.destroy().then(
@@ -2518,6 +2748,7 @@ export class RunnerContainer extends Container {
           ? {}
           : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
         destroyStartedAt,
+        expectedStart: input.expectedStart,
         failClosed,
         statusBeforeDestroy,
         stopGenerationBeforeDestroy,
@@ -2531,6 +2762,9 @@ export class RunnerContainer extends Container {
       ]);
 
       if (firstDestroyOutcome.kind === "destroy-rejected") {
+        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+          return true;
+        }
         const error = firstDestroyOutcome.error;
         if (isSettledRunnerContainerDestroyRaceError(error)) {
           return true;
@@ -2554,6 +2788,9 @@ export class RunnerContainer extends Container {
         ? await destroySettle
         : firstDestroyOutcome;
       if (settledOutcome.kind === "settle-rejected") {
+        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+          return true;
+        }
         if (failClosed) {
           throw settledOutcome.error;
         }
@@ -2591,6 +2828,7 @@ export class RunnerContainer extends Container {
   private async waitForDestroyedContainerStopped(input: {
     cleanupDeadlineAtMs?: number;
     destroyStartedAt: number;
+    expectedStart?: RunnerContainerCurrentStart | null;
     failClosed: boolean;
     statusBeforeDestroy: string | null;
     stopGenerationBeforeDestroy: number;
@@ -2598,7 +2836,7 @@ export class RunnerContainer extends Container {
     | {
         ok: true;
         observedStatuses: string[];
-        settleReason: "onStop" | "status";
+        settleReason: "onStop" | "status" | "superseded";
         settleLatencyMs: number;
         statusAfterDestroy: string | null;
         stopObservedAfterDestroy: boolean;
@@ -2613,8 +2851,19 @@ export class RunnerContainer extends Container {
     const observedStatuses: string[] = [];
     let lastError: unknown = null;
     let statusAfterDestroy: string | null = null;
+    const supersededResult = () => ({
+      ok: true as const,
+      observedStatuses,
+      settleLatencyMs: Date.now() - input.destroyStartedAt,
+      settleReason: "superseded" as const,
+      statusAfterDestroy,
+      stopObservedAfterDestroy: false,
+    });
 
     while (true) {
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+        return supersededResult();
+      }
       if (this.stopGeneration > input.stopGenerationBeforeDestroy) {
         return {
           ok: true,
@@ -2657,15 +2906,27 @@ export class RunnerContainer extends Container {
       }
 
       try {
-        statusAfterDestroy = await readRunnerContainerStatusWithTimeout(
+        const stateAfterDestroy = await readRunnerContainerStateWithTimeout(
           this,
           Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
         );
+        statusAfterDestroy = readContainerStatus(stateAfterDestroy);
         appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
+        const ownershipAfterDestroy = this.readContainerCleanupOwnership(
+          input.expectedStart,
+          stateAfterDestroy,
+        );
+        if (ownershipAfterDestroy === "superseded") {
+          return supersededResult();
+        }
+        if (ownershipAfterDestroy === "ambiguous") {
+          return { ok: false };
+        }
         if (
           isRunnerContainerStopped(statusAfterDestroy)
           && !this.isPlatformContainerDefinitelyRunning()
         ) {
+          this.recordCurrentContainerStopped();
           return {
             ok: true,
             observedStatuses,
@@ -2676,6 +2937,9 @@ export class RunnerContainer extends Container {
           };
         }
       } catch (error) {
+        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+          return supersededResult();
+        }
         lastError = error;
         appendObservedRunnerContainerStatus(observedStatuses, "status_error");
       }
@@ -2694,9 +2958,13 @@ export class RunnerContainer extends Container {
   private async stopWarmContainer(input?: {
     cleanupDeadlineAtMs?: number;
     expectedInteractionGeneration?: number;
+    expectedStart?: RunnerContainerCurrentStart | null;
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
   }): Promise<boolean> {
+    if (this.readContainerCleanupOwnership(input?.expectedStart) === "superseded") {
+      return true;
+    }
     this.clearRecentReadinessProof();
     const failClosed = input?.failClosed ?? true;
     const reason = input?.reason ?? "destroy-instance";
@@ -2709,12 +2977,21 @@ export class RunnerContainer extends Container {
         ...(input?.expectedInteractionGeneration === undefined
           ? {}
           : { expectedInteractionGeneration: input.expectedInteractionGeneration }),
+        ...(input?.expectedStart === undefined
+          ? {}
+          : { expectedStart: input.expectedStart }),
         failClosed,
         reason,
       });
     } catch (error) {
+      if (this.readContainerCleanupOwnership(input?.expectedStart) === "superseded") {
+        return true;
+      }
       this.warmShellInvalidatedByUnsettledDestroy = true;
       throw error;
+    }
+    if (this.readContainerCleanupOwnership(input?.expectedStart) === "superseded") {
+      return true;
     }
     if (destroyed) {
       this.warmShellInvalidatedByUnsettledDestroy = false;
@@ -2726,6 +3003,7 @@ export class RunnerContainer extends Container {
 
   private async stopWarmContainerForReadiness(input: {
     cause: unknown;
+    expectedStart: RunnerContainerCurrentStart | null;
     failClosed: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<void> {
@@ -2733,6 +3011,7 @@ export class RunnerContainer extends Container {
     try {
       const settled = await this.stopWarmContainer({
         cleanupDeadlineAtMs,
+        expectedStart: input.expectedStart,
         failClosed: input.failClosed,
         reason: input.reason,
       });
@@ -2837,14 +3116,152 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private recordContainerStartObserved(observedBy: RunnerContainerStartObservation): void {
-    if (this.containerStartedAtMs === null) {
-      this.containerStartedAtMs = Date.now();
-      this.containerStartObservedBy = observedBy;
+  private observeRecentPlatformStart(
+    state: unknown,
+    maxAgeMs: number,
+  ): RunnerContainerCurrentStart | null {
+    const existing = this.currentContainerStart;
+    if (existing) {
+      return existing;
     }
+    const recentStart = readRecentContainerStart(state, Date.now(), maxAgeMs);
+    const startedAtMs = readContainerLastChangeMs(state);
+    if (!recentStart || startedAtMs === null) {
+      return null;
+    }
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
+  }
+
+  private readContainerCleanupOwnership(
+    expectedStart: RunnerContainerCurrentStart | null | undefined,
+    state?: unknown,
+  ): RunnerContainerCleanupOwnership {
+    if (expectedStart === undefined) {
+      return "current";
+    }
+    if (this.currentContainerStart !== expectedStart) {
+      return "superseded";
+    }
+    if (
+      expectedStart !== null
+      && state !== undefined
+      && isRunnerContainerRunning(readContainerStatus(state))
+    ) {
+      const startedAtMs = readContainerLastChangeMs(state);
+      if (
+        startedAtMs !== null
+        && startedAtMs > expectedStart.startedAtMs
+      ) {
+        return "ambiguous";
+      }
+    }
+    return "current";
+  }
+
+  private recordContainerStartIssued(
+    startedAtMs: number,
+    maxAgeMs: number,
+  ): RunnerContainerCurrentStart {
+    const existing = this.currentContainerStart;
+    if (existing?.readyObservedBy === null) {
+      return existing;
+    }
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, true);
+  }
+
+  private recordContainerStartObserved(
+    startedAtMs: number,
+    maxAgeMs: number,
+  ): RunnerContainerCurrentStart {
+    const existing = this.currentContainerStart;
+    if (existing?.pendingOnStartObservation) {
+      existing.pendingOnStartObservation = false;
+      existing.startedAtMs = startedAtMs;
+      if (existing.pendingUntilMs !== null) {
+        existing.pendingUntilMs = startedAtMs + maxAgeMs;
+      }
+      this.recordContainerActivityObserved("onStart");
+      this.lastActivityExpiryAtMs = null;
+      this.lastDestroyRequest = null;
+      return existing;
+    }
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
+  }
+
+  private replaceCurrentContainerStart(
+    startedAtMs: number,
+    maxAgeMs: number,
+    pendingOnStartObservation: boolean,
+  ): RunnerContainerCurrentStart {
+    const currentStart: RunnerContainerCurrentStart = {
+      pendingOnStartObservation,
+      pendingUntilMs: startedAtMs + maxAgeMs,
+      readyObservedBy: null,
+      startedAtMs,
+    };
+    this.currentContainerStart = currentStart;
+    this.warmShellInvalidatedByUnsettledDestroy = false;
+    this.clearRecentReadinessProof();
+    this.recordContainerActivityObserved("onStart");
+    this.lastActivityExpiryAtMs = null;
+    this.lastDestroyRequest = null;
+    return currentStart;
+  }
+
+  private recordContainerReady(
+    observedBy: RunnerContainerReadinessObservation,
+    state: unknown,
+    expectedStart: RunnerContainerCurrentStart | null,
+  ): RunnerContainerCurrentStart | null {
+    if (this.currentContainerStart !== expectedStart) {
+      return null;
+    }
+    const currentStart: RunnerContainerCurrentStart = expectedStart ?? {
+      pendingOnStartObservation: false,
+      pendingUntilMs: null,
+      readyObservedBy: null,
+      startedAtMs: readContainerLastChangeMs(state) ?? Date.now(),
+    };
+    currentStart.pendingUntilMs = null;
+    currentStart.readyObservedBy = observedBy;
+    this.currentContainerStart = currentStart;
     this.recordContainerActivityObserved(observedBy);
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
+    return currentStart;
+  }
+
+  private clearContainerPendingWindow(
+    expectedStart: RunnerContainerCurrentStart | null,
+  ): void {
+    if (
+      expectedStart === null
+      || this.currentContainerStart !== expectedStart
+    ) {
+      return;
+    }
+    expectedStart.pendingUntilMs = null;
+  }
+
+  private recordCurrentContainerStopped(): boolean {
+    const currentGenerationObserved = this.currentContainerStart !== null
+      || this.recentReadinessProof !== null
+      || this.lastDestroyRequest !== null
+      || this.stopObservers.size > 0;
+    if (!currentGenerationObserved) {
+      return false;
+    }
+    this.stopGeneration += 1;
+    this.currentContainerStart = null;
+    this.clearRecentReadinessProof();
+    this.warmShellInvalidatedByUnsettledDestroy = false;
+    this.shellPrewarmObservation = null;
+    this.lastActivityExpiryAtMs = null;
+    this.lastActivityObservedAtMs = null;
+    this.lastActivityObservedStage = null;
+    this.lastDestroyRequest = null;
+    this.resolveStopObservers();
+    return true;
   }
 
   private recordContainerActivityObserved(stage: string): void {
@@ -2870,14 +3287,18 @@ export class RunnerContainer extends Container {
   private buildLifecycleDiagnosticDetails(): HostedExecutionStructuredLogDetails {
     const nowMs = Date.now();
     const runnerIdleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
-    const containerUptimeMs = readElapsedMs(this.containerStartedAtMs, nowMs);
+    const containerUptimeMs = readElapsedMs(
+      this.currentContainerStart?.startedAtMs ?? null,
+      nowMs,
+    );
     const destroyRequestAgeMs = readElapsedMs(this.lastDestroyRequest?.requestedAtMs ?? null, nowMs);
     const lastActivityExpiryAgeMs = readElapsedMs(this.lastActivityExpiryAtMs, nowMs);
     const lastActivityObservedAgeMs = readElapsedMs(this.lastActivityObservedAtMs, nowMs);
 
     return {
       activeWorkspaceInvocationPresent: this.workspaceInvocationOperations.length > 0,
-      containerStartObservedBy: this.containerStartObservedBy,
+      containerStartObservedBy: this.currentContainerStart?.readyObservedBy
+        ?? (this.currentContainerStart ? "onStart" : null),
       containerUptimeMs,
       destroyRequestAgeMs,
       destroyRequestFailClosed: this.lastDestroyRequest?.failClosed ?? null,
@@ -2964,7 +3385,7 @@ export class RunnerContainer extends Container {
         const finishedAtMs = Date.now();
         const coldStartObserved = result.action === "start_issued"
           && !input.operation.coldStartAlreadyObserved
-          && this.containerStartedAtMs !== null;
+          && this.currentContainerStart !== null;
         input.observation.outcome = result.action === "superseded"
           ? "superseded"
           : coldStartObserved
@@ -3022,10 +3443,16 @@ export class RunnerContainer extends Container {
     );
   }
 
-  private recordRecentReadinessProof(userId: string): void {
+  private recordRecentReadinessProof(
+    userId: string,
+    currentStart: RunnerContainerCurrentStart,
+  ): void {
+    if (this.currentContainerStart !== currentStart) {
+      return;
+    }
     this.recentReadinessProof = {
       checkedAtMs: Date.now(),
-      stopGeneration: this.stopGeneration,
+      currentStart,
       userId,
     };
   }
@@ -3034,9 +3461,19 @@ export class RunnerContainer extends Container {
     this.recentReadinessProof = null;
   }
 
-  private readRecentReadinessProof(nowMs: number, userId: string): { ageMs: number } | null {
+  private readRecentReadinessProof(
+    nowMs: number,
+    userId: string,
+    currentStart: RunnerContainerCurrentStart | null,
+  ): { ageMs: number } | null {
     const proof = this.recentReadinessProof;
-    if (!proof || proof.stopGeneration !== this.stopGeneration || proof.userId !== userId) {
+    if (
+      !proof
+      || currentStart === null
+      || proof.currentStart !== currentStart
+      || this.currentContainerStart !== currentStart
+      || proof.userId !== userId
+    ) {
       this.clearRecentReadinessProof();
       return null;
     }
@@ -3345,6 +3782,12 @@ async function waitForRunnerContainerOperationSettlement(
 
 function isRunnerContainerAbortHardTimeout(reason: unknown): boolean {
   return reason instanceof DOMException && reason.name === "TimeoutError";
+}
+
+function isRunnerContainerFatalReadinessError(error: unknown): boolean {
+  return error instanceof HostedRunnerContainerArchitectureMismatchError
+    || error instanceof HostedRunnerContainerBundleMismatchError
+    || error instanceof HostedRunnerContainerPoisonedError;
 }
 
 async function waitForRunnerContainerOperationCompletion(
@@ -4165,6 +4608,34 @@ function readContainerStatus(state: unknown): string | null {
   return typeof status === "string" ? status : null;
 }
 
+function readContainerLastChangeMs(state: unknown): number | null {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return null;
+  }
+
+  const lastChange = (state as { lastChange?: unknown }).lastChange;
+  return typeof lastChange === "number" && Number.isFinite(lastChange)
+    ? lastChange
+    : null;
+}
+
+function readRecentContainerStart(
+  state: unknown,
+  nowMs: number,
+  maxAgeMs: number,
+): { ageMs: number } | null {
+  const status = readContainerStatus(state);
+  if (status !== "running" && status !== "healthy") {
+    return null;
+  }
+  const lastChangeMs = readContainerLastChangeMs(state);
+  if (lastChangeMs === null) {
+    return null;
+  }
+  const ageMs = nowMs - lastChangeMs;
+  return ageMs >= 0 && ageMs <= maxAgeMs ? { ageMs } : null;
+}
+
 function isRunnerContainerStopped(status: string | null): boolean {
   return status === "stopped" || status === "stopped_with_code";
 }
@@ -4274,11 +4745,25 @@ async function readRunnerContainerStatusWithTimeout(
   container: RunnerContainer,
   timeoutMs: number,
 ): Promise<string | null> {
-  const statusRead = readRunnerContainerStatus(container);
+  return readContainerStatus(
+    await readRunnerContainerStateWithTimeout(container, timeoutMs),
+  );
+}
+
+async function readRunnerContainerStateWithTimeout(
+  container: RunnerContainer,
+  timeoutMs: number,
+): Promise<unknown> {
+  const stateRead = container.getState().catch((error: unknown) => {
+    if (isMissingRunnerContainerError(error)) {
+      return { status: "stopped" };
+    }
+    throw error;
+  });
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
-      statusRead,
+      stateRead,
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           reject(new Error("Hosted runner container status read timed out."));
@@ -4289,7 +4774,7 @@ async function readRunnerContainerStatusWithTimeout(
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
     }
-    void statusRead.catch(() => undefined);
+    void stateRead.catch(() => undefined);
   }
 }
 

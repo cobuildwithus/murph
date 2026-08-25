@@ -33,12 +33,19 @@ import {
 } from '../src/assistant/managed-automations.ts'
 import {
   completeAssistantOnboarding,
+  readAssistantOnboardingState,
   resolveAssistantOnboardingStatePath,
+  startAssistantOnboarding,
 } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
+import { resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
+import { computeAssistantCronFirstRunAfterCurrentLocalDay } from '../src/assistant/cron/schedule.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
-import { resolveMurphOnboardingFollowupSchedule } from '../src/assistant/onboarding-followup-automation.ts'
+import {
+  resolveMurphOnboardingFollowupActiveUntil,
+  resolveMurphOnboardingFollowupSchedule,
+} from '../src/assistant/onboarding-followup-automation.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 import {
@@ -163,7 +170,226 @@ async function createVaultRoot(): Promise<string> {
   return context.vaultRoot
 }
 
+async function startOnboarding(input: {
+  startedAt: string
+  vaultRoot: string
+}): Promise<void> {
+  await startAssistantOnboarding({
+    startedAt: input.startedAt,
+    vault: input.vaultRoot,
+  })
+}
+
 describe('applyMurphManagedAutomations core integration', () => {
+  it('seeds one finite follow-up from durable onboarding start and preserves archive', async () => {
+    const vaultRoot = await createVaultRoot()
+    const route = {
+      channel: 'telegram',
+      deliveryTarget: 'telegram-direct-target',
+      identityId: 'telegram-bot-identity',
+      participantId: 'telegram-direct-participant',
+      threadId: 'telegram-direct-thread',
+      threadIsDirect: true,
+    }
+    const ambientRoute = {
+      ...route,
+      deliveryTarget: 'different-ambient-target',
+      participantId: 'different-ambient-participant',
+      threadId: 'different-ambient-thread',
+    }
+    await applyMurphManagedAutomations({
+      defaultRoute: ambientRoute,
+      now: new Date('2026-08-20T12:00:00.000Z'),
+      vaultRoot,
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toBeNull()
+
+    await startOnboarding({
+      startedAt: '2026-08-20T12:01:00.000Z',
+      vaultRoot,
+    })
+
+    // Replaying activation cannot move the original onboarding window.
+    await startOnboarding({
+      startedAt: '2026-08-21T12:01:00.000Z',
+      vaultRoot,
+    })
+    await expect(readAssistantOnboardingState(vaultRoot)).resolves.toMatchObject({
+      createdAt: '2026-08-20T12:01:00.000Z',
+      status: 'open',
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute: null,
+      now: new Date('2026-08-22T12:01:30.000Z'),
+      vaultRoot,
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toBeNull()
+
+    // The first available direct route completes the activation-owned seed.
+    await applyMurphManagedAutomations({
+      defaultRoute: route,
+      now: new Date('2026-08-22T12:02:00.000Z'),
+      vaultRoot,
+    })
+
+    const automation = await showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })
+    expect(automation).toMatchObject({
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      route,
+      schedule: { kind: 'dailyLocal' },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+    })
+    const timeZone = await resolveAssistantCronDefaultTimeZone(vaultRoot)
+    const originalFirstOccurrenceAt =
+      computeAssistantCronFirstRunAfterCurrentLocalDay({
+        after: new Date('2026-08-20T12:01:00.000Z'),
+        schedule: {
+          ...resolveMurphOnboardingFollowupSchedule(
+            (await loadVault({ vaultRoot })).metadata.vaultId,
+          ),
+          timeZone,
+        },
+      })
+    expect(automation?.activeUntil).toBe(
+      resolveMurphOnboardingFollowupActiveUntil({
+        scheduledAt: originalFirstOccurrenceAt,
+        timeZone,
+      }),
+    )
+
+    await applyMurphManagedAutomations({
+      now: new Date('2026-08-22T12:03:00.000Z'),
+      vaultRoot,
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toMatchObject({ automationId: automation?.automationId })
+
+    await patchAutomation({
+      lookup: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'archived',
+      vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      now: new Date('2026-08-22T12:04:00.000Z'),
+      vaultRoot,
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toMatchObject({ status: 'archived' })
+  })
+
+  it('does not turn an expired onboarding start into a new follow-up window', async () => {
+    const vaultRoot = await createVaultRoot()
+    const route = {
+      channel: 'telegram',
+      deliveryTarget: 'telegram-historical-target',
+      identityId: 'telegram-historical-identity',
+      participantId: 'telegram-historical-participant',
+      threadId: 'telegram-historical-thread',
+      threadIsDirect: true,
+    }
+    await startOnboarding({
+      startedAt: '2026-07-01T12:01:00.000Z',
+      vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      defaultRoute: route,
+      now: new Date('2026-08-20T12:02:00.000Z'),
+      vaultRoot,
+    })
+
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
+  it.each([
+    ['a Telegram group', { channel: 'telegram', threadIsDirect: false }, false],
+    ['a Linq direct chat', { channel: 'linq', threadIsDirect: true }, true],
+  ])('seeds the onboarding follow-up for %s only when direct', async (
+    _label,
+    override,
+    shouldSeed,
+  ) => {
+    const vaultRoot = await createVaultRoot()
+    const route = {
+      channel: override.channel,
+      deliveryTarget: 'channel-target',
+      identityId: 'channel-identity',
+      participantId: null,
+      threadId: 'channel-thread',
+      threadIsDirect: override.threadIsDirect,
+    }
+    await startAssistantOnboarding({
+      startedAt: '2026-08-20T12:01:00.000Z',
+      vault: vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      defaultRoute: route,
+      now: new Date('2026-08-20T12:02:00.000Z'),
+      vaultRoot,
+    })
+
+    const automation = await showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })
+    expect(automation === null).toBe(!shouldSeed)
+  })
+
+  it.each([
+    ['completed', 'user_answered'],
+    ['declined', 'user_declined'],
+  ] as const)(
+    'does not reopen a %s onboarding relationship after activation',
+    async (_label, completionReason) => {
+      const vaultRoot = await createVaultRoot()
+      const route = {
+        channel: 'telegram',
+        deliveryTarget: 'telegram-completed-target',
+        identityId: 'telegram-completed-identity',
+        participantId: null,
+        threadId: 'telegram-completed-thread',
+        threadIsDirect: true,
+      }
+      await startOnboarding({
+        startedAt: '2026-08-20T12:01:00.000Z',
+        vaultRoot,
+      })
+      await completeAssistantOnboarding({
+        completedAt: '2026-08-20T12:02:00.000Z',
+        reason: completionReason,
+        vault: vaultRoot,
+      })
+
+      await applyMurphManagedAutomations({
+        defaultRoute: route,
+        now: new Date('2026-08-20T12:03:00.000Z'),
+        vaultRoot,
+      })
+
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+        vaultRoot,
+      })).resolves.toBeNull()
+    },
+  )
+
   it('persists one automatic meal closeout through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 
@@ -332,7 +558,11 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(record?.instructions).toContain('still remember ten seconds after reading')
     expect(record?.instructions).toContain('murph.device')
     expect(record?.instructions).toContain('vault-cli wearables sources list')
-    expect(record?.instructions).toContain('Wearable connected but not delivering')
+    expect(record?.instructions).toContain('Wearable authorization failed')
+    expect(record?.instructions).toContain(
+      'Ordinary missing or stale data does not qualify',
+    )
+    expect(record?.instructions).not.toContain('roughly a week or more')
     expect(record?.instructions).toContain('action: connect')
     expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(record?.instructions).toContain('what was probably noise')

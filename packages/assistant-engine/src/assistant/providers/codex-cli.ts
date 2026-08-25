@@ -260,15 +260,17 @@ export async function executeCodexAssistantTurnAttempt(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
+    onAdditionalUsage: input.onAdditionalUsage ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     onboardingFirstReadCompletionTransitionAvailable:
       input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
     threadConfig: input.codexThreadConfig ?? null,
+    trustedContextReferences: input.trustedContextReferences ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
-        ? () => input.activeTurnSteering?.closeInputAdmission()
+        ? () => input.activeTurnSteering?.onFirstAssistantResponseCompleted()
         : undefined,
     onLiveTurn:
       input.activeTurnSteering
@@ -467,6 +469,9 @@ export async function executeCodexAssistantTurnAttempt(
           }),
       transcriptResponse: result.transcriptMessage,
       responseDeliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      ...(result.responseContextReferences === undefined
+        ? {}
+        : { responseContextReferences: result.responseContextReferences }),
       ...(result.targetInputId === undefined
         ? {}
         : { targetInputId: result.targetInputId }),
@@ -474,6 +479,9 @@ export async function executeCodexAssistantTurnAttempt(
         ? {}
         : { reactions: result.reactions }),
       precedingResponseSegments: result.precedingAgentMessageSegments.map((segment) => ({
+        ...(segment.contextReferences === undefined
+          ? {}
+          : { contextReferences: segment.contextReferences }),
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
         media: segment.media,
         response: segment.response,

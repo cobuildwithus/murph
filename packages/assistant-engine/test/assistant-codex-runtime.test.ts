@@ -85,6 +85,7 @@ import {
 import {
   attachCodexAppServerProcessExitCleanup,
   stopCodexAppServerChild,
+  withCodexRpcTimeout,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
   extractCodexAppServerUserMessageImages,
@@ -775,6 +776,37 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
 }
 
 describe('assistant codex runtime', () => {
+  it('runs RPC timeout cleanup only when the timeout wins', async () => {
+    vi.useFakeTimers()
+    try {
+      const timedOutCleanup = vi.fn()
+      const timedOutRequest = withCodexRpcTimeout(
+        new Promise<never>(() => undefined),
+        25,
+        'subagent thread/resume',
+        timedOutCleanup,
+      )
+      const timeoutExpectation = expect(timedOutRequest).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT',
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+      await timeoutExpectation
+      expect(timedOutCleanup).toHaveBeenCalledOnce()
+
+      const completedCleanup = vi.fn()
+      await expect(withCodexRpcTimeout(
+        Promise.resolve('metadata'),
+        25,
+        'subagent thread/resume',
+        completedCleanup,
+      )).resolves.toBe('metadata')
+      expect(completedCleanup).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('builds Codex app-server args for configured turns', () => {
     expect(
       buildCodexAppServerArgs({
@@ -1305,7 +1337,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
+                  text: '{"error":"invalid_response_media_arguments","validationIssues":[{"code":"custom","message":"Assistant response media URLs must be valid public HTTPS image URLs.","params":{"murphExpectedShape":"public_https_image_url"},"path":["media",0,"url"]}]}',
                 },
               ],
             },
@@ -3637,7 +3669,7 @@ describe('assistant codex runtime', () => {
                 message_ref: earlierInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           child.stdout.write(jsonLine({
@@ -3649,7 +3681,7 @@ describe('assistant codex runtime', () => {
                 message_ref: independentInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           child.stdout.write(jsonLine({
@@ -3661,7 +3693,7 @@ describe('assistant codex runtime', () => {
                 message_ref: laterInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
 
@@ -3786,11 +3818,11 @@ describe('assistant codex runtime', () => {
             method: 'item/tool/call',
             params: {
               arguments: {
-                action: 'message_current_sender',
+                action: 'continue_current_sender_privately',
                 message_ref: inputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           await privateStarted.promise
@@ -3803,7 +3835,7 @@ describe('assistant codex runtime', () => {
                 message_ref: inputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
 
@@ -3855,7 +3887,7 @@ describe('assistant codex runtime', () => {
       expectedMode: 'continuation' as const,
       expectedNoticeCount: 1,
       label: 'group continuation',
-      laterAction: 'message_current_sender' as const,
+      laterAction: 'continue_current_sender_privately' as const,
     },
   ])('claims an earlier current-sender $label before a contradictory new request', async ({
     earlierAction,
@@ -3935,7 +3967,7 @@ describe('assistant codex runtime', () => {
                   message_ref: inputId,
                 },
                 namespace: 'murph',
-                tool: 'group',
+                tool: 'group_consult',
               },
             }),
             jsonLine({
@@ -3947,7 +3979,7 @@ describe('assistant codex runtime', () => {
                   message_ref: inputId,
                 },
                 namespace: 'murph',
-                tool: 'group',
+                tool: 'group_consult',
               },
             }),
           ].join(''))
@@ -16311,14 +16343,16 @@ describe('assistant codex runtime', () => {
         created: false,
         effectiveTimeZone: 'America/New_York',
         lookupId: 'hidden',
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
           localTime: '09:00',
         },
         status: 'paused' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
@@ -16746,7 +16780,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid progress update arguments',
+                  text: '{"error":"invalid_progress_update_arguments","validationIssues":[{"origin":"string","code":"too_small","minimum":1,"inclusive":true,"path":["text"],"message":"Too small: expected string to have >=1 characters"}]}',
                 },
               ],
             },
@@ -16851,7 +16885,7 @@ describe('assistant codex runtime', () => {
               success: false,
               contentItems: [{
                 type: 'inputText',
-                text: 'invalid pending vault-file arguments',
+                text: '{"error":"invalid_pending_vault_files_arguments","validationIssues":[{"origin":"string","code":"invalid_format","format":"regex","pattern":"/^outbox_[0-9a-f]{32}$/u","path":["intentIds",0],"message":"Invalid string: must match pattern /^outbox_[0-9a-f]{32}$/u"}]}',
               }],
             },
           })
@@ -18611,7 +18645,449 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
-    it('inherits the parent model for activity-only children and uses collab spawn models', async () => {
+    const verifyLateChildUsage = async (
+      childStatus: 'completed' | 'failed' | 'interrupted',
+      expectedOutcome: 'aborted' | 'partial' | 'succeeded',
+    ): Promise<void> => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-terminal-usage-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-terminal-usage-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      const releaseChildUsage = createDeferred<void>()
+      const releaseUsageRecording = createDeferred<void>()
+      const reportedUsage = createDeferred<
+        Parameters<NonNullable<CodexAppServerTurnInput['onAdditionalUsage']>>[0]
+      >()
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_050 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            const parentResume = await waitForRpcMethod(child, 'thread/resume')
+            child.stdout.write(jsonLine({
+              id: parentResume.id,
+              result: {
+                approvalPolicy: 'never',
+                cwd: workingDirectory,
+                model: 'gpt-5.6-sol',
+                modelProvider: 'openai',
+                sandbox: codexSandboxPolicyForMode('workspace-write'),
+                serviceTier: 'flex',
+                thread: { id: 'thread-subagent-terminal-parent' },
+              },
+            }))
+            const parentTurn = await waitForRpcMethod(child, 'turn/start')
+            child.stdout.write(jsonLine({
+              id: parentTurn.id,
+              result: { turn: { id: 'turn-subagent-terminal-parent' } },
+            }))
+
+            // The owned process is the trust boundary. A foreign-thread turn
+            // notification correlates the child without parsing a parent
+            // collab item as billing authorization.
+            writeStartedTurn(
+              child,
+              'thread-subagent-terminal-child',
+              'turn-subagent-terminal-child',
+            )
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Parent replied before child usage',
+              threadId: 'thread-subagent-terminal-parent',
+              turnId: 'turn-subagent-terminal-parent',
+            })
+
+            await releaseChildUsage.promise
+            writeTokenUsage({
+              child,
+              last: {
+                cacheWriteInputTokens: 8,
+                cachedInputTokens: 40,
+                inputTokens: 120,
+                outputTokens: 30,
+                reasoningOutputTokens: 7,
+                totalTokens: 150,
+              },
+              threadId: 'thread-subagent-terminal-child',
+              total: {
+                cacheWriteInputTokens: 8,
+                cachedInputTokens: 40,
+                inputTokens: 120,
+                outputTokens: 30,
+                reasoningOutputTokens: 7,
+                totalTokens: 150,
+              },
+              turnId: 'turn-subagent-terminal-child',
+            })
+            writeCompletedTurn(
+              child,
+              'thread-subagent-terminal-child',
+              'turn-subagent-terminal-child',
+              childStatus,
+            )
+            writeCompletedTurn(
+              child,
+              'thread-subagent-terminal-child',
+              'turn-subagent-terminal-child',
+              childStatus,
+            )
+
+            const metadataResume = await waitForRpcMethodCount(
+              child,
+              'thread/resume',
+              2,
+            )
+            expect(asRecord(metadataResume.params)).toEqual({
+              excludeTurns: true,
+              threadId: 'thread-subagent-terminal-child',
+            })
+            child.stdout.write(jsonLine({
+              id: metadataResume.id,
+              result: {
+                model: 'gpt-5.2',
+                modelProvider: 'openai',
+                reasoningEffort: 'high',
+                serviceTier: 'flex',
+                thread: { id: 'thread-subagent-terminal-child' },
+              },
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        onAdditionalUsage: async (usage) => {
+          reportedUsage.resolve(usage)
+          await releaseUsageRecording.promise
+        },
+        prompt: 'spawn a metered child',
+        reasoningEffort: 'medium',
+        resumeSessionId: 'thread-subagent-terminal-parent',
+        sandbox: 'workspace-write',
+        serviceTier: 'flex',
+        workingDirectory,
+      })
+
+      expect(result.finalMessage).toBe('Parent replied before child usage')
+      expect(result.additionalUsages).toEqual([])
+
+      let boundaryFinished = false
+      const boundary = waitForWarmCodexBackgroundWork().then(() => {
+        boundaryFinished = true
+      })
+      await Promise.resolve()
+      expect(boundaryFinished).toBe(false)
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) =>
+          message.method === 'thread/backgroundTerminals/list'
+        ),
+      ).toHaveLength(0)
+
+      releaseChildUsage.resolve(undefined)
+      const usage = await reportedUsage.promise
+      expect(usage).toMatchObject({
+        provider: 'codex-cli',
+        providerRequestOrdinal: 1,
+        providerRequestOutcome: expectedOutcome,
+        usage: {
+          cacheWriteTokens: 8,
+          cachedInputTokens: 40,
+          inputTokens: 120,
+          outputTokens: 30,
+          providerName: 'openai',
+          providerRequestId: null,
+          reasoningTokens: 7,
+          requestedModel: 'gpt-5.2',
+          servedModel: 'gpt-5.2',
+          tokenPricingBasis: 'standard',
+          totalTokens: 150,
+          usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+        },
+      })
+      expect(usage.usage.rawUsageJson).toEqual({
+        cacheWriteInputTokens: 8,
+        cachedInputTokens: 40,
+        inputTokens: 120,
+        outputTokens: 30,
+        reasoningOutputTokens: 7,
+        totalTokens: 150,
+      })
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) =>
+          message.method === 'thread/resume' &&
+          asRecord(message.params).threadId === 'thread-subagent-terminal-child'
+        ),
+      ).toHaveLength(1)
+
+      await Promise.resolve()
+      expect(boundaryFinished).toBe(false)
+
+      releaseUsageRecording.resolve(undefined)
+      const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+      const parentTerminalScan = await respondToBackgroundTerminals(child, 1)
+      expect(asRecord(parentTerminalScan.params).threadId)
+        .toBe('thread-subagent-terminal-parent')
+      const childTerminalScan = await respondToBackgroundTerminals(child, 2)
+      expect(asRecord(childTerminalScan.params).threadId)
+        .toBe('thread-subagent-terminal-child')
+      await expect(boundary).resolves.toBeUndefined()
+      expect(boundaryFinished).toBe(true)
+    }
+
+    it.each([
+      ['completed', 'succeeded'],
+      ['failed', 'partial'],
+      ['interrupted', 'aborted'],
+    ] as const)(
+      'holds the workspace boundary for %s child usage reported after the parent reply',
+      verifyLateChildUsage,
+    )
+
+    it('drops child usage when effective metadata is incomplete without retrying or inheriting the parent', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-metadata-failure-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-metadata-failure-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      const onAdditionalUsage = vi.fn()
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_060 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-subagent-metadata-parent',
+              turnId: 'turn-subagent-metadata-parent',
+            })
+            writeStartedTurn(
+              child,
+              'thread-subagent-metadata-child',
+              'turn-subagent-metadata-child',
+            )
+
+            writeTokenUsage({
+              child,
+              last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+              threadId: 'thread-subagent-metadata-child',
+              total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+              turnId: 'turn-subagent-metadata-child',
+            })
+            writeCompletedTurn(
+              child,
+              'thread-subagent-metadata-child',
+              'turn-subagent-metadata-child',
+            )
+            const metadataResume = await waitForRpcMethod(child, 'thread/resume')
+            child.stdout.write(jsonLine({
+              id: metadataResume.id,
+              result: {
+                // Missing modelProvider: the parent identity is deliberately
+                // not used as a billing fallback.
+                model: 'gpt-5.6-terra',
+                reasoningEffort: 'high',
+                serviceTier: null,
+                thread: { id: 'thread-subagent-metadata-child' },
+              },
+            }))
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Metadata failure stayed best effort',
+              threadId: 'thread-subagent-metadata-parent',
+              turnId: 'turn-subagent-metadata-parent',
+            })
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        onAdditionalUsage,
+        prompt: 'spawn a child with unavailable metadata',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+
+      expect(result.finalMessage).toBe('Metadata failure stayed best effort')
+      expect(result.additionalUsages).toEqual([])
+      expect(onAdditionalUsage).not.toHaveBeenCalled()
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) => message.method === 'thread/resume'),
+      ).toHaveLength(1)
+    })
+
+    it('keeps non-hosted cold-resumed child usage in the parent result', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-cold-resume-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-cold-resume-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_075 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+            const threadResume = await waitForRpcMethod(child, 'thread/resume')
+            expect(asRecord(threadResume.params)).toEqual({
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              excludeTurns: true,
+              model: 'gpt-5.6-sol',
+              modelProvider: 'openai',
+              sandbox: 'workspace-write',
+              threadId: 'thread-subagent-cold-parent',
+            })
+            child.stdout.write(jsonLine({
+              id: threadResume.id,
+              result: {
+                approvalPolicy: 'never',
+                cwd: workingDirectory,
+                model: 'gpt-5.6-sol',
+                modelProvider: 'openai',
+                sandbox: codexSandboxPolicyForMode('workspace-write'),
+                thread: { id: 'thread-subagent-cold-parent' },
+              },
+            }))
+
+            const turnStart = await waitForRpcMethod(child, 'turn/start')
+            child.stdout.write(jsonLine({
+              id: turnStart.id,
+              result: { turn: { id: 'turn-subagent-cold-parent' } },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'collab-spawn-cold-child',
+                  type: 'collabAgentToolCall',
+                  tool: 'spawnAgent',
+                  status: 'completed',
+                  senderThreadId: 'thread-subagent-cold-parent',
+                  receiverThreadIds: ['thread-subagent-cold-child'],
+                  model: 'gpt-5.6-terra-mini',
+                },
+                threadId: 'thread-subagent-cold-parent',
+                turnId: 'turn-subagent-cold-parent',
+              },
+            }))
+            writeStartedTurn(
+              child,
+              'thread-subagent-cold-child',
+              'turn-subagent-cold-child',
+            )
+            writeTokenUsage({
+              child,
+              last: {
+                cacheWriteInputTokens: 0,
+                cachedInputTokens: 20,
+                inputTokens: 70,
+                outputTokens: 30,
+                reasoningOutputTokens: 4,
+                totalTokens: 100,
+              },
+              threadId: 'thread-subagent-cold-child',
+              total: {
+                cacheWriteInputTokens: 0,
+                cachedInputTokens: 20,
+                inputTokens: 70,
+                outputTokens: 30,
+                reasoningOutputTokens: 4,
+                totalTokens: 100,
+              },
+              turnId: 'turn-subagent-cold-child',
+            })
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Cold child usage recorded',
+              threadId: 'thread-subagent-cold-parent',
+              turnId: 'turn-subagent-cold-parent',
+            })
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        prompt: 'resume and meter a child cumulatively',
+        resumeSessionId: 'thread-subagent-cold-parent',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      expect(result.finalMessage).toBe('Cold child usage recorded')
+      expect(result.additionalUsages).toHaveLength(1)
+      expect(result.additionalUsages[0]?.usage).toMatchObject({
+        cachedInputTokens: 20,
+        inputTokens: 70,
+        outputTokens: 30,
+        providerRequestId: null,
+        reasoningTokens: 4,
+        requestedModel: 'gpt-5.6-sol',
+        servedModel: 'gpt-5.6-sol',
+        totalTokens: 100,
+        usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+      })
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) => message.method === 'thread/resume'),
+      ).toHaveLength(1)
+    })
+
+    it('uses the parent model for non-hosted child usage aggregation', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -19682,7 +20158,7 @@ describe('assistant codex event shaping', () => {
       })
     })
 
-    it('caps distinct subagent usage threads without charging reused turns against the cap', async () => {
+    it('accounts every observed child thread without an arbitrary fan-out cap', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -19754,8 +20230,8 @@ describe('assistant codex event shaping', () => {
                 },
               }))
             }
-            // The overflow thread emits a second event: the dropped count
-            // must stay per-thread, not per-event.
+            // The last child emits a second cumulative checkpoint for the
+            // same turn and remains a single usage operation.
             child.stdout.write(jsonLine({
               method: 'thread/tokenUsage/updated',
               params: {
@@ -19823,13 +20299,13 @@ describe('assistant codex event shaping', () => {
         env: {
           PATH: '/custom/bin',
         },
-        prompt: 'spawn more children than the usage cap',
+        prompt: 'spawn many children',
         sandbox: 'workspace-write',
         workingDirectory,
       })
 
       expect(result.finalMessage).toBe('Survived the spawn storm')
-      expect(result.additionalUsages).toHaveLength(trackedThreadCount + 1)
+      expect(result.additionalUsages).toHaveLength(trackedThreadCount + 2)
       expect(result.additionalUsages[0]).toMatchObject({
         providerRequestOrdinal: 1,
         usage: {
@@ -19845,12 +20321,15 @@ describe('assistant codex event shaping', () => {
       expect(result.additionalUsages[trackedThreadCount]).toMatchObject({
         providerRequestOrdinal: trackedThreadCount + 1,
         usage: {
+          totalTokens: 9_900,
+        },
+      })
+      expect(result.additionalUsages[trackedThreadCount + 1]).toMatchObject({
+        providerRequestOrdinal: trackedThreadCount + 2,
+        usage: {
           totalTokens: 50,
         },
       })
-      expect(
-        result.additionalUsages.map((draft) => draft.usage.totalTokens),
-      ).not.toContain(9_900)
     })
 
     it('continues subagent usage ordinals after dynamic tool usage drafts', async () => {
@@ -20815,153 +21294,6 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('evicts unattributed foreign threads from a full buffer in favor of spawned children', async () => {
-      const workingDirectory = await createTempDir('assistant-codex-subagent-evict-work-')
-      const codexHome = await createTempDir('assistant-codex-subagent-evict-home-')
-      const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-      const ghostThreadCount = 32
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_800 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-evict-parent',
-              turnId: 'turn-subagent-evict-parent',
-            })
-            // Stale/unattributed foreign threads fill the buffer first.
-            for (let ghostIndex = 1; ghostIndex <= ghostThreadCount; ghostIndex += 1) {
-              const totals = {
-                totalTokens: ghostIndex,
-                inputTokens: ghostIndex,
-                cachedInputTokens: 0,
-                outputTokens: 0,
-                reasoningOutputTokens: 0,
-              }
-              child.stdout.write(jsonLine({
-                method: 'turn/started',
-                params: {
-                  threadId: `thread-subagent-ghost-${ghostIndex}`,
-                  turn: {
-                    id: `turn-subagent-ghost-${ghostIndex}`,
-                  },
-                },
-              }))
-              child.stdout.write(jsonLine({
-                method: 'thread/tokenUsage/updated',
-                params: {
-                  threadId: `thread-subagent-ghost-${ghostIndex}`,
-                  turnId: `turn-subagent-ghost-${ghostIndex}`,
-                  tokenUsage: {
-                    total: totals,
-                    last: totals,
-                  },
-                },
-              }))
-            }
-            // A real spawned child arrives after the buffer is full: it must
-            // still get a slot (an unattributed ghost is evicted) and bill.
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'collab-spawn-evict-1',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  status: 'completed',
-                  senderThreadId: 'thread-subagent-evict-parent',
-                  receiverThreadIds: ['thread-subagent-evict-child'],
-                  model: 'gpt-5.6-terra-mini',
-                },
-                threadId: 'thread-subagent-evict-parent',
-                turnId: 'turn-subagent-evict-parent',
-              },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'turn/started',
-              params: {
-                threadId: 'thread-subagent-evict-child',
-                turn: {
-                  id: 'turn-subagent-evict-child',
-                },
-              },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-subagent-evict-child',
-                turnId: 'turn-subagent-evict-child',
-                tokenUsage: {
-                  total: { cacheWriteInputTokens: 0,
-                    totalTokens: 2_500,
-                    inputTokens: 2_000,
-                    cachedInputTokens: 500,
-                    outputTokens: 500,
-                    reasoningOutputTokens: 0,
-                  },
-                  last: { cacheWriteInputTokens: 0,
-                    totalTokens: 2_500,
-                    inputTokens: 2_000,
-                    cachedInputTokens: 500,
-                    outputTokens: 500,
-                    reasoningOutputTokens: 0,
-                  },
-                },
-              },
-            }))
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Evicted a ghost for the real child',
-              threadId: 'thread-subagent-evict-parent',
-              turnId: 'turn-subagent-evict-parent',
-            })
-          })()
-        })
-
-        return child
-      })
-
-      const result = await executeCodexAppServerTurn({
-        approvalPolicy: 'never',
-        codexHome,
-        env: {
-          PATH: '/custom/bin',
-        },
-        prompt: 'spawned child arrives after ghosts fill the buffer',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      })
-
-      expect(result.finalMessage).toBe('Evicted a ghost for the real child')
-      expect(result.additionalUsages).toHaveLength(1)
-      expect(result.additionalUsages[0]).toMatchObject({
-        provider: 'codex-cli',
-        providerRequestOrdinal: 1,
-        usage: {
-          inputTokens: 2_000,
-          outputTokens: 500,
-          requestedModel: 'gpt-5.6-terra-mini',
-          servedModel: 'gpt-5.6-terra-mini',
-          totalTokens: 2_500,
-        },
-      })
-      expect(result.additionalUsages[0]?.usage.rawUsageJson).toEqual({
-        cacheWriteInputTokens: 0,
-        cachedInputTokens: 500,
-        inputTokens: 2_000,
-        outputTokens: 500,
-        reasoningOutputTokens: 0,
-        totalTokens: 2_500,
-      })
-    })
   })
 })
 
@@ -21127,6 +21459,7 @@ describe('steered final segments', () => {
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       responseCardsAvailable?: boolean
+      trustedContextReferences?: CodexAppServerTurnInput['trustedContextReferences']
       turnStatus?: 'completed' | 'failed'
       voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
@@ -21332,7 +21665,7 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'group',
+                  tool: 'group_membership',
                   arguments: { action: 'list_memberships' },
                   turnId: 'turn-steered-finals',
                 },
@@ -21358,7 +21691,7 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'group',
+                  tool: 'group_data',
                   arguments: { action: 'offer_access' },
                   turnId: 'turn-steered-finals',
                 },
@@ -21480,6 +21813,7 @@ describe('steered final segments', () => {
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
+      trustedContextReferences: input.trustedContextReferences,
       voiceMemoRuntime: input.voiceMemoRuntime,
       prompt: 'First question',
       sandbox: 'workspace-write',
@@ -21510,6 +21844,40 @@ describe('steered final segments', () => {
       params: {
         item: canonicalItem,
       },
+    }
+  }
+
+  function scriptedWorkoutStartResult(eventId: string) {
+    return {
+      activityType: 'strength-training',
+      created: true,
+      distanceKm: null,
+      durationMinutes: 60,
+      eventId,
+      kind: 'activity_session',
+      ledgerFile: '/vault/bank/ledger.md',
+      lookupId: eventId,
+      note: 'Current workout',
+      occurredAt: '2026-08-24T14:00:00.000Z',
+      title: 'Current workout',
+      vault: '/vault',
+      workout: null,
+    }
+  }
+
+  function scriptedWorkoutShowResult(eventId: string) {
+    return {
+      entity: {
+        data: {},
+        id: eventId,
+        kind: 'activity_session',
+        links: [],
+        markdown: null,
+        occurredAt: '2026-08-24T14:00:00.000Z',
+        path: '/vault/bank/ledger.md',
+        title: 'Current workout',
+      },
+      vault: '/vault',
     }
   }
 
@@ -21791,6 +22159,140 @@ describe('steered final segments', () => {
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
     )
+  })
+
+  it('attaches a validated live-workout start to the exact response delivery', async () => {
+    const workoutId = 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ'
+    const command = 'vault-cli workout start Current --format json'
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        method: 'item/started',
+        params: {
+          item: {
+            command,
+            id: 'workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: JSON.stringify(
+              scriptedWorkoutStartResult(workoutId),
+            ),
+            command,
+            exitCode: 0,
+            id: 'workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
+      completedItemEvent({
+        id: 'assistant-workout-follow-up',
+        type: 'assistant_message',
+        message: 'How many reps did you get on set 2?',
+      }),
+    ])
+
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe('How many reps did you get on set 2?')
+    expect(result.responseContextReferences).toEqual([{
+      entityId: workoutId,
+      entityKind: 'activity_session',
+    }])
+  })
+
+  it('keeps validated workout identity on its own steered response segment', async () => {
+    const workoutId = 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ'
+    const startCommand = 'vault-cli workout start Current --format json'
+    const setCommand =
+      `vault-cli workout set log --workout-id ${workoutId} --set-order 2`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-workout-follow-up-1',
+        type: 'user_message',
+        message: 'Ask me about my next set.',
+      }),
+      {
+        method: 'item/started',
+        params: {
+          item: {
+            command: startCommand,
+            id: 'steered-workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: JSON.stringify(
+              scriptedWorkoutStartResult(workoutId),
+            ),
+            command: startCommand,
+            exitCode: 0,
+            id: 'steered-workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
+      completedItemEvent({
+        id: 'assistant-workout-follow-up-1',
+        type: 'assistant_message',
+        message: 'What did you get on the next set?',
+      }),
+      completedItemEvent({
+        id: 'user-workout-follow-up-2',
+        type: 'user_message',
+        message: 'One more thought.',
+      }),
+      {
+        method: 'item/started',
+        params: {
+          item: {
+            command: setCommand,
+            id: 'steered-workout-set',
+            type: 'commandExecution',
+          },
+        },
+      },
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: JSON.stringify(
+              scriptedWorkoutShowResult(workoutId),
+            ),
+            command: setCommand,
+            exitCode: 0,
+            id: 'steered-workout-set',
+            type: 'commandExecution',
+          },
+        },
+      },
+      completedItemEvent({
+        id: 'assistant-workout-follow-up-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ])
+
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      contextReferences: [{
+        entityId: workoutId,
+        entityKind: 'activity_session',
+      }],
+      deliveryContextOrdinal: 0,
+      media: [],
+      response: 'What did you get on the next set?',
+    }])
+    expect(result.responseContextReferences).toEqual([{
+      entityId: workoutId,
+      entityKind: 'activity_session',
+    }])
   })
 
   it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
@@ -22635,7 +23137,7 @@ describe('steered final segments', () => {
     try {
       const turn = executeCodexAppServerTurn({
         onFirstAssistantResponseCompleted: () => {
-          controller.closeInputAdmission()
+          controller.closeTurnAdmission()
         },
         onLiveTurn: (liveTurn) => {
           const releaseLiveTurn = controller.registerLiveProviderTurn({
