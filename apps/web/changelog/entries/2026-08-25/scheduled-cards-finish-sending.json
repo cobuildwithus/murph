@@ -9,6 +9,6 @@
     "summary": "Scheduled nutrition and workout cards now arrive when the finished card is the complete response.",
     "details": "Complete text fallbacks also keep moving when a rich card cannot fit, without changing ordinary send-or-skip reminders.",
     "relevanceTags": ["assistant", "messaging", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2262]
   }
 }
