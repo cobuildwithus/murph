@@ -7668,6 +7668,7 @@ function stampTrackedResponseCardSnapshot(value: unknown): unknown {
   if (
     card?.kind !== 'compact_table'
     || tracking?.kind !== 'workout'
+    || !Object.hasOwn(card, 'workout')
   ) {
     return value
   }

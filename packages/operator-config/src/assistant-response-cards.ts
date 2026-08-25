@@ -1266,8 +1266,17 @@ function createAssistantResponseCardJsonSchema() {
   const tracking = {
     type: ['object', 'null'],
     additionalProperties: false,
-    properties: workoutTrackingProperties,
-    required: ['kind', 'entityId'],
+    properties: {
+      ...workoutTrackingProperties,
+      snapshotAt: {
+        type: 'string',
+        minLength: 24,
+        maxLength: 24,
+        pattern:
+          '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$',
+      },
+    },
+    required: ['kind', 'entityId', 'snapshotAt'],
   } as const
   const workoutTracking = {
     type: 'object',

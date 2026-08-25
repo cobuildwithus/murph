@@ -721,7 +721,12 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).toContain('fiberGrams')
-    expect(privateSchema).not.toContain('snapshotAt')
+    expect(JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[1],
+    )).toContain('snapshotAt')
+    expect(JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[2],
+    )).not.toContain('snapshotAt')
     expect(privateSchema).not.toContain('editor')
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')

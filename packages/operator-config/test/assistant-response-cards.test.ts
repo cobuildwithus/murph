@@ -265,8 +265,13 @@ describe('assistant response cards', () => {
                   pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
                 },
                 kind: { const: 'workout' },
+                snapshotAt: {
+                  maxLength: 24,
+                  minLength: 24,
+                  pattern: expect.stringContaining('\\.\\d{3}Z'),
+                },
               },
-              required: ['kind', 'entityId'],
+              required: ['kind', 'entityId', 'snapshotAt'],
               type: ['object', 'null'],
             },
             version: { const: 1 },
@@ -317,9 +322,11 @@ describe('assistant response cards', () => {
         },
       ],
     })
-    expect(JSON.stringify(assistantResponseCardJsonSchema)).not.toContain(
+    expect(JSON.stringify(assistantResponseCardJsonSchema.anyOf[1])).toContain(
       'snapshotAt',
     )
+    expect(JSON.stringify(assistantResponseCardJsonSchema.anyOf[2])).not
+      .toContain('snapshotAt')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
     expect(assistantResponseCardAuthoringSchema.parse(COMPLETE_CARD_V2)).toEqual(
       COMPLETE_CARD_V2,
