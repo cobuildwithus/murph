@@ -242,7 +242,6 @@ async function runWithDatabaseRetry<T>(
   run: () => Promise<T>,
   canRetry: () => boolean = () => true,
 ): Promise<T> {
-  let pendingRetryError: unknown = null;
   for (let attempt = 1; ; attempt += 1) {
     const beforeAttempt = readDatabasePoolSnapshot(pool);
     const locallyContendedBeforeAttempt = hasLocalDatabasePoolPressure(
@@ -250,9 +249,6 @@ async function runWithDatabaseRetry<T>(
       poolMax,
     );
     reportDatabasePoolPressure(pool, poolMax, beforeAttempt);
-    if (attempt > 1 && locallyContendedBeforeAttempt) {
-      throw pendingRetryError;
-    }
     try {
       return await run();
     } catch (error) {
@@ -264,21 +260,46 @@ async function runWithDatabaseRetry<T>(
         && canRetry()
         && !locallyContendedBeforeAttempt
         && !hasLocalDatabasePoolPressure(afterAttempt, poolMax);
+      if (!shouldRetry) {
+        if (category) {
+          reportDatabasePoolFailure(afterAttempt, category, {
+            attempt,
+            beforeAttempt,
+            disposition: "terminal",
+            operation: telemetry.operation,
+            poolMax,
+            source: telemetry.source,
+          });
+        }
+        throw error;
+      }
+
+      await delay(resolveDatabaseRetryDelayMs());
+      const beforeRetry = readDatabasePoolSnapshot(pool);
+      reportDatabasePoolPressure(pool, poolMax, beforeRetry);
+      if (hasLocalDatabasePoolPressure(beforeRetry, poolMax)) {
+        if (category) {
+          reportDatabasePoolFailure(beforeRetry, category, {
+            attempt,
+            beforeAttempt,
+            disposition: "terminal",
+            operation: telemetry.operation,
+            poolMax,
+            source: telemetry.source,
+          });
+        }
+        throw error;
+      }
       if (category) {
         reportDatabasePoolFailure(afterAttempt, category, {
           attempt,
           beforeAttempt,
-          disposition: shouldRetry ? "retrying" : "terminal",
+          disposition: "retrying",
           operation: telemetry.operation,
           poolMax,
           source: telemetry.source,
         });
       }
-      if (!shouldRetry) {
-        throw error;
-      }
-      pendingRetryError = error;
-      await delay(resolveDatabaseRetryDelayMs());
     }
   }
 }

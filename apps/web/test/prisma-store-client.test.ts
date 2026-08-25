@@ -922,6 +922,7 @@ describe("prisma module", () => {
     })).rejects.toBe(failure);
 
     expect(query).toHaveBeenCalledOnce();
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
     expect(pressureLogs(warn)).toEqual([{
       idleConnections: 0,
       poolMax: 15,
@@ -966,6 +967,7 @@ describe("prisma module", () => {
     })).rejects.toBe(failure);
 
     expect(query).toHaveBeenCalledOnce();
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
     expect(pressureLogs(warn)).toEqual([{
       idleConnections: 0,
       poolMax: 15,
@@ -1482,6 +1484,12 @@ function failureCategories(warn: { mock: { calls: unknown[][] } }): unknown[] {
   return warn.mock.calls
     .filter((call) => call[0] === "Hosted web database pool failure.")
     .map((call) => (call[1] as { category: unknown }).category);
+}
+
+function failureDispositions(warn: { mock: { calls: unknown[][] } }): unknown[] {
+  return warn.mock.calls
+    .filter((call) => call[0] === "Hosted web database pool failure.")
+    .map((call) => (call[1] as { disposition: unknown }).disposition);
 }
 
 function slowTransactionLogs(
