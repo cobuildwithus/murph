@@ -420,6 +420,13 @@ describe('assistant auto-reply event-first path', () => {
 
   it('loads every exact Murph anchor in a compound native-reply group', async () => {
     const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-08-07T21:09:30.000Z',
+        sessionId: 'session-chat',
+      },
+    })
     const deliveries = [
       createOutboxMessage({
         channel: 'linq',
@@ -427,7 +434,7 @@ describe('assistant auto-reply event-first path', () => {
         message: 'First prior Murph message.',
         providerMessageId: 'linq-msg-compound-murph-target-first',
         sentAt: '2026-08-07T21:08:00.000Z',
-        sessionId: 'session-automation-first',
+        sessionId: 'session-chat',
         target: 'thread-1',
       }),
       createOutboxMessage({
@@ -436,7 +443,7 @@ describe('assistant auto-reply event-first path', () => {
         message: 'Second prior Murph message.',
         providerMessageId: 'linq-msg-compound-murph-target-second',
         sentAt: '2026-08-07T21:09:00.000Z',
-        sessionId: 'session-automation-second',
+        sessionId: 'session-chat',
         target: 'thread-1',
       }),
     ]
@@ -476,6 +483,9 @@ describe('assistant auto-reply event-first path', () => {
     const prompt = readSentPrompt()
     expect(prompt).toContain('First prior Murph message.')
     expect(prompt).toContain('Second prior Murph message.')
+    expect(readSentInput().turnContext ?? '').not.toContain(
+      'Prior message 1 (native reply target):',
+    )
     expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledWith(
       expect.objectContaining({
         providerMessageIds: [

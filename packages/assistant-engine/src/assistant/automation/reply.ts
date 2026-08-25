@@ -1541,7 +1541,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
         crossSessionReplyContext.hasNativeReplyReference,
       historyReader: input.historyReader,
       input: primaryReplyInput,
-      preserveSameSessionReplyTarget: !affirmativeReaction,
+      preserveSameSessionReplyTarget:
+        primaryReplyInput.conversation.threadIsDirect === true &&
+        !affirmativeReaction,
       replyToMessageId: crossSessionReplyContext.replyToMessageId,
       session: existingSession,
       vault: input.vault,
