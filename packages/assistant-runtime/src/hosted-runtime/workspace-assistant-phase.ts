@@ -75,7 +75,6 @@ import {
   AutomationAvailabilityConflictBlockError,
   patchAutomation,
   reconcileAutomationSupportSeries,
-  resolveAutomationUpsertSlug,
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
@@ -364,6 +363,10 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  runtimeIssueProvenance?: {
+    releaseSha: string | null;
+    runtimeName: string;
+  } | null;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
@@ -1497,10 +1500,6 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
-        const requestedSlug = resolveAutomationUpsertSlug({
-          slug: request.slug,
-          title: request.title,
-        });
         const existingTarget = request.automationId
           ? await showAutomation({
               automationId: request.automationId,
@@ -1510,7 +1509,7 @@ function createHostedAssistantAutomationTool(input: {
         const targetsOnboardingFirstRead =
           request.automationId ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
-          || requestedSlug ===
+          || request.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
           || existingTarget?.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG;
@@ -2031,6 +2030,9 @@ export async function runHostedWorkspaceAssistantPhase(
         executionContext: {
           hosted: {
             memberId: input.request.userId,
+            releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+            runtimeAttemptId: input.request.attemptId,
+            runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
             ...(usageRecorder ? { usageRecorder } : {}),
             userEnvKeys: Object.keys(input.runtime.userEnv),
           },
@@ -2197,6 +2199,9 @@ export async function runHostedWorkspaceAssistantPhase(
             }
           : {}),
         memberId: input.request.userId,
+        releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+        runtimeAttemptId: input.request.attemptId,
+        runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
         createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
           createHostedScheduledGroupTools({
             channel,

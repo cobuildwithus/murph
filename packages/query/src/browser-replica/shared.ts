@@ -394,6 +394,7 @@ export interface CreateBrowserVaultReplicaInput {
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
+  signal?: AbortSignal;
   sourceBundleHash: string;
   vault: VaultReadModel;
 }

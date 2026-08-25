@@ -194,6 +194,7 @@ product-decision owners.
      the frontend lens and require enough redacted rendered evidence to judge
      each material visual, state, interaction, and responsive claim
    - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
+   - for behavior composed across multiple owners, map the complete production path and prefer one stable composed or end-to-end proof of the invariant; seam-level unit tests may localize failures but do not replace proof that the owners work together
    - any product-owned dimension activates the Product UX lens, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Once implementation is stable, run the focused local proof selected from the

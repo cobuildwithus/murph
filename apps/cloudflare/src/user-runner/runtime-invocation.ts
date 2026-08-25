@@ -14,6 +14,9 @@ import type {
   HostedAssistantCustomInferenceOverride,
 } from "@murphai/hosted-execution/assistant-inference";
 import {
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
+} from "@murphai/hosted-execution/env";
+import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -244,6 +247,9 @@ export class RuntimeInvocationService {
     const workspaceVersion = workspaceRead.workspace?.version ?? "0";
     const hostedAssistantCustomInferenceOverride =
       workspaceRead.hostedAssistantCustomInferenceOverride ?? null;
+    const hostedAssistantSubagentModelOverridesAllowed =
+      hostedAssistantCustomInferenceOverride === null
+      && workspaceRead.hostedAssistantSubagentModelOverridesAllowed === true;
     const customInferenceTarget = hostedAssistantCustomInferenceOverride
       ? await this.readHostedInferenceRuntimeTargetFromWeb({
           override: hostedAssistantCustomInferenceOverride,
@@ -316,6 +322,7 @@ export class RuntimeInvocationService {
         workspaceRead.hostedAssistantProviderOverride ?? null,
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
+      hostedAssistantSubagentModelOverridesAllowed,
       assistantExecutionBlocked,
       processingMode: invocationProcessingMode,
       token,
@@ -846,6 +853,7 @@ export class RuntimeInvocationService {
     hostedAssistantProviderOverride: HostedAssistantProviderOverride | null;
     hostedAssistantReasoningEffortOverride:
       HostedAssistantReasoningEffortOverride | null;
+    hostedAssistantSubagentModelOverridesAllowed: boolean;
     processingMode?: HostedWorkspaceInvocationProcessingMode | null;
     token: RunnerWriteFenceToken;
     userId: string;
@@ -863,6 +871,8 @@ export class RuntimeInvocationService {
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.input.runnerRuntimeEnvSource,
     );
+    forwardedEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV] =
+      input.hostedAssistantSubagentModelOverridesAllowed ? "1" : "0";
     if (input.hostedAssistantCustomInferenceOverride !== null) {
       forwardedEnv.HOSTED_ASSISTANT_PROVIDER = HOSTED_CUSTOM_INFERENCE_PROVIDER;
       forwardedEnv.HOSTED_ASSISTANT_MODEL =

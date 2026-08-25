@@ -39,7 +39,9 @@ import { describe, expect, it } from 'vitest'
 import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
+  stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
+  waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
 import {
   executeReadOnlyAssistantAsk,
@@ -139,6 +141,7 @@ import type {
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
+  AssistantProviderUsageDraft,
 } from '../src/assistant/providers/types.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
@@ -306,6 +309,77 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+
+describeRealCodex('real Codex child model selection e2e', () => {
+  it(
+    'runs a Luna child through native collaboration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig({
+        multiAgentV2: true,
+      })
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-codex-luna-child-e2e-'),
+      )
+      const childUsages: AssistantProviderUsageDraft[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          env: config.env,
+          excludeResumeTurns: true,
+          model: DEFAULT_REAL_CODEX_MODEL,
+          modelProvider: config.modelProvider,
+          onAdditionalUsage: async (usage) => {
+            childUsages.push(usage)
+          },
+          prompt: [
+            'Run one native collaboration child for this synthetic smoke check.',
+            'Call spawn_agent once with model gpt-5.6-luna and a small task that needs no tools.',
+            'Do not wait for the child; finish the parent response after launching it.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        expect(result.finalMessage.trim()).not.toBe('')
+        const parentUsage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+            model: DEFAULT_REAL_CODEX_MODEL,
+            modelProvider: config.modelProvider,
+            oss: false,
+          }),
+          rawEvents: result.jsonEvents,
+        })
+        expect(parentUsage.servedModel).not.toBeNull()
+        expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
+        await waitForWarmCodexBackgroundWork()
+        expect(childUsages).toHaveLength(1)
+        expect(childUsages[0]).toMatchObject({
+          provider: 'codex-cli',
+          providerRequestOutcome: 'succeeded',
+          usage: {
+            requestedModel: 'gpt-5.6-luna',
+            servedModel: 'gpt-5.6-luna',
+          },
+        })
+      } finally {
+        await stopWarmCodexAppServer('real-codex-luna-child-e2e-complete')
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
@@ -714,6 +788,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(started.transcriptMessage).toContain(
           `[Murph tracked workout source: ${finiteWorkout.id};`,
         )
+        expect(started.responseContextReferences).toEqual([{
+          entityId: finiteWorkout.id,
+          entityKind: 'activity_session',
+        }])
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
           name: 'Seated cable curl',
@@ -744,9 +822,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ].join(' '),
         })
 
-        expect(untrustedContext.transcriptMessage).not.toContain(
-          '[Murph workout follow-up:',
-        )
+        expect(untrustedContext.responseContextReferences).toBeUndefined()
 
         const untrustedReply = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -763,28 +839,66 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(unchangedAfterUntrustedReply.exercises[0]?.sets[7]?.reps)
           .toBeUndefined()
 
-        const followUp = await executeRealCodexAppServerTurn({
+        const commandCountBeforeLegacyMarker = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .length
+        const legacyMarkerReply = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            `The immediately preceding durable assistant transcript is: ${started.transcriptMessage}`,
+            'The immediately preceding visible assistant transcript ended with this retired text-only marker:',
+            `[Murph workout follow-up: ${finiteWorkout.id}; exercise=Seated cable curl; set=8]`,
+            'There are no host-preserved contextReferences for this reply.',
+            'The current member message is exactly: "Set done."',
+          ].join('\n'),
+        })
+        const unchangedAfterLegacyMarker = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
+        )
+        const legacyMarkerCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .slice(commandCountBeforeLegacyMarker)
+
+        expect(legacyMarkerReply.responseCard).toBeNull()
+        expect(legacyMarkerReply.responseContextReferences).toBeUndefined()
+        expect(legacyMarkerReply.finalMessage).toMatch(/\?/u)
+        expect(legacyMarkerReply.finalMessage).toMatch(/which|what|workout|exercise|set/iu)
+        expect(legacyMarkerReply.finalMessage).not.toMatch(/already|logged|recorded/iu)
+        expect(legacyMarkerCommands.join('\n')).not.toMatch(
+          /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u,
+        )
+        expect(unchangedAfterLegacyMarker.exercises[0]?.sets[7]?.reps)
+          .toBeUndefined()
+
+        const followUp = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          trustedContextReferences: started.responseContextReferences,
+          prompt: [
+            `Host-preserved contextReferences: ${JSON.stringify(started.responseContextReferences)}`,
             'The current member message is exactly: "I am doing set 8 now. Ask me how it went when I finish."',
           ].join(' '),
         })
 
         expect(followUp.responseCard).toBeNull()
         expect(followUp.finalMessage).toMatch(/set 8|how.*went|reps/iu)
-        expect(followUp.finalMessage).toContain(
-          `[Murph workout follow-up: ${finiteWorkout.id}]`,
-        )
+        expect(followUp.finalMessage).not.toContain('[Murph workout follow-up:')
         expect(followUp.transcriptMessage).toBe(followUp.finalMessage)
+        expect(followUp.responseContextReferences).toEqual([{
+          entityId: finiteWorkout.id,
+          entityKind: 'activity_session',
+        }])
 
         // Deliberately do not resume the provider session. The member's terse
-        // message carries no id; Murph's preceding transcript supplies the
-        // exact workout id, while the exercise prescription remains canonical.
+        // message carries no id; the runtime-owned delivery relationship
+        // supplies the exact workout id while the prescription stays canonical.
         const finalSet = await executeRealCodexAppServerTurn({
           ...commonInput,
+          trustedContextReferences: followUp.responseContextReferences,
           prompt: [
-            `The immediately preceding durable assistant transcript is: ${followUp.transcriptMessage}`,
+            `Host-preserved contextReferences: ${JSON.stringify(followUp.responseContextReferences)}`,
             'The current member message is exactly: "Repeated set 8 done for today\'s routine."',
           ].join(' '),
         })
@@ -8286,16 +8400,34 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('[model_providers.openai-env]')
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
+    expect(configToml).not.toContain('[features.multi_agent_v2]')
+
+    const multiAgentConfigToml = buildRealCodexConfigToml({
+      apiKeyEnv: 'PROVIDER_KEY',
+      model: 'gpt-5.6-terra',
+      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+      multiAgentV2: true,
+    })
+    expect(multiAgentConfigToml).toContain('[features.multi_agent_v2]')
+    expect(multiAgentConfigToml).toContain('enabled = true')
+    expect(multiAgentConfigToml).toContain(
+      'expose_spawn_agent_model_overrides = true',
+    )
+    expect(multiAgentConfigToml).toContain(
+      'max_concurrent_threads_per_session = 4',
+    )
   })
 
   it('uses normal Codex home only in explicit subscription mode', async () => {
     const config = await resolveRealCodexE2eConfig({
-      DATABASE_URL: 'ignored-database-url',
-      HOME: '/synthetic-home',
-      MURPH_REAL_CODEX_AUTH: 'subscription',
-      OPENAI_API_KEY: 'ignored-provider-value',
-      PATH: '/usr/bin:/bin',
-      XDG_CONFIG_HOME: '/synthetic-config',
+      sourceEnv: {
+        DATABASE_URL: 'ignored-database-url',
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_AUTH: 'subscription',
+        OPENAI_API_KEY: 'ignored-provider-value',
+        PATH: '/usr/bin:/bin',
+        XDG_CONFIG_HOME: '/synthetic-config',
+      },
     })
 
     expect(config).toEqual({
@@ -8313,8 +8445,10 @@ describe('real Codex app-server cache usage e2e harness', () => {
 
   it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
     await expect(resolveRealCodexE2eConfig({
-      MURPH_REAL_CODEX_AUTH: 'provider',
-      MURPH_REAL_CODEX_MODEL_PROVIDER: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_MODEL_PROVIDER: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      },
     })).rejects.toThrow(
       `Use ${OPENAI_ENV_MODEL_PROVIDER} for provider-key real Codex e2e.`,
     )
@@ -12776,8 +12910,12 @@ function summarizeCodexEventSequence(
 }
 
 async function resolveRealCodexE2eConfig(
-  sourceEnv: NodeJS.ProcessEnv = process.env,
+  input: {
+    multiAgentV2?: boolean
+    sourceEnv?: NodeJS.ProcessEnv
+  } = {},
 ): Promise<RealCodexE2eConfig> {
+  const sourceEnv = input.sourceEnv ?? process.env
   const model =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
@@ -12862,6 +13000,7 @@ async function resolveRealCodexE2eConfig(
       apiKeyEnv,
       model,
       modelProvider,
+      multiAgentV2: input.multiAgentV2,
     }),
     {
       encoding: 'utf8',
@@ -12910,6 +13049,7 @@ function buildRealCodexConfigToml(input: {
   apiKeyEnv: string
   model: string
   modelProvider: string
+  multiAgentV2?: boolean
 }): string {
   const baseUrl =
     input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
@@ -12944,6 +13084,15 @@ function buildRealCodexConfigToml(input: {
     'stream_max_retries = 5',
     'supports_websockets = false',
     '',
+    ...(input.multiAgentV2
+      ? [
+          '[features.multi_agent_v2]',
+          'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
+          'max_concurrent_threads_per_session = 4',
+          '',
+        ]
+      : []),
   ].join('\n')
 }
 

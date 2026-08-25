@@ -23,6 +23,7 @@ jobs:
         with:
           client-id: ${{ vars.FROG_APP_CLIENT_ID }}
           private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}
+          permission-contents: write
           permission-pull-requests: write
 
       - name: Convert the exact synchronized head to draft

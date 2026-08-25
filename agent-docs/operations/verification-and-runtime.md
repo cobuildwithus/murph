@@ -55,9 +55,13 @@ trusted default-branch controller returns the PR to draft only while that event
 still names the current SHA. The controller runs in the protected
 `frog-reconciliation` environment, leaves the workflow-provided token with no
 permissions, and mints a current-repository Frog GitHub App installation token
-with only `pull-requests: write` for its reads and sole draft mutation. The
-controller lists open PRs in the base repository with GitHub's validated
-`head=owner:branch` filter, then resolves
+with exactly `contents: write` and `pull-requests: write`. Pull requests write
+covers the controller's REST pull-request reads; Contents write is requested
+only because GitHub App authorization for GraphQL `convertPullRequestToDraft`
+requires it. The controller never calls the Contents API, mutates repository
+contents, or checks out code, and its sole mutation remains the exact pull
+request's draft state. The controller lists open PRs in the base repository
+with GitHub's validated `head=owner:branch` filter, then resolves
 exactly one target from the workflow-run head repository, branch, and SHA. Fork
 default branches therefore follow the same path without depending on GitHub
 populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
@@ -1110,6 +1114,7 @@ the advisory budget.
 
 - Model nested CLI verbs with real incur router groups. Do not use argv rewrites or synthetic action args to mimic nested commands, because `--schema`, `--llms`, `skills add/list`, and command-map typegen only stay truthful when the router tree itself is truthful.
 - Treat incur-owned transport and discovery features as framework behavior: `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Command-surface docs should describe Murph semantics and payloads, not restate incur defaults command-by-command unless the repo is deliberately constraining them.
+- Error-envelope changes require final built-CLI proof for stable domain code, retryability, stage, hint, and field errors plus explicit non-echo assertions for submitted values, raw causes, provider bodies, and absolute paths. Include a pre-`serve()` machine-format scenario whenever invocation planning, vault/config resolution, or the outer entrypoint changes.
 - Keep `packages/cli/src/index.ts` default-exporting the root CLI and refresh `packages/cli/src/incur.generated.ts` whenever command topology changes. If `incur gen` is blocked by an unrelated build failure, record that explicitly in the handoff instead of silently leaving stale generated types.
 - `packages/cli/test/cli-test-helpers.ts` executes `packages/cli/dist/bin.js`, so source checks like `pnpm exec tsx packages/cli/src/bin.ts ...` are only a diagnostic shortcut. Final verification still needs the built CLI path or a clearly documented unrelated blocker.
 

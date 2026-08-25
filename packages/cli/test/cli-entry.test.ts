@@ -6,14 +6,13 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
 
-import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
-  formatMurphCliError,
   installSqliteExperimentalWarningFilter,
   isBrokenPipeError,
   loadCliEnvFiles,
+  renderMurphCliEntrypointError,
   resolveBrokenPipeExitCode,
   runMurphCliEntrypoint,
   runMurphCliAction,
@@ -162,8 +161,11 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("formatMurphCliError reuses the shared structured formatter", () => {
-  const error = Object.assign(new Error("Config validation failed."), {
+test("renderMurphCliEntrypointError preserves a bounded diagnostic failure", async () => {
+  const submittedValue = "private-submitted-value";
+  const providerBody = "private-provider-response";
+  const rawMessage = `Parser rejected ${submittedValue}: ${providerBody}.`;
+  const error = Object.assign(new Error(rawMessage), {
     code: "CONFIG_INVALID",
     details: {
       errors: [
@@ -173,16 +175,154 @@ test("formatMurphCliError reuses the shared structured formatter", () => {
     },
   });
 
-  assert.equal(formatMurphCliError(error), formatStructuredErrorMessage(error));
+  const rendered = await renderMurphCliEntrypointError(error, [], { human: true });
+
+  assert.equal(rendered.machineReadable, false);
   assert.equal(
-    formatMurphCliError(error),
+    rendered.output,
     [
-      "Config validation failed.",
-      "details:",
-      '- $.paths.vaultRoot: Invalid input: expected "vault"',
-      '- Invalid JSON in "<HOME_DIR>/vault/config.json".',
+      `Error (CONFIG_INVALID): ${rawMessage}`,
+      "Stage: command",
     ].join("\n"),
   );
+  assert.equal(rendered.output.includes(submittedValue), true);
+  assert.equal(rendered.output.includes(providerBody), true);
+});
+
+test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
+  const privateValue = "private-schedule-value";
+  const error = new VaultCliError(
+    "invalid_payload",
+    "Schedule failed validation.",
+    {
+      issues: [
+        {
+          code: "invalid_value",
+          expected: "IANA time zone",
+          path: ["schedule", "timeZone"],
+          publicPath: ["schedule", "timeZone"],
+          message: privateValue,
+        },
+      ],
+      retryable: false,
+      stage: "validation",
+    },
+  );
+
+  for (const jsonArgs of [
+    ["--vault", "first", "--vault", "second", "--format", "json"],
+    ["--vault", "first", "--vault", "second", "--json"],
+  ]) {
+    const rendered = await renderMurphCliEntrypointError(
+      error,
+      jsonArgs,
+      { human: true },
+    );
+
+    assert.equal(rendered.machineReadable, true);
+    assert.equal(rendered.exitCode, 1);
+    const directError = JSON.parse(rendered.output) as {
+      code?: string;
+      error?: unknown;
+      fieldErrors?: Array<{ path?: string }>;
+      hint?: string;
+      stage?: string;
+    };
+    assert.equal(directError.code, "invalid_payload");
+    assert.equal(directError.error, undefined);
+    assert.equal(directError.stage, "validation");
+    assert.equal(directError.hint, undefined);
+    assert.equal(directError.fieldErrors?.[0]?.path, "schedule.timeZone");
+    assert.equal(rendered.output.includes(privateValue), false);
+    assert.equal(rendered.output.includes("first"), false);
+    assert.equal(rendered.output.includes("second"), false);
+  }
+
+  const rendered = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "first", "--vault", "second", "--full-output", "--format", "json"],
+    { human: true },
+  );
+
+  assert.equal(rendered.machineReadable, true);
+  assert.equal(rendered.exitCode, 1);
+  const envelope = JSON.parse(rendered.output) as {
+    error?: {
+      code?: string;
+      fieldErrors?: Array<{ path?: string }>;
+      hint?: string;
+      stage?: string;
+    };
+    meta?: { command?: string };
+    ok?: boolean;
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error?.code, "invalid_payload");
+  assert.equal(envelope.error?.stage, "validation");
+  assert.equal(envelope.error?.hint, undefined);
+  assert.equal(envelope.error?.fieldErrors?.[0]?.path, "schedule.timeZone");
+  assert.equal(envelope.meta?.command, "invocation");
+  assert.equal(rendered.output.includes(privateValue), false);
+  assert.equal(rendered.output.includes("first"), false);
+  assert.equal(rendered.output.includes("second"), false);
+});
+
+test("renderMurphCliEntrypointError wraps every formatter with full-output", async () => {
+  const error = new VaultCliError(
+    "invalid_option",
+    "Pass vault only once.",
+  );
+
+  const plain = await renderMurphCliEntrypointError(
+    new VaultCliError(
+      error.code,
+      error.message,
+    ),
+    ["--vault", "one", "--vault", "two", "--format", "json"],
+    { human: true },
+  );
+
+  const direct = JSON.parse(plain.output) as { code?: string; error?: unknown };
+  assert.equal(direct.code, "invalid_option");
+  assert.equal(direct.error, undefined);
+
+  const full = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "one", "--vault", "two", "--full-output", "--format", "json"],
+    { human: true },
+  );
+  const fullEnvelope = JSON.parse(full.output) as {
+    code?: string;
+    error?: { code?: string };
+    ok?: boolean;
+  };
+  assert.equal(fullEnvelope.ok, false);
+  assert.equal(fullEnvelope.code, undefined);
+  assert.equal(fullEnvelope.error?.code, "invalid_option");
+
+  const yaml = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "one", "--vault", "two", "--full-output", "--format", "yaml"],
+    { human: true },
+  );
+  assert.match(yaml.output, /^ok:\s+false$/mu);
+  assert.match(yaml.output, /^error:/mu);
+  assert.match(yaml.output, /^\s+code:\s+invalid_option$/mu);
+});
+
+test("renderMurphCliEntrypointError defaults non-interactive failures to machine TOON", async () => {
+  const rendered = await renderMurphCliEntrypointError(
+    Object.assign(new Error("permission denied at /private/vault/config.json"), {
+      code: "EACCES",
+    }),
+    [],
+    { human: false },
+  );
+
+  assert.equal(rendered.machineReadable, true);
+  assert.match(rendered.output, /permission_denied/u);
+  assert.match(rendered.output, /filesystem/u);
+  assert.match(rendered.output, /private\/vault/u);
 });
 
 test("isBrokenPipeError recognizes stdout pipe closure failures", () => {

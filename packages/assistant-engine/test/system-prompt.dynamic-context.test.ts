@@ -28,6 +28,29 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('assembles the CLI error-recovery rule exactly once', () => {
+    const layers = buildAssistantSystemPromptLayers(baseConversationInput)
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+
+    expect(
+      prompt.match(/`stage` names the failure/gu) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).toContain(
+      'For a read-only command, `retryable: true` permits at most one unchanged retry in the turn',
+    )
+    expect(prompt).toContain('never retry an unchanged write')
+    expect(prompt).toContain(
+      'Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt',
+    )
+    expect(prompt).toContain('Otherwise stop')
+    expect(prompt).toContain('never guess or echo omitted details')
+  })
+
   it('uses hosted direct current time without treating group time as personal', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,

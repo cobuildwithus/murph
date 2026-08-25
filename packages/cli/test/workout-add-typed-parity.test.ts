@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { writeFile } from 'node:fs/promises'
+import { readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { initializeVault } from '@murphai/core'
@@ -9,6 +9,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 
 import { registerWorkoutCommands } from '../src/commands/workout.js'
+import { workoutOptionPublicPath } from '../src/commands/workout-typed-options.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   createTempVaultContext,
@@ -80,6 +81,55 @@ function createWorkoutCli() {
   registerWorkoutCommands(cli, createIntegratedVaultServices())
   return cli
 }
+
+test('workout public paths omit unallowlisted schema leaves', () => {
+  const targetSet = {}
+  const targetExercise = { order: 4, sets: [targetSet] }
+  const sourceOptions = {
+    media: [{}],
+    exercises: [
+      { order: 0, sets: [] },
+      { order: 1, sets: [] },
+      { order: 2, sets: [] },
+      { order: 3, sets: [] },
+      targetExercise,
+    ],
+    sets: [
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 0, set: {} },
+      { exerciseOrder: 4, set: targetSet },
+    ],
+  }
+  const publicFields = {
+    media: new Set(['kind']),
+    exercise: new Set(['unitOverride']),
+    set: new Set(['weightUnit']),
+  }
+
+  assert.deepEqual(
+    workoutOptionPublicPath(
+      ['exercises', 0, 'privateSchemaLeaf'],
+      sourceOptions,
+      [targetExercise],
+      publicFields,
+    ),
+    ['workoutExercise', 4],
+  )
+  assert.deepEqual(
+    workoutOptionPublicPath(
+      ['exercises', 0, 'sets', 0, 'privateSchemaLeaf'],
+      sourceOptions,
+      [targetExercise],
+      publicFields,
+    ),
+    ['workoutSet', 7],
+  )
+})
 
 async function runRawInProcessCli(
   cli: Cli.Cli,
@@ -579,6 +629,56 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(missingSet.exitCode, 1)
   assert.equal(missingSet.envelope.ok, false)
   assert.match(missingSet.envelope.error.message ?? '', /Invalid workout session fields/u)
+  assert.equal(missingSet.envelope.error.stage, 'validation')
+  assert.equal(missingSet.envelope.error.fieldErrors?.[0]?.path, 'workoutSet')
+  assert.deepEqual(
+    await readdir(path.join(vaultRoot, 'ledger', 'events')).catch(() => []),
+    [],
+  )
+
+  const privateWorkoutText = 'Private second workout option'
+  const repeatedOptionFailure = await runInProcessJsonCli(cli, [
+    'workout',
+    'add',
+    '--note',
+    'Repeated option validation.',
+    '--duration',
+    '45',
+    '--type',
+    'strength-training',
+    '--workout-media',
+    'kind=photo;relativePath=raw/workouts/first.jpg',
+    '--workout-media',
+    'kind=private-kind;relativePath=raw/workouts/private.jpg',
+    '--workout-exercise',
+    'order=2;name=First public occurrence',
+    '--workout-exercise',
+    `order=1;name=${privateWorkoutText};unitOverride=stone`,
+    '--workout-set',
+    'exercise=2;order=1;reps=5;weightUnit=lb',
+    '--workout-set',
+    'exercise=1;order=1;reps=5;weightUnit=stone',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(repeatedOptionFailure.exitCode, 1)
+  assert.equal(repeatedOptionFailure.envelope.ok, false)
+  assert.deepEqual(
+    repeatedOptionFailure.envelope.error.fieldErrors?.map(({ path }) => path),
+    [
+      'workoutMedia.1.kind',
+      'workoutExercise.1.unitOverride',
+      'workoutSet.1.weightUnit',
+    ],
+  )
+  assert.doesNotMatch(
+    JSON.stringify(repeatedOptionFailure.envelope.error),
+    new RegExp(privateWorkoutText, 'u'),
+  )
+  assert.deepEqual(
+    await readdir(path.join(vaultRoot, 'ledger', 'events')).catch(() => []),
+    [],
+  )
 
   const misspelledSetField = await runInProcessJsonCli(cli, [
     'workout',

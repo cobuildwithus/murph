@@ -196,6 +196,54 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal attaches runtime-derived context to the exact deliveries', async () => {
+  const session = createAssistantSession()
+  const contextReferences = [{
+    entityId: 'evt_current_workout',
+    entityKind: 'activity_session',
+  }]
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [{
+          contextReferences,
+          deliveryContextOrdinal: 0,
+          response: 'First workout reply.',
+        }],
+        response: 'Final workout reply.',
+        responseContextReferences: contextReferences,
+        responseDeliveryContextOrdinal: 0,
+        route: { routeId: 'route-workout-context' },
+        session,
+        transcriptResponse: 'Final workout reply.',
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Continue the workout',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        contextReferences,
+        response: 'First workout reply.',
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input)
+    .toEqual(expect.objectContaining({
+      outboxAutomationContextReferences: contextReferences,
+    }))
+})
+
 test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
   const session = createAssistantSession()
   const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {
@@ -5012,6 +5060,10 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
 })
 
 test('sendAssistantMessageLocal live-steers same-conversation input without a second provider request', async () => {
+  const reminderReferences = [{
+    entityId: 'wfmt_initial',
+    entityKind: 'workout_format',
+  }]
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -5055,6 +5107,10 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
         codexContinuation: {
           kind: 'explicit-structured-history',
         },
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          response: 'initial response before live steer',
+        }],
         response: 'final after live-steered input',
         responseDeliveryContextOrdinal: 1,
         transcriptResponse: 'final after live-steered input',
@@ -5065,6 +5121,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
 
   const firstResultPromise = sendAssistantMessageLocal({
     onProviderRequestStarted: providerRequestStarted,
+    outboxAutomationContextReferences: reminderReferences,
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })
@@ -5098,6 +5155,14 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   expect(providerRequestStarted).not.toHaveBeenCalled()
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments?.[0]
+      ?.deliveryContext?.outboxAutomationContextReferences,
+  ).toEqual(reminderReferences)
+  expect(
+    mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input
+      ?.outboxAutomationContextReferences,
+  ).toBeNull()
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
       .map((call) => call[0])
@@ -10187,6 +10252,10 @@ async function loadLocalServiceModule(input?: {
           codexThreadId?: string | null
           finalAction?: AssistantNoReplyDisposition
           precedingResponseSegments?: readonly {
+            contextReferences?: readonly {
+              entityId: string
+              entityKind: string
+            }[] | null
             deliveryContextOrdinal: number
             media?: AssistantDeliveryOutcome['media']
             response: string
@@ -10203,6 +10272,10 @@ async function loadLocalServiceModule(input?: {
             routeId?: string
           }
           response: string
+          responseContextReferences?: readonly {
+            entityId: string
+            entityKind: string
+          }[] | null
           responseDeliveryContextOrdinal: number
           responseMedia?: readonly AssistantResponseMedia[] | null
           responseCard?: AssistantResponseCard | null

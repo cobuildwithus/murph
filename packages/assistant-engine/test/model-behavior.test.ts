@@ -179,10 +179,13 @@ describe('assistant execution prompt contract', () => {
     )
 
     expect(prompt).toContain(
-      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+      'The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only',
     )
     expect(prompt).toContain(
-      'a saved model starts on the next turn',
+      'A saved Luna, Terra, or Sol model starts next turn',
+    )
+    expect(prompt).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -1012,10 +1015,13 @@ describe('assistant execution prompt contract', () => {
       'Voice memos keep the running-turn voice unless this user names another',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model, core-reply provider, or reasoning changes',
+      'changes future conversation model, provider, or reasoning only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'a saved change starts on the next turn',
+      'one-task child models use `spawn_agent.model` and are never saved',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never switch them automatically',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -1993,10 +1999,10 @@ describe('assistant system prompt cache stability', () => {
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
     // longitudinal recommendation policy, narrowest-relevant-safety rule,
-    // response-card dietary/burn
-    // target-authority boundary, and explicit group-family tool routing set this
-    // ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_104)
+    // response-card dietary/burn target-authority boundary, explicit
+    // group-family tool routing, and the cross-route CLI error-recovery
+    // contract set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_403)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -3117,7 +3123,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'A saved Luna, Terra, or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -3261,7 +3267,10 @@ describe('assistant conversation scope', () => {
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(
-      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+      'For an ordinary save, omit `slug`; it creates a new automation with a host-generated `automationId`, even when another automation has the same title.',
+    )
+    expect(prompt).toContain(
+      'Only when the current loaded skill defines an exact stable recipe key may save include that exact value as `slug`; never derive one from a title or invent one.',
     )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
@@ -3398,7 +3407,7 @@ describe('assistant conversation scope', () => {
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(
-      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+      'For an ordinary save, omit `slug`; it creates a new automation with a host-generated `automationId`, even when another automation has the same title.',
     )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
