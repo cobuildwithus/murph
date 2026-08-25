@@ -74,9 +74,11 @@ vi.mock("@/src/components/ui/dialog", () => ({
 
 import {
   addDeclinedAnswersForSkippedTopic,
+  buildTopicInstructions,
   EnvironmentVoiceCapture,
   microphoneAccessNotice,
   summarizeEnvironmentInterviewCompletion,
+  withoutSavedFields,
 } from "../app/(dashboard)/environment/environment-voice-capture";
 import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
@@ -84,7 +86,6 @@ import { renderClientComponent } from "./render-client-component";
 const SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Build your Environment report",
   flow: "walkthrough",
-  idleDescription: "2 focused topics. Murph saves each topic before moving on.",
   idleTitle: "Ready when you are",
   topics: [
     {
@@ -99,7 +100,6 @@ const SCRIPT: EnvironmentVoiceScript = {
       ],
       focus: ["Your bedroom temperature at night"],
       id: "sleep:0",
-      prompt: "Describe the item below. If you do not know, say so.",
       title: "Your bedroom at night",
     },
     {
@@ -114,7 +114,6 @@ const SCRIPT: EnvironmentVoiceScript = {
       ],
       focus: ["Whether you work at home, an office, or both"],
       id: "workspace:0",
-      prompt: "Describe the item below. If you do not know, say so.",
       title: "Your work setup",
     },
   ],
@@ -145,8 +144,9 @@ test("opens with concise instructions before showing the first topic", async () 
     const bodyText = rendered.window.document.body.textContent ?? "";
     assert.match(bodyText, /One topic at a time/);
     assert.match(bodyText, /Start recording/);
-    assert.match(bodyText, /Only confirmed details are added to your report/);
     assert.match(bodyText, /Speaking language/);
+    assert.doesNotMatch(bodyText, /Only confirmed details/);
+    assert.doesNotMatch(bodyText, /focused topics/);
     assert.doesNotMatch(bodyText, /Your bedroom at night/);
   } finally {
     await rendered.cleanup();
@@ -755,3 +755,78 @@ class FakeDataChannel {
     this.sent.push(value);
   }
 }
+
+test("does not ask again for a field this session already saved", () => {
+  const resumed = withoutSavedFields(
+    { ...SCRIPT, initialCoveredDetails: 0, totalDetails: 2 },
+    new Map([["sleep-environment.night_temp_c", 19]]),
+  );
+
+  assert.deepEqual(
+    resumed.topics.map((topic) => topic.id),
+    ["workspace:0"],
+  );
+  assert.equal(resumed.initialCoveredDetails, 1);
+  assert.deepEqual(
+    summarizeEnvironmentInterviewCompletion(resumed, new Map()),
+    {
+      coveredDetails: 1,
+      remainingDetails: 1,
+      savedDetails: 0,
+      totalDetails: 2,
+    },
+  );
+});
+
+test("keeps the checklist aligned when one field of a topic is already saved", () => {
+  const script: EnvironmentVoiceScript = {
+    ...SCRIPT,
+    topics: [
+      {
+        ...SCRIPT.topics[0],
+        fields: [
+          {
+            aspectId: "workspace",
+            indicatorId: "work_mode",
+            label: "Whether you work at home, an office, or both",
+            valueType: { kind: "text" },
+          },
+          {
+            aspectId: "workspace",
+            indicatorId: "desk_hours",
+            label: "How many hours you spend at a desk each day",
+            valueType: { kind: "number" },
+          },
+        ],
+        focus: [
+          "Whether you work at home, an office, or both",
+          "How many hours you spend at a desk each day",
+        ],
+        id: "workspace:0",
+        title: "Your work setup",
+      },
+    ],
+  };
+
+  const resumed = withoutSavedFields(
+    script,
+    new Map([["workspace.work_mode", "remote"]]),
+  );
+
+  assert.deepEqual(resumed.topics[0]?.focus, [
+    "How many hours you spend at a desk each day",
+  ]);
+  assert.deepEqual(
+    resumed.topics[0]?.fields?.map((field) => field.indicatorId),
+    ["desk_hours"],
+  );
+});
+
+test("tells the extractor how to read a checklist topic, a range, and imperial units", () => {
+  const instructions = buildTopicInstructions(SCRIPT.topics[1], null, "en");
+
+  assert.doesNotMatch(instructions, /undefined/);
+  assert.match(instructions, /the field labels below as the visible checklist/);
+  assert.match(instructions, /rounded midpoint of the range/);
+  assert.match(instructions, /Fahrenheit to Celsius/);
+});

@@ -92,8 +92,6 @@ const GAP_SCRIPTS: Readonly<Record<10 | 30 | 70, EnvironmentVoiceScript>> = {
 const UPDATE_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Update your environment",
   flow: "update",
-  idleDescription:
-    "You do not need to repeat the full walkthrough. Mention only what is new or different.",
   idleTitle: "Record what changed",
   topics: [
     {
@@ -263,9 +261,6 @@ function gapScript(
   return {
     dialogTitle: "Fill the gaps in your report",
     flow: "fill-gaps",
-    idleDescription: `${topics.length} short ${
-      topics.length === 1 ? "topic" : "topics"
-    }, based on what Murph does not know yet.`,
     idleTitle: "Only the missing details",
     topics: [buildTopic(firstTopic), ...remainingTopics.map(buildTopic)],
   };

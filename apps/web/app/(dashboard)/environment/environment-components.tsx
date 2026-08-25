@@ -91,7 +91,7 @@ export const gradeBadgeVariants = cva(
 function gradeTone(letter: CategoryGrade["letter"]): GradeTone {
   if (letter === "A" || letter === "B") return "olive";
   if (letter === "C") return "amber";
-  if (letter === "D" || letter === "E") return "terracotta";
+  if (letter === "D" || letter === "F") return "terracotta";
   return "muted";
 }
 
@@ -539,8 +539,8 @@ export function EnvironmentHero({
               >
                 {grade.redFlags} urgent{" "}
                 {grade.redFlags === 1 ? "issue" : "issues"}{" "}
-                {grade.letter === "E"
-                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at E`
+                {grade.letter === "F"
+                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at F`
                   : `${grade.redFlags === 1 ? "needs" : "need"} attention now`}
               </button>
             ) : null}

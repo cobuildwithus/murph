@@ -22,6 +22,7 @@ import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { deriveCategoryNote, overallGrade } from "./category-notes";
+import { toFahrenheit, useImperialUnits } from "./use-imperial-units";
 import {
   CategoryCard,
   EnvironmentHero,
@@ -119,12 +120,13 @@ export default function EnvironmentPageClient({
     [client],
   );
   const scene = useMemo(() => resolveHabitatScene(values), [values]);
+  const imperial = useImperialUnits();
   const notes = useMemo(
     () =>
       scene.categories.map((category) =>
-        deriveCategoryNote(category, values, indicatorNotes)
+        deriveCategoryNote(category, values, indicatorNotes, imperial)
       ),
-    [indicatorNotes, scene, values],
+    [imperial, indicatorNotes, scene, values],
   );
   const grade = useMemo(() => overallGrade(notes, values), [notes, values]);
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
@@ -133,7 +135,7 @@ export default function EnvironmentPageClient({
     [indicatorNotes, values],
   );
   const location = readableLocation(values);
-  const conditions = useEnvironmentConditions(location);
+  const conditions = useEnvironmentConditions(location, imperial);
   const hasEnvironmentData = hasKnownHabitatValue(values);
   const valuesSignature = JSON.stringify({ indicatorNotes, values });
   const displayedVoiceRefreshState = resolveDisplayedVoiceRefreshState({
@@ -502,14 +504,16 @@ export function EnvironmentShell({
 }) {
   return (
     <div className="flex w-full flex-col gap-10">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <PageHeader
           eyebrow="Habitat"
           title="Your environment"
           description="What Murph knows about your home, and what to check next."
         />
         {actions ? (
-          <div className="flex shrink-0 items-center gap-5 pb-1">{actions}</div>
+          <div className="flex shrink-0 items-center gap-5 sm:pb-1">
+            {actions}
+          </div>
         ) : null}
       </div>
       {children}
@@ -1029,7 +1033,10 @@ function hasKnownHabitatValue(values: HabitatValues): boolean {
   );
 }
 
-function useEnvironmentConditions(location: string | null): {
+function useEnvironmentConditions(
+  location: string | null,
+  imperial: boolean,
+): {
   outdoorAir: string;
   weather: string;
 } {
@@ -1089,9 +1096,11 @@ function useEnvironmentConditions(location: string | null): {
         )} µg/m³`
       : "Couldn’t check",
     weather: conditions.weather
-      ? `${Math.round(conditions.weather.temperatureC)}°C · ${sentenceCase(
-          conditions.weather.description,
-        )}`
+      ? `${
+          imperial
+            ? `${toFahrenheit(conditions.weather.temperatureC)}°F`
+            : `${Math.round(conditions.weather.temperatureC)}°C`
+        } · ${sentenceCase(conditions.weather.description)}`
       : "Couldn’t check",
   };
 }
