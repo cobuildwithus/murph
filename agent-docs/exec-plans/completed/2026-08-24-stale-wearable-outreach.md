@@ -1,6 +1,6 @@
 # Stop staleness-only wearable outreach
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-24
 
@@ -74,7 +74,7 @@ Updated: 2026-08-24
 5. [x] Relocate retired-outbox cleanup to one checkpoint-owning boundary and
    prove pending, retryable, and sending states survive checkpoint restoration
    without provider or model entry.
-6. [ ] Commit the corrected candidate, push it, and complete final ReviewGPT and
+6. [x] Commit the corrected candidate, push it, and complete final ReviewGPT and
    CI on the exact head.
 
 ## Decisions
@@ -138,7 +138,12 @@ Updated: 2026-08-24
   device-syncd (7), and hosted-execution (2) focused tests pass, together with
   typechecks for Assistant Engine, Assistant Runtime, device-syncd,
   hosted-execution, and hosted Web.
+- Final ReviewGPT substantive round 3 passed its full sensitive audit on the
+  exact pushed head with no qualifying findings. It validated the retrospective
+  lineage, single checkpoint owner, restore-to-restore proof, model/provider
+  exclusion, exact digest reconciliation, and split workflow-policy scope.
 - The production-shaped real-Codex test is committed for both stale-only silence
   and explicit reauthorization with exactly one returned connect URL. Its local
   live run is credential-blocked because neither supported provider credential
   is configured; the same file compiles and its deterministic owner proofs pass.
+Completed: 2026-08-24
