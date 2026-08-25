@@ -1,6 +1,6 @@
 # Enable explicit hosted subagent model selection
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-25
 
@@ -40,7 +40,7 @@ Updated: 2026-08-25
 1. [x] Ask ReviewGPT Pro to implement a scoped attachment-based patch against the current task worktree.
 2. [x] Inspect the returned patch against the current owner boundaries and apply only the minimal correct slice.
 3. [x] Run focused tests and typechecks, then complete the Product UX walkthrough for inherited, explicit-supported, and unsupported-model requests.
-4. [ ] Commit and push the remediated candidate, run the canonical final ReviewGPT gate, close this plan, and merge only after exact-head CI is green.
+4. [x] Commit and push the remediated candidate, pass the canonical final ReviewGPT gate, and close this plan. Exact-head CI, current-base mergeability, and merge remain post-plan release gates on the final archival head.
 
 ## Decisions
 
@@ -89,4 +89,7 @@ Updated: 2026-08-25
 - Pinned Codex 0.147.0 complete first-request capture with `gpt-tokenizer` 3.4.0 (`o200k_harmony`) — direct changed from 26,777 tokens / 122,618 bytes to 26,711 / 122,332 (-66, -0.2465%, -286 bytes); group changed from 24,046 / 110,136 to 23,965 / 109,873 (-81, -0.3369%, -263 bytes). Volatile local paths and UUIDs were normalized. The only provider-visible changes were the reviewed persistent-versus-one-task guidance and removal of the two non-product bundled models from native collaboration guidance; every other selected field was identical.
 - `pnpm docs:drift` — passed.
 - `git diff --check` and the task-scoped direct-identifier scan — passed.
-- Exact-head required CI remains pending until the PR candidate is pushed.
+- Canonical ReviewGPT round 2 on pushed head `76bc5e5db11df0b745a583657704e70b40e486a9` — `ROUND_OUTCOME: PASS`; the reviewer confirmed the prior catalog/billing finding is closed at the real App Server provider boundary and found no new qualifying issue.
+- Parent final call-path and diff review — passed with no unresolved accepted/actionable finding. The implementation retains one Web authority decision, one optional hosted projection, one direct Codex config mapping, and the existing image-owned native catalog boundary; no new state, service, router, or lifecycle owner was introduced.
+- Exact-head required CI and the current-base merge-tree remain post-plan release gates after `scripts/finish-task` creates the archival commit.
+Completed: 2026-08-25
