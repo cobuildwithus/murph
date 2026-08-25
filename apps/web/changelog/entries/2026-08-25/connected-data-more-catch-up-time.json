@@ -9,6 +9,6 @@
     "summary": "Murph now gives each background connected-data pass up to two minutes to finish unusually slow sync jobs.",
     "details": "Foreground replies still take priority. Longer-running syncs stay recoverable, and Murph can now pinpoint slow background phases without exposing account or health data.",
     "relevanceTags": ["connected-health", "devices", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2267]
   }
 }
