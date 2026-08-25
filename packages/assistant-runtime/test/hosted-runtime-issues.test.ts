@@ -37,6 +37,9 @@ function createPendingIssueRecord(input: {
   occurredAt: string
   operation: null
   phase: 'final_response'
+  releaseSha: null
+  runtimeAttemptId: null
+  runtimeName: null
   schema: 'murph.assistant-runtime-issue.v1'
   severity: 'warning' | 'error'
   summary: string
@@ -73,6 +76,9 @@ function createPendingIssueRecord(input: {
     occurredAt: input.occurredAt,
     operation: null,
     phase: 'final_response',
+    releaseSha: null,
+    runtimeAttemptId: null,
+    runtimeName: null,
     schema: 'murph.assistant-runtime-issue.v1',
     severity,
     summary,
@@ -98,6 +104,9 @@ describe('exportHostedPendingAssistantRuntimeIssues', () => {
         occurredAt: '2026-04-08T12:00:00.000Z',
         operation: null,
         phase: 'final_response' as const,
+        releaseSha: null,
+        runtimeAttemptId: null,
+        runtimeName: null,
         schema: 'murph.assistant-runtime-issue.v1' as const,
         severity: 'warning' as const,
         summary: 'Assistant produced a visible developer note on a surface where developer notes are hidden.',

@@ -564,6 +564,7 @@ export interface AssistantHostedExecutionContext {
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
+  releaseSha?: string | null
   resolveScheduledLinqRoute?(input: {
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
@@ -582,6 +583,8 @@ export interface AssistantHostedExecutionContext {
     signal?: AbortSignal | null
     target: string
   }): Promise<HostedExecutionExternalThreadRouteAuthority>
+  runtimeAttemptId?: string | null
+  runtimeName?: string | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -669,6 +672,9 @@ export function normalizeAssistantExecutionContext(
   const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
     hosted?.productFeedbackCandidateSink,
   )
+  const releaseSha = normalizeNullableString(hosted?.releaseSha)
+  const runtimeAttemptId = normalizeNullableString(hosted?.runtimeAttemptId)
+  const runtimeName = normalizeNullableString(hosted?.runtimeName)
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
     return {
@@ -740,6 +746,9 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
+      ...(releaseSha ? { releaseSha } : {}),
+      ...(runtimeAttemptId ? { runtimeAttemptId } : {}),
+      ...(runtimeName ? { runtimeName } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       ...(progressDeliveryDependencies

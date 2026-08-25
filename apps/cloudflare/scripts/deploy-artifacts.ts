@@ -24,7 +24,8 @@ import {
 
 export const runnerBundleManifestFileName = ".murph-runner-bundle-manifest.json";
 
-const runnerBundleManifestSchemaVersion = 2;
+const runnerBundleManifestSchemaVersion = 3;
+const publicReleaseShaPattern = /^[a-f0-9]{40}$/u;
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultAppDir = path.resolve(scriptDir, "..");
 const defaultRepoRoot = path.resolve(defaultAppDir, "../..");
@@ -95,6 +96,7 @@ export interface RunnerBundleManifest {
   bundleFingerprint: string;
   generatedAt: string;
   includeBundleOnlyDependencies: boolean;
+  releaseSha: string;
   schemaVersion: typeof runnerBundleManifestSchemaVersion;
   sourceFingerprint: string;
   workspacePackageNames: readonly string[];
@@ -107,8 +109,9 @@ export async function writeRunnerBundleManifest(
     buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
+    releaseSha: string;
     repoRoot?: string;
-  } = {},
+  },
 ): Promise<RunnerBundleManifest> {
   const manifest = await buildRunnerBundleManifest(bundleDir, input);
 
@@ -128,12 +131,14 @@ async function buildRunnerBundleManifest(
     buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
+    releaseSha: string;
     repoRoot?: string;
-  } = {},
+  },
 ): Promise<RunnerBundleManifest> {
   const includeBundleOnlyDependencies = input.includeBundleOnlyDependencies ?? true;
   const appDir = input.appDir ?? defaultAppDir;
   const repoRoot = input.repoRoot ?? defaultRepoRoot;
+  const releaseSha = normalizePublicReleaseSha(input.releaseSha);
 
   return {
     buildSkipped: input.buildSkipped === true,
@@ -143,6 +148,7 @@ async function buildRunnerBundleManifest(
     bundleFingerprint: await fingerprintRunnerBundle(bundleDir),
     generatedAt: (input.now ?? (() => new Date()))().toISOString(),
     includeBundleOnlyDependencies,
+    releaseSha,
     schemaVersion: runnerBundleManifestSchemaVersion,
     sourceFingerprint: await fingerprintHostedRunnerSources({
       appDir,
@@ -281,6 +287,8 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
     typeof manifest.buildSkipped !== "boolean" ||
     typeof manifest.generatedAt !== "string" ||
     typeof manifest.includeBundleOnlyDependencies !== "boolean" ||
+    typeof manifest.releaseSha !== "string" ||
+    !publicReleaseShaPattern.test(manifest.releaseSha) ||
     typeof manifest.sourceFingerprint !== "string" ||
     typeof manifest.bundleFingerprint !== "string" ||
     !isStringArray(manifest.workspacePackageNames) ||
@@ -295,10 +303,19 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
     bundleFingerprint: manifest.bundleFingerprint,
     generatedAt: manifest.generatedAt,
     includeBundleOnlyDependencies: manifest.includeBundleOnlyDependencies,
+    releaseSha: manifest.releaseSha,
     schemaVersion: runnerBundleManifestSchemaVersion,
     sourceFingerprint: manifest.sourceFingerprint,
     workspacePackageNames: manifest.workspacePackageNames,
   };
+}
+
+function normalizePublicReleaseSha(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!publicReleaseShaPattern.test(normalized)) {
+    throw new TypeError("Runner bundle release SHA must be a full public Git commit SHA.");
+  }
+  return normalized;
 }
 
 async function assertRunnerBundleShape(

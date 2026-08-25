@@ -23,6 +23,7 @@ import {
 } from "../scripts/runner-bundle-contract.js";
 
 const healthCommonsPackageName = "@murphai/health-commons";
+const testPublicReleaseSha = "0123456789abcdef0123456789abcdef01234567";
 const finnishDrySaunaProtocol = {
   attribution: {
     ownerType: "murph",
@@ -126,7 +127,27 @@ describe("deploy artifact validation", () => {
   it("accepts a complete freshly assembled deploy artifact set", async () => {
     const fixture = await createDeployArtifactFixture();
 
+    expect(fixture.manifest).toMatchObject({
+      releaseSha: testPublicReleaseSha,
+      schemaVersion: 3,
+    });
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
+  it("rejects a runner bundle whose release provenance is not a public commit SHA", async () => {
+    const fixture = await createDeployArtifactFixture();
+    await writeFile(
+      path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
+      `${JSON.stringify({
+        ...fixture.manifest,
+        releaseSha: "cloudflare-version-uuid",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Runner bundle manifest is incomplete or invalid.",
+    );
   });
 
   it("accepts runner dependencies installed through pnpm's virtual store", async () => {
@@ -952,6 +973,7 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
     const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
       now: () => new Date(future.getTime() + 1_000),
+      releaseSha: fixture.manifest.releaseSha,
     };
 
     if (fixture.appDir) {
@@ -1196,6 +1218,7 @@ async function createDeployArtifactFixture(input: {
   const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
     buildSkipped: input.buildSkipped === true,
     includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
+    releaseSha: testPublicReleaseSha,
   };
 
   if (input.appDir) {
@@ -1243,7 +1266,9 @@ async function rewriteRunnerBundleManifest(fixture: {
   repoRoot?: string;
   runnerBundleDir: string;
 }): Promise<RunnerBundleManifest> {
-  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {};
+  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {
+    releaseSha: testPublicReleaseSha,
+  };
 
   if (fixture.appDir) {
     input.appDir = fixture.appDir;

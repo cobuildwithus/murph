@@ -751,6 +751,9 @@ describe('assistant product small seams', () => {
       executionContext: {
         hosted: {
           memberId: 'member-1',
+          releaseSha: '0123456789ABCDEF0123456789ABCDEF01234567',
+          runtimeAttemptId: 'attempt_evt_123',
+          runtimeName: 'cloudflare-hosted-runner',
           userEnvKeys: [],
         },
       },
@@ -758,7 +761,49 @@ describe('assistant product small seams', () => {
     expect(hostedPolicy).toMatchObject({
       environment: 'hosted',
       privateIssueCaptureEnabled: true,
+      releaseSha: '0123456789abcdef0123456789abcdef01234567',
+      runtimeAttemptId: 'attempt_evt_123',
+      runtimeName: 'cloudflare-hosted-runner',
       surface: 'telegram',
+    })
+  })
+
+  it('stamps hosted runtime issue records with trusted execution provenance', async () => {
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValue(undefined)
+    const policy = resolveAssistantDiagnosticsPolicy({
+      channel: 'linq',
+      env: {},
+      executionContext: {
+        hosted: {
+          memberId: 'member-1',
+          releaseSha: '0123456789abcdef0123456789abcdef01234567',
+          runtimeAttemptId: 'attempt_evt_occurrence',
+          runtimeName: 'cloudflare-hosted-runner',
+          userEnvKeys: [],
+        },
+      },
+    })
+
+    await recordAssistantRuntimeIssue({
+      issue: {
+        component: 'assistant.provider',
+        errorCode: 'ASSISTANT_CODEX_CONNECTION_LOST',
+        issueKind: 'tool_error',
+        phase: 'provider_turn',
+        severity: 'error',
+        summary: 'Codex connection was lost during the provider turn.',
+      },
+      policy,
+      vault: '/vaults/test',
+    })
+
+    expect(runtimeStateMocks.writePendingAssistantRuntimeIssueRecord).toHaveBeenCalledWith({
+      record: expect.objectContaining({
+        releaseSha: '0123456789abcdef0123456789abcdef01234567',
+        runtimeAttemptId: 'attempt_evt_occurrence',
+        runtimeName: 'cloudflare-hosted-runner',
+      }),
+      vault: '/vaults/test',
     })
   })
 

@@ -45,6 +45,7 @@ import { TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON } from "./hosted-execution-fi
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEST_OIDC_TOKEN = "vercel-oidc-token";
+const TEST_PUBLIC_RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 describe("resolveSmokeWorkerBaseUrl", () => {
   it("prefers the explicit smoke worker base URL over the other envs", () => {
@@ -453,6 +454,7 @@ describe("runSmokeHostedDeploy", () => {
       `${JSON.stringify({
         buildSkipped: false,
         bundleFingerprint: "bundle-fingerprint",
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
         sourceFingerprint: "source-fingerprint",
       }, null, 2)}\n`,
       "utf8",
@@ -493,6 +495,7 @@ describe("runSmokeHostedDeploy", () => {
             runnerBundle: {
               buildSkipped: false,
               bundleFingerprint: "bundle-fingerprint",
+              releaseSha: TEST_PUBLIC_RELEASE_SHA,
               sourceFingerprint: "source-fingerprint",
             },
             service: "cloudflare-hosted-runner-node",

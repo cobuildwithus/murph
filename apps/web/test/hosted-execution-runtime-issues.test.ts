@@ -77,6 +77,9 @@ describe('importHostedAssistantRuntimeIssues', () => {
         occurredAt: new Date('2026-04-08T12:00:00.000Z'),
         operation: null,
         phase: 'final_response',
+        releaseSha: null,
+        runtimeAttemptId: null,
+        runtimeName: null,
         severity: 'warning',
         summary:
           'Assistant produced a visible developer note on a surface where developer notes are hidden.',
@@ -84,6 +87,51 @@ describe('importHostedAssistantRuntimeIssues', () => {
       }),
     )
     expect(create).not.toHaveProperty('memberId')
+  })
+
+  it('persists release, runtime, and occurrence-attempt provenance', async () => {
+    const createMany = vi.fn<
+      (input: {
+        data: Record<string, unknown>[]
+        skipDuplicates: true
+      }) => Promise<{ count: number }>
+    >(async (input) => ({ count: input.data.length }))
+    prismaMocks.getPrisma.mockReturnValue({
+      hostedAssistantRuntimeIssue: {
+        createMany,
+      },
+    })
+
+    await importHostedAssistantRuntimeIssues({
+      issues: [
+        {
+          component: 'assistant.provider',
+          details: {},
+          environment: 'hosted',
+          errorCode: 'ASSISTANT_CODEX_CONNECTION_LOST',
+          fingerprint: TEST_FINGERPRINT,
+          issueId: TEST_ISSUE_ID,
+          issueKind: 'tool_error',
+          occurredAt: '2026-04-08T12:00:00.000Z',
+          operation: 'provider.turn',
+          phase: 'provider_turn',
+          releaseSha: '0123456789abcdef0123456789abcdef01234567',
+          runtimeAttemptId: 'attempt_evt_occurrence',
+          runtimeName: 'cloudflare-hosted-runner',
+          schema: 'murph.assistant-runtime-issue.v1',
+          severity: 'error',
+          summary: 'Codex connection was lost during the provider turn.',
+          surface: 'linq',
+        },
+      ],
+      now: new Date('2026-04-08T00:00:00.000Z'),
+    })
+
+    expect(createMany.mock.calls[0]?.[0]?.data[0]).toEqual(expect.objectContaining({
+      releaseSha: '0123456789abcdef0123456789abcdef01234567',
+      runtimeAttemptId: 'attempt_evt_occurrence',
+      runtimeName: 'cloudflare-hosted-runner',
+    }))
   })
 
   it('persists bounded command attribution without a member relation', async () => {

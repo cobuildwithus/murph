@@ -19,6 +19,9 @@ import { normalizeNullableString } from './shared.js'
 export interface AssistantDiagnosticsPolicy {
   environment: 'hosted' | 'local'
   privateIssueCaptureEnabled: boolean
+  releaseSha?: string | null
+  runtimeAttemptId?: string | null
+  runtimeName?: string | null
   surface: string | null
 }
 
@@ -39,6 +42,7 @@ const SUMMARY_MAX_LENGTH = 240
 const FIELD_MAX_LENGTH = 96
 const DETAIL_MAX_KEYS = 24
 const DETAIL_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/u
+const RELEASE_SHA_PATTERN = /^[a-f0-9]{40}$/u
 const pendingIssueWritePromises = new Set<Promise<void>>()
 
 export function resolveAssistantDiagnosticsPolicy(input: {
@@ -55,6 +59,15 @@ export function resolveAssistantDiagnosticsPolicy(input: {
   return {
     environment,
     privateIssueCaptureEnabled: explicitIssueCapture ?? true,
+    releaseSha: environment === 'hosted'
+      ? normalizeAssistantIssueReleaseSha(executionContext.hosted?.releaseSha)
+      : null,
+    runtimeAttemptId: environment === 'hosted'
+      ? sanitizeNullableIssueField(executionContext.hosted?.runtimeAttemptId)
+      : null,
+    runtimeName: environment === 'hosted'
+      ? sanitizeNullableIssueField(executionContext.hosted?.runtimeName)
+      : null,
     surface,
   }
 }
@@ -160,10 +173,21 @@ function createAssistantRuntimeIssueRecord(input: {
     occurredAt,
     operation,
     phase: input.issue.phase,
+    releaseSha: input.policy.releaseSha ?? null,
+    runtimeAttemptId: input.policy.runtimeAttemptId ?? null,
+    runtimeName: input.policy.runtimeName ?? null,
     severity: input.issue.severity,
     summary,
     surface: input.policy.surface,
   }
+}
+
+function normalizeAssistantIssueReleaseSha(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = value.trim().toLowerCase()
+  return RELEASE_SHA_PATTERN.test(normalized) ? normalized : null
 }
 
 function extractAssistantToolFailureRuntimeIssues(
