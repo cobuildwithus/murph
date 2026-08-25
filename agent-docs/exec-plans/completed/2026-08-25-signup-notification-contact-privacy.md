@@ -1,6 +1,6 @@
 # Remove contact details from internal signup notifications
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -133,3 +133,4 @@ Updated: 2026-08-25
   after the docs-only remediation push. Logged the new public-safe Frog entry
   `20260825122035-pr-head-draft` and used the normal explicit draft transition
   before the final candidate push.
+Completed: 2026-08-25
