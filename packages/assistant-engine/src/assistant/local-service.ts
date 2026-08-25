@@ -190,9 +190,10 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
-  'New messages arrived before delivery.',
-  'Re-evaluate all accepted messages under the group turn rules and return one final result.',
-  'Do not mention this review or repeat completed effects.',
+  'Additional group messages joined this turn.',
+  'Replace the draft with one final result under the group turn rules.',
+  'The unsent draft does not answer any accepted human request.',
+  'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')
 
 function shouldHoldAssistantGroupReplyDraft(input: {
@@ -1155,6 +1156,7 @@ export async function sendAssistantMessageLocal(
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
         let providerRequestOrdinal = 0
+        let groupReplyReconsidered = false
         let providerRequestDeliveryContextBaseOrdinal = 0
         let nextUsageRecordOrdinal = 0
         const heldGroupAcceptedTranscriptInputs: Array<{
@@ -1308,8 +1310,7 @@ export async function sendAssistantMessageLocal(
             input: previousInput,
           })
           currentInput =
-            holdGroupReplyDraft &&
-            acceptanceInput.providerRequestOrdinal === 0
+            holdGroupReplyDraft
               ? {
                   ...nextInput,
                   prompt: `${previousInput.prompt}\n\n${nextInput.prompt}`,
@@ -1805,10 +1806,12 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
             const failedProviderResumeStateAction =
-              resolveAssistantProviderResumeStateAction({
-                codexThreadId: providerOutcome.codexThreadId ?? null,
-                threadScope,
-              })
+              groupReplyReconsidered
+                ? 'clear'
+                : resolveAssistantProviderResumeStateAction({
+                    codexThreadId: providerOutcome.codexThreadId ?? null,
+                    threadScope,
+                  })
             if (progressDeliveredSessionRef.value) {
               currentSession = applyAssistantProgressDeliveredSession({
                 progressDeliveredSession: progressDeliveredSessionRef.value,
@@ -2085,6 +2088,7 @@ export async function sendAssistantMessageLocal(
             signal: currentInput.abortSignal,
           })
           if (draftWindowOutcome.kind === 'review') {
+            groupReplyReconsidered = true
             providerRequestOrdinal = 1
             const accepted = await acceptActiveTurnInput({
               activeTurnInput: draftWindowOutcome.acceptedInput,
@@ -2231,10 +2235,12 @@ export async function sendAssistantMessageLocal(
           }) ?? response
         })
         const providerResumeStateAction =
-          resolveAssistantProviderResumeStateAction({
-            codexThreadId: providerResult.codexThreadId ?? null,
-            threadScope,
-          })
+          groupReplyReconsidered
+            ? 'clear'
+            : resolveAssistantProviderResumeStateAction({
+                codexThreadId: providerResult.codexThreadId ?? null,
+                threadScope,
+              })
         if (providerResumeStateAction === 'clear') {
           currentSession = await clearAssistantSessionCodexResumeState({
             session: currentSession,

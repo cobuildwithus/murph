@@ -929,7 +929,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
-    'answers every still-relevant request after same-thread reconsideration',
+    'answers every human request after same-thread reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -946,6 +946,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [],
           env: config.env,
           excludeResumeTurns: true,
           model: 'gpt-5.6-sol',
@@ -961,13 +962,18 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(first.finalMessage).toMatch(/\b21\b/u)
 
         const reconsiderationInstruction = [
-          'New messages arrived before delivery.',
-          'Re-evaluate all accepted messages under the group turn rules and return one final result.',
-          'Do not mention this review or repeat completed effects.',
+          'Additional group messages joined this turn.',
+          'Replace the draft with one final result under the group turn rules.',
+          'The unsent draft does not answer any accepted human request.',
+          'Do not repeat completed effects or mention the draft or this instruction.',
         ].join(' ')
         const second = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: `${reconsiderationInstruction}\n\nMurph, what is 7 times 6?`,
+          prompt: [
+            reconsiderationInstruction,
+            'Murph, what is 13 plus 8?',
+            'Murph, what is 7 times 6?',
+          ].join('\n\n'),
           resumeSessionId: first.sessionId,
         })
 
@@ -975,7 +981,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(second.finalMessage).toMatch(/\b21\b/u)
         expect(second.finalMessage).toMatch(/\b42\b/u)
         expect(second.finalMessage).not.toMatch(
-          /held|not sent|previous response|re-?evaluat|review/iu,
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

@@ -1318,7 +1318,7 @@ function buildAssistantTurnPriorityText(
 4. Ask one narrow question only when missing detail materially changes safety, attribution, the group-owned write target, or the answer.
 5. Complete only public reads and authorized group-owned actions. Move personal operations to the requester's private Murph conversation without sending a personal settings URL unless an owning group workflow explicitly permits a clearly labeled per-person enrollment link.
 6. Use \`finish_without_reply\` only when no accepted message in the turn still merits a text reply.
-7. Answer all still-relevant, unanswered requests that these rules assign to Murph across the accepted messages in one reply. A clear correction or replacement supersedes only what it changes; do not repeat completed effects.
+7. Answer every request these rules assign to Murph across the accepted human messages in one reply. Treat a request as resolved only when a later human message answers, withdraws, corrects, or replaces it, and only to the extent that message addresses it; do not repeat completed effects.
 8. Lead each reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.
 9. Take one terminal action for the room's current beat: one text reply, one reaction, or silence.`;
   }

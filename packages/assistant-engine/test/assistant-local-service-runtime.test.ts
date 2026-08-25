@@ -6113,6 +6113,8 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.appendAssistantTranscriptEntries.mockClear()
     mocks.appendAssistantTranscriptEntriesWithRefs.mockClear()
     mocks.appendAssistantTurnReceiptEvent.mockClear()
+    mocks.applyAssistantSessionCodexResumeStateAction.mockClear()
+    mocks.clearAssistantSessionCodexResumeState.mockClear()
     mocks.executeCodexTurnWithRecovery.mockReset()
     mocks.deliverAssistantPrecedingReplies.mockClear()
     mocks.deliverAssistantProgressUpdate.mockClear()
@@ -6346,8 +6348,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       assert.equal(outcome.status, 'fulfilled')
       expect(outcome.result).toMatchObject({
         prompt: scenario.liveSteer
-          ? 'One more group detail.'
-          : 'Actually, plans changed.',
+          ? [
+              'Initial group message',
+              'Actually, plans changed.',
+              'One more group detail.',
+            ].join('\n\n')
+          : 'Initial group message\n\nActually, plans changed.',
         response: scenario.finalResponse,
       })
     }
@@ -6359,9 +6365,9 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
     ).toMatchObject({
-      prompt: 'Actually, plans changed.',
+      prompt: 'Initial group message\n\nActually, plans changed.',
       turnContext: expect.stringContaining(
-        'Re-evaluate all accepted messages under the group turn rules and return one final result.',
+        'The unsent draft does not answer any accepted human request.',
       ),
     })
     expect(
@@ -6378,6 +6384,18 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       expect.objectContaining({ providerRequestOrdinal: 1 }),
     )
     expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledOnce()
+    expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+      session: expect.objectContaining({
+        sessionId: session.sessionId,
+      }),
+      vault: '/vaults/test',
+    })
+    expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        precedingAssistantTranscriptTexts: [],
+        providerResumeStateAction: 'clear',
+      }),
+    )
     expect(
       mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
     ).toMatchObject({
@@ -6492,6 +6510,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect.objectContaining({ segments: [] }),
   )
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.clearAssistantSessionCodexResumeState).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'persist-from-provider-turn',
+    }),
+  )
 
   resetScenario()
   const silenceDraftReady = createDeferred<void>()
@@ -6824,6 +6848,19 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     assert.equal(outcome.error, terminalError)
   }
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.applyAssistantSessionCodexResumeStateAction,
+  ).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action: 'clear',
+      codexThreadId: 'provider-thread-group-failure',
+      session: expect.objectContaining({ sessionId: session.sessionId }),
+    }),
+  )
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: expect.objectContaining({ sessionId: session.sessionId }),
+    vault: '/vaults/test',
+  })
   expect(failedNoReplyAccepted).not.toHaveBeenCalled()
   expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
