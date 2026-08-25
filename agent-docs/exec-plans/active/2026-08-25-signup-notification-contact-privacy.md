@@ -129,3 +129,7 @@ Updated: 2026-08-25
   review found runtime coverage sufficient and returned no patch artifact.
 - Final ReviewGPT round 1 passed with no qualifying findings on the immutable
   production candidate.
+- The automatic ready-to-draft controller failed its exact pull-request lookup
+  after the docs-only remediation push. Logged the new public-safe Frog entry
+  `20260825122035-pr-head-draft` and used the normal explicit draft transition
+  before the final candidate push.
