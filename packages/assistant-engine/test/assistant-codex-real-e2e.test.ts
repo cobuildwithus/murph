@@ -8951,7 +8951,7 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         )).toBe(false)
         expect(recordedVaultCommandStartsWith(
           result.firstCommands,
-          ['meal', 'edit'],
+          ['meal', 'edit', result.mealId],
         )).toBe(false)
 
         const editIndex = result.followupCommands.findIndex((command) =>
