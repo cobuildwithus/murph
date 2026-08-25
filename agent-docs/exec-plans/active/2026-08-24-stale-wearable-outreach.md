@@ -133,6 +133,11 @@ Updated: 2026-08-24
   collector remains read-only and filters the retired namespace. Another 457
   callback, runner, system-mailbox, and model-free notification tests pass, as
   does the Assistant Runtime typecheck.
+- Current-main reconciliation proof: the combined Assistant Runtime owner suite
+  passes all 815 tests. Managed automation (101), hosted Web (188),
+  device-syncd (7), and hosted-execution (2) focused tests pass, together with
+  typechecks for Assistant Engine, Assistant Runtime, device-syncd,
+  hosted-execution, and hosted Web.
 - The production-shaped real-Codex test is committed for both stale-only silence
   and explicit reauthorization with exactly one returned connect URL. Its local
   live run is credential-blocked because neither supported provider credential
