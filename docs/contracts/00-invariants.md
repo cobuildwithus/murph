@@ -380,11 +380,20 @@ it has been explicitly elevated to a cross-cutting invariant.
   every admitted group message's sender, opaque message reference, content,
   attachments, and native reply context separately. Initial selection freezes
   before provider start. Exact successors may then join through the existing
-  live-steering path only until the first completed assistant response; initial
-  plus live input is capped at 50 messages, and overflow or later input remains
-  pending for the next ordinary turn. Every completed assistant text or media
-  segment remains part of the turn and is delivered; no audience-specific
-  last-response-wins rule may discard it. A gap, legacy or missing causal
+  live-steering path only until the first completed assistant response. The one
+  narrow exception is an ordinary interactive Linq/iMessage or Telegram group
+  auto-reply: request 0 remains an in-memory draft for one four-second window,
+  and exact successors admitted during that window may cause exactly one
+  same-thread request 1 before the final cutoff. Initial plus live input is
+  capped at 50 messages, and overflow or later input remains pending for the
+  next ordinary turn. Every completed assistant text or media segment remains
+  part of an ordinary turn and is delivered; no audience-specific
+  last-response-wins rule may discard it. In the held-draft exception,
+  completed conversational segments remain provisional until selection, and
+  only the selected request's latest terminal response is deliverable: request
+  0 at a quiet cutoff or request 1 when reconsideration occurs. Completed tools,
+  progress messages, and other real-world effects remain authoritative and must
+  not be repeated. A gap, legacy or missing causal
   identifier, changed direct anchor or actor, or changed room boundary starts a
   later turn; terminal evidence covers every admitted input so restart repair
   cannot resend the reply.

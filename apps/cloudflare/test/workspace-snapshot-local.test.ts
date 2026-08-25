@@ -73,6 +73,41 @@ describe("workspace snapshot process pipes", () => {
 });
 
 describe("workspace snapshot local restore", () => {
+  it("omits explicitly excluded vault paths from encrypted archive planning", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "hosted-workspace-excluded-path-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const videoRelativePath =
+      "raw/inbox/linq/synthetic/attachments/01__clip.mp4";
+
+    try {
+      await mkdir(path.dirname(path.join(vaultRoot, videoRelativePath)), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(vaultRoot, videoRelativePath),
+        "synthetic-video-bytes",
+        "utf8",
+      );
+      await writeFile(path.join(vaultRoot, "note.md"), "keep me\n", "utf8");
+
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot,
+        excludedVaultPaths: [videoRelativePath],
+        vaultRoot,
+      });
+
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === videoRelativePath
+      )).toBe(false);
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === "note.md"
+      )).toBe(true);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("round-trips selected portable workspace state and Codex continuity", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");

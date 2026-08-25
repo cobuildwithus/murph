@@ -131,55 +131,32 @@ describe('assistant execution prompt contract', () => {
       'You are Murph, a durable personal health assistant.'
     const sharedStyleOwner =
       'Current-conversation style settings override these defaults.'
+    const scopedSafety =
+      'A diagnosis, medication, disability, age, pregnancy status, allergy, dietary restriction, or other health-context fact can change or block the specific advice it affects, but it is not a blanket veto on benign calculations, summaries, logging, education, or unrelated low-risk actions.'
 
     expect(groupPrompt).toContain(sharedIdentity)
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
-    expect(groupPrompt).toContain(
-      'It does not withdraw an answer already completed in that turn; that answer still sends.',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted before the first completed assistant response may join this turn.',
-    )
-    expect(groupPrompt).toContain(
-      'never replace, retract, or suppress completed text or media',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
-    )
+    expect(groupPrompt).toContain('reason over the whole current beat')
+    expect(groupPrompt).toContain('do not repeat completed effects')
+    expect(groupPrompt).toContain(scopedSafety)
+    expect(directPrompt).toContain(scopedSafety)
     expect(groupPrompt).not.toContain('replaces the earlier answer')
     expect(groupPrompt).not.toContain('carry forward anything still worth saying')
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
-      'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
+      'Take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
     expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
+      'Do not answer each accepted message separately or recap the burst point by point.',
     )
-    expect(groupPrompt).toContain(
-      'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
-    )
-    expect(groupPrompt).toContain(
-      'answer newly urgent or time-sensitive input without another sleep',
-    )
-    expect(groupPrompt).toContain(
-      'Only when the refreshed beat still warrants an ordinary text reply, run one final `sleep 6`',
-    )
-    expect(groupPrompt).toContain(
-      'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
-    )
-    expect(groupPrompt).toContain(
-      'Never sleep more than 14 seconds total.',
-    )
-    expect(groupPrompt).toContain(
-      'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
-    )
-    expect(directPrompt).not.toContain('run shell `sleep 8`')
+    expect(groupPrompt).not.toContain('sleep 8')
+    expect(groupPrompt).not.toContain('sleep 6')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
-      'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
+      'use the CLI only for public reference reads and group-owned state other than the `group-room-model` page',
     )
     expect(groupPrompt).toContain(
       'Send an ordinary group reply as one text bubble.',
@@ -270,8 +247,8 @@ describe('assistant execution prompt contract', () => {
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Floor follows authority, not punctuation.',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Apply this gate before any group reply-cadence pause',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'reply-cadence pause',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
@@ -280,10 +257,7 @@ describe('assistant execution prompt contract', () => {
       'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without text or reaction immediately. Do not sleep on that terminal human-private branch.',
-    )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'The cadence pause applies only after this gate says a text reply is warranted; a human-owned or otherwise silent beat still finishes immediately without sleeping.',
+      'finish without text or reaction.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
@@ -292,10 +266,10 @@ describe('assistant execution prompt contract', () => {
       'say plainly that you do not know; do not speculate or turn the limit into a bit.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without a reply or reaction immediately',
+      'finish without a reply or reaction',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Do not sleep or watch for a follow-up',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'sleep',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'A complaint that Murph inserted itself into a human-owned beat is a participation boundary, not a new comedic premise.',
@@ -2007,14 +1981,15 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_050)
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_415)
     // This layer is resident on every turn for every member, so it is a ratchet,
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
-    // longitudinal recommendation policy, response-card dietary/burn
+    // longitudinal recommendation policy, narrowest-relevant-safety rule,
+    // response-card dietary/burn
     // target-authority boundary, and explicit group-family tool routing set this
     // ceiling.
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_104)
@@ -2307,7 +2282,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '59bdee189b368b6c91df9f4cc828caf9919b7839063747c58b5d6c7281309fd1',
+      '8c5d6627b8f18d7da850f2cb02fed34b439ac54ad4589b39b5c0b464b14f17a4',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -3368,6 +3343,12 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'When `occurrenceProjection.status: unavailable`, confirm that the write succeeded',
+    )
+    expect(prompt).toContain(
+      'When an unavailable projection includes `stale_recurring_occurrence`, say that the recurring occurrence is overdue and its next occurrence could not be confirmed',
+    )
+    expect(prompt).toContain(
+      'Do not describe it as current scheduler work, promise automatic recovery, or say that no member action is needed',
     )
     expect(prompt).toContain(
       'A save or patch result already includes its host-owned readback',

@@ -39,28 +39,12 @@ test("rejects moving the authoritative byte measurement to macOS", async () => {
   assert.ok(issueCodes(source).includes("wrong-budget-platform"));
 });
 
-test("rejects measuring only the PR head instead of its current-base candidate", async () => {
+test("rejects measuring only the PR head instead of GitHub's merge candidate", async () => {
   const source = (await readWorkflow()).replace(
     "ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}",
     "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
   );
   assert.ok(issueCodes(source).includes("missing-exact-merge-ref"));
-});
-
-test("rejects a stale local main comparison", async () => {
-  const source = (await readWorkflow()).replaceAll(
-    'git ls-remote --exit-code --refs origin "refs/heads/${PR_BASE_REF}"',
-    'git rev-parse "refs/remotes/origin/${PR_BASE_REF}"',
-  );
-  assert.ok(issueCodes(source).includes("missing-live-base-read"));
-});
-
-test("rejects dropping the post-assembly base freshness check", async () => {
-  const source = (await readWorkflow()).replace(
-    '[[ "$current_base" == "$MEASURED_BASE_SHA" ]]',
-    '[[ -n "$current_base" ]]',
-  );
-  assert.ok(issueCodes(source).includes("missing-post-assembly-base-check"));
 });
 
 test("rejects a prepared-only bundle substitute", async () => {

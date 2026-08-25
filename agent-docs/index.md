@@ -171,7 +171,10 @@ authority because provider tools freeze at turn start and the first video may
 arrive through live steering. Murph freezes attachment metadata before Codex
 can act on each initial or live-steered input, verifies the exact bytes before
 cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
-the Worker boundary. The architecture, security, deployment order, and
+the Worker boundary. Ordinary inbound hosted video bytes stay outside workspace
+snapshots and become immediately retention-eligible when active input no longer
+needs them; explicit canonical durable references are the exception. The
+architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
 `agent-docs/references/testing-ci-map.md`.
@@ -512,6 +515,17 @@ Member-owned device-provider application authority, including the shared
 webhook admission fence for app-bound connections, is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
 
+Daily nutrition cards use one prompt-owned known-context suitability rule and
+one compact safety question before new numeric targets when needed. Routine
+cards do not run a universal clinical-history or measurement preflight, and a
+health-context fact constrains only the target or advice it materially affects.
+Stale or incomplete context snapshots likewise direct only the canonical read
+needed for a concrete concern or an owning workflow's explicit contract. The
+Goal, totals, card-validation, and delivery owners remain unchanged. This
+contract is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/operations/imessage-deliverability.md`.
+
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
@@ -583,7 +597,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/murph-personas.md` | Six base personalities, 36 premade ordered combinations, direct `/home` first-visit picker ownership, combination-id persistence, main-owned voice/tone defaults, legacy read normalization, and six-set preview ownership. | Murph persona behavior | High | 2026-07-22 |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Conversation-first contract for the persona baseline plus hosted Tone, Voice, Humor, Push, Detail, and the conversational-only Unhinged dial across first-visit personalization, private Murph, and synthetic room runtimes, including accepted-input and current-Linq-route authority, personal Settings convergence, room-owned group controls, the running-turn voice-memo default plus explicit current-user named one-off override, per-dial projection and canonical companion watermarks, exact-successor compound message batches, sparse web projection, per-setting causal ordering, shared owners, prompt behavior, the same-turn read plus bounded step for a bare directional request, the group shared-dial buy-in rule for Unhinged, and rollout and rollback floors. | Murph speaking-style preference spec | Medium | 2026-08-10 |
 | `agent-docs/product-specs/shared-message-targeting.md` | Shared opaque accepted-message reference, authority resolver, native-reply marker, reaction reuse, provider behavior, and immediate runner rollout contract. | Assistant messaging behavior | High | 2026-07-16 |
-| `agent-docs/product-specs/group-chat-social-dynamics.md` | Human-first group-chat psychology, conversational-floor ownership, prompt-owned 8+6-second reply cadence with mid-pause safety/floor re-evaluation, one-bubble interactive replies, setup-to-human handoff, arrival-to-resident tapering, participation boundaries, comedy authority, and brief public-reference grounding for earned playful turns. | Group conversation behavior | High | 2026-08-09 |
+| `agent-docs/product-specs/group-chat-social-dynamics.md` | Human-first group-chat psychology, conversational-floor ownership, one-shot pre-commit reply reconsideration with a four-second held-draft window, commit-owned user transcript materialization, provisional conversational segments, one same-thread continuation, and an atomic now-versus-next-turn cutoff; one-bubble interactive replies; setup-to-human handoff; arrival-to-resident tapering; participation boundaries; comedy authority; and brief public-reference grounding for earned playful turns. | Group conversation behavior | High | 2026-08-21 |
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior; no member-facing group social automation currently ships. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Newsletter as a private skill recipe over an ordinary wall-clock-aware group automation, consent-aware shared reads, normal current-chat delivery, and an optional generic group-email effect with Web-owned recipient revalidation and existing-outbox durability. | Group newsletter behavior | Medium | 2026-08-22 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |

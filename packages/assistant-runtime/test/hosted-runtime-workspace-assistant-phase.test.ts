@@ -5569,13 +5569,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("distinguishes pending scheduler work from resolved occurrences after reminder patches", async () => {
+  it("distinguishes pending scheduler work, stale recurrences, and resolved occurrences after reminder patches", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
     const vaultRoot = path.join(parentRoot, "vault");
     const inputId = "ain_44444444444444444444444444444444";
-    const logRequests: HostedRuntimeLogRequest[] = [];
 
     try {
       await initializeVault({
@@ -5602,7 +5601,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
         assistantInputIds: [inputId],
         importedCount: 1,
-        logRequests,
         vaultRoot,
       }));
       const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
@@ -5823,7 +5821,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
 
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
-      const pendingProjectionCallsBefore =
+      const staleProjectionCallsBefore =
         mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
       await expect(requestAutomation({
         action: "patch",
@@ -5831,7 +5829,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         instructions: "Send the revised recurring interval reminder.",
         lookup: "recurring-interval-reminder",
       })).resolves.toEqual(expect.objectContaining({
-        occurrenceProjection: { status: "pending" },
+        occurrenceProjection: {
+          issues: ["stale_recurring_occurrence"],
+          status: "unavailable",
+        },
         schedule: {
           everyMs: 86_400_000,
           kind: "every",
@@ -5840,7 +5841,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       expect(
         mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
-        - pendingProjectionCallsBefore,
+        - staleProjectionCallsBefore,
+      ).toBe(2);
+      const staleInspectCallsBefore =
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "recurring-interval-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        occurrenceProjection: {
+          issues: ["stale_recurring_occurrence"],
+          status: "unavailable",
+        },
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        status: "active",
+      }));
+      expect(
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+        - staleInspectCallsBefore,
       ).toBe(1);
       await expect(requestAutomation({
         action: "patch",
@@ -6000,14 +6022,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       )).resolves.toMatchObject({
         state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
       });
-      expect(
-        logRequests
-          .flatMap((request) => request.entries)
-          .filter((entry) =>
-            entry.redactedJson?.schema
-              === "murph.hosted-automation-timing-verification.v1"
-          ),
-      ).toEqual([]);
+
+      vi.setSystemTime(new Date("2026-08-11T01:00:00.000Z"));
+      const implicitTimeZoneReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the implicit-timezone reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        slug: "implicit-timezone-reminder",
+        title: "Implicit timezone reminder",
+      });
+      if (implicitTimeZoneReminder.action !== "save") {
+        throw new Error("Expected implicit-timezone reminder save result.");
+      }
+      expect(implicitTimeZoneReminder).toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/New_York",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-11T06:00:00.000Z",
+          status: "resolved",
+        },
+      }));
+
+      vi.setSystemTime(new Date("2026-08-11T03:01:00.000Z"));
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "UTC",
+        vaultTimeZoneVerified: false,
+      });
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "implicit-timezone-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        effectiveTimeZone: "UTC",
+        occurrenceProjection: {
+          issues: ["default_timezone_unverified"],
+          status: "unavailable",
+        },
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        status: "active",
+      }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -6187,6 +6245,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 status: "unavailable",
               },
             }));
+
+            const staleRecurring = await automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic recurring reminder.",
+              schedule: {
+                everyMs: 86_400_000,
+                kind: "every",
+              },
+              slug: "synthetic-stale-recurring-reminder",
+              title: "Synthetic stale recurring reminder",
+            });
+            if (staleRecurring.action !== "save") {
+              throw new Error("Expected the stale recurring save result.");
+            }
+            vi.setSystemTime(new Date("2026-08-15T02:01:00.000Z"));
+            await expect(automationTool.request({
+              action: "patch",
+              expectedUpdatedAt: staleRecurring.updatedAt,
+              instructions: "Send the revised synthetic recurring reminder.",
+              lookup: "synthetic-stale-recurring-reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              occurrenceProjection: {
+                issues: ["stale_recurring_occurrence"],
+                status: "unavailable",
+              },
+            }));
           },
           turnEnvironment: null,
         });
@@ -6212,7 +6296,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           && entry.redactedJson?.schema
             === "murph.hosted-automation-timing-verification.v1"
         );
-      expect(verificationEntries).toHaveLength(8);
+      expect(verificationEntries).toHaveLength(10);
       expect(verificationEntries[0]).toEqual(expect.objectContaining({
         errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
         level: "info",
@@ -6274,6 +6358,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           automationTimingVerificationStage: "readback",
         }),
       }));
+      expect(verificationEntries[8]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "patch",
+          automationTimingVerificationIssues: ["stale_recurring_occurrence"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+        }),
+      }));
+      expect(verificationEntries[9]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "patch",
+          automationTimingVerificationIssues: ["stale_recurring_occurrence"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
       expect(JSON.stringify(logRequests)).not.toContain(
         "synthetic-private-verification-reminder",
       );
@@ -6312,6 +6416,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "Synthetic projection failure reminder",
       );
       expect(JSON.stringify(logRequests)).not.toContain("07:30");
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-stale-recurring-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "revised synthetic recurring reminder",
+      );
       expect(() => logRequests.forEach(parseHostedRuntimeLogRequest)).not.toThrow();
     } finally {
       await rm(parentRoot, { force: true, recursive: true });

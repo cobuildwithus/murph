@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 120,
+  "item": {
+    "id": "group-replies-follow-current-beat",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Group replies follow the current beat",
+    "summary": "In active iMessage and Telegram groups, Murph now briefly holds an answer and reconsiders it when another message arrives before send.",
+    "details": "Murph sends only the final response for that moment, or stays quiet when the room has moved on. Completed actions are not repeated.",
+    "relevanceTags": ["assistant", "groups", "messaging"],
+    "sourcePullRequests": [2107]
+  }
+}
