@@ -93,11 +93,11 @@ Recipients without the Messages extension, including Messages on macOS,
 receive a generated static image that mirrors the compact native workout or
 generic-table balloon. Provider chrome is intentionally bounded to the title
 plus derived progress for structured workouts; it does not repeat the image's
-sets below the balloon. Generic-table provider chrome retains its existing
-title, optional subtitle, rows, and footer. The complete semantic text renderer
-remains the workout recovery owner, and the value-free fallback identifies the
-message as the member's workout before telling them how to request that complete
-text without exposing its values outside the card.
+sets below the balloon. Generic-table provider chrome likewise retains only the
+title instead of repeating the image's subtitle, rows, or footer. The complete
+semantic text renderer remains the recovery owner, and the value-free fallback
+identifies the message as the member's workout or summary before telling them
+how to request that complete text without exposing its values outside the card.
 
 The bitmap remains rectangular because Messages owns the outer mask and
 caption. Because the provider request omits an App Store id, the app-absent

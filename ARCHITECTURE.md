@@ -2239,13 +2239,13 @@ recovery retains the complete status meaning outside the bitmap.
 Null, incomplete, and unavailable goal states retain a neutral ring, and a
 short subcaption appears only when some totals are partial. Compact-table
 images retain the table grid or workout progress and exercise rows without a
-large empty icon gutter. Stacked generic fields place each measured header
-above its full-width measured value so contract-valid tokens remain contained.
-Their provider
-chrome stays bounded to the title plus an optional generic subtitle or derived
-workout progress rather than repeating the raster's rows and sets. Complete
-semantic text remains available through the deterministic text renderer and
-value-free recovery fallback.
+large empty icon gutter. Their compact grid typography keeps short comparisons
+under one shared header, while stacked generic fields place each measured
+header above its full-width measured value so contract-valid tokens remain
+contained. Generic provider chrome keeps only the title; structured-workout
+chrome adds derived progress. Neither repeats the raster's rows or sets.
+Complete semantic text remains available through the deterministic text
+renderer and value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
@@ -3805,15 +3805,15 @@ the opaque workout-revision binding plus a bounded typed editable-set projection
 derived from values already visible in that private-direct workout card. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
-Generic V3 tables choose their one shared-header grid solely from the exact
-intrinsic width of every admitted header and cell track plus its gutters. Only
-genuinely overwide content uses repeated full-width field labels; column count
-does not create a second layout authority.
+Generic V3 tables use compact grid typography and choose their one shared-header
+grid solely from the exact intrinsic width of every admitted header and cell
+track plus its gutters. Only genuinely overwide content uses repeated
+full-width field labels; column count does not create a second layout authority.
 The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
-delivery. Compact-table provider chrome uses only bounded title, optional
-generic subtitle, and derived workout-progress fields; complete detail remains
-owned by the semantic text renderer. V4 workout authoring and native decoding
+delivery. Generic compact-table provider chrome uses only the bounded title;
+structured workouts add derived progress. Complete detail remains owned by the
+semantic text renderer. V4 workout authoring and native decoding
 admit up to 16 exercises and 16 sets per exercise, but those logical bounds do
 not replace the measured fragment and image-path gates. A complete snapshot is
 attempted first; a real encoded-envelope rejection recovers through complete

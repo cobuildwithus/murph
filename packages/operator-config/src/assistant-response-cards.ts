@@ -338,14 +338,9 @@ export function buildLinqIMessageAppLayout(
         subcaption: `${progress.completed}/${progress.total} sets complete`,
       }
     }
-    const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
-      caption: semantic.heading,
+      caption: parsed.title,
       image_url: imageUrl,
-      subcaption: semantic.detailLines.join('\n'),
-      ...(semantic.footer === null
-        ? {}
-        : { trailing_caption: semantic.footer }),
     }
   }
   if (parsed.kind === 'challenge_standings') {
