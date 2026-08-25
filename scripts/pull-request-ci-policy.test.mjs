@@ -147,8 +147,25 @@ test("synchronize observer is read-only and never checks out candidate code", as
 
 function inspectDraftReset(source) {
   assert.match(source, /^  workflow_run:\n    workflows: \["Pull Request Head Change"\]\n    types: \[completed\]$/mu);
-  assert.match(source, /^permissions:\n  pull-requests: write$/mu);
+  assert.match(source, /^permissions: \{\}$/mu);
+  assert.match(
+    source,
+    /^    environment:\n      name: frog-reconciliation\n      deployment: false$/mu,
+  );
   assert.doesNotMatch(source, /contents: write|actions\/checkout|pull_request_target/u);
+  const appTokenInputs =
+    /^        uses: actions\/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3\.2\.0\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
+      .exec(source)?.groups?.inputs;
+  assert.deepEqual(
+    appTokenInputs?.trim().split("\n").map((line) => line.trim()),
+    [
+      "client-id: ${{ vars.FROG_APP_CLIENT_ID }}",
+      "private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}",
+      "permission-pull-requests: write",
+    ],
+  );
+  assert.match(source, /GH_TOKEN: \$\{\{ steps\.frog-app-token\.outputs\.token \}\}/u);
+  assert.doesNotMatch(source, /github\.token|secrets\.GITHUB_TOKEN/u);
   assert.match(
     source,
     /^    if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && github\.event\.workflow_run\.event == 'pull_request' \}\}$/mu,
@@ -188,6 +205,23 @@ test("weakening exact-head draft reset is detected", async () => {
     'if [[ -z "${current_head_sha}" ]]; then',
   );
   assert.throws(() => inspectDraftReset(mutation), /current_head_sha/u);
+});
+
+test("draft reset rejects workflow-token fallback and broader App authority", async () => {
+  const source = await workflow("pr-head-draft-reset.yml");
+  assert.throws(
+    () => inspectDraftReset(source.replace(
+      "GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}",
+      "GH_TOKEN: ${{ github.token }}",
+    )),
+    /github\.token/u,
+  );
+  assert.throws(
+    () => inspectDraftReset(source.replace(
+      "          permission-pull-requests: write",
+      "          permission-contents: write\n          permission-pull-requests: write",
+    )),
+  );
 });
 
 test("draft reset executes only for an event-time ready receipt and current eligible PR", async () => {
