@@ -1,17 +1,13 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import {
-  approveHostedSensitiveActionChallengeForTest,
+  approveHostedActionAndSignalRuntimeForTest,
   readLatestHostedSensitiveActionChallengeForTest,
   type HostedSensitiveActionChallengeForTest,
 } from "#hosted-web-testing";
 import {
   buildHostedExecutionMemberActivatedWake,
-  buildHostedExecutionPendingEffectsReconcileRequestedWake,
 } from "@murphai/hosted-execution";
-import {
-  buildHostedActionApprovalOutcomeEffectId,
-} from "@murphai/hosted-execution/action-approval";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "@murphai/runtime-state/assistant-generated-deliveries";
@@ -47,7 +43,6 @@ const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";
 const reportRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`;
 const attachmentUploadLogMessage = "Hosted-local Linq attachment upload accepted.";
-const approvalGenerationVersion = "murph-action-approval-generation-v1";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -115,7 +110,7 @@ describe("hosted local vault-file approval resume e2e", () => {
       expectedPath: "/attachments",
     });
     const attachmentUploadBaseline = countAttachmentUploadLogs();
-    const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    const requestReplyBaseline = requireLinqStub().countAcceptedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
         `mkdir -p '${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}' && printf '%s\\n' '%PDF-1.7 synthetic hosted-local report' > '${reportRef}'`,
@@ -145,7 +140,7 @@ describe("hosted local vault-file approval resume e2e", () => {
       },
     ));
     expect(requestResponse.status).toBe(202);
-    const pendingReply = await requireLinqStub().waitForAdditionalSend({
+    const pendingReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: requestReplyBaseline,
       expectedPath: replyPath,
       scenario: requireScenario(),
@@ -158,6 +153,9 @@ describe("hosted local vault-file approval resume e2e", () => {
     );
     expect(challenge.actionId).toMatch(/^vault-file-send:[0-9a-f]{64}$/u);
     expect(challenge.approvalKey).toMatch(/^haa_[A-Za-z0-9_-]{32}$/u);
+    if (!challenge.approvalKey) {
+      throw new Error("Hosted vault-file approval id was unavailable.");
+    }
     const pendingReplyWithApprovalUrl = [
       pendingReplyText,
       `${requireScenario().harness.webBaseUrl}/approve/${challenge.approvalKey}`,
@@ -173,32 +171,18 @@ describe("hosted local vault-file approval resume e2e", () => {
       expectedPath: "/attachments",
     })).toBe(attachmentCreateBaseline);
     expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline);
-    const approvalEffectId = buildApprovalOutcomeEffectId(challenge);
-
     const providerRequestCountBeforeResume = countAssistantProviderResponsesApiRequests();
     const containerStartCountBeforeResume = countStructuredLogMessage(
       "Hosted execution container starting.",
     );
-    const approvedChallenge = await approveHostedSensitiveActionChallengeForTest({
+    const approvedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    const approved = await approveHostedActionAndSignalRuntimeForTest({
+      approvalId: challenge.approvalKey,
       environment: requireScenario().runtimeEnv,
+      memberId: userId,
       tokenHash: challenge.tokenHash,
     });
-    expect(approvedChallenge.approvalStatus).toBe("approved");
-
-    const approvedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
-    const resumed = await requireScenario().runWake(
-      buildHostedExecutionPendingEffectsReconcileRequestedWake({
-        effectId: approvalEffectId,
-        eventId: `runtime-control:pending-effects-reconcile:local:${runId}`,
-        occurredAt: new Date().toISOString(),
-        userId,
-      }),
-      userId,
-    );
-    expect(resumed.wakeResult).toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-    });
+    expect(approved).toEqual({ signalAccepted: true });
     const attachedReply = await requireLinqStub().waitForAdditionalSend({
       baselineCount: approvedReplyBaseline,
       expectedPath: replyPath,
@@ -305,27 +289,6 @@ function countAttachmentUploadLogs(): number {
     requireScenario().harness.stderrTail(2_000_000),
   ].join("\n");
   return output.split(attachmentUploadLogMessage).length - 1;
-}
-
-function buildApprovalOutcomeEffectId(
-  challenge: HostedSensitiveActionChallengeForTest,
-): string {
-  if (!challenge.approvalKey || !challenge.actionHash) {
-    throw new Error("Hosted vault-file approval identity was incomplete.");
-  }
-  const approvalGeneration = createHash("sha256")
-    .update([
-      approvalGenerationVersion,
-      challenge.approvalKey,
-      challenge.actionHash,
-      challenge.tokenHash,
-    ].join("\n"))
-    .digest("hex");
-  return buildHostedActionApprovalOutcomeEffectId({
-    approvalGeneration,
-    approvalId: challenge.approvalKey,
-    expiresAt: challenge.expiresAt.toISOString(),
-  });
 }
 
 function countStructuredLogMessage(
