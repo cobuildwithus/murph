@@ -198,7 +198,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /id="fitbit"/u);
   assert.match(markup, /id="oura"/u);
   assert.equal(markup.match(/scroll-mt-24/gu)?.length, 33);
+  assert.equal(markup.match(/target:border-primary\/80/gu)?.length, 33);
   assert.equal(markup.match(/target:ring-2/gu)?.length, 33);
+  assert.equal(markup.match(/target:ring-primary(?=\s)/gu)?.length, 33);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
   assert.doesNotMatch(
