@@ -60,6 +60,7 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
+import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import {
   PersonaOnboardingStudy,
   PersonaSettingsStudy,
@@ -785,6 +786,12 @@ export function SectionsContent({
 
           <StudySection title="Ops usage search and recovery">
             <OpsUsageStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Private Murph diagnostic and direct member message">
+            <OpsOperatorTaskStudy />
           </StudySection>
         </>
       ) : null}

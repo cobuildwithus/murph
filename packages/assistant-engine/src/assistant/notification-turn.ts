@@ -205,6 +205,7 @@ export type AssistantNotificationPromptProfile =
   | 'context-handoff'
   | 'creative-response'
   | 'creative-response-text'
+  | 'operator-message'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -1787,6 +1788,9 @@ function resolveAssistantNotificationTurnProfile(
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
   }
   if (input.notificationPromptProfile === 'creative-response-text') {
+    return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
+  }
+  if (input.notificationPromptProfile === 'operator-message') {
     return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
   }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {

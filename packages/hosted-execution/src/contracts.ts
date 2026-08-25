@@ -246,6 +246,7 @@ export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
   "context-handoff",
   "creative-response",
   "creative-response-text",
+  "operator-message",
 ] as const;
 
 export type HostedExecutionAssistantNotificationPromptProfile =
@@ -337,6 +338,11 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   permissionDigest: string;
 }
 
+export interface HostedExecutionAssistantAskOperatorTaskTarget {
+  kind: "operator_task";
+  taskId: string;
+}
+
 /**
  * Fixed one-time permissions selected by Web from the exact source message
  * before personal-model work. The outgoing reviewer may only allow or deny the
@@ -381,6 +387,7 @@ export type HostedExecutionAssistantAskResultDestination =
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskOperatorTaskTarget
   | HostedExecutionAssistantAskCurrentSenderTarget;
 
 export function isHostedExecutionAssistantAskCurrentSenderTarget(
@@ -432,6 +439,12 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
+export interface HostedExecutionAssistantAskOperatorTaskRequestedPayload {
+  expiresAt: string;
+  question: string;
+  target: HostedExecutionAssistantAskOperatorTaskTarget;
+}
+
 export interface HostedExecutionAssistantAskCurrentSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
@@ -450,6 +463,7 @@ export interface HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload {
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
+  | HostedExecutionAssistantAskOperatorTaskRequestedPayload
   | HostedExecutionAssistantAskCurrentSenderRequestedPayload
   | HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload;
 

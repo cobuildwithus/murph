@@ -1678,3 +1678,13 @@ message-authorized claim creation remains single-attempt at the transport bounda
 Ordinary feedback and verified-private
 support escalation both require accepted-message authority; scheduled turns receive
 neither capability.
+
+## Hosted operator tasks
+
+Operator-task admission is restricted to the existing hosted Ops allowlist and
+same-origin mutation boundary. Every task is bound to one active member and the
+admitting operator. A diagnostic receives one fixed read-only disclosure,
+cannot deliver to the member, and stores its bounded result with member-bound
+secure-box encryption. A message is restricted to an existing private direct
+route and enters the normal notification/outbox authority checks. Neither path
+creates first-contact, group, arbitrary tool, or runtime-shell authority.

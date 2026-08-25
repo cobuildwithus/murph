@@ -2094,6 +2094,16 @@ If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is confi
 
 ## Container Operator Access
 
+## Operator task rollout
+
+Deploy shared runner/Worker code that accepts the additive `operator_task` ask
+target and `operator-message` prompt profile before deploying the Web migration
+and `/ops/tasks` admission UI. Old Web remains safe with the new reader because
+it cannot enqueue the new shapes. After Web deploy, prove one private
+diagnostic and one synthetic direct-message admission. For rollback, disable or
+roll back Web admission first, allow admitted mailbox work to drain, then roll
+back the runner/Worker reader.
+
 Wrangler SSH is intentionally disabled for both runner Container classes. The
 checked-in scaffold and generated deploy config must set `ssh.enabled` to
 `false`, contain no `authorized_keys`, and expose no environment input that can
