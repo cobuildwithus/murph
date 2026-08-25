@@ -1531,6 +1531,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
   const crossSessionReplyContext =
     readPromptInputsCrossSessionReplyContext(promptInputs)
+  const affirmativeReaction =
+    primaryReplyInput.sourceMetadata?.kind === 'linq' &&
+    primaryReplyInput.sourceMetadata.affirmativeReaction === true
   const outboxContext =
     await resolveAssistantAutoReplyCrossSessionDeliveryContext({
       deliveryTarget: conversationDeliveryTarget,
@@ -1538,6 +1541,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
         crossSessionReplyContext.hasNativeReplyReference,
       historyReader: input.historyReader,
       input: primaryReplyInput,
+      preserveSameSessionReplyTarget:
+        primaryReplyInput.conversation.threadIsDirect === true &&
+        !affirmativeReaction,
       replyToMessageId: crossSessionReplyContext.replyToMessageId,
       session: existingSession,
       vault: input.vault,
@@ -1546,9 +1552,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
     providerStartCriticalPath,
     'automationCrossSessionContextDoneAtMonotonicMs',
   )
-  const affirmativeReaction =
-    primaryReplyInput.sourceMetadata?.kind === 'linq' &&
-    primaryReplyInput.sourceMetadata.affirmativeReaction === true
   if (
     affirmativeReaction &&
     (outboxContext.replyTargetDelivery === null ||
@@ -4672,6 +4675,7 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
   hasNativeReplyReference: boolean
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
+  preserveSameSessionReplyTarget: boolean
   replyToMessageId: string | null
   session: AssistantSession | null
   vault: string
@@ -4714,6 +4718,24 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
         matchingDeliveries,
         replyToMessageId,
       )
+  // Generic same-session history is already present in the transcript. An
+  // explicit native reply still needs its one selected assistant message
+  // preserved so the model can distinguish it from newer transcript turns.
+  if (
+    input.preserveSameSessionReplyTarget &&
+    replyTargetDelivery !== null &&
+    input.session !== null &&
+    replyTargetDelivery.sessionId === input.session.sessionId
+  ) {
+    return {
+      claim: null,
+      deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
+        deliveries: [replyTargetDelivery],
+        exactReplyTargetIntentId: replyTargetDelivery.intentId,
+      }),
+      replyTargetDelivery,
+    }
+  }
   const orderedMatchingDeliveries = [...matchingDeliveries]
     .sort((left, right) =>
       compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
