@@ -1,6 +1,7 @@
 ---
 title: 'Private runner composition invalidates public release provenance'
 severity: 'major'
+issue: 'cobuildwithus/murph#2284'
 ---
 
 ## Expected Behavior
