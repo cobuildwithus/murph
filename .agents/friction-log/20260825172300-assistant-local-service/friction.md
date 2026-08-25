@@ -1,6 +1,7 @@
 ---
 title: 'Assistant local-service coverage repeatedly exhausts expanded heap'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2305'
 ---
 
 ## Expected Behavior
