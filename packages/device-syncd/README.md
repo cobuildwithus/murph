@@ -116,7 +116,9 @@ Current providers:
   wait to 24 seconds. A page-heavy hourly/session feature fetches at most two
   complete hours serially and commits their fetched prefix once. A foreground
   yield retains the current cursor; a retryable second-hour failure commits
-  only the fetched active prefix and resumes from the exact next hour.
+  only the fetched active prefix and resumes from the exact next hour. A
+  classified optional response commits any earlier prefix while consuming only
+  the hour that produced that response.
   Daily aggregates remain day-atomic. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
   serial stream reads. Each reduced hourly prefix is imported before the scalar

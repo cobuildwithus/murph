@@ -725,6 +725,141 @@ test("Junction hourly coalescing retains a fetched prefix when the next hour fai
   );
 });
 
+test("Junction hourly coalescing imports a completed prefix before consuming an optional next hour", async () => {
+  const requestedWindows: Array<{ end: string | null; start: string | null }> = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    const start = url.searchParams.get("start_date");
+    const end = url.searchParams.get("end_date");
+    requestedWindows.push({ end, start });
+    if (start === "2026-04-02T01:00:00.000Z") {
+      return createJsonResponse({ error: "unsupported_resource" }, 422);
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            timestamp: "2026-04-02T00:30:00.000Z",
+            unit: "bpm",
+            value: 72,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heartrate"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: "heartrate",
+      timeseriesWindowHours: 1,
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows, [
+    {
+      end: "2026-04-02T01:00:00.000Z",
+      start: "2026-04-02T00:00:00.000Z",
+    },
+    {
+      end: "2026-04-02T02:00:00.000Z",
+      start: "2026-04-02T01:00:00.000Z",
+    },
+  ]);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    (importedSnapshots[0] as { windowEnd?: unknown }).windowEnd,
+    "2026-04-02T01:00:00.000Z",
+  );
+  assert.equal(
+    result.scheduledJobs?.[0]?.payload?.timeseriesCursor,
+    "2026-04-02T02:00:00.000Z",
+  );
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLast,
+    "timeseries.heartrate.422.unsupported",
+  );
+});
+
+test("Junction hourly coalescing consumes only the optional first hour", async () => {
+  const requestedWindows: Array<{ end: string | null; start: string | null }> = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    const start = url.searchParams.get("start_date");
+    const end = url.searchParams.get("end_date");
+    requestedWindows.push({ end, start });
+    if (start === "2026-04-02T00:00:00.000Z") {
+      return createJsonResponse({ error: "unsupported_resource" }, 422);
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            timestamp: new Date(
+              Date.parse(start ?? "") + 30 * 60_000,
+            ).toISOString(),
+            unit: "bpm",
+            value: 72,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heartrate"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: "heartrate",
+      timeseriesWindowHours: 1,
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows, [{
+    end: "2026-04-02T01:00:00.000Z",
+    start: "2026-04-02T00:00:00.000Z",
+  }]);
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(
+    result.scheduledJobs?.[0]?.payload?.timeseriesCursor,
+    "2026-04-02T01:00:00.000Z",
+  );
+
+  const successor = result.scheduledJobs?.[0];
+  assert.ok(successor);
+  await executeJunctionJob(provider, context, createJobFromInput(successor));
+  assert.equal(requestedWindows[1]?.start, "2026-04-02T01:00:00.000Z");
+});
+
 test("Junction deployed full-job progress resumes once and emits only scalar successors", async () => {
   const requestedResources: string[] = [];
   const provider = createJunctionProvider(async (input) => {

@@ -14,9 +14,10 @@ Updated: 2026-08-26
 
 - A production-shaped synthetic test proves that several consecutive hourly
   windows can be fetched serially and committed through one canonical import.
-- The continuation cursor advances only through the last durably imported
-  window. A hosted yield retains the current cursor, while a later-hour
-  retryable provider failure may commit only the active fetched prefix.
+- The canonical import boundary advances only through the last completed
+  window. A hosted yield retains the current cursor, a later-hour retryable
+  provider failure resumes at that failed hour, and a classified optional
+  response consumes exactly its own hour without discarding an earlier prefix.
 - Provider requests remain serial and bounded; no new fanout, transaction, or
   persisted-state owner is introduced.
 - Focused provider, service, importer, and hosted-runtime tests and affected
@@ -35,8 +36,9 @@ Updated: 2026-08-26
 - Preserve one source of truth for canonical health data under `packages/core`.
 - Keep provider requests sequential and within the existing collection work
   limit; evaluate composed maximum request and record counts explicitly.
-- Do not mark a queue job complete until its combined snapshot is durably
-  imported, and retain the existing exact cursor on any pre-commit failure.
+- Do not mark completed records durable until their combined snapshot is
+  imported. Keep the import and continuation boundaries distinct when one
+  classified optional hour is intentionally consumed without an import.
 - Keep runtime diagnostics metadata-only and free of member, payload, provider
   record, credential, and filesystem identifiers.
 
@@ -45,7 +47,8 @@ Updated: 2026-08-26
 1. Risk: coalescing windows could skip an hour after interruption.
    Mitigation: advance the continuation only after one successful canonical
    import covering the complete fetched prefix; propagate hosted aborts before
-   import and add interruption regression coverage.
+   import, consume only the exact classified optional hour, and add
+   interruption and optional-response regression coverage.
 2. Risk: a larger in-memory snapshot could exceed canonical record limits.
    Mitigation: use a small fixed window count derived from the existing
    one-hour provider bound and retain existing per-resource sanitization and
@@ -75,8 +78,13 @@ Updated: 2026-08-26
 - Reaches: the existing connected-health catch-up journey after a page-heavy
   provider day falls back to hourly windows.
 - Proof: provider-shaped rich, yield, and retryable-failure scenarios prove
-  import count, exact durable cursor behavior, and unchanged source coverage;
-  live post-deploy evidence must prove the stalled mailbox lane converges.
+  import count, exact durable cursor behavior, classified optional-hour
+  consumption, and unchanged source coverage; live post-deploy evidence must
+  prove the stalled mailbox lane converges.
+- Accepted final-review finding: the first candidate conflated its import and
+  continuation boundaries after a later optional response. The corrected
+  candidate carries those coordinates separately in memory, imports the valid
+  prefix, and consumes only the classified optional hour.
 - Rejected: increasing the hosted timeout. It would hide the repeated-write
   cost and weaken foreground responsiveness without reducing work.
 - Rejected: changing resource admission or deleting queued work. That would
@@ -88,7 +96,7 @@ Updated: 2026-08-26
 
 - Add focused Junction provider/service tests for serial request count,
   combined import count, terminal cursor, yield-before-commit replay, and
-  provider failure replay.
+  retryable and optional provider-failure replay.
 - Run the narrow affected Vitest files and package typechecks first; expand only
   when direct evidence or CI requires it.
 - Measure the synthetic path before and after using deterministic import and
@@ -104,3 +112,5 @@ Updated: 2026-08-26
   wake.
 - Provider failure preserves the exact last committed cursor and ordinary
   retry ownership.
+- A classified optional response retains its diagnostic metadata, never drops
+  an earlier valid prefix, and never consumes an unrequested later hour.
