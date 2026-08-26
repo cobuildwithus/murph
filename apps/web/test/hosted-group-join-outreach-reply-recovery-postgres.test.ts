@@ -224,6 +224,7 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
+  leaveHostedGroupMemberTx,
   readHostedGroupJoinOfferTargetTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -2676,6 +2677,204 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("serializes account deletion after a canonical group-member lock without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
+      const deletionApplicationName = `delete_group_first_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        deletionApplicationName,
+      });
+      const groupLockBarrier = createSqlLockBarrier();
+      let groupPromise: Promise<unknown> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        groupPromise = fixture.replyPrisma.$transaction((tx) =>
+          leaveHostedGroupMemberTx({
+            joinCode: fixture.joinCode,
+            memberId: fixture.ownerMemberId,
+            now: new Date("2026-07-27T16:00:00.000Z"),
+            tx: withSqlLockBarrierTx({
+              barrier: groupLockBarrier,
+              matches: isHostedGroupRowLockQuery,
+              tx,
+            }),
+          })
+        );
+        await withTimeout(groupLockBarrier.locked, 5_000);
+
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: deletionApplicationName,
+          observer: fixture.replyPrisma,
+        });
+
+        groupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([groupPromise, deletionPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0]).toEqual({
+          status: "fulfilled",
+          value: { kind: "owner_cannot_leave" },
+        });
+        expect(settled[1].status).toBe("fulfilled");
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        groupLockBarrier.release();
+        await Promise.allSettled([
+          ...(groupPromise ? [groupPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("serializes a canonical group-member lock after account deletion without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
+      const groupApplicationName = `group_after_delete_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        replyApplicationName: groupApplicationName,
+      });
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      let groupPromise: Promise<unknown> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+
+        groupPromise = fixture.replyPrisma.$transaction((tx) =>
+          leaveHostedGroupMemberTx({
+            joinCode: fixture.joinCode,
+            memberId: fixture.ownerMemberId,
+            now: new Date("2026-07-27T16:00:00.000Z"),
+            tx,
+          })
+        );
+        await waitForPostgresApplicationLock({
+          applicationName: groupApplicationName,
+          observer: fixture.deletionPrisma,
+        });
+
+        deletionGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([deletionPromise, groupPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0].status).toBe("fulfilled");
+        expect(settled[1]).toEqual({
+          status: "fulfilled",
+          value: { kind: "group_not_found" },
+        });
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(groupPromise ? [groupPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("revalidates the exact deletion group set before destructive database deletion", async () => {
+      const fixture = await createDeletionReplyRaceFixture();
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      const addedGroupId = `hgrp_delete_set_change_${randomUUID()}`;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+        await fixture.replyPrisma.hostedGroup.create({
+          data: {
+            displayName: "Deletion Set Change Group",
+            id: addedGroupId,
+            joinCode: `join-delete-set-change-${randomUUID()}`,
+            joinCodeCreatedAt: new Date("2026-07-27T16:00:00.000Z"),
+            ownerMemberId: fixture.ownerMemberId,
+          },
+        });
+        deletionGroupLockBarrier.release();
+
+        const deletionError = await withTimeout(
+          deletionPromise.then(
+            () => null,
+            (error: unknown) => error,
+          ),
+          10_000,
+        );
+        expect(deletionError).toMatchObject({
+          code: "ACCOUNT_DELETION_GROUP_SET_CHANGED",
+        });
+        await expect(fixture.deletionPrisma.hostedGroup.findMany({
+          orderBy: { id: "asc" },
+          select: { id: true },
+          where: { id: { in: [fixture.groupId, addedGroupId] } },
+        })).resolves.toEqual([
+          { id: addedGroupId },
+          { id: fixture.groupId },
+        ].sort((left, right) => left.id.localeCompare(right.id)));
+        await expect(fixture.deletionPrisma.hostedMember.findMany({
+          orderBy: { id: "asc" },
+          select: { id: true },
+          where: {
+            id: { in: [fixture.ownerMemberId, fixture.runtimeMemberId] },
+          },
+        })).resolves.toHaveLength(2);
+        await expect(fixture.deletionPrisma.hostedThreadContainer.findUnique({
+          select: { memberId: true },
+          where: { memberId: fixture.runtimeMemberId },
+        })).resolves.toEqual({ memberId: fixture.runtimeMemberId });
+        await expect(fixture.deletionPrisma.hostedGroupJoinOutreach.findUnique({
+          select: { id: true },
+          where: { id: fixture.outreachId },
+        })).resolves.toEqual({ id: fixture.outreachId });
+
+        await expect(deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        })).resolves.toBeDefined();
+        await expectDeletionReplyRaceConverged(fixture);
+        await expect(fixture.deletionPrisma.hostedGroup.findUnique({
+          select: { id: true },
+          where: { id: addedGroupId },
+        })).resolves.toBeNull();
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await fixture.deletionPrisma.hostedGroup.deleteMany({
+          where: { id: addedGroupId },
+        });
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
     it("lets a reply already holding the drain finish before the same deletion request", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -4407,6 +4606,7 @@ function makePendingDeletionCleanupResult() {
 async function createDeletionReplyRaceFixture(input: {
   deletionApplicationName?: string;
   externalParticipantSortsBeforeOwner?: boolean;
+  replyApplicationName?: string;
 } = {}):
   Promise<DeletionReplyRaceFixture> {
   const deletionPrisma = createPrismaClient({
@@ -4415,7 +4615,12 @@ async function createDeletionReplyRaceFixture(input: {
       : databaseUrl,
     poolMax: 2,
   });
-  const replyPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const replyPrisma = createPrismaClient({
+    databaseUrl: input.replyApplicationName
+      ? withPostgresApplicationName(databaseUrl, input.replyApplicationName)
+      : databaseUrl,
+    poolMax: 2,
+  });
   const ownerMemberId = input.externalParticipantSortsBeforeOwner
     ? `hbm_delete_z_owner_${randomUUID()}`
     : `hbm_delete_owner_${randomUUID()}`;
@@ -4579,6 +4784,10 @@ async function expectDeletionReplyRaceConverged(
   await expect(fixture.deletionPrisma.hostedGroupJoinOutreach.findUnique({
     select: { id: true },
     where: { id: fixture.outreachId },
+  })).resolves.toBeNull();
+  await expect(fixture.deletionPrisma.hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: fixture.runtimeMemberId },
   })).resolves.toBeNull();
   await expect(fixture.deletionPrisma.hostedMember.findMany({
     select: { id: true },
@@ -4880,6 +5089,126 @@ async function closeTestServer(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+type SqlLockBarrier = {
+  locked: Promise<void>;
+  release: () => void;
+  reportLocked: () => void;
+  waitUntilReleased: Promise<void>;
+};
+
+function createSqlLockBarrier(): SqlLockBarrier {
+  let reportLocked = (): void => undefined;
+  let release = (): void => undefined;
+  const locked = new Promise<void>((resolve) => {
+    reportLocked = resolve;
+  });
+  const waitUntilReleased = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    locked,
+    release,
+    reportLocked,
+    waitUntilReleased,
+  };
+}
+
+function withSqlLockBarrierTx(input: {
+  barrier: SqlLockBarrier;
+  matches: (sql: string) => boolean;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  let paused = false;
+  return new Proxy(input.tx, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== "$queryRaw" || typeof value !== "function") {
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (...args: unknown[]) => {
+        const result = await Reflect.apply(value, target, args);
+        if (!paused && input.matches(readTaggedSql(args[0]))) {
+          paused = true;
+          input.barrier.reportLocked();
+          await input.barrier.waitUntilReleased;
+        }
+        return result;
+      };
+    },
+  });
+}
+
+function withAccountDeletionGroupLockBarrier(
+  prisma: PrismaClient,
+  barrier: SqlLockBarrier,
+): PrismaClient {
+  return new Proxy(prisma, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== "$transaction" || typeof value !== "function") {
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (...args: unknown[]) => {
+        const [transactionInput, ...rest] = args;
+        if (typeof transactionInput !== "function") {
+          return Reflect.apply(value, target, args);
+        }
+        const callback = transactionInput as (
+          tx: Prisma.TransactionClient,
+        ) => unknown;
+        return Reflect.apply(value, target, [
+          (tx: Prisma.TransactionClient) => callback(withSqlLockBarrierTx({
+            barrier,
+            matches: (sql) =>
+              sql.includes("hosted-account-deletion-target-group-lock"),
+            tx,
+          })),
+          ...rest,
+        ]);
+      };
+    },
+  });
+}
+
+function isHostedGroupRowLockQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_group"')
+    && normalized.includes("for update");
+}
+
+function readTaggedSql(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value.filter((part): part is string => typeof part === "string").join(" ");
+}
+
+function assertNoPostgresDeadlock(
+  results: readonly PromiseSettledResult<unknown>[],
+): void {
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      continue;
+    }
+    expect(errorContainsText(result.reason, "40P01")).toBe(false);
+    throw result.reason;
+  }
+}
+
+function errorContainsText(error: unknown, needle: string): boolean {
+  if (typeof error === "string") {
+    return error.includes(needle);
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  if (error instanceof Error && error.message.includes(needle)) {
+    return true;
+  }
+  return Object.values(error as Record<string, unknown>)
+    .some((value) => errorContainsText(value, needle));
 }
 
 async function waitForPostgresApplicationLock(input: {

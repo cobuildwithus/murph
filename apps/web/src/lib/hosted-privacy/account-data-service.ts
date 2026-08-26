@@ -1139,6 +1139,10 @@ async function deleteHostedAccountDataInternal(input: {
           session: phoneTransferSession,
         })
       : null;
+  const preparedHostedGroupIds = await listHostedAccountDeletionTargetGroupIds({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+  });
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
     if (input.phoneTransfer && phoneTransferSession) {
       await acquireHostedPrivyPhoneTransferPhoneLocksTx({
@@ -1148,6 +1152,10 @@ async function deleteHostedAccountDataInternal(input: {
         transferPhoneNumber: input.phoneTransfer.transfer.phoneNumber,
       });
     }
+    await lockHostedGroupsForAccountDeletionTx({
+      groupIds: preparedHostedGroupIds,
+      prisma: tx,
+    });
     const lockedFamilyClaimOwnerIds =
       await lockHostedFamilyClaimOwnersForAccountDeletionTx({
         memberIds: deletionMemberIds,
@@ -1206,6 +1214,14 @@ async function deleteHostedAccountDataInternal(input: {
         (memberId) => memberId !== input.memberId,
       ),
     });
+    const transactionHostedGroupIds =
+      await listHostedAccountDeletionTargetGroupIds({
+        memberIds: transactionDeletionMemberIds,
+        prisma: tx,
+      });
+    if (!haveSameStrings(transactionHostedGroupIds, preparedHostedGroupIds)) {
+      throwHostedAccountDeletionGroupSetChanged();
+    }
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
@@ -2340,6 +2356,15 @@ function throwHostedAccountDeletionRuntimeSetChanged(): never {
     code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
     httpStatus: 503,
     message: "Your account changed during deletion. Retry so every hosted runtime is included.",
+    retryable: true,
+  });
+}
+
+function throwHostedAccountDeletionGroupSetChanged(): never {
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_GROUP_SET_CHANGED",
+    httpStatus: 503,
+    message: "Your account changed during deletion. Retry so every hosted group is included.",
     retryable: true,
   });
 }
@@ -3829,6 +3854,48 @@ async function listDeviceConnectionIdentities(input: {
     },
     where: { userId: input.memberId },
   });
+}
+
+async function listHostedAccountDeletionTargetGroupIds(input: {
+  memberIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<string[]> {
+  const memberIds = uniqueStrings(input.memberIds).sort();
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    /* hosted-account-deletion-target-groups */
+    SELECT id
+    FROM hosted_group
+    WHERE owner_member_id IN (${Prisma.join(memberIds)})
+       OR runtime_member_id IN (${Prisma.join(memberIds)})
+    ORDER BY id ASC
+  `;
+  return rows.map((row) => row.id);
+}
+
+async function lockHostedGroupsForAccountDeletionTx(input: {
+  groupIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const groupIds = uniqueStrings(input.groupIds).sort();
+  if (groupIds.length === 0) {
+    return;
+  }
+
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    /* hosted-account-deletion-target-group-lock */
+    SELECT id
+    FROM hosted_group
+    WHERE id IN (${Prisma.join(groupIds)})
+    ORDER BY id ASC
+    FOR UPDATE
+  `;
+  if (!haveSameStrings(rows.map((row) => row.id), groupIds)) {
+    throwHostedAccountDeletionGroupSetChanged();
+  }
 }
 
 async function lockHostedMembersForAccountDeletionTx(input: {
