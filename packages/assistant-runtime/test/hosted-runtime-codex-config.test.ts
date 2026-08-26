@@ -74,6 +74,8 @@ const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_INPUT_TOKENS =
   HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT + 1_000;
+const CURRENT_TIME_REMINDER_PATTERN =
+  /It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\./gu;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
@@ -956,6 +958,37 @@ test("hosted Codex runtime config rejects relative command overrides", async () 
   );
 });
 
+test("hosted Codex current-time proof ignores non-authoritative request content", () => {
+  const reminder = "It is 2026-08-26 01:23:45 UTC.";
+  const userInput = {
+    role: "user",
+    content: [{ type: "input_text", text: reminder }],
+  };
+
+  assert.equal(
+    countAuthoritativeCurrentTimeReminders(JSON.stringify({ input: [userInput] })),
+    0,
+  );
+  assert.equal(
+    countAuthoritativeCurrentTimeReminders(
+      JSON.stringify({ input: [userInput], instructions: reminder }),
+    ),
+    1,
+  );
+  assert.equal(
+    countAuthoritativeCurrentTimeReminders(JSON.stringify({
+      input: [
+        userInput,
+        {
+          role: "developer",
+          content: [{ type: "input_text", text: reminder }],
+        },
+      ],
+    })),
+    1,
+  );
+});
+
 testHostedCodexAuthE2e(
   "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
   async () => {
@@ -1086,10 +1119,7 @@ testHostedCodexAuthE2e(
             request.includes(individualPrompt) || request.includes(groupPrompt),
         );
       const currentTimeReminderCounts = promptRequests.map(
-        (request) =>
-          request.match(
-            /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
-          )?.length ?? 0,
+        countAuthoritativeCurrentTimeReminders,
       );
       assert.ok(currentTimeReminderCounts.every((count) => count === 1));
 
@@ -2426,12 +2456,47 @@ async function prepareLegacyBuiltInOpenAiCodexHome(input: {
 function parseJsonObject(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
+    return isJsonObject(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function countAuthoritativeCurrentTimeReminders(requestBody: string): number {
+  const parsed = parseJsonObject(requestBody);
+  if (!parsed) {
+    return 0;
+  }
+
+  const inputReminderCount = Array.isArray(parsed.input)
+    ? parsed.input.reduce((count, item) => {
+        if (!isJsonObject(item) || item.role !== "developer") {
+          return count;
+        }
+        return count + countCurrentTimeReminders(item.content);
+      }, 0)
+    : 0;
+  return countCurrentTimeReminders(parsed.instructions) + inputReminderCount;
+}
+
+function countCurrentTimeReminders(value: unknown): number {
+  if (typeof value === "string") {
+    return value.match(CURRENT_TIME_REMINDER_PATTERN)?.length ?? 0;
+  }
+  if (!Array.isArray(value)) {
+    return 0;
+  }
+  return value.reduce(
+    (count, item) =>
+      count + (isJsonObject(item)
+        ? countCurrentTimeReminders(item.text)
+        : countCurrentTimeReminders(item)),
+    0,
+  );
 }
 
 function isNativeMemoryRequestMarker(input: {
