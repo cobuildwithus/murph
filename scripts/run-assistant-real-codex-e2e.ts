@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export type AssistantRealCodexAuthMode = 'provider' | 'subscription'
@@ -47,7 +48,7 @@ const USAGE = [
   '',
   'Options:',
   '  --auth subscription|provider  Use local ChatGPT auth (default) or provider env.',
-  '  --codex-home <path>            Use an explicit local Codex home for subscription auth.',
+  '  --codex-home <absolute-path>   Use an explicit local Codex home for subscription auth.',
   '  --model <model>               Override the default gpt-5.6-terra model.',
   '  -h, --help                    Show this help.',
 ].join('\n')
@@ -77,7 +78,11 @@ export function parseAssistantRealCodexRunArgs(
       continue
     }
     if (argument === '--codex-home') {
-      options.codexHome = readRequiredValue(argv, index, argument)
+      const codexHome = readRequiredValue(argv, index, argument)
+      if (!isAbsolute(codexHome)) {
+        throw new Error('--codex-home requires an absolute path.')
+      }
+      options.codexHome = codexHome
       index += 1
       continue
     }
