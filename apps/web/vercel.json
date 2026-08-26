@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "sh scripts/vercel-build.sh",
+  "ignoreCommand": "node ../../scripts/ci-markdown-docs-scope.mjs --vercel",
   "git": {
     "deploymentEnabled": {
       "main": true,

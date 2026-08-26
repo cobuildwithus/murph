@@ -438,15 +438,27 @@ export class RuntimeProcessingController {
     }
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
-    const foregroundWaitingOnSystemMailbox =
+    const triggeredByTrustedWebDirect =
+      input.input.orchestration?.triggeredByWebDirect === true
+      && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+        input.input.orchestrationAttemptId,
+      );
+    const cooperativeForegroundWaitingOnSystemMailbox =
       activeFence.processingMode === "system_mailbox"
-      && requestedProcessingMode === "default";
+      && requestedProcessingMode === "default"
+      && !triggeredByTrustedWebDirect;
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"
         || (
           activeFence.processingMode === "system_mailbox"
-          && requestedProcessingMode === "environment_interview"
+          && (
+            requestedProcessingMode === "environment_interview"
+            || (
+              requestedProcessingMode === "default"
+              && triggeredByTrustedWebDirect
+            )
+          )
         )
       ) {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
@@ -457,7 +469,7 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (!foregroundWaitingOnSystemMailbox) {
+      if (!cooperativeForegroundWaitingOnSystemMailbox) {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
             activeFence,
@@ -559,7 +571,7 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      if (foregroundWaitingOnSystemMailbox) {
+      if (cooperativeForegroundWaitingOnSystemMailbox) {
         // The active system child accepted the wake so it can checkpoint and
         // release. It did not accept the requested default-mode processing.
         return this.createRetryLater({

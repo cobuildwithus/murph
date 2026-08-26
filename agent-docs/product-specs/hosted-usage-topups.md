@@ -1260,16 +1260,19 @@ capacity expresses urgency and governs later automatic refill admission, not
 whether someone may fund the group. The browser never submits payer or
 beneficiary identity.
 
-A group chat that has only ever talked to Murph has no `HostedGroup` row or
-join code. Its funding URL uses a signed funding-only locator instead:
+A group chat that has only ever talked to Murph has an ordinary unnamed
+`HostedGroup` and owner membership, but no owner-created join code. Its funding
+URL uses a signed funding-only locator instead:
 `gf1.<runtimeMemberId>.<hmac>` derived from the app-session HMAC key with a
 dedicated domain separator. The locator is accepted only by the funding page
 and checkout target resolution, resolves to the exact runtime member after
 re-verifying the container and active access, and is rejected by every join
-surface because it is not a join code. It writes nothing: no `HostedGroup`
-row, membership, join code, vault-share projection, or profile-name/email
-grant is created. Owner-created join codes keep funding exactly as before,
-and enrollment stays behind the owner-minted join link.
+surface because it is not a join code. Creating or resolving that funding
+locator writes no group state, membership, join code, vault-share projection,
+or profile-name/email grant. The route transaction owns the pre-existing group,
+and owner membership independently without granting a vault share.
+Owner-created join codes keep funding exactly as before, and participant
+enrollment stays behind the owner-minted join link.
 
 An exhaustion notice may also use the signed locator for an owner-created
 group so notice construction stays database-free. After authenticating that

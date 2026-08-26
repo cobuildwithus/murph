@@ -244,6 +244,21 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
+One worker drain reuses a single in-memory canonical import session. Core may
+reuse its event-identity index only when the event-ledger metadata fingerprint
+is unchanged and every event id, external reference, Junction profile scope,
+and authoritative facet scope changed earlier in the drain is disjoint from
+the next import. Overlap, an external ledger write, or an import failure forces
+a full rescan. The session is neither persisted nor shared across drains, and
+the worker still checks the foreground-yield fence before each job.
+
+Privacy-safe job timing separates Junction inventory requests, Junction
+resource requests, normalization, event-identity indexing, canonical writes,
+and remaining provider time. `device-sync.pass_finished` reports only bounded
+counts, durations, cache-hit counts, and provider/job/resource classification;
+it never includes account or job ids, cursors, provider records, health values,
+credentials, or filesystem paths.
+
 Junction timeseries use one exhaustive static history policy. Dense/default
 resources, ECG voltage, workout streams, and ordinary full-timeseries collection
 keep the generic bounded initial window (14 days by default, configurable through

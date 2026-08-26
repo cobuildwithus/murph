@@ -4422,6 +4422,7 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotStartSubstageKind: "completed",
       snapshotStartTotalDurationMs: 60_000,
       userIdPresent: true,
+      workspaceAttemptId: "attempt_1",
     });
     const durationKeys = [
       "snapshotStartAlarmCandidateWorkDurationMs",
@@ -4458,6 +4459,7 @@ describe("handleRunnerOutboundRequest", () => {
       "snapshotStartTotalDurationMs",
       "snapshotStartWriteFenceOwnerValidationDurationMs",
       "userIdPresent",
+      "workspaceAttemptId",
     ]);
     const serializedDetails = JSON.stringify(details);
     expect(serializedDetails).not.toContain(requireTestString(
@@ -4476,6 +4478,54 @@ describe("handleRunnerOutboundRequest", () => {
       responseEncryption.wrappedDataKey,
       "bounded workspace snapshot wrapped data key",
     ));
+  });
+
+  it("correlates failed workspace snapshot start route diagnostics", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const runnerStub = runner.getByName();
+    const failedStub: WorkerUserRunnerStubLike = {
+      ...runnerStub,
+      async createHostedWorkspaceSnapshotUploadSession() {
+        throw new Error("workspace snapshot session create failed");
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: { getByName: () => failedStub },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
+
+    await expect(handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    )).rejects.toThrow("workspace snapshot session create failed");
+    const diagnosticLog =
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([entry]) => entry)
+        .find(
+          (entry: { details?: unknown; level?: string; message?: string }) =>
+            entry.message
+              === "Hosted runner workspace snapshot start diagnostic.",
+        );
+    expect(diagnosticLog).toMatchObject({
+      level: "warn",
+      userId: null,
+    });
+    expect(requireTestObject(
+      diagnosticLog?.details,
+      "failed workspace snapshot start route diagnostic details",
+    )).toMatchObject({
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartOutcomeKind: "failed",
+      snapshotStartSubstageKind: "session_create_storage",
+      workspaceAttemptId: "attempt_1",
+    });
   });
 
   it.each([
@@ -5893,6 +5943,23 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
+    const diagnosticLog =
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([entry]) => entry)
+        .find(
+          (entry: { details?: unknown; message?: string }) =>
+            entry.message
+              === "Hosted runner workspace snapshot start diagnostic.",
+        );
+    const details = requireTestObject(
+      diagnosticLog?.details,
+      "unauthorized workspace snapshot start route diagnostic details",
+    );
+    expect(details).toMatchObject({
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartOutcomeKind: "unauthorized",
+    });
+    expect(details).not.toHaveProperty("workspaceAttemptId");
   });
 
   it("does not expose a test-gated Worker body upload route for workspace snapshots", async () => {

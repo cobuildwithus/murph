@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { GrowthCharts } from "./growth-charts";
+import { GroupPrivateConversions } from "./group-private-conversions";
 import { GrowthScorecard } from "./growth-scorecard";
 import { GrowthSponsorships } from "./growth-sponsorships";
 import { GrowthWeeklyTable } from "./growth-weekly-table";
@@ -89,6 +90,8 @@ export default async function HostedOpsGrowthPage() {
         monthlyRevenueSeries={dashboard.monthlyRevenueSeries}
         snapshotSeries={dashboard.snapshotSeries}
       />
+
+      <GroupPrivateConversions conversions={dashboard.groupPrivateConversions} />
 
       <ReferralLinkUsage usage={dashboard.referralLinkUsage} />
 

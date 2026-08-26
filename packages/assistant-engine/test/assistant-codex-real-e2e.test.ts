@@ -70,6 +70,7 @@ import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+  MURPH_GROUP_CONSULT_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -791,6 +792,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'active' },
         })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: finiteWorkout.id,
+          events: started.jsonEvents,
+          state: 'active',
+        })
+        expect(started.runtimeIssueInputs).toEqual([])
         expect(started.transcriptMessage).toContain(
           `[Murph tracked workout source: ${finiteWorkout.id};`,
         )
@@ -922,6 +929,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'completed' },
         })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: finiteWorkout.id,
+          events: finalSet.jsonEvents,
+          state: 'completed',
+        })
+        expect(finalSet.runtimeIssueInputs).toEqual([])
         expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual(
           Array.from({ length: 8 }, () => 9),
         )
@@ -3536,6 +3549,168 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /detect(?:ed|s|ing)? who|who (?:tapped|performed) add/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'uses the saved preferred name in a private-to-group handoff',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-handoff-name-e2e-'),
+      )
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const vaultCliPath = path.join(workingDirectory, 'vault-cli')
+        const memoryPayload = JSON.stringify({
+          document: {
+            records: [{
+              id: 'memory_preferred_name',
+              section: 'Identity',
+              text: 'Preferred display name: Member Delta',
+              updatedAt: '2026-07-29T12:00:00.000Z',
+            }],
+          },
+          memory: null,
+          vault: 'synthetic-vault',
+        })
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'group-chat',
+          }),
+          writeFile(commandLogPath, '', 'utf8'),
+          writeFile(
+            vaultCliPath,
+            [
+              '#!/bin/sh',
+              'set -eu',
+              'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
+              'printf \'%s\\n\' "$*" >> "$script_dir/vault-commands.log"',
+              'case "$*" in',
+              `  memory\\ show*) printf '%s\\n' '${memoryPayload}' ;;`,
+              '  *) printf \'unsupported synthetic vault command: %s\\n\' "$*" >&2; exit 64 ;;',
+              'esac',
+              '',
+            ].join('\n'),
+            { encoding: 'utf8', mode: 0o700 },
+          ),
+        ])
+        await chmod(vaultCliPath, 0o700)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_handoff_name',
+              recipientKey: 'recipient_private_group_handoff_name',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_handoff_name'],
+              conversationId: 'conversation_private_group_handoff_name',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_handoff_name'],
+              originSessionId: 'session_private_group_handoff_name',
+              recipientKey: 'recipient_private_group_handoff_name',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'handoff',
+                  result: {
+                    status: 'accepted',
+                    targetLabel: 'Training Circle',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Tell Training Circle that I completed the planned session.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const memoryCommands = (await readFile(commandLogPath, 'utf8'))
+          .split('\n')
+          .map((command) => command.trim())
+          .filter(Boolean)
+        const observedContext = groupRequests.find((request) =>
+          request !== null
+          && typeof request === 'object'
+          && 'context' in request
+          && typeof request.context === 'string'
+        )
+        process.stdout.write(
+          `[group-handoff-name-e2e] ${JSON.stringify({
+            context:
+              observedContext
+                && typeof observedContext === 'object'
+                && 'context' in observedContext
+                ? observedContext.context
+                : null,
+            memoryCommands,
+            reply: result.finalMessage.trim(),
+            toolCallCount: groupRequests.length,
+          })}\n`,
+        )
+
+        expect(groupRequests).toHaveLength(1)
+        const handoffRequest = groupRequests[0]
+        expect(handoffRequest).toMatchObject({
+          action: 'handoff',
+          groupLabel: 'Training Circle',
+        })
+        if (
+          !handoffRequest
+          || typeof handoffRequest !== 'object'
+          || !('context' in handoffRequest)
+          || typeof handoffRequest.context !== 'string'
+        ) {
+          throw new Error('Expected one named group handoff context.')
+        }
+        expect(handoffRequest.context).toContain('Member Delta')
+        expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
+        expect(
+          memoryCommands.filter((command) => command.startsWith('memory show')),
+        ).toHaveLength(1)
+        expect(result.finalMessage).toMatch(/queu/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -12949,6 +13124,31 @@ function readDynamicToolAttempts(
       tool,
     }]
   })
+}
+
+function expectStructuredWorkoutAuthoringAttempt(input: {
+  entityId: string
+  events: readonly unknown[]
+  state: 'active' | 'completed'
+}): void {
+  const attempts = readDynamicToolAttempts(input.events).filter(
+    (attempt) => attempt.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name,
+  )
+  expect(attempts).toHaveLength(1)
+
+  const card = readRecord(attempts[0]?.argumentsValue.card)
+  expect(card).toMatchObject({
+    kind: 'compact_table',
+    tracking: {
+      entityId: input.entityId,
+      kind: 'workout',
+    },
+    workout: { state: input.state },
+  })
+  expect(card).not.toHaveProperty('columns')
+  expect(card).not.toHaveProperty('rowHeader')
+  expect(card).not.toHaveProperty('rows')
+  expect(readRecord(card?.tracking)).not.toHaveProperty('snapshotAt')
 }
 
 function readCompletedAgentMessages(

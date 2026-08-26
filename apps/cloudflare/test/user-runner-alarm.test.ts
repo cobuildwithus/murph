@@ -3642,11 +3642,18 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it.each([
-    ["retention-only", "default", "inbox_media_retention", undefined],
-    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox"],
+    ["retention-only", "default", "inbox_media_retention", undefined, false],
+    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false],
+    ["system-mailbox", "Web-direct default", "system_mailbox", undefined, true],
   ] as const)(
     "preempts active %s work before starting %s processing",
-    async (_activeLabel, _requestedLabel, activeProcessingMode, processingMode) => {
+    async (
+      _activeLabel,
+      _requestedLabel,
+      activeProcessingMode,
+      processingMode,
+      triggeredByWebDirect,
+    ) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortStarted = createDeferred<void>();
@@ -3715,15 +3722,30 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotId,
     });
 
+    const orchestrationAttemptId = triggeredByWebDirect
+      ? "web-ingress-33333333-3333-4333-8333-333333333333"
+      : `test-${processingMode ?? "default"}-behind-${activeProcessingMode}`;
     const ensureRuntimeProcessing = runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId:
-        `test-${processingMode ?? "default"}-behind-${activeProcessingMode}`,
+      ...(triggeredByWebDirect
+        ? { orchestration: { triggeredByWebDirect: true } }
+        : {}),
+      orchestrationAttemptId,
       processingMode,
       userId: TEST_USER_ID,
     });
+    let ensureRuntimeProcessingSettled = false;
+    void ensureRuntimeProcessing.then(
+      () => {
+        ensureRuntimeProcessingSettled = true;
+      },
+      () => {
+        ensureRuntimeProcessingSettled = true;
+      },
+    );
 
     await abortStarted.promise;
     expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
+    expect(ensureRuntimeProcessingSettled).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
     expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
     abortResult.resolve("accepted");
@@ -3742,17 +3764,25 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     expect(ensureProcessing).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(ensureRuntimeProcessingSettled).toBe(true);
+    expect(invoke).toHaveBeenCalledOnce();
     expect(runnerContainerNames).toContain(currentRunnerContainerName);
     expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
       processingMode,
     );
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
       replacedStaleFence: false,
+      ...(triggeredByWebDirect
+        ? {
+            runtimeInvocationOrchestrationAttemptId: orchestrationAttemptId,
+            triggeredByWebDirect: true,
+          }
+        : {}),
     });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
+      active_reason: processingMode ?? "default",
       wake_at: null,
     });
 
@@ -3769,7 +3799,26 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
-  it("wakes active system-mailbox work before retrying foreground processing", async () => {
+  it.each([
+    [
+      "non-direct Temporal default processing",
+      {
+        orchestration: {
+          temporalActivityStartedAtEpochMs: Date.parse(FIXED_NOW),
+        },
+        orchestrationAttemptId: "temporal-default-behind-system-mailbox",
+      },
+    ],
+    [
+      "an unvalidated Web-direct identity",
+      {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId: "web-ingress-direct-test",
+      },
+    ],
+  ] as const)(
+    "wakes active system-mailbox work before retrying %s",
+    async (_label, ensureInput) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -3794,7 +3843,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-foreground-behind-system-mailbox",
+      ...ensureInput,
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -3815,17 +3864,29 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
       active_expires_at: null,
+      active_generation: token.generation,
+      active_reason: "system_mailbox",
       wake_at: null,
     });
-  });
+    },
+  );
 
   it.each([
-    ["stale", "2026-04-27T00:00:05.000Z"],
-    ["queued", "2026-04-27T00:00:05.000Z"],
-    ["failed", "2026-04-27T00:00:30.000Z"],
+    ["retention", "stale", "inbox_media_retention", false, "2026-04-27T00:00:05.000Z"],
+    ["retention", "queued", "inbox_media_retention", false, "2026-04-27T00:00:05.000Z"],
+    ["retention", "failed", "inbox_media_retention", false, "2026-04-27T00:00:30.000Z"],
+    ["system-mailbox", "stale", "system_mailbox", true, "2026-04-27T00:00:05.000Z"],
+    ["system-mailbox", "queued", "system_mailbox", true, "2026-04-27T00:00:05.000Z"],
+    ["system-mailbox", "failed", "system_mailbox", true, "2026-04-27T00:00:30.000Z"],
   ] as const)(
-    "preserves the active retention fence when the exact abort is %s",
-    async (abortStatus, retryAt) => {
+    "preserves the active %s fence when the exact abort is %s",
+    async (
+      _activeLabel,
+      abortStatus,
+      activeProcessingMode,
+      triggeredByWebDirect,
+      retryAt,
+    ) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -3848,15 +3909,21 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
-      processingMode: "inbox_media_retention",
+      processingMode: activeProcessingMode,
       runnerContainerName: TEST_USER_ID,
       workspaceVersion: "7",
     });
     activeAttemptId = token.attemptId;
     activeGeneration = String(token.generation);
 
+    const orchestrationAttemptId = triggeredByWebDirect
+      ? "web-ingress-44444444-4444-4444-8444-444444444444"
+      : `test-default-behind-retention-${abortStatus}`;
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-default-behind-stale-retention",
+      ...(triggeredByWebDirect
+        ? { orchestration: { triggeredByWebDirect: true } }
+        : {}),
+      orchestrationAttemptId,
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -3873,6 +3940,8 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
       active_expires_at: null,
+      active_generation: token.generation,
+      active_reason: activeProcessingMode,
       wake_at: null,
     });
     },
@@ -7202,6 +7271,48 @@ describe("HostedUserRunner execution coordination", () => {
     )).toBe(false);
   });
 
+  it("correlates failed snapshot session-owner starts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, sql } = createRunnerHarness({
+      onStoragePut: ({ key }) => {
+        if (key === workspaceSnapshotUploadSessionCurrentStorageKey()) {
+          throw new Error("workspace snapshot session storage failed");
+        }
+      },
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    mocks.emitHostedExecutionStructuredLog.mockClear();
+
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${workspacePrefix}snapshot_failed_session_owner.snapshot.enc`,
+        snapshotId: "snapshot_failed_session_owner",
+      }),
+    )).rejects.toThrow("workspace snapshot session storage failed");
+
+    const diagnosticLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry) => entry.message
+          === "Hosted runner workspace snapshot session start diagnostic.",
+      );
+    expect(diagnosticLog).toMatchObject({
+      level: "warn",
+      userId: null,
+    });
+    expect(diagnosticLog?.details).toMatchObject({
+      snapshotStartDiagnosticScopeKind: "session_owner",
+      snapshotStartOutcomeKind: "failed",
+      snapshotStartSubstageKind: "session_create_storage",
+      workspaceAttemptId: "attempt_1",
+    });
+  });
+
   it("attributes previous-session candidate persistence to alarm work", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -7271,6 +7382,7 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotStartSessionCreateStorageDurationMs: 0,
       snapshotStartSubstageKind: "completed",
       snapshotStartWriteFenceOwnerValidationDurationMs: 0,
+      workspaceAttemptId: "attempt_1",
     });
   });
 
@@ -7364,6 +7476,7 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotStartOutcomeKind: "created",
       snapshotStartRecordedCandidateCount: 0,
       snapshotStartSubstageKind: "completed",
+      workspaceAttemptId: "attempt_1",
     });
     for (const key of [
       "snapshotStartAlarmCandidateWorkDurationMs",
@@ -7395,6 +7508,7 @@ describe("HostedUserRunner execution coordination", () => {
       "snapshotStartSessionCreateStorageDurationMs",
       "snapshotStartSubstageKind",
       "snapshotStartWriteFenceOwnerValidationDurationMs",
+      "workspaceAttemptId",
     ]);
     expect(JSON.stringify(details)).not.toContain("snapshot_create_no_scan_current");
     expect(JSON.stringify(details)).not.toContain(workspacePrefix);

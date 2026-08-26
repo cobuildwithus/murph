@@ -133,7 +133,7 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     aggregateJob,
     "missing-aggregate-result-check",
     '${{ needs.production-runner-bundle-budget-linux.result }}',
-    "The release aggregate must fail when the bundle budget job is skipped or unsuccessful.",
+    "The release aggregate must inspect the bundle result so full proof requires success and docs proof requires a skip.",
   );
 
   return issues;
