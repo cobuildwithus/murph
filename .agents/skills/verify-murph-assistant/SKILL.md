@@ -42,6 +42,18 @@ the acceptance result.
    `--model <model>` only when the product target differs. Use
    `--auth provider` only for an explicitly configured supported provider-key
    lane. Never print, copy, or persist auth material.
+
+   If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT`
+   before any provider action, rerun the same journey once with another
+   already-authenticated local home:
+
+   ```bash
+   pnpm test:assistant:live -- --test "<unique test-name pattern>" --codex-home <ALTERNATE_CODEX_HOME>
+   ```
+
+   The explicit home selects existing local auth and config; it does not copy
+   credentials. Do not discover profiles automatically or cycle through homes.
+   If the alternate home is also blocked, record `Hold`.
 5. Read every printed member-visible reply and inspect the corresponding tool
    assertions. Mark the journey `Ready` only when all are true:
    - Murph fulfills the user's real purpose correctly and completely.
@@ -65,10 +77,10 @@ the acceptance result.
 
 - Keep live journeys opt-in. Routine CI compiles them but must not call a paid
   provider or depend on a developer's subscription.
-- The local subscription mode intentionally uses the normal local Codex home
-  for auth but does not copy it into a temporary home. It is developer-local
-  evidence, not a hermetic CI lane. Provider-key mode keeps its
-  isolated Codex home and minimal secret allowlist.
+- The local subscription mode uses the normal local Codex home by default and
+  may select one explicit alternate home, but it never copies auth into a
+  temporary home. It is developer-local evidence, not a hermetic CI lane.
+  Provider-key mode keeps its isolated Codex home and minimal secret allowlist.
 - Do not call production databases, delivery providers, device providers, or
   member-facing channels. Inject synthetic ports and fixtures.
 - A stochastic pass is evidence for the tested model and run, not a guarantee

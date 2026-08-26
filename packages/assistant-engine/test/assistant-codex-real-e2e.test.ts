@@ -8744,6 +8744,36 @@ describe('real Codex app-server cache usage e2e harness', () => {
     })
   })
 
+  it('selects one explicit Codex home only in subscription mode', async () => {
+    const config = await resolveRealCodexE2eConfig({
+      sourceEnv: {
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_AUTH: 'subscription',
+        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+    })
+
+    expect(config).toEqual({
+      codexHome: '/alternate-codex-home',
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+    await expect(resolveRealCodexE2eConfig({
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+      },
+    })).rejects.toThrow(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
+    )
+  })
+
   it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
     await expect(resolveRealCodexE2eConfig({
       sourceEnv: {
@@ -13528,18 +13558,17 @@ async function resolveRealCodexE2eConfig(
   const model =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
-  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
-  if (configuredCodexHome) {
-    throw new Error(
-      'MURPH_REAL_CODEX_HOME is not supported; provider mode creates an isolated home and subscription mode uses the normal local Codex home.',
-    )
-  }
-
   const authMode =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_AUTH) ?? 'provider'
   if (authMode !== 'provider' && authMode !== 'subscription') {
     throw new Error(
       'MURPH_REAL_CODEX_AUTH must be provider or subscription.',
+    )
+  }
+  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
+  if (authMode === 'provider' && configuredCodexHome) {
+    throw new Error(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
     )
   }
   const explicitModelProvider =
@@ -13554,7 +13583,7 @@ async function resolveRealCodexE2eConfig(
       )
     }
     return {
-      codexHome: null,
+      codexHome: configuredCodexHome,
       env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
       model,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,

@@ -17,6 +17,7 @@ describe('assistant real Codex local runner', () => {
       'adaptive wearable no-data outreach',
     ])).toEqual({
       authMode: 'subscription',
+      codexHome: null,
       help: false,
       model: null,
       testPattern: 'adaptive wearable no-data outreach',
@@ -35,10 +36,32 @@ describe('assistant real Codex local runner', () => {
       'gpt-5.6-sol',
     ])).toEqual({
       authMode: 'provider',
+      codexHome: null,
       help: false,
       model: 'gpt-5.6-sol',
       testPattern: 'member preference',
     })
+  })
+
+  it('supports one explicit Codex home for subscription auth', () => {
+    expect(parseAssistantRealCodexRunArgs([
+      'member preference',
+      '--codex-home',
+      '/alternate-codex-home',
+    ])).toEqual({
+      authMode: 'subscription',
+      codexHome: '/alternate-codex-home',
+      help: false,
+      model: null,
+      testPattern: 'member preference',
+    })
+    expect(() => parseAssistantRealCodexRunArgs([
+      'member preference',
+      '--auth',
+      'provider',
+      '--codex-home',
+      '/alternate-codex-home',
+    ])).toThrow('--codex-home is available only with subscription auth.')
   })
 
   it('sets only the live-test controls owned by the selected auth mode', () => {
@@ -66,6 +89,32 @@ describe('assistant real Codex local runner', () => {
       HOME: '/normal-home',
       PATH: '/usr/bin:/bin',
     })
+    const selectedRunEnv = buildAssistantRealCodexRunEnv({
+      options: parseAssistantRealCodexRunArgs([
+        'focused journey',
+        '--codex-home',
+        '/selected-codex-home',
+      ]),
+      sourceEnv: {
+        CODEX_HOME: '/ambient-codex-home',
+        HOME: '/normal-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+    })
+    expect(selectedRunEnv.CODEX_HOME).toBeUndefined()
+    expect(selectedRunEnv.MURPH_REAL_CODEX_HOME).toBe('/selected-codex-home')
+    const selectedLoginEnv = buildAssistantRealCodexLoginEnv(
+      {
+        CODEX_HOME: '/ambient-codex-home',
+        HOME: '/normal-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+      '/selected-codex-home',
+    )
+    expect(selectedLoginEnv.CODEX_HOME).toBe('/selected-codex-home')
+    expect(selectedLoginEnv.MURPH_REAL_CODEX_HOME).toBeUndefined()
   })
 
   it('builds package-relative list and focused run invocations', () => {

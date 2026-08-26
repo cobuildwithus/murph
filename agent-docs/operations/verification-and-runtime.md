@@ -258,10 +258,18 @@ reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
+If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
+any provider action, rerun that same focused journey once with
+`--codex-home <ALTERNATE_CODEX_HOME>`. Use only another already-authenticated,
+authorized local home; the runner selects its existing auth and config without
+copying credentials. Do not auto-discover profiles or cycle through homes. If
+the alternate home is also blocked, record `Hold`.
+
 Assistant Engine's lower-level opt-in live Codex journeys still use
 `MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
 credential, while explicit subscription mode uses the normal local Codex home
-for auth and is developer-local rather than hermetic CI evidence. The
+by default and may select one alternate local home for auth. It remains
+developer-local rather than hermetic CI evidence. The
 generated-image avatar journey must exercise the production tool contracts in
 three natural turns: launch with a truthful wait acknowledgement, trusted
 completion media attachment with no group mutation, and a later explicit
