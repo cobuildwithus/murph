@@ -2755,7 +2755,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       summary: 'Codex command execution failed during provider turn.',
       details: {
         actionKind: 'command.execution',
-        commandFamily: 'unknown',
+        commandFamily: 'cat',
         commandOrdinal: 1,
         durationMsBucket: '5_30s',
         exitCode: 2,
@@ -2965,22 +2965,32 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       {
         command: 'cat /tmp/private-record',
         exitCode: 126,
+        expectedFamily: 'cat',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 127,
+        expectedFamily: 'cat',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 124,
+        expectedFamily: 'cat',
       },
       {
         command: 'bash -lc "rg private-query /tmp/private-record"',
         exitCode: 1,
+        expectedFamily: 'command',
       },
       {
         command: 'rg private-query /tmp/private-record | head',
         exitCode: 1,
+        expectedFamily: 'command',
+      },
+      {
+        command: 'vault-cli knowledge show page_test --format json',
+        exitCode: 2,
+        expectedFamily: 'vault-cli knowledge',
       },
     ] as const
     const operationalIssues: AssistantRuntimeIssueInput[] = []
@@ -2996,7 +3006,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const issue = record(event)
       expect(issue).toMatchObject({
         details: {
-          commandFamily: 'unknown',
+          commandFamily: example.expectedFamily,
           commandOrdinal: index + 5,
           exitCode: example.exitCode,
         },
@@ -3114,7 +3124,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         const issue = recordCommand({ command, exitCode: 1 })
         expect(issue).toMatchObject({
           details: {
-            commandFamily: 'unknown',
+            commandFamily: 'command',
             commandOrdinal: index + 7,
             exitCode: 1,
           },
@@ -3180,7 +3190,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     })
     expect(boundaryIssue).toMatchObject({
       details: {
-        commandFamily: 'unknown',
+        commandFamily: 'cat',
         commandOrdinal: 10_000,
         exitCode: 127,
       },
