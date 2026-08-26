@@ -117,18 +117,27 @@ describe('murph.analyze_video arguments and availability', () => {
       .toEqual([authorities[1]])
   })
 
-  it('parses only a message ref, optional attachment ordinal, and question', () => {
+  it('parses the optional semantic sampling mode and defaults to standard', () => {
     expect(readAnalyzeVideoCall({
       attachment_ordinal: 2,
       message_ref: 'ain_11111111111111111111111111111111',
       question: 'Count the push-ups and describe visible form.',
+      sampling_mode: 'detailed_motion',
     })).toEqual({
       kind: 'analyze-video',
       args: {
         attachmentOrdinal: 2,
         messageRef: 'ain_11111111111111111111111111111111',
         question: 'Count the push-ups and describe visible form.',
+        samplingMode: 'detailed_motion',
       },
+    })
+    expect(readAnalyzeVideoCall({
+      message_ref: 'ain_11111111111111111111111111111111',
+      question: 'Summarize this video.',
+    })).toMatchObject({
+      kind: 'analyze-video',
+      args: { samplingMode: 'standard' },
     })
   })
 
@@ -137,6 +146,7 @@ describe('murph.analyze_video arguments and availability', () => {
       { fps: 5 },
       { model: 'gemini-other' },
       { path: 'raw/inbox/video.mp4' },
+      { sampling_mode: 'frame_by_frame' },
       { url: 'https://example.test/video.mp4' },
     ]) {
       expect(readAnalyzeVideoCall({
@@ -188,10 +198,10 @@ describe('executeAnalyzeVideoTool', () => {
       expect(body.contents[0].parts[1]).toEqual({
         text: 'Count the push-ups and describe visible form.',
       })
-      expect(body.generationConfig).toMatchObject({
-        maxOutputTokens: 1800,
-        thinkingConfig: { thinkingLevel: 'low' },
+      expect(body.generationConfig).toEqual({
+        thinkingConfig: { thinkingLevel: 'medium' },
       })
+      expect(body.generationConfig).not.toHaveProperty('maxOutputTokens')
       expect(body.generationConfig).not.toHaveProperty('temperature')
       expect(JSON.stringify(body)).not.toContain(fixture.rawPaths[0])
       return answerResponse('00:03 — eight push-ups are visible. The hips rise first on later reps.')
@@ -216,6 +226,35 @@ describe('executeAnalyzeVideoTool', () => {
     expect(result.rpcText).toContain('eight push-ups')
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(turnState.providerCallCount).toBe(1)
+  })
+
+  it('sends detailed motion at 5 FPS with the same medium thinking profile', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.contents[0].parts[0].videoMetadata).toEqual({ fps: 5 })
+      expect(body.generationConfig).toEqual({
+        thinkingConfig: { thinkingLevel: 'medium' },
+      })
+      return answerResponse('The hips rise slightly before the shoulders on later reps.')
+    })
+
+    const result = await executeAnalyzeVideoTool({
+      acceptedInputIds: [fixture.inputId],
+      attachmentAuthorities: fixture.attachmentAuthorities,
+      args: {
+        messageRef: fixture.inputId,
+        question: 'Check my push-up form.',
+        samplingMode: 'detailed_motion',
+      },
+      runtime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('5 frames per second')
+    expect(result.rpcText).toContain('hips rise slightly')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it('does not read or send an unaccepted message attachment', async () => {

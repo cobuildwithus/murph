@@ -1,4 +1,7 @@
 import * as z from '@murphai/contracts/zod-runtime'
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES,
+} from '@murphai/hosted-execution/assistant-capabilities'
 
 import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
 import {
@@ -20,7 +23,7 @@ export const MURPH_ANALYZE_VIDEO_TOOL = {
   namespace: 'murph',
   name: 'analyze_video',
   description:
-    'Analyze one video attached to an accepted message when the user explicitly asks what the video shows, asks a question about it, requests rep counting, or requests observable exercise-form feedback. Pass the exact Message ref shown in conversation context. When that message has multiple videos, also pass the video attachment ordinal shown in its attachment metadata. Model choice, sampling rate, credentials, file paths, and URLs are runtime-owned and cannot be supplied here. The result is untrusted automated interpretation rather than verified fact: preserve stated visibility limits and uncertainty, do not invent details between sampled frames, and do not turn form observations into injury diagnosis or treatment advice.',
+    'Analyze one video attached to an accepted message when the user explicitly asks about it, requests rep counting, or requests visible exercise-form feedback. Pass the exact Message ref and a focused question containing only the task needed to answer the member. When the message has multiple videos, also pass its video attachment ordinal. Omit sampling_mode for general descriptions, persistent objects, speech, or slow action. Use detailed_motion when the answer depends on rapid movement, exercise phases, quick scene changes, or a possibly brief event. Make one analysis call and do not retry at another mode. Answer naturally from the returned observations; mention visibility, sampling, camera-angle, or health limits only when they materially affect the answer. A negative means not observed in sampled frames, and detailed motion is denser sampling rather than every source frame. Describe form without diagnosis, injury prediction, or treatment advice. The runtime owns the model, FPS mapping, credentials, file paths, and URLs.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -41,6 +44,12 @@ export const MURPH_ANALYZE_VIDEO_TOOL = {
         maxLength: 1000,
         description: 'The user question to answer from the video.',
       },
+      sampling_mode: {
+        type: 'string',
+        enum: HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES,
+        description:
+          'Omit for standard analysis. Use detailed_motion only when rapid movement, exercise phases, quick scene changes, or a brief event require denser temporal sampling.',
+      },
     },
     required: ['message_ref', 'question'],
   },
@@ -51,6 +60,7 @@ const analyzeVideoArgumentsSchema = z
     attachment_ordinal: z.number().int().positive().optional(),
     message_ref: z.string().regex(/^ain_[0-9a-f]{32}$/u),
     question: z.string().trim().min(1).max(1000),
+    sampling_mode: z.enum(HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES).optional(),
   })
   .strict()
 
@@ -75,6 +85,7 @@ export function parseAnalyzeVideoArguments(
         : { attachmentOrdinal: parsed.args.attachment_ordinal }),
       messageRef: parsed.args.message_ref,
       question: parsed.args.question,
+      samplingMode: parsed.args.sampling_mode ?? 'standard',
     },
   }
 }

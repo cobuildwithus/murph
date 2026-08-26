@@ -358,10 +358,18 @@ Last verified: 2026-08-23
   replies only because snapshot exclusion is the independent persistence
   boundary. An explicit canonical event raw reference is the sole durable-save
   exception and keeps its separately authorized lifecycle. The tool
-  pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
-  cap, a 90-second timeout, and a bounded response. The Worker must revalidate
-  the exact request and use manual redirects before replacing the runner
-  sentinel with `GEMINI_API_KEY`. A protocol-valid successful response must be
+  pins Gemini 3.7 Flash and maps only `standard` to 1 FPS or
+  `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
+  raw FPS remains unavailable to the model and member. Both current profiles
+  use medium thinking, omit an explicit output-token cap, allow one call, do
+  not retry, keep the 14 MiB raw cap and 90-second timeout, and bound both the
+  delivered response and tool result. The Worker must revalidate the exact
+  request and use manual redirects before replacing the runner sentinel with
+  `GEMINI_API_KEY`. During rollout it may also accept only the exact deployed
+  legacy profile of 1 FPS, low thinking, and a 1,800-token output cap from a
+  warm old runner; mixed profiles remain denied, new runners never emit the
+  legacy shape, and the compatibility reader is removed after the rollback
+  floor advances. A protocol-valid successful response must be
   withheld until Web durably accepts its exact usage record; callback rejection
   fails the tool closed. An upstream response above the 1 MiB delivery cap is a
   protocol violation: reject it without widening the buffer, let Murph absorb
