@@ -10,6 +10,7 @@ import type {
 } from "./reconciliation-facts-wire.ts";
 
 export {
+  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   projectHostedRuntimeReconciliationFactsWireResponse,

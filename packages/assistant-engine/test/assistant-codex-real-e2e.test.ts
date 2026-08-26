@@ -101,6 +101,9 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
+  sendAssistantMessageLocal,
+} from '../src/assistant/service.ts'
+import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -145,7 +148,10 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
-import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import {
+  extractCodexAssistantProviderUsage,
+  resolveAssistantProviderPrompt,
+} from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
@@ -321,6 +327,145 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
+
+describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+  it(
+    'answers from an early detail retained across sixty committed messages',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-cold-conversation-reconstruction-e2e-'),
+      )
+      const conversationHistoryMessages = Array.from(
+        { length: 30 },
+        (_, index) => index === 0
+          ? [
+              {
+                content:
+                  'For the synthetic packing checklist, put the train tickets in the cobalt folder.',
+                role: 'user' as const,
+              },
+              {
+                content:
+                  'Got it. The train tickets go in the cobalt folder.',
+                role: 'assistant' as const,
+              },
+            ]
+          : [
+              {
+                content:
+                  `Synthetic checklist item ${index + 1}: ${'routine packing note '.repeat(8)}`,
+                role: 'user' as const,
+              },
+              {
+                content:
+                  `Synthetic checklist response ${index + 1}: ${'routine confirmation '.repeat(8)}`,
+                role: 'assistant' as const,
+              },
+            ],
+      ).flat()
+      const userPrompt = 'Which folder did we pick for the train tickets?'
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'telegram',
+            conversationKey: 'telegram:direct:cold-reconstruction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-cold-reconstruction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-cold-reconstruction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'read-only',
+          },
+          turnCount: 30,
+          updatedAt: '2026-08-26T12:30:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          conversationHistoryMessages.map((message) => ({
+            kind: message.role,
+            text: message.content,
+          })),
+        )
+        const historyBytes = conversationHistoryMessages.reduce(
+          (total, message) =>
+            total + Buffer.byteLength(message.content, 'utf8'),
+          0,
+        )
+        expect(historyBytes).toBeLessThanOrEqual(12_000)
+
+        const result = await sendAssistantMessageLocal({
+          channel: 'telegram',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          persistUserPromptOnFailure: false,
+          prompt: userPrompt,
+          provider: 'codex-cli',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          sessionId: session.sessionId,
+          threadId: 'thread-cold-reconstruction',
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          vault: workingDirectory,
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyBytes,
+            historyMessages: conversationHistoryMessages.length,
+            reply: result.response.trim(),
+          })}\n`,
+        )
+        expect(result.response).toMatch(/cobalt/iu)
+        expect(result.response).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
