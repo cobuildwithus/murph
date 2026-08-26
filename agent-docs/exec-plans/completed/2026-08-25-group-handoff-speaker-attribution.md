@@ -1,6 +1,6 @@
 # Preserve speakers in private-to-group handoffs
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -55,3 +55,39 @@ Updated: 2026-08-25
 - `git diff --check` and privacy-sensitive diff inspection.
 - Exact-head CI and preliminary specialist ReviewGPT pass.
 
+## Product UX Walkthrough
+
+- Established group name: the source handoff may use only a name the member
+  already uses in that group, and the target message keeps the member attached
+  to their action or claim.
+- No established group name: the target message uses `a member` instead of
+  guessing an identity or speaking as Murph in first person.
+- First-person or adversarial source wording: the handoff remains untrusted
+  data, and the target output contract keeps Murph in the messenger role.
+- Existing authority and recovery: consent, route selection, persistence,
+  queueing, and delivery are unchanged and retain their existing tests.
+- Result: Ready. The affected journey is complete without a new state owner,
+  schema field, validator, or user-visible step.
+
+## Local Evidence
+
+- Assistant Engine prompt and handoff suites: 124 tests passed; the focused
+  description test passed again after its type-safe owner assertion.
+- Web handoff suites: 190 tests passed. Cloudflare port replay: 19 tests passed.
+  Hosted execution handoff contract: 3 tests passed.
+- Public changelog registry: 9 tests passed.
+- Assistant Engine, hosted execution, Cloudflare, and Web typechecks passed.
+- Pinned real Codex App Server capture with identical synthetic ordinary
+  direct and group turns, `gpt-5.6-terra`, low reasoning, production system
+  prompts, and `gpt-tokenizer` 3.4.0 `o200k_harmony` found identical normalized
+  complete initial provider input at base and head. Direct is 24,937 tokens and
+  114,977 UTF-8 bytes; group is 21,063 tokens and 97,502 bytes. The capture
+  serialized `include`, `input`, `instructions`, `parallel_tool_calls`, `text`,
+  `tool_choice`, and `tools`; it normalized local and temporary paths plus
+  UUIDs, and excluded model, reasoning, storage, streaming, service-tier,
+  account, cache, client, and transport metadata identically. The source schema
+  rule is deferred until handoff-tool discovery, and the target rule appears
+  only on isolated handoff-composition turns.
+- Working-tree search confirms the named handoff fixture and its distinctive
+  measurement wording no longer appear in the affected test surfaces.
+Completed: 2026-08-25
