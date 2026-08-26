@@ -17,6 +17,10 @@ reuse, and focused proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+`vault-cli` runner-bundle budget ownership and focused proof are specified by
+`agent-docs/operations/verification-and-runtime.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
