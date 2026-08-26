@@ -122,6 +122,10 @@ Updated: 2026-08-25
   now states that requests answered only in earlier undelivered response text
   remain unanswered. The exact Terra journey subsequently passed with both
   answers in one reply and no review mechanics in user-visible text.
+- ReviewGPT's full-snapshot round found that this group journey asserted but
+  did not print the final member-visible reply, preventing the required human
+  `Ready`/`Hold` review. The leaf now emits one compact synthetic scenario and
+  final-reply line through the existing live-harness stdout convention.
 
 ## ReviewGPT round-3 retrospective
 

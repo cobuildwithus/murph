@@ -1121,6 +1121,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           prompt: `${reconsiderationInstruction}\n\nMurph, what is 7 times 6?`,
           resumeSessionId: first.sessionId,
         })
+        process.stdout.write(
+          `[group-reconsideration-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'two still-relevant requests',
+          })}\n`,
+        )
 
         expect(second.sessionId).toBe(first.sessionId)
         expect(
