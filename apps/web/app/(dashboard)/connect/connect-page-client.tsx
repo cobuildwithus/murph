@@ -23,6 +23,7 @@ import {
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
   ConnectRedirectDialog,
+  ConnectSourceDialog,
   VitalConnectionDialog,
 } from "./connect-page-dialogs";
 import {
@@ -36,11 +37,13 @@ import {
   markLocallyDisconnectedSources,
   readDeviceConnectIntentFromCurrentLocation,
   requestConnectionAuthorizationUrl,
+  resolveConnectSourceIdFromHash,
   resolveCallbackSourceId,
   resolveConnectIntentRedirectSource,
   resolveConnectIntentStartSource,
   resolveInitialConnectIntentPresentation,
   stripConnectCallbackParams,
+  stripConnectSourceHash,
   stripDeviceConnectIntentParams,
 } from "./connect-page-helpers";
 import { SourceCard } from "./connect-source-card";
@@ -131,6 +134,9 @@ export function ConnectSourcesGrid({
     useState<ConnectSourceSetupGuideId | null>(null);
   const [disconnectSource, setDisconnectSource] =
     useState<ConnectSource | null>(null);
+  const [deepLinkedSourceId, setDeepLinkedSourceId] = useState<string | null>(
+    null,
+  );
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -193,6 +199,9 @@ export function ConnectSourcesGrid({
   const hasActiveFitbitMigration =
     fitbitMigrationState === "verifying_successor"
     || fitbitMigrationState === "cutover_ready";
+  const deepLinkedSource = displaySources.find(
+    (source) => source.id === deepLinkedSourceId,
+  ) ?? null;
   const disconnectUnavailableSourceNames = useMemo(() => {
     if (
       disconnectSource?.disconnectScope !== "junction_account"
@@ -267,6 +276,18 @@ export function ConnectSourcesGrid({
       stripConnectCallbackParams();
     }
   }, [hasInitialCallback]);
+
+  useEffect(() => {
+    const syncDeepLinkedSource = () => {
+      setDeepLinkedSourceId(
+        resolveConnectSourceIdFromHash(window.location.hash, displaySources),
+      );
+    };
+
+    syncDeepLinkedSource();
+    window.addEventListener("hashchange", syncDeepLinkedSource);
+    return () => window.removeEventListener("hashchange", syncDeepLinkedSource);
+  }, [displaySources]);
 
   useEffect(() => {
     if (!hasActiveFitbitMigration) {
@@ -562,6 +583,11 @@ export function ConnectSourcesGrid({
     }
   }, [pendingDisconnectSourceId, pendingSourceId, router]);
 
+  const closeDeepLinkedSourceDialog = useCallback(() => {
+    setDeepLinkedSourceId(null);
+    stripConnectSourceHash();
+  }, []);
+
   return (
     <section className="flex min-w-0 flex-col gap-4">
       {initialLoadError?.message ? (
@@ -645,6 +671,47 @@ export function ConnectSourcesGrid({
           ))}
         </div>
       )}
+
+      <ConnectSourceDialog
+        source={deepLinkedSource}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeDeepLinkedSourceDialog();
+          }
+        }}
+      >
+        {deepLinkedSource ? (
+          <SourceCard
+            authenticated={authenticated}
+            errorMessage={
+              visibleActionError?.sourceId === deepLinkedSource.id
+                ? visibleActionError.message
+                : null
+            }
+            pending={pendingSourceId === deepLinkedSource.id}
+            pendingDisconnect={pendingDisconnectSourceId === deepLinkedSource.id}
+            presentation="dialog"
+            source={deepLinkedSource}
+            onDisconnectTargetChange={(source) => {
+              closeDeepLinkedSourceDialog();
+              setDisconnectSource(source);
+            }}
+            onMigrationRetry={(source) => {
+              closeDeepLinkedSourceDialog();
+              void disconnectConnection(source);
+            }}
+            onSignIn={closeDeepLinkedSourceDialog}
+            onSetupGuideOpen={(setupGuideId) => {
+              closeDeepLinkedSourceDialog();
+              setActiveSetupGuideId(setupGuideId);
+            }}
+            onStartConnection={async (source) => {
+              closeDeepLinkedSourceDialog();
+              await startConnection(source);
+            }}
+          />
+        ) : null}
+      </ConnectSourceDialog>
 
       <DeviceSyncSetupGuideDialog
         contactAction={whoopSyncContactAction}

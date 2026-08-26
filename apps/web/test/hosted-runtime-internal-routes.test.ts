@@ -1697,7 +1697,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.147.0-portable-responses-v1",
+          "murph-codex-0.149.1-portable-responses-v1",
       },
       hostedAssistantModelOverride: "gpt-5.6-sol",
       hostedAssistantProviderOverride: "venice",
@@ -1743,7 +1743,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.147.0-portable-responses-v1",
+          "murph-codex-0.149.1-portable-responses-v1",
       },
       model: "gpt-5.6-terra",
       solAvailable: false,
@@ -1774,7 +1774,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.147.0-portable-responses-v1",
+          "murph-codex-0.149.1-portable-responses-v1",
       },
       model: "gpt-5.6-terra",
       solAvailable: false,

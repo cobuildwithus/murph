@@ -6181,6 +6181,138 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('rebuilds reconsidered group history without the provisional provider thread', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-group-reconsideration-',
+    ))
+    const routeFingerprint = 'route-group-reconsideration'
+    const route = createRoute({ routeFingerprint })
+    const initialSession = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'a'.repeat(64),
+        routeFingerprint,
+        threadId: 'provider-thread-provisional',
+      },
+    })
+    const session = await saveAssistantSession(vault, initialSession)
+    const firstRequest = 'List the morning hours.'
+    const secondRequest = 'Also list the afternoon hours.'
+    const selectedFinal = 'Morning: 9–11. Afternoon: 2–4.'
+    const provisionalDraft = 'INTERNAL_PROVISIONAL_DRAFT'
+    const reconsiderationMarker = 'INTERNAL_RECONSIDERATION_INSTRUCTION'
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: firstRequest },
+        { kind: 'user', text: secondRequest },
+      ])
+      const providerResult: ExecutedAssistantProviderTurnResult = {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint: 'b'.repeat(64),
+        attemptCount: 1,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexRolloutRelativePath: null,
+        codexThreadId: 'provider-thread-reconsidered',
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          media: [],
+          response: provisionalDraft,
+          transcriptResponse: provisionalDraft,
+        }],
+        provider: 'codex-cli',
+        providerOptions: route.providerOptions,
+        rawEvents: [],
+        response: selectedFinal,
+        responseCard: null,
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [],
+        route,
+        session,
+        stderr: '',
+        stdout: '',
+        transcriptResponse: selectedFinal,
+        usage: null,
+        workingDirectory: '/work',
+      }
+      const saved = await persistAssistantTurnAndSession({
+        assistantTranscriptText: selectedFinal,
+        input: {
+          ...createMessageInput(),
+          prompt: `${firstRequest}\n\n${secondRequest}`,
+          turnContext: reconsiderationMarker,
+          vault,
+        },
+        persistUserPromptToTranscript: false,
+        plan: createPrivateSharedPlan(),
+        precedingAssistantTranscriptTexts: [],
+        providerResult,
+        providerResumeStateAction: 'clear',
+        session,
+        turnCreatedAt: '2026-08-25T16:40:00.000Z',
+        turnId: 'turn-group-reconsideration',
+      })
+
+      expect(saved.resumeState).toBeNull()
+      expect(saved.codexResume).toBeNull()
+      const transcript = await listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )
+      expect(transcript.map(({ kind, text }) => ({ kind, text }))).toEqual([
+        { kind: 'user', text: firstRequest },
+        { kind: 'user', text: secondRequest },
+        { kind: 'assistant', text: selectedFinal },
+      ])
+      expect(JSON.stringify(transcript)).not.toContain(provisionalDraft)
+      expect(JSON.stringify(transcript)).not.toContain(reconsiderationMarker)
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Summarize the visible conversation.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-25',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        session: saved,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: firstRequest, role: 'user' },
+        { content: secondRequest, role: 'user' },
+        { content: selectedFinal, role: 'assistant' },
+      ])
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        provisionalDraft,
+      )
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        reconsiderationMarker,
+      )
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('drops an assistant-only suffix when marker reservation removes the sole member message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
