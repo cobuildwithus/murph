@@ -829,7 +829,7 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
           materializeRealWorkoutVaultCli({ binDirectory }),
         ])
 
-        const result = await executeRealCodexAppServerTurn({
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -870,13 +870,14 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
           },
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt: [
-            'Start a live workout called Position circuit with standing seated and kneeling cable presses.',
-            'Plan two sets of 10 reps for each exercise. None of the sets are complete yet.',
-          ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           workingDirectory,
+        }
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start a live workout called Position circuit with standing seated and kneeling cable presses two sets of 10 reps each none are complete yet',
         })
         const vault = await readVaultRawTolerant(workingDirectory)
         const workouts = vault.events.flatMap((event) => {
@@ -928,6 +929,38 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
         const commands = await readFile(commandLogPath, 'utf8')
         expect(commands.match(/--exercise /gu)).toHaveLength(3)
         expect(commands).not.toContain('workout exercise add')
+
+        const commandCountBeforeAmbiguousTurn = commands
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .length
+        const ambiguousResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start another live workout called Allocation question with standing and seated cable presses three sets of 10 reps total',
+        })
+        const afterAmbiguousTurn = await readVaultRawTolerant(workingDirectory)
+        const workoutsAfterAmbiguousTurn = afterAmbiguousTurn.events.filter(
+          (event) =>
+            workoutSessionSchema.safeParse(event.attributes.workout).success,
+        )
+        const ambiguousTurnCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .slice(commandCountBeforeAmbiguousTurn)
+
+        expect(workoutsAfterAmbiguousTurn).toHaveLength(1)
+        expect(ambiguousResult.responseCard).toBeNull()
+        expect(ambiguousResult.finalMessage).toMatch(/\?/u)
+        expect(ambiguousResult.finalMessage).toMatch(
+          /standing|seated|split|which exercise/iu,
+        )
+        expect(ambiguousResult.runtimeIssueInputs).toEqual([])
+        expect(ambiguousTurnCommands.join('\n')).not.toMatch(
+          /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
