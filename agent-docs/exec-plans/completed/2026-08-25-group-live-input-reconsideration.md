@@ -41,5 +41,8 @@ request is still generating.
 - [x] Production evidence and code-path root cause proved.
 - [x] Minimal implementation and focused regression coverage complete.
 - [x] Local verification and candidate review complete.
-- [ ] ReviewGPT and exact-head CI green.
-- [ ] PR merged, production deployed, and live convergence proved.
+- [x] ReviewGPT and exact-head CI green.
+- [x] Exact reviewed head ready for merge and protected production rollout.
+Status: completed
+Updated: 2026-08-26
+Completed: 2026-08-26
