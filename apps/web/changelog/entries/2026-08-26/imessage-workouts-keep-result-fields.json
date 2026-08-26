@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 200,
+  "item": {
+    "id": "imessage-workouts-keep-result-fields",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout sets open with the right fields",
+    "summary": "Resistance exercises now keep separate weight and repetition inputs in the iMessage workout editor, even before a load is logged.",
+    "details": "Murph preserves each exercise's result type and lb or kg context while leaving unknown weights empty; bodyweight exercises remain repetition-only.",
+    "relevanceTags": ["imessage", "workouts"],
+    "sourcePullRequests": [2348]
+  }
+}
