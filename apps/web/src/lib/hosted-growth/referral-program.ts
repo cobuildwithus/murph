@@ -91,8 +91,8 @@ export function formatHostedPublicReferralRewardValue(
 }
 
 /**
- * Compact homepage label. The section supplies the shared usage-versus-calendar
- * context once beneath the reward ledger instead of repeating it in every row.
+ * Compact homepage amount. The section supplies the visible Murph unit and the
+ * shared usage-versus-calendar context around this value.
  */
 export function formatHostedPublicReferralRewardCompactValue(
   reward: Pick<
@@ -101,5 +101,5 @@ export function formatHostedPublicReferralRewardCompactValue(
   >,
 ): string {
   const days = computeHostedReferralRewardUsageDays(reward);
-  return `About ${days} ${days === 1 ? "day" : "days"}`;
+  return String(days);
 }

@@ -10,10 +10,11 @@ const RETIRED_USAGE_TERM_PATTERN = new RegExp(
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "About 10 days" },
-      { count: 1, label: "About 14 days" },
+      { count: 2, label: "10" },
+      { count: 1, label: "14" },
     ],
-    description: "Share your link or start a group with Murph.",
+    description:
+      "Bring someone into Murph—or start a fresh group—and you can earn more room to keep going.",
     rewardCount: 3,
     selector: '[data-design-section="homepage-referral-program"]',
     slug: "mixed",
@@ -25,10 +26,11 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "About 10 days" },
-      { count: 1, label: "About 14 days" },
+      { count: 1, label: "10" },
+      { count: 1, label: "14" },
     ],
-    description: "Start a fresh group with Murph.",
+    description:
+      "Start a fresh group and you can earn more room to keep going.",
     rewardCount: 2,
     selector:
       '[data-design-section="homepage-referral-program-group-only"]',
@@ -37,9 +39,10 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "About 10 days" },
+      { count: 1, label: "10" },
     ],
-    description: "Share your personal link with someone new.",
+    description:
+      "Bring someone new into Murph and you can earn more room to keep going.",
     rewardCount: 1,
     selector:
       '[data-design-section="homepage-referral-program-signup-only"]',
@@ -292,10 +295,13 @@ test.describe("homepage referral design proof", () => {
             study.getByText(dayLabel.label, { exact: true }),
           ).toHaveCount(dayLabel.count);
         }
+        const rewardUnits = study.locator("[data-referral-reward-unit]");
+        await expect(rewardUnits).toHaveCount(expected.rewardCount);
+        for (const unit of await rewardUnits.all()) {
+          await expect(unit).toContainText(/days of\s*Murph/i);
+        }
         await expect(study.getByText(/If eligible/)).toHaveCount(0);
-        await expect(study).not.toContainText(
-          /\$|≈|usage credit/i,
-        );
+        await expect(study).not.toContainText(/\$|usage credit/i);
         await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
 
         const overflowPx = await study.evaluate((element) =>

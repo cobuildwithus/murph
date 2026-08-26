@@ -3,6 +3,7 @@ import { ArrowRight, Link2, UsersRound } from "lucide-react";
 
 import {
   formatHostedPublicReferralRewardCompactValue,
+  formatHostedPublicReferralRewardValue,
   type HostedPublicReferralReward,
 } from "@/src/lib/hosted-growth/referral-program";
 
@@ -18,32 +19,32 @@ export function ReferralSection({
   const signupAvailable = rewards.some(({ id }) => id === "signup-link");
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
   const description = signupAvailable && groupAvailable
-    ? "Share your link or start a group with Murph."
+    ? "Bring someone into Murph—or start a fresh group—and you can earn more room to keep going."
     : signupAvailable
-    ? "Share your personal link with someone new."
-    : "Start a fresh group with Murph.";
+    ? "Bring someone new into Murph and you can earn more room to keep going."
+    : "Start a fresh group and you can earn more room to keep going.";
 
   return (
-    <section className="bg-[#f5f0e8] px-4 py-10 sm:px-8 sm:py-16 lg:px-16 lg:py-20">
-      <div className="mx-auto grid max-w-[1200px] overflow-hidden rounded-[1.25rem] border border-[#c4a882]/25 bg-[#fffcf6] lg:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
-        <div className="flex flex-col justify-between bg-[#2d3436] px-6 py-9 sm:px-10 sm:py-12 lg:min-h-[31rem] lg:px-12 lg:py-14">
+    <section className="bg-[#f3eadb] px-4 py-10 sm:px-8 sm:py-16 lg:px-16 lg:py-20">
+      <div className="mx-auto grid max-w-[1200px] overflow-hidden rounded-[1.75rem] border border-[#d7bd8a]/45 bg-[#fff9ef] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="flex flex-col justify-between bg-[#3f4c2e] px-6 py-9 sm:px-10 sm:py-11 lg:min-h-[27rem] lg:px-12">
           <div>
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#d4b87a]">
               Murph referrals
             </p>
-            <h2 className="mt-5 font-serif text-[clamp(2rem,8.5vw,3rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-[#f5f0e8] lg:text-4xl xl:text-5xl">
+            <h2 className="mt-5 font-serif text-[clamp(2rem,7.5vw,2.75rem)] font-semibold leading-[0.98] tracking-[-0.035em] text-[#fff8eb] lg:text-4xl xl:text-[2.75rem]">
               <span className="block" data-referral-headline-lead>
                 Bring your people.
               </span>{" "}
-              <span className="block">Earn more Murph time.</span>
+              <span className="mt-1 block text-[#f4c969]">Earn more Murph.</span>
             </h2>
-            <p className="mt-5 max-w-[48ch] text-[0.9375rem] leading-7 text-[#f5f0e8]/70 sm:text-base">
+            <p className="mt-6 max-w-[42ch] text-[0.9375rem] leading-7 text-[#fff8eb]/75 sm:text-base">
               {description}
             </p>
           </div>
 
           <Link
-            className="group mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#f5f0e8] px-6 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-[#eadfce] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a] sm:w-fit"
+            className="group mt-10 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#f4c969] px-6 py-3.5 text-[0.9375rem] font-semibold text-[#26321f] transition-colors hover:bg-[#ffda7f] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#fff8eb] sm:w-fit"
             href="/refer"
           >
             See ways to earn
@@ -54,30 +55,52 @@ export function ReferralSection({
           </Link>
         </div>
 
-        <div className="flex flex-col px-6 py-9 sm:px-10 sm:py-12 lg:px-12 lg:py-14">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Ways to earn
-          </p>
+        <div className="flex flex-col bg-[#fff9ef] px-6 py-9 sm:px-10 sm:py-11 lg:px-12">
+          <div>
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#7d6a4a]">
+              Choose your way
+            </p>
+            <p className="mt-2 font-serif text-2xl font-semibold tracking-[-0.025em] text-[#3f4c2e]">
+              More Murph starts here.
+            </p>
+          </div>
 
-          <div className="mt-5 border-y border-[#c4a882]/30">
+          <div className="mt-5 border-y border-[#d7bd8a]/45">
             {rewards.map((reward) => {
               const Icon = reward.id === "signup-link" ? Link2 : UsersRound;
               return (
                 <article
-                  className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-[#c4a882]/25 py-5 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_minmax(11rem,0.9fr)] sm:gap-x-5 sm:py-6"
+                  className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 border-b border-[#d7bd8a]/35 py-5 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-5"
                   key={reward.id}
                 >
-                  <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#c4a882]/15 text-[#5a6e32]">
+                  <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-[#f4c969] text-[#3f4c2e]">
                     <Icon aria-hidden="true" className="size-5" />
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold leading-6 text-[#2d3436] sm:text-[0.9375rem]">
+                    <p className="text-sm font-semibold leading-6 text-[#334025] sm:text-[0.9375rem]">
                       {reward.title}
                     </p>
                   </div>
                   <div className="col-start-2 sm:col-start-auto sm:text-right">
-                    <p className="text-pretty font-serif text-[1.0625rem] font-semibold leading-[1.35] tracking-[-0.015em] text-[#2d3436] sm:text-lg">
-                      {formatHostedPublicReferralRewardCompactValue(reward)}
+                    <p
+                      aria-label={formatHostedPublicReferralRewardValue(reward)}
+                      className="inline-flex items-center gap-2 whitespace-nowrap"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="font-serif text-[1.75rem] font-semibold leading-none tracking-[-0.035em] text-[#a86f08]"
+                      >
+                        {formatHostedPublicReferralRewardCompactValue(reward)}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="text-left font-mono text-[9px] font-medium uppercase leading-[1.25] tracking-[0.08em] text-[#6f634f]"
+                        data-referral-reward-unit
+                      >
+                        days of
+                        <br />
+                        Murph
+                      </span>
                     </p>
                   </div>
                 </article>
@@ -85,7 +108,7 @@ export function ReferralSection({
             })}
           </div>
 
-          <p className="mt-4 text-xs leading-5 text-[#736a58]">
+          <p className="mt-4 text-xs leading-5 text-[#796c55]">
             Typical Murph usage added—not calendar access. Actual capacity
             varies.
           </p>

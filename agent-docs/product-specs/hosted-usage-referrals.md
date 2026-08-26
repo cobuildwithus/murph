@@ -27,7 +27,7 @@ member has enough rolling capacity for the next reward. Public signup-link
 copy therefore states that a completed signup can earn more usage only after
 the later eligibility and rolling-limit checks pass.
 On the compact homepage referral section, each enabled path leads with a short
-typical-use estimate (`About 10 days` or `About 14 days`). One shared ledger
+typical-use estimate (`10 days of Murph` or `14 days of Murph`). One shared ledger
 note completes the meaning without repeating it in every row: the estimate is
 typical Murph usage added, not calendar access, and actual capacity varies.
 These day labels are presentation estimates, not accounting units, while
@@ -77,7 +77,7 @@ an amount the tool did not return.
 | `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | About 14 more days of Murph usage |
 
 The table labels are the self-contained form used on detailed surfaces. The
-compact homepage may use `About 10 days` or `About 14 days` only beside its
+compact homepage may use `10 days of Murph` or `14 days of Murph` only beside its
 shared note that the value is typical Murph usage added, not calendar access,
 and that actual capacity varies.
 

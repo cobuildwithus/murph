@@ -116,10 +116,10 @@ describe("public referral program projection", () => {
       "About 14 more days of Murph usage",
     );
     expect(formatHostedPublicReferralRewardCompactValue(signup)).toBe(
-      "About 10 days",
+      "10",
     );
     expect(formatHostedPublicReferralRewardCompactValue(activeGroup)).toBe(
-      "About 14 days",
+      "14",
     );
   });
 
