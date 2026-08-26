@@ -86,6 +86,24 @@ Updated: 2026-08-26
   bounded clarification, and multiple matches remain ambiguous.
 - Product UX effort is Patch because this restores an existing specified flow
   without adding a new interaction or state.
+- Exact matching uses one slim all-membership query only when a label is
+  supplied. This preserves the existing JavaScript Unicode normalization and
+  duplicate detection without a schema migration or per-membership fanout.
+
+## Progress
+
+- Failing proof reproduced all three 27-membership failures before the source
+  fix: named consult, unnamed clarification, and named handoff.
+- The corrected target-admission suite passes 31 tests; Web typecheck passes.
+- Hosted execution contracts pass 52 files and 557 tests. Cloudflare control
+  port and exact replay pass 2 files and 8 tests.
+- The adjacent Assistant Engine slice passes 115 tests. Its unrelated
+  512-receipt continuation stress test repeatedly reaches its existing
+  60-second timeout on this shared host.
+- The focused real-Codex journey is `Hold`: the default local subscription
+  returned `ASSISTANT_CODEX_USAGE_LIMIT` before any provider action, and no
+  explicitly authorized alternate home was available.
+- Draft PR: #2361.
 
 ## Verification
 

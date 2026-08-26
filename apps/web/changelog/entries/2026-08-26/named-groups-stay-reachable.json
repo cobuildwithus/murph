@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "named-groups-stay-reachable",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Named groups stay reachable",
+    "summary": "Murph can now consult or share an update with an explicitly named joined group even when you belong to many groups.",
+    "details": "An exact name still selects only one group. If a name is missing or shared by more than one group, Murph asks you to clarify instead of guessing.",
+    "relevanceTags": ["groups", "messaging", "reliability"],
+    "sourcePullRequests": [2361]
+  }
+}
