@@ -128,6 +128,48 @@ describe("meal photo capture enrollment credentials", () => {
     })).rejects.toMatchObject({ code: "AUTH_REQUIRED", httpStatus: 401 });
   });
 
+  it("serializes concurrent same-member enrollments and reuses the winner secret", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const firstReachedUpsert = createDeferred();
+    const releaseFirstUpsert = createDeferred();
+    const secondReachedLock = createDeferred();
+    const releaseSecondLock = createDeferred();
+    prisma.setBeforeUpsert(async () => {
+      firstReachedUpsert.resolve();
+      await releaseFirstUpsert.promise;
+      prisma.setBeforeUpsert(null);
+    });
+    mocks.lockHostedMemberRow.mockImplementation(async () => {
+      if (mocks.lockHostedMemberRow.mock.calls.length === 2) {
+        secondReachedLock.resolve();
+        await releaseSecondLock.promise;
+      }
+    });
+
+    const firstPromise = issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await firstReachedUpsert.promise;
+    const secondPromise = issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await secondReachedLock.promise;
+
+    releaseFirstUpsert.resolve();
+    const first = await firstPromise;
+    releaseSecondLock.resolve();
+    const second = await secondPromise;
+
+    expect(second.idempotencySecret).toBe(first.idempotencySecret);
+    expect(second.uploadToken).not.toBe(first.uploadToken);
+    expect(prisma.getRecord()?.uploadTokenHash).toBe(sha256(second.uploadToken));
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
+  });
+
   it("rotates both credentials after explicit member revocation", async () => {
     const prisma = createEnrollmentPrismaHarness();
     const first = await issueMealPhotoCaptureEnrollment({
