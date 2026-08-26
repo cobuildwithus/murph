@@ -75,6 +75,12 @@ attestation failure remains fail-closed. This boundary and its focused proof
 are specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+Direct iMessage workout apply may carry bounded rendering context and return an
+optional authoritative post-write V4/V6 card in the existing terminal receipt.
+Mutation authority remains with the locked canonical workout, and response-card
+construction adds no reread, queue, or persisted projection. This contract is
+specified by `agent-docs/RELIABILITY.md`.
+
 Direct and authenticated-group Telegram model-authored rich-content admission,
 optional semantic-card selection, closed HTML, disabled automatic Telegram
 entities, trusted text fallback derivation, and the group-audience runner
