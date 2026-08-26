@@ -2088,28 +2088,31 @@ export async function sendAssistantMessageLocal(
           const draftWindowOutcome = await turnInputController.finishDraftWindow({
             signal: currentInput.abortSignal,
           })
-          if (draftWindowOutcome.kind === 'review') {
-            const accepted = await acceptActiveTurnInput({
-              activeTurnInput: draftWindowOutcome.acceptedInput,
-              providerRequestAcceptedInputIds,
-              providerRequestOrdinal: 1,
-              sessionId: currentSession.sessionId,
-            })
-            replyDeliveryContexts.push(
-              pickAssistantReplyDeliveryContext(currentInput),
-            )
-            acceptedInputIdsByDeliveryContextOrdinal[
-              replyDeliveryContexts.length - 1
-            ] = accepted.acceptedInputItems.map((item) => item.id)
-          }
           // Context zero includes every pre-provider input. Any later context
           // proves that group input joined while request zero was running or
           // during its draft window, so its result is only a draft.
-          if (replyDeliveryContexts.length > 1) {
+          if (
+            draftWindowOutcome.kind === 'review'
+            || replyDeliveryContexts.length > 1
+          ) {
             providerRequestOrdinal = 1
-            providerRequestDeliveryContextBaseOrdinal =
-              replyDeliveryContexts.length - 1
             try {
+              if (draftWindowOutcome.kind === 'review') {
+                const accepted = await acceptActiveTurnInput({
+                  activeTurnInput: draftWindowOutcome.acceptedInput,
+                  providerRequestAcceptedInputIds,
+                  providerRequestOrdinal,
+                  sessionId: currentSession.sessionId,
+                })
+                replyDeliveryContexts.push(
+                  pickAssistantReplyDeliveryContext(currentInput),
+                )
+                acceptedInputIdsByDeliveryContextOrdinal[
+                  replyDeliveryContexts.length - 1
+                ] = accepted.acceptedInputItems.map((item) => item.id)
+              }
+              providerRequestDeliveryContextBaseOrdinal =
+                replyDeliveryContexts.length - 1
               currentSession = applyAssistantProviderTurnResumeInMemory({
                 providerResult,
                 session: currentSession,
