@@ -1,4 +1,9 @@
+import type {
+  HostedRuntimeUsageRecordResponse,
+} from "@murphai/hosted-execution/runtime-control";
+
 import {
+  requireRunnerOutboundUserStubMethod,
   resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
@@ -120,6 +125,25 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
     ...headers,
     workspaceVersion,
   };
+}
+
+export async function applyRunnerRuntimeUsageSettlement(input: {
+  env: RunnerOutboundEnvironmentSource;
+  settlement: HostedRuntimeUsageRecordResponse | null;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+}): Promise<void> {
+  if (input.settlement?.platformAiUsageAllowedAfter === true) {
+    return;
+  }
+
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(stub, "revokeActiveRuntimePlatformAiUsage");
+  await stub.revokeActiveRuntimePlatformAiUsage({
+    attemptId: input.writeAuthority.attemptId,
+    generation: input.writeAuthority.generation,
+    userId: input.userId,
+  });
 }
 
 function readValidWorkspaceVersionOrNull(value: string | null): string | null {

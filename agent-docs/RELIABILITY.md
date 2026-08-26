@@ -1267,13 +1267,20 @@ Last verified: 2026-08-23
   contains only bounded metadata: the last pass stage, outcome, elapsed time,
   processed-job count, checkpoint/retry presence, and a typed yield reason
   (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
-  `outer_signal`, or `unknown`). A persisted start without a matching finish is
-  the queryable abrupt-loss signal and must be correlated with runner,
+  `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
+  summaries with provider, job kind, code-owned resource class, outcome,
+  attempt/job counts, durable-progress presence, total/provider execution time,
+  provider time unattributed after subtracting measured callbacks, and measured
+  connection-source read, credential-refresh, and canonical-import counts and
+  durations. The service retains at most one pass budget of those summaries in
+  memory, and the terminal marker declares both the observed count and whether
+  the slowest-job sample was truncated. A persisted start without a matching
+  finish is the queryable abrupt-loss signal and must be correlated with runner,
   container, and checkpoint events for that attempt. The pair remains
   best-effort: abrupt loss before the background writer flushes can omit either
-  marker. These entries
-  never include member/account/job identifiers, provider payloads, resource
-  values, or raw abort/error messages.
+  marker. These entries never include member/account/job identifiers, provider
+  payloads, cursor values, provider responses, health values, or raw
+  abort/error messages.
   This event taxonomy is a strict Web parser boundary. Shared workspace packages
   are build inputs, not separately deployed planes. Deploy the Web artifact that
   contains its parser first, then deploy and fully recycle the Cloudflare
@@ -1308,6 +1315,12 @@ Last verified: 2026-08-23
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
   due, only a connection mailbox wake may admit it, so a generic runtime timer
   cannot self-rearm from stale local cadence.
+- Generated-delivery cleanup is fail-closed on an untrusted outbox or malformed
+  staging structure, but a trusted active reference whose file is already absent
+  does not make unrelated regular files ambiguous. Snapshot maintenance counts
+  that missing reference, retains every observed active file, prunes the safe
+  remainder, and emits only bounded counts, byte totals, and a closed failure
+  code.
 - A successful hosted checkpoint gets one best-effort, wake-raced vault-share
   projection opportunity before device-sync dirty acknowledgement or the next
   complete device-sync-only maintenance prefix. A conversation wake preempts
@@ -1568,7 +1581,7 @@ Last verified: 2026-08-23
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 90-second device-pass cancellation can release it as an unclassified
+  hosted 120-second device-pass cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
   UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
@@ -1581,8 +1594,17 @@ Last verified: 2026-08-23
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
-  owner. One admitted workout index yields serial exact-workout SDK reads; each
-  response has an 8 MiB cap and reduces before import to one compact overall
+  owner. Before the workout index, the existing control-plane current-import
+  admission predicate intersects with the current Junction provider inventory
+  so disconnect-fenced sources stay blocked while non-disconnected recovery
+  states can use currently advertised workout-stream capability. No eligible
+  source completes this optional resource without index or stream egress;
+  mixed-source indexes discard ineligible or unattributed workouts before
+  candidate progress is computed. An exact clear-unsupported HTTP 400 skips
+  only that candidate; ambiguous or request-shape HTTP 400s remain terminal.
+  Existing optional HTTP 404/422 candidate handling is unchanged. One admitted
+  workout index yields serial exact-workout SDK reads; each response
+  has an 8 MiB cap and reduces before import to one compact overall
   feature plus at most 64 fixed-distance splits. The stable workout/source
   identity and source update version form one authoritative facet set, so a
   newer correction withdraws omitted splits. Only reduced duration, distance,

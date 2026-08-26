@@ -66,6 +66,8 @@ import type {
   DeviceSyncImporterPort,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
+  DeviceSyncJobTimingDiagnostic,
+  DeviceSyncJobTimingOutcome,
   DeviceSyncLogger,
   DeviceSyncProvider,
   DeviceSyncRegistry,
@@ -82,6 +84,7 @@ import type {
   ProviderJobConnectionSource,
   ProviderJobContext,
   ProviderJobBatchDescriptor,
+  ProviderJobResult,
   ProviderSnapshotImportReceipt,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
@@ -131,6 +134,10 @@ const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
 // Never retain fewer diagnostics than one hosted pass can produce, and never
 // regress below the established 100-attempt observability window.
 export const DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT = Math.max(
+  100,
+  HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
+);
+export const DEVICE_SYNC_JOB_TIMING_DIAGNOSTIC_LIMIT = Math.max(
   100,
   HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
 );
@@ -216,6 +223,7 @@ export interface DeviceSyncService {
   listAccounts(input?: ListDeviceSyncAccountsInput): PublicDeviceSyncAccount[];
   getAccount(accountId: string): PublicDeviceSyncAccount | null;
   listJobFailureDiagnostics(): DeviceSyncJobFailureDiagnostic[];
+  listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[];
   start(): void;
   stop(): void;
   close(): void;
@@ -286,6 +294,7 @@ class DeviceSyncServiceController {
   private workerTimer: NodeJS.Timeout | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
+  private readonly jobTimingDiagnostics: DeviceSyncJobTimingDiagnostic[] = [];
   private readonly connectionMutationStates = new Map<string, {
     activeAndWaiting: number;
     tail: Promise<void>;
@@ -592,6 +601,10 @@ class DeviceSyncServiceController {
     }));
   }
 
+  listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[] {
+    return this.jobTimingDiagnostics.map((entry) => ({ ...entry }));
+  }
+
   start(): void {
     if (!this.workerTimer) {
       void this.runWorkerBatchOnce();
@@ -884,13 +897,53 @@ class DeviceSyncServiceController {
     }
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
+    let connectionSourceReadCount = 0;
+    let connectionSourceReadElapsedMs = 0;
+    let credentialRefreshCount = 0;
+    let credentialRefreshElapsedMs = 0;
+    let durableProgressCommitted = false;
+    let outcome: DeviceSyncJobTimingOutcome = "cancelled";
+    let providerExecutionElapsedMs: number | null = null;
+    let snapshotImportCount = 0;
+    let snapshotImportElapsedMs = 0;
     const finishPass = (): {
       job: DeviceSyncJobRecord;
       processedJobRows: number;
-    } => ({
-      job,
-      processedJobRows: Math.max(1, activeJobs.length),
-    });
+    } => {
+      const finishedAt = currentNow();
+      const resource = readSafeDiagnosticToken(job.payload.resource);
+      this.recordJobTimingDiagnostic({
+        at: finishedAt,
+        attempts: job.attempts,
+        connectionSourceReadCount,
+        connectionSourceReadElapsedMs,
+        credentialRefreshCount,
+        credentialRefreshElapsedMs,
+        durableProgressCommitted,
+        elapsedMs: nonnegativeDeviceSyncDurationMs(now, finishedAt),
+        jobCount: Math.max(1, activeJobs.length),
+        jobKind: job.kind,
+        outcome,
+        provider: job.provider,
+        providerExecutionElapsedMs,
+        providerUnattributedElapsedMs: providerExecutionElapsedMs === null
+          ? null
+          : Math.max(
+              0,
+              providerExecutionElapsedMs
+                - connectionSourceReadElapsedMs
+                - credentialRefreshElapsedMs
+                - snapshotImportElapsedMs,
+            ),
+        ...(resource ? { resource } : {}),
+        snapshotImportCount,
+        snapshotImportElapsedMs,
+      });
+      return {
+        job,
+        processedJobRows: Math.max(1, activeJobs.length),
+      };
+    };
     const failClaimedJob = (
       code: string,
       message: string,
@@ -916,6 +969,8 @@ class DeviceSyncServiceController {
         });
         return false;
       }
+
+      outcome = "failed";
 
       // No summary here: these repo-authored messages can embed the local
       // account id, and the failure code already names the cause.
@@ -962,7 +1017,7 @@ class DeviceSyncServiceController {
     const retainsAcceptedWork = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh;
     const delayRetainedJobUntilAuthorityReturns = (code: string, message: string): void => {
       const delayedAt = currentNow();
-      this.store.failJobIfOwned(
+      const transition = this.store.failJobIfOwned(
         job.id,
         this.workerId,
         delayedAt,
@@ -972,6 +1027,7 @@ class DeviceSyncServiceController {
         true,
         true,
       );
+      outcome = transition ? "deferred" : "cancelled";
     };
 
     if (
@@ -1030,6 +1086,9 @@ class DeviceSyncServiceController {
           accountId: job.accountId,
           jobId: job.id,
         });
+      } else {
+        outcome = "completed";
+        durableProgressCommitted = true;
       }
       return finishPass();
     }
@@ -1210,12 +1269,22 @@ class DeviceSyncServiceController {
         throwIfAborted: assertJobExecutionNotYielded,
         importSnapshot: async (snapshot: unknown, options) => {
           ensureExecutionActive();
-          const importResult = await this.importer.importDeviceProviderSnapshot({
-            provider: provider.provider,
-            snapshot,
-            vaultRoot: this.vaultRoot,
-            ...options,
-          });
+          const importStartedAt = currentNow();
+          snapshotImportCount += 1;
+          let importResult: Awaited<ReturnType<DeviceSyncImporterPort["importDeviceProviderSnapshot"]>>;
+          try {
+            importResult = await this.importer.importDeviceProviderSnapshot({
+              provider: provider.provider,
+              snapshot,
+              vaultRoot: this.vaultRoot,
+              ...options,
+            });
+          } finally {
+            snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(
+              importStartedAt,
+              currentNow(),
+            );
+          }
           const canonicalEventCount = readCanonicalDeviceImportEventCount(importResult);
           const junctionCanonicalCoverage =
             readCanonicalDeviceImportJunctionCoverage(importResult);
@@ -1261,17 +1330,27 @@ class DeviceSyncServiceController {
         },
         listConnectionSources: async (input = {}) => {
           ensureExecutionActive();
-          const sources = this.listConnectionSourcesForJob
-            ? await this.listConnectionSourcesForJob({
-                accountId: currentAccount.id,
-                provider: currentAccount.provider,
-                signal: jobAbortController.signal,
-                ...input,
-              })
-            : this.store.listConnectionSources({
-                ...input,
-                connectionId: currentAccount.id,
-              });
+          const sourceReadStartedAt = currentNow();
+          connectionSourceReadCount += 1;
+          let sources: ProviderJobConnectionSource[];
+          try {
+            sources = this.listConnectionSourcesForJob
+              ? await this.listConnectionSourcesForJob({
+                  accountId: currentAccount.id,
+                  provider: currentAccount.provider,
+                  signal: jobAbortController.signal,
+                  ...input,
+                })
+              : this.store.listConnectionSources({
+                  ...input,
+                  connectionId: currentAccount.id,
+                });
+          } finally {
+            connectionSourceReadElapsedMs += nonnegativeDeviceSyncDurationMs(
+              sourceReadStartedAt,
+              currentNow(),
+            );
+          }
           ensureExecutionActive();
           return sources;
         },
@@ -1296,7 +1375,17 @@ class DeviceSyncServiceController {
               httpStatus: 409,
             });
           }
-          const refreshed = await refreshTokens(currentAccount);
+          const credentialRefreshStartedAt = currentNow();
+          credentialRefreshCount += 1;
+          let refreshed: ProviderAuthTokens;
+          try {
+            refreshed = await refreshTokens(currentAccount);
+          } finally {
+            credentialRefreshElapsedMs += nonnegativeDeviceSyncDurationMs(
+              credentialRefreshStartedAt,
+              currentNow(),
+            );
+          }
           ensureJobLeasesOwned();
           ensureAccountActive();
           const updated = this.store.updateAccountTokens(
@@ -1332,19 +1421,30 @@ class DeviceSyncServiceController {
         },
         logger: this.logger,
       };
-      const result = normalizedJobs.length > 1 && jobExecutor.batch
-        ? await jobExecutor.batch.execute(jobContext, normalizedJobs)
-        : await jobExecutor.executeJob(jobContext, normalizedJob);
+      const providerExecutionStartedAt = currentNow();
+      let result: ProviderJobResult;
+      try {
+        result = normalizedJobs.length > 1 && jobExecutor.batch
+          ? await jobExecutor.batch.execute(jobContext, normalizedJobs)
+          : await jobExecutor.executeJob(jobContext, normalizedJob);
+      } finally {
+        providerExecutionElapsedMs = nonnegativeDeviceSyncDurationMs(
+          providerExecutionStartedAt,
+          currentNow(),
+        );
+      }
 
       ensureJobLeasesOwned();
       ensureAccountActive();
 
       if (preservesAcceptedCompanionHrv && !isOriginalActiveAccountExecutionCurrent()) {
-        this.store.completeJobsIfOwned(
+        const completed = this.store.completeJobsIfOwned(
           activeJobs.map((activeJob) => activeJob.id),
           this.workerId,
           currentNow(),
         );
+        outcome = completed ? "completed" : "cancelled";
+        durableProgressCommitted = completed;
         return finishPass();
       }
 
@@ -1398,6 +1498,8 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
+      outcome = "completed";
+      durableProgressCommitted = true;
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
@@ -1409,6 +1511,7 @@ class DeviceSyncServiceController {
           jobCount: activeJobs.length,
           released,
         });
+        outcome = "yielded";
         return finishPass();
       }
 
@@ -1421,6 +1524,7 @@ class DeviceSyncServiceController {
           jobId: job.id,
           ...(released > 0 ? { released } : {}),
         });
+        outcome = "cancelled";
         return finishPass();
       }
 
@@ -1488,6 +1592,9 @@ class DeviceSyncServiceController {
       if (failureTransitions.length === 0) {
         return finishPass();
       }
+
+      outcome = "failed";
+      durableProgressCommitted = timeseriesProgress !== null;
 
       const diagnosticTransition = failureTransitions.find(({ activeJob }) => activeJob.id === job.id)
         ?? failureTransitions[0];
@@ -1723,6 +1830,17 @@ class DeviceSyncServiceController {
       this.jobFailureDiagnostics.splice(
         0,
         this.jobFailureDiagnostics.length - DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT,
+      );
+    }
+  }
+
+  private recordJobTimingDiagnostic(entry: DeviceSyncJobTimingDiagnostic): void {
+    this.jobTimingDiagnostics.push({ ...entry });
+
+    if (this.jobTimingDiagnostics.length > DEVICE_SYNC_JOB_TIMING_DIAGNOSTIC_LIMIT) {
+      this.jobTimingDiagnostics.splice(
+        0,
+        this.jobTimingDiagnostics.length - DEVICE_SYNC_JOB_TIMING_DIAGNOSTIC_LIMIT,
       );
     }
   }
@@ -1963,6 +2081,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     listAccounts: (input) => controller.listAccounts(input),
     getAccount: (accountId) => controller.getAccount(accountId),
     listJobFailureDiagnostics: () => controller.listJobFailureDiagnostics(),
+    listJobTimingDiagnostics: () => controller.listJobTimingDiagnostics(),
     start: () => controller.start(),
     stop: () => controller.stop(),
     close: () => controller.close(),
@@ -1980,6 +2099,15 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     drainWorker: (limit, accountId) => controller.drainWorker(limit, accountId),
   } satisfies DeviceSyncService);
   return service;
+}
+
+function nonnegativeDeviceSyncDurationMs(startAt: string, endAt: string): number {
+  const startMs = Date.parse(startAt);
+  const endMs = Date.parse(endAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return 0;
+  }
+  return endMs - startMs;
 }
 
 function earliestIsoTimestamp(...values: Array<string | null | undefined>): string | null {

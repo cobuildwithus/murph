@@ -314,20 +314,7 @@ export function TrainingPageView({
         <Alert variant="destructive">
           <AlertTitle>Could not refresh your training log</AlertTitle>
           <AlertDescription>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span>
-                {error ?? "Your saved workouts are not available right now."}
-              </span>
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={onRefresh}
-              >
-                <RefreshCw aria-hidden="true" />
-                Retry
-              </Button>
-            </div>
+            {error ?? "Your saved workouts are not available right now."}
           </AlertDescription>
         </Alert>
       ) : null}

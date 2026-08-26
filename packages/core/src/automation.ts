@@ -1638,12 +1638,18 @@ async function upsertAutomationWithLatestRegistry(
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
-  const requestedSlug = resolveAutomationUpsertSlug({
-    slug: input.slug,
-    title,
-  });
+  const createOnlyRecordId = input.createOnly === true
+    ? normalizedId ?? generateRecordId("automation")
+    : null;
+  const requestedSlug = createOnlyRecordId !== null && input.slug === undefined
+    ? resolveAutomationUpsertSlug({ slug: createOnlyRecordId, title })
+    : resolveAutomationUpsertSlug({
+        slug: input.slug,
+        title,
+      });
+  const currentRecords = records ?? await loadAutomationRecords(input.vaultRoot);
   const existingRecord = selectAutomationRecord(
-    records ?? await loadAutomationRecords(input.vaultRoot),
+    currentRecords,
     { automationId: normalizedId, slug: requestedSlug },
   );
   if (input.createOnly === true && existingRecord !== null) {
@@ -1653,7 +1659,10 @@ async function upsertAutomationWithLatestRegistry(
     );
   }
   const now = (input.now ?? new Date()).toISOString();
-  const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
+  const recordId = existingRecord?.automationId
+    ?? createOnlyRecordId
+    ?? normalizedId
+    ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;
   const updatedAt = now;
   const target = resolveMarkdownRegistryUpsertTarget({
@@ -1676,11 +1685,11 @@ async function upsertAutomationWithLatestRegistry(
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
-  const timingChanged =
+  const scheduleAnchorAt = (
     existingRecord === null ||
     !isDeepStrictEqual(existingRecord.schedule, schedule) ||
-    (existingRecord.status !== "active" && status === "active");
-  const scheduleAnchorAt = timingChanged
+    (existingRecord.status !== "active" && status === "active")
+  )
     ? now
     : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
   const requestedTags = input.tags === undefined

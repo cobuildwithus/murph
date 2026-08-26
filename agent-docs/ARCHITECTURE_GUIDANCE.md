@@ -58,6 +58,12 @@ current legacy consumer requires it.
 ### 5. Design failure and evolution with the happy path
 
 - Preserve product-critical flows while fixing safety or reliability defects.
+- Preserve bounded error codes, stages, retryability, field paths, hints, and
+  useful diagnostic messages across model/tool and operator boundaries so the
+  caller can correct the request. Redact only concrete credential and
+  home-directory shapes, plus private-payload shapes identified by the owning
+  boundary; do not replace ordinary diagnostic prose or harmless paths with a
+  generic failure.
 - Bound retries, concurrency, retention, and replay; make idempotency and
   recovery ownership explicit.
 - State authorization and privacy behavior at every external boundary.

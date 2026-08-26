@@ -75,7 +75,6 @@ import {
   AutomationAvailabilityConflictBlockError,
   patchAutomation,
   reconcileAutomationSupportSeries,
-  resolveAutomationUpsertSlug,
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
@@ -364,6 +363,10 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  runtimeIssueProvenance?: {
+    releaseSha: string | null;
+    runtimeName: string;
+  } | null;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
@@ -1497,10 +1500,6 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
-        const requestedSlug = resolveAutomationUpsertSlug({
-          slug: request.slug,
-          title: request.title,
-        });
         const existingTarget = request.automationId
           ? await showAutomation({
               automationId: request.automationId,
@@ -1510,7 +1509,7 @@ function createHostedAssistantAutomationTool(input: {
         const targetsOnboardingFirstRead =
           request.automationId ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
-          || requestedSlug ===
+          || request.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
           || existingTarget?.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG;
@@ -2031,6 +2030,9 @@ export async function runHostedWorkspaceAssistantPhase(
         executionContext: {
           hosted: {
             memberId: input.request.userId,
+            releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+            runtimeAttemptId: input.request.attemptId,
+            runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
             ...(usageRecorder ? { usageRecorder } : {}),
             userEnvKeys: Object.keys(input.runtime.userEnv),
           },
@@ -2197,6 +2199,9 @@ export async function runHostedWorkspaceAssistantPhase(
             }
           : {}),
         memberId: input.request.userId,
+        releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+        runtimeAttemptId: input.request.attemptId,
+        runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
         createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
           createHostedScheduledGroupTools({
             channel,
@@ -9284,6 +9289,40 @@ function resolveHostedWorkspaceDeviceTool(input: {
           accountId: result.connectionId,
           action: request.action,
           occurredAt: result.occurredAt,
+          status: result.status,
+        };
+      }
+
+      if (request.action === "configure_no_data_outreach") {
+        if (
+          !deviceSyncPort.configureNoDataOutreach
+          || !context?.acceptedInputAuthority
+        ) {
+          throw new VaultCliError(
+            "device_no_data_outreach_unavailable",
+            "No-data outreach can only be changed from current private member input.",
+          );
+        }
+        const common = {
+          assistantInputId: context.acceptedInputAuthority.assistantInputId,
+          signal: context.signal ?? null,
+          sourceProviderSlug: request.sourceProvider,
+        };
+        const result = request.mode === "after_days"
+          ? await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              afterDays: request.afterDays,
+              mode: request.mode,
+            })
+          : await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              mode: request.mode,
+            });
+        return {
+          action: request.action,
+          effectiveAfterDays: result.effectiveAfterDays,
+          setting: result.setting,
+          sourceProvider: result.sourceProviderSlug,
           status: result.status,
         };
       }

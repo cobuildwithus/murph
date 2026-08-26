@@ -67,7 +67,9 @@ describe('assistant live workout card skill', () => {
     expect(skill).toContain('A target is not a completed set')
     expect(skill).toContain('Commands inserted by an iMessage card use explicit one-based presentation coordinates')
     expect(skill).toContain('Only the normal Murph message path may mutate canonical workout state')
-    expect(skill).toContain('durable tracking marker on the one card being answered')
+    expect(skill).toContain(
+      'The candidate is causal identity, not write authority.',
+    )
     expect(skill).toContain('Never choose a workout by recency.')
     expect(skill).toContain('Map presentation positions to canonical exercise and set `order` values')
     expect(skill).toContain('use exact exercise order or the exact canonical name')

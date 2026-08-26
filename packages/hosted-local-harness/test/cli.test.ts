@@ -265,6 +265,41 @@ describe("hosted-local run CLI", () => {
     expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
+  test("rejects worktree doctor when Temporal needs a missing worker package", async () => {
+    resolveHostedLocalWorktreeConfig.mockResolvedValueOnce(
+      createHostedLocalWorktreeConfig({ includeTemporalWorkerPackage: false }),
+    );
+
+    await expect(
+      runHostedLocalCli(["worktree", "doctor", "feature-a", "--json"], {
+        env: {},
+        stdout: createBufferedStdout().stdout,
+      }),
+    ).rejects.toThrow("Hosted-local Temporal requires an external worker package.");
+
+    expect(runDoctorCommand).not.toHaveBeenCalled();
+  });
+
+  test("allows doctor without a worker package when Temporal is disabled", async () => {
+    resolveHostedLocalDevConfig.mockReturnValueOnce({
+      ...resolveHostedLocalDevConfig(),
+      temporal: {
+        host: "127.0.0.1",
+        mode: "disabled",
+        namespace: "default",
+        port: 7233,
+        taskQueue: "murph-hosted-runtime",
+      },
+    });
+
+    await runHostedLocalCli(["doctor", "--json"], {
+      env: {},
+      stdout: createBufferedStdout().stdout,
+    });
+
+    expect(runDoctorCommand).toHaveBeenCalledTimes(4);
+  });
+
   test("prepares worktree resources before delegating worktree up to the normal stack", async () => {
     const output = createBufferedStdout();
 
@@ -492,6 +527,8 @@ describe("hosted-local run CLI", () => {
       const environment = {
         ...process.env,
         HOSTED_APP_SESSION_HMAC_KEY: authority,
+        MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
+          "../murph-cloud/packages/hosted-orchestrator-temporal",
       };
       await runHostedLocalCli(command, {
         env: environment,
@@ -715,12 +752,20 @@ function createHostedLocalStack(input: {
   };
 }
 
-function createHostedLocalWorktreeConfig() {
+function createHostedLocalWorktreeConfig(
+  input: { includeTemporalWorkerPackage?: boolean } = {},
+) {
   return {
     buildId: "worktree-feature-a",
     databaseName: "murph_dev_feature_a",
     databaseUrl: "postgresql://postgres@127.0.0.1:5432/murph_dev_feature_a",
     env: {
+      ...(input.includeTemporalWorkerPackage === false
+        ? {}
+        : {
+            MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
+              "../murph-cloud/packages/hosted-orchestrator-temporal",
+          }),
       MURPH_DEV_WORKTREE_SCOPE: "feature-a",
       MURPH_DEV_WEB_PORT: "3101",
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
