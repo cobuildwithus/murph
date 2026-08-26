@@ -71,6 +71,7 @@ describe('assistant real Codex local runner', () => {
       sourceEnv: {
         CODEX_HOME: '/alternate-codex-home',
         MURPH_REAL_CODEX_COMMAND: 'legacy-wrapper',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
         MURPH_REAL_CODEX_MODEL_PROVIDER: 'openai-env',
         OPENAI_API_KEY: 'provider-value',
         PATH: '/usr/bin:/bin',
@@ -192,10 +193,14 @@ describe('assistant real Codex local runner', () => {
     expect(requests[0]?.stdio).toBe('capture')
   })
 
-  it('starts exactly one subscription journey after a one-match preflight', () => {
+  it('routes one explicit subscription home through preflight and the live journey', () => {
     const requests: AssistantRealCodexCommandRequest[] = []
     const status = executeAssistantRealCodexRun(
-      parseAssistantRealCodexRunArgs(['adaptive wearable']),
+      parseAssistantRealCodexRunArgs([
+        'adaptive wearable',
+        '--codex-home',
+        '/selected-codex-home',
+      ]),
       {
         runCommand: (request) => {
           requests.push(request)
@@ -209,8 +214,9 @@ describe('assistant real Codex local runner', () => {
             : { status: 0 }
         },
         sourceEnv: {
-          CODEX_HOME: '/alternate-codex-home',
+          CODEX_HOME: '/ambient-codex-home',
           HOME: '/normal-home',
+          MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
           PATH: '/usr/bin:/bin',
         },
         writeStderr: () => undefined,
@@ -224,10 +230,21 @@ describe('assistant real Codex local runner', () => {
       { command: 'codex', stdio: 'ignore' },
       { command: 'pnpm', stdio: 'inherit' },
     ])
-    for (const request of requests) {
-      expect(request.env.CODEX_HOME).toBeUndefined()
-      expect(request.env.HOME).toBe('/normal-home')
-    }
+    expect(requests[0]?.env).toMatchObject({
+      HOME: '/normal-home',
+      MURPH_REAL_CODEX_HOME: '/selected-codex-home',
+    })
+    expect(requests[0]?.env.CODEX_HOME).toBeUndefined()
+    expect(requests[1]?.env).toMatchObject({
+      CODEX_HOME: '/selected-codex-home',
+      HOME: '/normal-home',
+    })
+    expect(requests[1]?.env.MURPH_REAL_CODEX_HOME).toBeUndefined()
+    expect(requests[2]?.env).toMatchObject({
+      HOME: '/normal-home',
+      MURPH_REAL_CODEX_HOME: '/selected-codex-home',
+    })
+    expect(requests[2]?.env.CODEX_HOME).toBeUndefined()
     expect(requests[2]?.args).toContain(
       '^real Codex adaptive wearable journey$',
     )

@@ -39,6 +39,10 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantRealCodexRunEnv,
+  parseAssistantRealCodexRunArgs,
+} from '../../../scripts/run-assistant-real-codex-e2e.ts'
+import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
@@ -8744,15 +8748,21 @@ describe('real Codex app-server cache usage e2e harness', () => {
     })
   })
 
-  it('selects one explicit Codex home only in subscription mode', async () => {
-    const config = await resolveRealCodexE2eConfig({
+  it('composes one explicit runner Codex home only in subscription mode', async () => {
+    const sourceEnv = buildAssistantRealCodexRunEnv({
+      options: parseAssistantRealCodexRunArgs([
+        'focused journey',
+        '--codex-home',
+        '/alternate-codex-home',
+      ]),
       sourceEnv: {
+        CODEX_HOME: '/ambient-codex-home',
         HOME: '/synthetic-home',
-        MURPH_REAL_CODEX_AUTH: 'subscription',
-        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
         PATH: '/usr/bin:/bin',
       },
     })
+    const config = await resolveRealCodexE2eConfig({ sourceEnv })
 
     expect(config).toEqual({
       codexHome: '/alternate-codex-home',
