@@ -804,6 +804,141 @@ describe('onboarding policy read detection', () => {
   })
 })
 
+describeRealCodex('real Codex coordinated workout exercise e2e', () => {
+  it(
+    'expands coordinated workout exercise modifiers',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-coordinated-workout-exercise-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic coordinated workout proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeRealWorkoutVaultCli({ binDirectory }),
+        ])
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] [--routine <format>]',
+              'vault-cli workout show <event-id> --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-20',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
+            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
+            WORKOUT_E2E_VAULT: workingDirectory,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Start a live workout called Position circuit with standing seated and kneeling cable presses.',
+            'Plan two sets of 10 reps for each exercise. None of the sets are complete yet.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const workouts = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+
+        expect(workouts).toHaveLength(1)
+        const workout = workouts[0]!
+        const normalizedNames = workout.workout.exercises.map((exercise) =>
+          exercise.name.toLowerCase()
+        )
+
+        expect(normalizedNames).toHaveLength(3)
+        expect(normalizedNames[0]).toMatch(/standing.*cable press/u)
+        expect(normalizedNames[1]).toMatch(/seated.*cable press/u)
+        expect(normalizedNames[2]).toMatch(/kneeling.*cable press/u)
+        expect(
+          workout.workout.exercises.map((exercise) => ({
+            memberRepsPerSet: exercise.memberRepsPerSet,
+            setCount: exercise.sets.length,
+            setPlanIsFinite: exercise.setPlanIsFinite,
+          })),
+        ).toEqual(Array.from({ length: 3 }, () => ({
+          memberRepsPerSet: 10,
+          setCount: 2,
+          setPlanIsFinite: true,
+        })))
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: workout.id,
+            kind: 'workout',
+          },
+          workout: {
+            state: 'active',
+          },
+        })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: workout.id,
+          events: result.jsonEvents,
+          state: 'active',
+        })
+        expect(result.runtimeIssueInputs).toEqual([])
+
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands.match(/--exercise /gu)).toHaveLength(3)
+        expect(commands).not.toContain('workout exercise add')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+})
+
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
     'keeps live and workout-format reminder sets on canonical workouts across fresh threads',

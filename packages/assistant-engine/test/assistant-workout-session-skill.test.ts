@@ -83,4 +83,18 @@ describe('assistant live workout card skill', () => {
       ACTIVE_WORKOUT_CARD,
     )
   })
+
+  it('expands clear coordinated exercise modifiers before asking', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain(
+      'expand each modifier into one distinct exercise by carrying the shared exercise head across the list',
+    )
+    expect(skill).toContain(
+      'Ask one narrow question only when the exercise identities or quantity allocation remain genuinely ambiguous',
+    )
+  })
 })
