@@ -8,7 +8,9 @@ Updated: 2026-08-25
 
 - Restore the existing hot-reply promise: an authenticated direct foreground
   message replaces active system-mailbox/device-maintenance work instead of
-  waiting through `retry_later` admission cycles.
+  waiting through `retry_later` admission cycles. Preserve the same priority
+  for durably signaled Assistant Ask request and completion obligations that
+  already share the Web-direct handoff.
 
 ## Success criteria
 
@@ -26,8 +28,9 @@ Updated: 2026-08-25
 ## Scope
 
 - In scope: the existing Cloudflare runtime-processing owner transition,
-  exact-invocation abort/replacement, unit/integration regression coverage, and
-  the composed foreground-priority hosted-local scenario.
+  exact-invocation abort/replacement, the current Linq and Assistant Ask
+  Web-direct owners, unit/integration regression coverage, and the composed
+  foreground-priority hosted-local scenario.
 - Out of scope: new queues, schedulers, persisted priority state, changes to
   ordinary scheduled assistant work, broad device-sync redesign, or container
   destruction.
@@ -64,6 +67,11 @@ Updated: 2026-08-25
    Mitigation: extend the existing `foreground-reply-priority` hosted-local E2E
    through Web ingress, Worker ownership, runner abort, runtime yield, and final
    delivery evidence.
+5. Risk: a shared trusted Web-direct owner changes an undeclared foreground
+   surface.
+   Mitigation: name Assistant Ask request, completion, and private-fallback
+   wakes explicitly and prove both source values reach one valid Web-ingress
+   ensure only after Temporal accepts the durable mailbox signal.
 
 ## Tasks
 
@@ -115,6 +123,11 @@ Updated: 2026-08-25
   after an acknowledged child abort. An already-forwarded checkpoint could then
   commit after replacement admission. The runner now waits for the acknowledged
   child to settle its atomic boundary before releasing the old operation.
+- Final ReviewGPT round 2 found that the shared Web-direct policy also covers
+  Assistant Ask request, completion, and private-fallback wakes. The production
+  sharing is intentional because those are durably signaled foreground
+  obligations; focused composition proof and this intent contract now disclose
+  that surface without adding a source discriminator or new runtime policy.
 - The composed regression holds the acknowledgement of a real committed
   canonical checkpoint, persists a signed foreground message, proves the old
   system owner and fence remain exclusive while the acknowledgement is held,
@@ -129,7 +142,11 @@ Updated: 2026-08-25
 - The full composed command reached the real Worker and runner image build but
   could not execute its Vitest cases on the current macOS Colima host because
   the proxy container's required socket option is unavailable in that kernel.
-  The supported exact-head CI host owns the remaining composed execution.
+  The supported-host exact-head run passed the race boundary, foreground reply,
+  and durable-device assertions; its recovery tail was too specific about
+  device-sync being the first resumed system item. The assertion now accepts
+  natural continuation of any seeded system item under a replacement attempt
+  while retaining explicit device-row durability proof.
 
 ## Verification
 

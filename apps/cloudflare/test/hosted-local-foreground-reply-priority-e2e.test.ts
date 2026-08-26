@@ -394,6 +394,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemMailboxProbe.userId,
         latestAppend.wake.seq,
         {
+          expectedWakeKinds: systemWakes.map((wake) => wake.kind),
           preemptedAttemptId: systemFence.attemptId,
           recoveryEvidenceStartedAt,
         },
@@ -2249,6 +2250,7 @@ async function requireSystemWakeStormPreserved(
   userId: string,
   expectedImportedSeq: string,
   input: {
+    expectedWakeKinds: readonly string[];
     preemptedAttemptId: string;
     recoveryEvidenceStartedAt: Date;
   },
@@ -2281,18 +2283,19 @@ async function requireSystemWakeStormPreserved(
           attemptId: entry.attemptId,
           redactedJson: entry.redactedJson,
         }));
-      const recoveredDeviceMaintenance = lastRecoveryLogs.find((entry) =>
-        entry.attemptId !== null
-        && entry.attemptId !== input.preemptedAttemptId
-        && entry.redactedJson?.routeAction === "run-device-sync-wake"
-        && entry.redactedJson.wakeKind === "device-sync.wake"
-        && (
-          entry.redactedJson.status === "processed"
-          || entry.redactedJson.status === "recorded"
-        )
-        && (entry.redactedJson.recordFailed ?? 0) === 0
-      );
-      if (recoveredDeviceMaintenance) {
+      const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
+        const wakeKind = entry.redactedJson?.wakeKind;
+        return entry.attemptId !== null
+          && entry.attemptId !== input.preemptedAttemptId
+          && typeof wakeKind === "string"
+          && input.expectedWakeKinds.includes(wakeKind)
+          && (
+            entry.redactedJson?.status === "processed"
+            || entry.redactedJson?.status === "recorded"
+          )
+          && (entry.redactedJson?.recordFailed ?? 0) === 0;
+      });
+      if (recoveredSystemContinuation) {
         return;
       }
     }
@@ -2300,9 +2303,10 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but the preempted system/device work did not recover durably.",
+    "Foreground reply succeeded, but seeded system work did not continue under a replacement attempt.",
     `preempted system attempt id: ${input.preemptedAttemptId}`,
     `expected imported sequence: ${expectedImportedSeq}`,
+    `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,
     `last status: ${JSON.stringify(lastStatus)}`,
   ]));
