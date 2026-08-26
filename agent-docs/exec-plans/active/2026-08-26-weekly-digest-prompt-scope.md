@@ -13,7 +13,7 @@ Updated: 2026-08-26
 ## Product UX
 
 - Outcome: A scheduled readout says what the member asked that automation to
-  say, even when a legacy weekly-digest classification is present.
+  say, even when weekly-digest consent metadata is present.
 - Reaches: Existing scheduled private and group automation deliveries.
 - Proof: A production-derived synthetic daily-readout journey delivers a daily
   readout and contains no weekly-recap framing.
@@ -22,7 +22,7 @@ Updated: 2026-08-26
 
 - `weekly_digest` adds no support-scope instructions to the provider prompt.
 - `reminder`, `check_in`, and `review` retain their existing scoped guidance.
-- Legacy `weekly_digest` records remain readable and retain their current
+- Existing `weekly_digest` records remain readable and retain their current
   plan-owner consent precondition.
 - Deterministic composition coverage and one focused real-Codex journey pass.
 
@@ -50,23 +50,22 @@ Updated: 2026-08-26
    coverage.
 2. Risk: Removing the enum outright would make existing automation records
    unreadable or bypass consent checks.
-   Mitigation: Keep `weekly_digest` as legacy consent metadata in this patch;
+   Mitigation: Keep `weekly_digest` as typed consent metadata in this patch;
    remove only its provider-prompt behavior.
 
 ## Tasks
 
 1. [x] Change support-scope composition so `weekly_digest` produces no overlay.
 2. [x] Add focused regression coverage for the composed provider instructions.
-3. [ ] Run the production-derived synthetic real-Codex journey. The journey is
-   committed, but the configured subscription returned
-   `ASSISTANT_CODEX_USAGE_LIMIT` before provider entry and no alternate Codex
-   home was authorized.
+3. [x] Run the production-derived synthetic real-Codex journey. The default
+   subscription returned `ASSISTANT_CODEX_USAGE_LIMIT` before provider entry;
+   the explicitly authorized alternate-home retry passed with the target model.
 4. [ ] Complete the repository PR/review workflow after the live journey is
    `Ready`.
 
 ## Decisions
 
-- Treat `weekly_digest` as compatibility and consent metadata only; it must not
+- Treat `weekly_digest` as typed consent and lifecycle metadata only; it must not
   change the provider-visible task instructions.
 - Preserve the other three support-scope overlays in this patch.
 
@@ -77,5 +76,6 @@ Updated: 2026-08-26
   `check_in`, and `review` (three tests).
 - Passed: Assistant Engine package typecheck.
 - Passed: focused changelog archive coverage (nine tests) and Web typecheck.
-- Hold: the focused real-Codex journey stopped before provider entry with
-  `ASSISTANT_CODEX_USAGE_LIMIT`; no model reply was produced for UX review.
+- Passed: the focused real-Codex journey through the authorized alternate local
+  subscription produced one current-day readout with the exact supplied facts,
+  no tool actions, and no weekly or recap framing. UX verdict: Ready.

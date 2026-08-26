@@ -4192,7 +4192,7 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
-  it('omits the support-scope override for a legacy weekly_digest automation', async () => {
+  it('omits the support-scope override for weekly_digest consent metadata', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-weekly-digest-prompt-only-',
     )

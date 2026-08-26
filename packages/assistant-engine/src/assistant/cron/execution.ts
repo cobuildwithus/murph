@@ -1893,8 +1893,8 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
 function buildAssistantCronSupportScopeInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
-  // Legacy weekly-digest metadata still participates in plan consent checks,
-  // but the saved automation instructions own the provider-visible task.
+  // Weekly-digest metadata still participates in plan consent checks, but the
+  // saved automation instructions own the provider-visible task.
   if (
     job.kind !== 'canonical' ||
     job.source.kind !== 'automation' ||
