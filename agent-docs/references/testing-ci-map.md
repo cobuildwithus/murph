@@ -623,7 +623,11 @@ supported provider credential.
   merge only for that owner, while delayed prior-generation evidence and
   milestone replay cannot reclaim the trace or roll either timestamp back. The
   current attempt may also persist a reset deadline before its first terminal
-  projection; a different attempt cannot adopt that nonterminal trace.
+  projection; a different attempt cannot adopt that nonterminal trace. The
+  opt-in real-PostgreSQL latency proof forces deterministic trace-id lock
+  contention, proves that a waiting older checkpoint lease cannot overwrite a
+  newer lease, and verifies newest-250 selection plus truncation and replay at
+  252 eligible rows.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and an isolated Resend stub to prove one
