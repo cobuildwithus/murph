@@ -189,3 +189,10 @@ without changing automation ownership or adding a second error framework.
   built command completes successfully. Frog entry
   `20260826104842-release-cli-manifest` records the repository-actionable
   friction; the temporary ignored-artifact timeout edit was restored.
+- Exact-head package coverage passed 4,125 assistant-engine tests, then exposed
+  three stale assistant-CLI expectations for the pre-remediation daemon prose.
+  The production behavior already matched the reviewed method boundary: unknown
+  owner codes become bounded HTTP failures, invalid GET responses remain
+  terminal, and replay-safe GET transport failures advertise retry. The tests
+  now assert those finite codes, stages, retryability values, and non-echo
+  guarantees without changing production behavior.
