@@ -789,6 +789,24 @@ compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
 leaves the Environment row pending for the dedicated model-free invocation.
 This handoff never aborts a foreground turn and adds no queue, scheduler, or
 persisted mode state.
+The handoff is bidirectional. When fresh foreground/default work arrives behind
+an active `environment_interview` invocation, UserRunner wakes that exact
+child and returns `retry_later` without clearing or replacing its fence. The
+Environment child completes or checkpoints its current model-free unit, sees
+the wake, and releases; ordinary reconciliation then admits the pending
+foreground pass before re-admitting background Environment work. This preserves
+foreground authority without aborting canonical publication midway or creating
+a competing queue.
+
+Web projects the required `environmentInterviewPending` boolean on the
+reconciliation wire. The Temporal workflow selects `environment_interview`
+only when that fact is true and no runnable foreground/default work is due;
+older workflow histories retain their former `system_mailbox` command shape
+behind the private worker's Temporal patch marker. The public
+`@murphai/hosted-execution` package version containing both the fact and mode
+must be released before the private worker adopts them. Source links across the
+public/private repository boundary are development proof only and are never a
+deployment contract.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because

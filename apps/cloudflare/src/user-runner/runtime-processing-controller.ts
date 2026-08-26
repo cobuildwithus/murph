@@ -438,9 +438,12 @@ export class RuntimeProcessingController {
     }
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
-    const foregroundWaitingOnSystemMailbox =
-      activeFence.processingMode === "system_mailbox"
-      && requestedProcessingMode === "default";
+    const foregroundWaitingOnModelFree =
+      requestedProcessingMode === "default"
+      && (
+        activeFence.processingMode === "system_mailbox"
+        || activeFence.processingMode === "environment_interview"
+      );
     const environmentWaitingOnForeground =
       activeFence.processingMode === "default"
       && requestedProcessingMode === "environment_interview";
@@ -461,7 +464,7 @@ export class RuntimeProcessingController {
         });
       }
       if (
-        !foregroundWaitingOnSystemMailbox
+        !foregroundWaitingOnModelFree
         && !environmentWaitingOnForeground
       ) {
         const activeRuntimeState =
@@ -491,8 +494,11 @@ export class RuntimeProcessingController {
     const canCoalesceWithoutWake =
       activeFence.processingMode === "inbox_media_retention"
       || (
-        activeFence.processingMode === "system_mailbox"
-        && requestedProcessingMode === "system_mailbox"
+        (
+          activeFence.processingMode === "system_mailbox"
+          || activeFence.processingMode === "environment_interview"
+        )
+        && requestedProcessingMode === activeFence.processingMode
       );
     if (canCoalesceWithoutWake) {
       const activeRuntimeState =
@@ -565,7 +571,7 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      if (foregroundWaitingOnSystemMailbox || environmentWaitingOnForeground) {
+      if (foregroundWaitingOnModelFree || environmentWaitingOnForeground) {
         // The active child accepted the wake so it can checkpoint and release.
         // It did not accept processing under the requested mode.
         return this.createRetryLater({

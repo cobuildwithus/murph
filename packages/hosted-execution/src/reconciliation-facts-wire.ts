@@ -45,6 +45,7 @@ export interface HostedRuntimeReconciliationFacts {
 
 export interface HostedRuntimeReconciliationFactsWireResponse {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
+  environmentInterviewPending: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
@@ -54,6 +55,7 @@ export function projectHostedRuntimeReconciliationFactsWireResponse(
 ): HostedRuntimeReconciliationFactsWireResponse {
   return {
     blocked: facts.blocked,
+    environmentInterviewPending: facts.environmentInterviewPending,
     mailboxLag: facts.mailboxLag,
     workspace: facts.workspace,
   };

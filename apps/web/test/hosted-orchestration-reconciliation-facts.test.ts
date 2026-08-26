@@ -381,6 +381,7 @@ describe("hosted orchestration reconciliation facts", () => {
         component: "hosted.orchestration.reconciliation",
         conversationLagPresent: false,
         decisionSource: "workflow",
+        environmentInterviewPending: false,
         mailboxLagLaneCount: 2,
         retryAtPresent: false,
         schema: "murph.hosted-runtime.reconciliation-facts.v1",
@@ -1641,7 +1642,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
-  it("keeps pending Environment interviews off the deployed orchestration wire", async () => {
+  it("projects pending Environment interviews onto the orchestration wire", async () => {
     mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
       id: "mailbox_environment_interview_1",
     });
@@ -1652,7 +1653,9 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     const facts = await response.json();
 
-    expect(facts).not.toHaveProperty("environmentInterviewPending");
+    expect(facts).toMatchObject({
+      environmentInterviewPending: true,
+    });
   });
 
   it("blocks inactive members while preserving workspace facts", async () => {

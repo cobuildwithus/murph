@@ -21,6 +21,15 @@ fix must not add another scheduler, queue, state owner, or polling loop.
   retains ownership indefinitely from the Environment request's point of view.
 - Existing Environment execution tests cover an idle runner, not an interview
   accepted while `default` is active.
+- The public reconciliation owner computes
+  `environmentInterviewPending`, but the deployed wire projector omitted it.
+  The private Temporal worker therefore could not select the existing dedicated
+  Environment mode and treated the item as generic system-mailbox work, which
+  cannot apply Habitat answers.
+- The reverse mismatch was also incomplete: fresh foreground work behind an
+  active Environment invocation performed only a liveness check, so background
+  publication could retain the execution fence instead of yielding foreground
+  authority.
 
 ## Product UX Patch
 
@@ -34,26 +43,37 @@ fix must not add another scheduler, queue, state owner, or polling loop.
 ## Plan
 
 1. Trace the current Web, Temporal, Cloudflare, runtime, and checkpoint owners
-   and separate foreground work from background continuation work.
-2. Add a failing contention regression for Environment work arriving during an
-   active `default` invocation.
-3. Reorder the existing owner handoff at the narrowest boundary so the active
-   foreground turn can finish and queued Environment work receives bounded
-   ownership next.
-4. Run focused Cloudflare/runtime tests and typechecks, replay the Product UX
-   journey, and inspect the final privacy-safe diff.
-5. Commit the scoped change, open a draft PR, and run the required exact-head
-   specialist/final reviews with CI.
+   and separate foreground work from background continuation work. Completed.
+2. Add contention regressions in both directions: Environment behind active
+   `default`, and fresh foreground behind active `environment_interview`.
+   Completed.
+3. Keep the exact active child as the sole handoff owner: wake it, preserve its
+   fence through checkpoint publication, then let ordinary reconciliation admit
+   the waiting mode. Completed.
+4. Publish the existing Environment-pending fact on the Web reconciliation
+   wire and release the public hosted-execution contract so Temporal can select
+   the dedicated mode without a cross-repository source import. In progress.
+5. Update the private Temporal worker behind a replay-safe patch marker, run
+   focused and production-shaped full-stack proof, and deploy the compatible
+   public/private pair. In progress.
+6. Run exact-head specialist/final review with CI, merge, release, deploy, and
+   verify production convergence. Pending.
 
 ## Deployment
 
-Deploy the Cloudflare Worker/controller and its runner bundle through the same
-ordinary Cloudflare release. A controller-first overlap is safe because it adds
-only the existing generic wake; a runner-first overlap is inert until the
-controller begins waking the default owner. Web is unchanged. Post-deploy,
-verify that a contended Environment item advances the system mailbox frontier,
-runs under the dedicated Environment owner after the default checkpoint, and
-refreshes Browser Vault.
+Release the public hosted-execution package before deploying the private
+Temporal worker that consumes its required reconciliation fact and processing
+mode. The Web wire may deploy before that worker because old workers ignore the
+additive field. The Cloudflare controller/runner handoff may deploy before or
+after the new Temporal worker because both mismatch paths preserve the exact
+active fence and retry through existing reconciliation; no component invents a
+second owner.
+
+Post-deploy, verify both directions: a contended Environment item runs under the
+dedicated owner after the foreground checkpoint and refreshes Browser Vault,
+while a fresh foreground inbound wakes an active Environment owner, receives
+provider authority before the Environment publication advances, and then lets
+the pending report converge.
 
 ## Verification
 
@@ -66,6 +86,12 @@ refreshes Browser Vault.
 - The Environment handoff, Environment execution/Browser Vault refresh, and
   existing provider-handoff runtime tests pass together.
 - Cloudflare and assistant-runtime package typechecks pass.
+- The hosted-execution package build, typecheck, and all 557 package tests pass;
+  the focused Web reconciliation test proves the pending fact reaches the
+  deployed orchestration wire.
+- A production-shaped public Web/Cloudflare/runner plus private Temporal
+  full-stack scenario proves the exact fence and final Browser Vault frontier
+  in both handoff directions.
 - The required changelog fragment is privacy-safe and reuses the existing
   archive; all 57 focused changelog tests and the prepared Web typecheck pass.
 - Live desktop/phone changelog inspection is blocked because this session has

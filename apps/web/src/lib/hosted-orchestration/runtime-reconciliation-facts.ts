@@ -702,6 +702,7 @@ function emitHostedRuntimeReconciliationFacts(event: {
     component: "hosted.orchestration.reconciliation",
     conversationLagPresent: hasHostedMailboxLag(event.facts.mailboxLag, "conversation"),
     decisionSource: event.request.decisionSource ?? "workflow",
+    environmentInterviewPending: event.facts.environmentInterviewPending,
     mailboxLagLaneCount: event.facts.mailboxLag.length,
     retryAtPresent: event.facts.blocked?.retryAt !== null
       && event.facts.blocked?.retryAt !== undefined,
