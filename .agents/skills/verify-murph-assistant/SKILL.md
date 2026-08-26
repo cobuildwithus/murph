@@ -43,17 +43,11 @@ the acceptance result.
    `--auth provider` only for an explicitly configured supported provider-key
    lane. Never print, copy, or persist auth material.
 
-   If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT`
-   before any provider action, rerun the same journey once with another
-   already-authenticated local home:
-
-   ```bash
-   pnpm test:assistant:live -- --test "<unique test-name pattern>" --codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>
-   ```
-
-   The explicit home selects existing local auth and config; it does not copy
-   credentials. Do not discover profiles automatically or cycle through homes.
-   If the alternate home is also blocked, record `Hold`.
+   If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT`,
+   follow the alternate-home retry contract in
+   `agent-docs/operations/verification-and-runtime.md` § Expensive And
+   Stochastic Proof Order. That section owns its authorization, path, retry,
+   and stopping rules.
 5. Read every printed member-visible reply and inspect the corresponding tool
    assertions. Mark the journey `Ready` only when all are true:
    - Murph fulfills the user's real purpose correctly and completely.
