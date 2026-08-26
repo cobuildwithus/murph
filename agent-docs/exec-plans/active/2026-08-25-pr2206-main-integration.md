@@ -146,6 +146,9 @@ shared error projector and no partial writes or submitted-value echo.
   journey uses one physical row recognized as heart rate and steps, verifies
   both safe import paths, and proves the resulting guidance contains no row
   count or raw cell value.
+- The post-remediation canonical runner assembly passes all eight parity probes.
+  The Vault CLI is 9,541,592 / 9,588,702 bytes with an 805-byte entry and
+  25,155-byte static closure; runner total is 11,383,774 / 11,393,617 bytes.
 
 ## Tasks
 
