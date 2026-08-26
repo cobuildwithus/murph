@@ -55,11 +55,14 @@ Updated: 2026-08-26
 
 ## Tasks
 
-1. Change support-scope composition so `weekly_digest` produces no overlay.
-2. Add focused regression coverage for the composed provider instructions.
-3. Add and run one production-derived synthetic real-Codex journey.
-4. Run focused tests and typecheck, inspect the Product UX result, and complete
-   the repository PR/review workflow.
+1. [x] Change support-scope composition so `weekly_digest` produces no overlay.
+2. [x] Add focused regression coverage for the composed provider instructions.
+3. [ ] Run the production-derived synthetic real-Codex journey. The journey is
+   committed, but the configured subscription returned
+   `ASSISTANT_CODEX_USAGE_LIMIT` before provider entry and no alternate Codex
+   home was authorized.
+4. [ ] Complete the repository PR/review workflow after the live journey is
+   `Ready`.
 
 ## Decisions
 
@@ -69,9 +72,10 @@ Updated: 2026-08-26
 
 ## Verification
 
-- Commands to run: focused Assistant Engine Vitest composition tests, the
-  selected `pnpm test:assistant:live` journey, package typecheck, and exact-head
-  PR checks.
-- Expected outcomes: the saved daily-readout prompt reaches the provider
-  without weekly-digest override text, the synthetic reply is a concise daily
-  readout, and existing scoped kinds remain unchanged.
+- Passed: focused Assistant Engine Vitest composition regression (one test).
+- Passed: focused Assistant Engine preservation coverage for `reminder`,
+  `check_in`, and `review` (three tests).
+- Passed: Assistant Engine package typecheck.
+- Passed: focused changelog archive coverage (nine tests) and Web typecheck.
+- Hold: the focused real-Codex journey stopped before provider entry with
+  `ASSISTANT_CODEX_USAGE_LIMIT`; no model reply was produced for UX review.
