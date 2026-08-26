@@ -51,8 +51,6 @@ export interface UpdateMemoryInput {
   text: string;
 }
 
-type MemoryPersistenceOperation = "forget" | "set-name" | "update" | "upsert";
-
 export class MemoryRecordNotFoundError extends Error {
   readonly code = "MEMORY_RECORD_NOT_FOUND";
 
@@ -64,12 +62,10 @@ export class MemoryRecordNotFoundError extends Error {
 
 export class MemoryPersistenceError extends Error {
   readonly code = "MEMORY_PERSISTENCE_INVALID";
-  readonly operation: MemoryPersistenceOperation;
 
-  constructor(operation: MemoryPersistenceOperation) {
+  constructor() {
     super("The canonical memory write could not be verified after it completed.");
     this.name = "MemoryPersistenceError";
-    this.operation = operation;
   }
 }
 
@@ -168,7 +164,6 @@ export async function setMemoryDisplayName(
     const persisted = await readPersistedMemoryRecord(
       vaultRoot,
       next.record.id,
-      "set-name",
       markdown,
     );
 
@@ -239,7 +234,6 @@ export async function updateMemory(
     const persisted = await readPersistedMemoryRecord(
       vaultRoot,
       result.result.recordId,
-      "update",
       result.result.expectedMarkdown,
     );
 
@@ -285,7 +279,7 @@ export async function forgetMemory(
         targetIds: [next.record.id],
       },
     });
-    const nextSnapshot = await readPersistedMemoryDocument(vaultRoot, "forget", markdown);
+    const nextSnapshot = await readPersistedMemoryDocument(vaultRoot, markdown);
 
     return {
       document: nextSnapshot,
@@ -313,16 +307,15 @@ async function withLockedMemoryDocument<TResult>(
 async function readPersistedMemoryRecord(
   vaultRoot: string,
   recordId: string,
-  operation: MemoryPersistenceOperation,
   expectedMarkdown: string,
 ): Promise<{
   document: MemoryDocumentSnapshot;
   record: MemoryRecord;
 }> {
-  const document = await readPersistedMemoryDocument(vaultRoot, operation, expectedMarkdown);
+  const document = await readPersistedMemoryDocument(vaultRoot, expectedMarkdown);
   const record = document.records.find((entry) => entry.id === recordId) ?? null;
   if (record === null) {
-    throw new MemoryPersistenceError(operation);
+    throw new MemoryPersistenceError();
   }
 
   return {
@@ -333,17 +326,16 @@ async function readPersistedMemoryRecord(
 
 async function readPersistedMemoryDocument(
   vaultRoot: string,
-  operation: MemoryPersistenceOperation,
   expectedMarkdown: string,
 ): Promise<MemoryDocumentSnapshot> {
   let document: MemoryDocumentSnapshot;
   try {
     document = await readMemoryDocument(vaultRoot);
   } catch {
-    throw new MemoryPersistenceError(operation);
+    throw new MemoryPersistenceError();
   }
   if (document.markdown !== expectedMarkdown) {
-    throw new MemoryPersistenceError(operation);
+    throw new MemoryPersistenceError();
   }
   return document;
 }
@@ -378,7 +370,6 @@ async function persistUpsertMemory(
   const persisted = await readPersistedMemoryRecord(
     vaultRoot,
     next.record.id,
-    "upsert",
     markdown,
   );
 

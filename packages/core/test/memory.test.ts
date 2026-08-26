@@ -408,7 +408,6 @@ describe("core memory package wrapper", () => {
 
   test("classifies every failed post-write memory read-back after preserving the write", async () => {
     async function expectPostWriteReadbackFailure(input: {
-      operation: "forget" | "set-name" | "update" | "upsert";
       preWriteReads: number;
       readback: Error | string;
       run: () => Promise<void>;
@@ -439,7 +438,6 @@ describe("core memory package wrapper", () => {
       expect(error).toBeInstanceOf(MemoryPersistenceError);
       expect(error).toMatchObject({
         code: "MEMORY_PERSISTENCE_INVALID",
-        operation: input.operation,
       });
       if (!(error instanceof MemoryPersistenceError)) {
         throw new Error("Expected post-write memory read-back to use the persistence error.");
@@ -453,7 +451,6 @@ describe("core memory package wrapper", () => {
 
     const upsertVaultRoot = await makeVaultRoot();
     await expectPostWriteReadbackFailure({
-      operation: "upsert",
       preWriteReads: 0,
       readback: new Error("private post-write read-back failure"),
       run: async () => {
@@ -476,7 +473,6 @@ describe("core memory package wrapper", () => {
 
     const setNameVaultRoot = await makeVaultRoot();
     await expectPostWriteReadbackFailure({
-      operation: "set-name",
       preWriteReads: 0,
       readback: "private malformed post-write memory document",
       run: async () => {
@@ -504,7 +500,6 @@ describe("core memory package wrapper", () => {
     });
     const staleUpdateMarkdown = (await readMemoryDocument(updateVaultRoot)).markdown;
     await expectPostWriteReadbackFailure({
-      operation: "update",
       preWriteReads: 1,
       readback: staleUpdateMarkdown,
       run: async () => {
@@ -533,7 +528,6 @@ describe("core memory package wrapper", () => {
     });
     const staleForgetMarkdown = (await readMemoryDocument(forgetVaultRoot)).markdown;
     await expectPostWriteReadbackFailure({
-      operation: "forget",
       preWriteReads: 1,
       readback: staleForgetMarkdown,
       run: async () => {

@@ -237,7 +237,7 @@ async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<T
       throw new VaultCliError(
         "memory_persistence_invalid",
         "The canonical memory write completed but could not be verified. Inspect canonical memory before deciding whether another write is necessary.",
-        { retryable: false, operation: error.operation, stage: "persistence" },
+        { retryable: false, stage: "persistence" },
       );
     }
     throw error;

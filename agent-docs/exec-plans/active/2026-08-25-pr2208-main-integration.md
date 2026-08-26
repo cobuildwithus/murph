@@ -50,6 +50,10 @@ fields, terminal read semantics, and no failed-read writes.
   one persisted write, malformed/stale read-back, terminal inspect-first
   guidance, non-echo, and byte-identical no-write behavior for pre-write parse
   failure. Core and CLI typechecks plus `git diff --check` pass.
+- The operation label formerly threaded through `MemoryPersistenceError` and
+  the CLI context had no recovery consumer, so the corrected head deletes it.
+  All four writers now use one fixed persistence-uncertainty error with no
+  operation-specific constructor or projection branch.
 
 ## Design
 
