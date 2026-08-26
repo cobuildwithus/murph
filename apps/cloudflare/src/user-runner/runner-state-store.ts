@@ -517,6 +517,29 @@ export class RunnerStateStore {
     };
   }
 
+  async revokeActiveRuntimePlatformAiUsage(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<boolean> {
+    const meta = this.selectMetaRowSync();
+    if (
+      !meta
+      || meta.active_attempt_id !== input.attemptId
+      || normalizeNonNegativeInteger(meta.active_generation).toString() !== input.generation
+      || readWriteFenceKind(meta.active_kind) !== "runtime"
+      || meta.user_id !== input.userId
+    ) {
+      return false;
+    }
+
+    if (meta.active_platform_ai_allowed !== 0) {
+      meta.active_platform_ai_allowed = 0;
+      this.writeMetaRowSync(meta);
+    }
+    return true;
+  }
+
   async validateProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;

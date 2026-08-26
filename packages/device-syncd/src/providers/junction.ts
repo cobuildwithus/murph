@@ -4790,14 +4790,6 @@ export function createJunctionDeviceSyncProvider(
     const resource = resourceCursor.resource;
     const policy = resolveJunctionTimeseriesResourcePolicy(resource);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
-    const sourceProviders = sourceProviderSlug
-      ? (await client.listUserProviders(context.account.externalAccountId, {
-          signal: context.signal ?? null,
-        })).filter((provider) => areJunctionProviderSlugsDataEquivalent(
-          provider.origin.sourceProviderSlug ?? provider.slug,
-          sourceProviderSlug,
-        ))
-      : [];
     let historicalProviderRecordsSeen = sourceProviderSlug !== null
       && job.payload.historicalProviderRecordsSeen === true;
     let historicalRecordsSeen = sourceProviderSlug !== null
@@ -4814,6 +4806,20 @@ export function createJunctionDeviceSyncProvider(
     ) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
+    const listedSourceProviders = sourceProviderSlug || resource === "workout_stream"
+      ? await client.listUserProviders(context.account.externalAccountId, {
+          ...(!sourceProviderSlug && resource === "workout_stream"
+            ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+            : {}),
+          signal: context.signal ?? null,
+        })
+      : [];
+    const sourceProviders = sourceProviderSlug
+      ? listedSourceProviders.filter((provider) => areJunctionProviderSlugsDataEquivalent(
+          provider.origin.sourceProviderSlug ?? provider.slug,
+          sourceProviderSlug,
+        ))
+      : listedSourceProviders;
 
     const executionWindowEnd = new Date(Math.min(
       Date.parse(timeseriesCursor) + timeseriesWindowHours * TIMESERIES_HOUR_MS,
@@ -5197,6 +5203,40 @@ export function createJunctionDeviceSyncProvider(
       throw error;
     };
 
+    let eligibleSourceProviderSlugs: ReadonlySet<string>;
+    try {
+      eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
+        input.context,
+        input.sourceProviders,
+      );
+    } catch (error) {
+      return carryTerminalProgressOrThrow(error);
+    }
+    const sourceScopeProvided = input.sourceProviderSlug !== undefined
+      && input.sourceProviderSlug !== null;
+    const scopedSourceProviderSlug = canonicalizeJunctionProviderSlug(
+      input.sourceProviderSlug,
+    );
+    if (
+      eligibleSourceProviderSlugs.size === 0
+      || (
+        sourceScopeProvided
+        && (
+          !scopedSourceProviderSlug
+          || !eligibleSourceProviderSlugs.has(scopedSourceProviderSlug)
+        )
+      )
+    ) {
+      return {
+        emptyTimestampArraySeen: workoutStreamEmptySeen,
+        historicalProviderRecordsSeen,
+        historicalRecordsSeen,
+        madeProgress,
+        workoutStreamCursor: null,
+        yieldedAt: null,
+      };
+    }
+
     let candidateListing: Awaited<ReturnType<typeof listJunctionWorkoutStreamCandidates>>;
     try {
       candidateListing = await listJunctionWorkoutStreamCandidates(
@@ -5211,6 +5251,7 @@ export function createJunctionDeviceSyncProvider(
           windowStart: input.windowStart,
         },
         true,
+        eligibleSourceProviderSlugs,
       );
     } catch (error) {
       return carryTerminalProgressOrThrow(error);
@@ -5252,10 +5293,8 @@ export function createJunctionDeviceSyncProvider(
           input.collectionWorkLimit,
         );
       } catch (error) {
-        const failure = classifyOptionalJunctionResourceFailure(
+        const failure = classifyOptionalJunctionWorkoutStreamCandidateFailure(
           error,
-          "timeseries",
-          "workout_stream",
           input.context.account.externalAccountId,
         );
         if (!failure) {
@@ -6032,6 +6071,7 @@ async function listJunctionWorkoutStreamCandidates(
   junctionClient: JunctionClient,
   input: JunctionWindowInput,
   strictSourceScope = false,
+  eligibleSourceProviderSlugs?: ReadonlySet<string>,
 ) {
   const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
     ?.maxRecordsPerWindow;
@@ -6046,7 +6086,6 @@ async function listJunctionWorkoutStreamCandidates(
     userId: input.userId,
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
-    maxRecords: maxWorkouts + 1,
   });
   const summaries = strictSourceScope
     ? scopeJunctionRecordsToSourceProvider(
@@ -6056,8 +6095,21 @@ async function listJunctionWorkoutStreamCandidates(
     : indexRecords.map((record) =>
         withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
       );
+  const eligibleSummaries = eligibleSourceProviderSlugs === undefined
+    ? summaries
+    : summaries.filter((summary) => {
+        const summaryRecord = readPlainObject(summary);
+        if (!summaryRecord) {
+          return false;
+        }
+        const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+          resolveJunctionOrigin(summaryRecord).sourceProviderSlug,
+        );
+        return sourceProviderSlug !== null
+          && eligibleSourceProviderSlugs.has(sourceProviderSlug);
+      });
   return {
-    candidates: selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts),
+    candidates: selectJunctionWorkoutStreamCandidates(eligibleSummaries, maxWorkouts),
     providerRecordsSeen: indexRecords.length > 0,
   };
 }
@@ -6310,6 +6362,38 @@ function classifyOptionalJunctionResourceFailure(
     responseStatus: status,
     ...(responseDetail ? { responseDetail } : {}),
   };
+}
+
+function classifyOptionalJunctionWorkoutStreamCandidateFailure(
+  error: unknown,
+  accountExternalId: string,
+): JunctionOptionalResourceFailure | null {
+  const existing = classifyOptionalJunctionResourceFailure(
+    error,
+    "timeseries",
+    "workout_stream",
+    accountExternalId,
+  );
+  if (existing) {
+    return existing;
+  }
+  if (
+    !isDeviceSyncError(error)
+    || error.code !== "JUNCTION_API_REQUEST_FAILED"
+    || error.details?.status !== 400
+  ) {
+    return null;
+  }
+
+  const reason = classifyClearOptionalJunctionResourceFailureReason({
+    responseErrorCode: readJunctionDiagnosticString(error.details.responseErrorCode),
+    responseErrorDescription: readJunctionDiagnosticString(
+      error.details.responseErrorDescription,
+    ),
+  });
+  return reason === "unsupported"
+    ? { reason, responseStatus: 400 }
+    : null;
 }
 
 function isRetryableDeviceSyncFailure(error: unknown): error is DeviceSyncError {
@@ -9888,6 +9972,34 @@ function isJunctionResourceAvailableInSummary(
     normalizeJunctionResourceName(candidate) === normalizedResource
     && isJunctionResourceAdvertisedAvailable(availability)
   );
+}
+
+async function resolveJunctionWorkoutStreamEligibleSources(
+  context: ProviderJobContext,
+  providers: readonly JunctionProviderConnection[],
+): Promise<ReadonlySet<string>> {
+  if (!context.listConnectionSources) {
+    return new Set();
+  }
+  const sources = await context.listConnectionSources();
+
+  return new Set(projectJunctionSourcesByProviderSlug(
+    context.account.id,
+    providers,
+  ).flatMap((source) =>
+    isJunctionSourceAdmittedForImport(
+      sources,
+      source.sourceProviderSlug,
+      context.connectionSourceAdmissionMode !== "listed_only",
+    )
+      && source.status === "connected"
+      && isJunctionResourceAvailableInSummary(
+        source.resourceAvailabilitySummary,
+        "workout_stream",
+      )
+      ? [source.sourceProviderSlug]
+      : []
+  ));
 }
 
 function isJunctionSourceResourceCurrentlyAvailable(input: {

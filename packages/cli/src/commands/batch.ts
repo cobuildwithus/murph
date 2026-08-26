@@ -7,40 +7,19 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
-  pathSchema,
-  VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
+  VAULT_CLI_BATCH_MAX_COMMANDS,
+  vaultCliBatchCommandResultEnvelopeSchema,
+  vaultCliBatchResultEnvelopeSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 
 const batchCommandOptionSchema = z.string().min(1)
 
-const batchCommandResultSchema = z.object({
-  index: z.number().int().nonnegative(),
-  argv: z.array(z.string().min(1)),
-  durationMs: z.number().int().nonnegative(),
-  ok: z.boolean(),
-  outputBytes: z.number().int().nonnegative().describe(
-    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
-  ),
-  outputChars: z.number().int().nonnegative().describe(
-    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
-  ),
-  stdout: z.string(),
-  data: z.unknown().optional(),
-  error: z.object({
-    message: z.string().min(1),
-  }).optional(),
-})
+export const batchRunResultSchema = vaultCliBatchResultEnvelopeSchema
 
-export const batchRunResultSchema = z.object({
-  schema: z.string().min(1),
-  vault: pathSchema,
-  count: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  commands: z.array(batchCommandResultSchema),
-})
-
-type BatchCommandResult = z.output<typeof batchCommandResultSchema>
+type BatchCommandResult = z.output<
+  typeof vaultCliBatchCommandResultEnvelopeSchema
+>
 
 export function registerBatchCommands(cli: Cli.Cli) {
   cli.command('batch', {
@@ -75,7 +54,8 @@ export function registerBatchCommands(cli: Cli.Cli) {
       }
 
       return {
-        schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+        schema:
+          VAULT_CLI_BATCH_RESULT_SCHEMA as typeof VAULT_CLI_BATCH_RESULT_SCHEMA,
         vault: options.vault,
         count: commands.length,
         failed: commands.filter((command) => !command.ok).length,

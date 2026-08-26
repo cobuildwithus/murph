@@ -12,6 +12,10 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+} from '@murphai/hosted-execution/assistant-model'
+import { goalMetricTargetSchema } from '@murphai/contracts'
+import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
 } from '@murphai/runtime-state/node'
@@ -166,9 +170,9 @@ const scriptedPermissionShellIt =
     ? it.skip
     : it
 
-function buildTestAutomationLocalAtRecoveryKey(identity: string): string {
+function buildTestAutomationLocalAtRecoveryKey(request: unknown): string {
   return createHash('sha256')
-    .update(JSON.stringify(identity))
+    .update(JSON.stringify(request))
     .digest('hex')
 }
 
@@ -3370,6 +3374,10 @@ text(result.output);
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
+      const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+      })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
       const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
@@ -3380,6 +3388,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
+              model: 'gpt-5.6-luna',
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3406,6 +3415,10 @@ text(result.output);
       const first = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: firstPrompt,
       })
@@ -3426,6 +3439,9 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
+      expect(
+        scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
+      ).toContain('gpt-5.6-luna')
       await delay(100)
 
       scenario.stub.queue({
@@ -3437,6 +3453,10 @@ text(result.output);
       })
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
@@ -3447,6 +3467,55 @@ text(result.output);
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )
+
+  it('rejects a non-product child model before a provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      multiAgentV2: true,
+    })
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            fork_turns: 'none',
+            message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
+            model: 'gpt-5.5',
+            task_name: 'non_product_child',
+          },
+          name: 'spawn_agent',
+          namespace: 'collaboration',
+        },
+      },
+      { text: 'NON_PRODUCT_CHILD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Try to spawn the requested non-product child model.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(result.finalMessage).toBe('NON_PRODUCT_CHILD_REJECTED')
+    expect(summaries.map(({ model }) => model)).toEqual([
+      SCRIPTED_MODEL,
+      SCRIPTED_MODEL,
+    ])
+    expect(summaries.flatMap(
+      (summary) => summary.functionCallOutputs ?? [],
+    )).toEqual([
+      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+    ])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
 
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
@@ -3558,7 +3627,7 @@ text(result.output);
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -3644,7 +3713,7 @@ if (!tool) {
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
     expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
-    expect(automationOutput).toContain('morning-reminder')
+    expect(automationOutput).not.toContain('lookupId')
     expect(automationOutput).toContain('active')
     expect(automationRequests).toEqual([{
       action: 'save',
@@ -4212,9 +4281,7 @@ text(JSON.stringify(result));
       expectedAt: '2026-03-08T07:30:00.000Z',
       failedTime: '02:30',
       finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
-      initialSlug: null,
       kind: 'gap',
-      retrySlug: 'morning-meds',
       retryTitle: 'Morning meds',
       referenceAt: '2026-03-08T04:59:00.000Z',
       retryLocalAt: {
@@ -4233,9 +4300,7 @@ text(JSON.stringify(result));
       failedTime: '01:30',
       finalMessage:
         'Done — your reminder is set for the earlier 1:30 AM on November 1.',
-      initialSlug: 'fall-reminder',
       kind: 'fold',
-      retrySlug: null,
       retryTitle: 'Evening meds',
       referenceAt: '2026-11-01T03:59:00.000Z',
       retryLocalAt: {
@@ -4245,21 +4310,19 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'For reminder "Fall reminder (fall-reminder)", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fall reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       steerAt: '2026-11-01T04:01:00.000Z',
       steerPrompt: 'Use the earlier occurrence.',
       title: 'Fall reminder',
     },
-  ])('clears a $kind clarification after a renamed live-steered save retry', {
+  ])('clears a $kind clarification after a retitled live-steered save retry', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
     failedTime,
     finalMessage,
-    initialSlug,
     referenceAt,
     retryLocalAt,
-    retrySlug,
     retryTitle,
     staleClarification,
     steerAt,
@@ -4280,20 +4343,16 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      ...(initialSlug ? { slug: initialSlug } : {}),
       title,
     }
     const retryRequest = {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        initialSlug ?? title.toLowerCase().replace(/\s+/gu, '-'),
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
       },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }
     scenario.stub.queue(
@@ -4342,8 +4401,8 @@ text(JSON.stringify(result));
                 `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               created: true,
               effectiveTimeZone: null,
-              lookupId: retrySlug
-                ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
+              lookupId:
+                `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               occurrenceProjection: {
                 nextOccurrenceAt: expectedAt,
                 status: 'resolved' as const,
@@ -4382,7 +4441,6 @@ text(JSON.stringify(result));
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }])
     expect(result.finalMessage).toBe(finalMessage)
@@ -4395,24 +4453,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4473,25 +4532,26 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4566,24 +4626,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4686,70 +4747,32 @@ text(JSON.stringify(result));
   it.each([
     {
       expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '02:30',
       referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
       retryLocalAt: {
         date: '2026-03-08',
         time: '03:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'automation-medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'automation-medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      requestedSlug: 'morning-meds',
-      responseLookup: 'morning-meds',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
     },
     {
       expectedAt: '2026-11-01T06:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '01:30',
       referenceAt: '2026-11-01T03:59:00.000Z',
-      requestedSlug: 'evening-meds',
-      responseLookup: 'evening-meds',
       retryLocalAt: {
         date: '2026-11-01',
         fold: 'later' as const,
         time: '01:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'medication-reminder',
     },
-  ])('clears a patch clarification across canonical and renamed aliases', {
+  ])('clears a patch clarification using one exact automation id', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
-    failedLookup,
     failedTime,
     referenceAt,
-    requestedSlug,
-    responseLookup,
     retryLocalAt,
-    retryLookup,
   }) => {
     const scenario = await prepareScriptedTurnScenario()
     const responseCard = {
@@ -4763,11 +4786,11 @@ text(JSON.stringify(result));
       footer: null,
       tracking: null,
     } satisfies AssistantResponseCard
+    const automationId = 'automation-medication-reminder'
     const failedRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: failedLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: {
@@ -4780,9 +4803,8 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedLookup),
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
@@ -4825,10 +4847,10 @@ text(JSON.stringify(result));
       }
       return {
         action: 'patch' as const,
-        automationId: 'automation-medication-reminder',
+        automationId,
         created: false,
         effectiveTimeZone: 'America/New_York',
-        lookupId: responseLookup,
+        lookupId: automationId,
         occurrenceProjection: {
           nextOccurrenceAt: expectedAt,
           status: 'resolved' as const,
@@ -4870,8 +4892,7 @@ text(JSON.stringify(result));
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: { at: expectedAt, kind: 'at' },
     }, expect.anything())
     expect(result.responseCard).toEqual(responseCard)
@@ -4879,7 +4900,7 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).not.toContain('the trusted date is')
   })
 
-  it('contains local one-shot slug failures and accepts a corrected retry', {
+  it('saves a localized one-shot title without a separate slug', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -4896,24 +4917,11 @@ text(JSON.stringify(result));
       },
       title: '薬を飲む',
     }
-    const correctedRequest = {
-      ...localizedRequest,
-      slug: 'take-medicine',
-    }
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
 const result = await tools.murph__automation(${JSON.stringify(localizedRequest)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      },
-      {
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(correctedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -5077,7 +5085,6 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5089,12 +5096,11 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      slug,
       title: 'Medication reminder',
     }
     const retryRequest = {
       ...failedRequest,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: {
@@ -5143,7 +5149,7 @@ text(JSON.stringify(result));
     })
 
     const question =
-      'For reminder "Medication reminder (medication-reminder)", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(result.finalMessage).toContain(question)
     expect(result.transcriptMessage).toContain(question)
@@ -5198,9 +5204,6 @@ text(JSON.stringify(result));
     resolvedAt,
     resolvedLocalAt,
   }) => {
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(
-      'medication-reminder',
-    )
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5214,6 +5217,7 @@ text(JSON.stringify(result));
       },
       title: 'Medication reminder',
     }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     const matchingInvalidRetry = {
       ...failedRequest,
       instructions: 'Send the renamed medication reminder.',
@@ -5444,14 +5448,12 @@ text(JSON.stringify(result));
     }
     const successA = {
       ...failureA,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        'medication-reminder',
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
       schedule: { kind: 'at', localAt: recoveryA },
     }
     const successB = {
       ...failureB,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey('call-reminder'),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureB),
       schedule: { kind: 'at', localAt: recoveryB },
     }
     const responseCard = {
@@ -5544,7 +5546,7 @@ text(JSON.stringify(result));
               input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${date}",
 });
 text(JSON.stringify(result));
@@ -5570,9 +5572,7 @@ text(JSON.stringify(result));
         }
         const mismatchedA = {
           ...failureA,
-          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-            'medication-reminder',
-          ),
+          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
           schedule: {
             kind: 'at',
             localAt: {
@@ -5649,7 +5649,7 @@ text(JSON.stringify(result));
             input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${mismatchDate}",
 });
 text(JSON.stringify(result));
@@ -5810,272 +5810,6 @@ text(JSON.stringify(result));
     }
   })
 
-  it.each([
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: 'morning-meds',
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: null,
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'later' as const,
-      newSlug: null,
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T06:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'earlier' as const,
-      newSlug: 'evening-meds',
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T05:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: true,
-    },
-  ])('settles $date save recovery through create conflict and versioned patch', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async ({
-    date,
-    failedTime,
-    fold,
-    newSlug,
-    patchLookup,
-    referenceAt,
-    resolvedAt,
-    resolvedTime,
-    secondPending,
-  }) => {
-    const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
-    const automationId = 'automation-medication-reminder'
-    const updatedAt = '2026-03-07T20:00:00.000Z'
-    const failedSave = {
-      action: 'save',
-      instructions: 'Send the medication reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug,
-      title: 'Medication reminder',
-    }
-    const recoveryLocalAt = {
-      date,
-      ...(fold ? { fold } : {}),
-      time: resolvedTime,
-      timeZone: 'America/New_York',
-    }
-    const retrySave = {
-      ...failedSave,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const inspect = { action: 'inspect', lookup: slug }
-    const patch = {
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const secondFailure = {
-      action: 'save',
-      instructions: 'Send the call reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug: 'call-reminder',
-      title: 'Call reminder',
-    }
-    const responseCard = {
-      kind: 'compact_table',
-      version: 1,
-      title: 'Medication reminder',
-      subtitle: `${date} at ${resolvedTime}`,
-      rowHeader: 'Status',
-      columns: ['Schedule'],
-      rows: [{ label: 'Active', values: [resolvedTime] }],
-      footer: null,
-      tracking: null,
-    } satisfies AssistantResponseCard
-    const calls = [
-      failedSave,
-      ...(secondPending ? [secondFailure] : []),
-      retrySave,
-      inspect,
-      patch,
-    ]
-    for (const request of calls) {
-      scenario.stub.queue({
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(request)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      })
-    }
-    scenario.stub.queue({
-      functionCall: {
-        arguments: { card: responseCard },
-        name: 'attach_response_card',
-        namespace: 'murph',
-      },
-    })
-    if (secondPending) {
-      scenario.stub.queue(
-        {
-          functionCall: {
-            arguments: {},
-            name: 'finish_without_reply',
-            namespace: 'murph',
-          },
-        },
-        { text: '' },
-      )
-    } else {
-      scenario.stub.queue({ text: 'CARD_ATTACHED' })
-    }
-
-    const ownerRequests: AssistantHostedAutomationToolRequest[] = []
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      allowFinishWithoutReply: true,
-      automationRelativeDateReferenceWindow: {
-        earliestAt: referenceAt,
-        latestAt: referenceAt,
-      },
-      dynamicTools: [
-        MURPH_AUTOMATION_TOOL,
-        MURPH_ATTACH_RESPONSE_CARD_TOOL,
-        MURPH_FINISH_WITHOUT_REPLY_TOOL,
-      ],
-      groupConversation: false,
-      hostedToolContext: {
-        automationTool: {
-          request: async (request) => {
-            ownerRequests.push(request)
-            if (request.action === 'save') {
-              throw Object.assign(new Error('automation already exists'), {
-                code: 'VAULT_AUTOMATION_CONFLICT' as const,
-              })
-            }
-            if (request.action === 'inspect') {
-              return {
-                action: 'inspect',
-                automationId,
-                effectiveTimeZone: 'America/New_York',
-                lookupId: slug,
-                occurrenceProjection: {
-                  nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
-                  status: 'resolved' as const,
-                },
-                routeBinding: 'preserved',
-                schedule: {
-                  at: '2026-03-07T21:00:00.000Z',
-                  kind: 'at',
-                },
-                status: 'active',
-                updatedAt,
-              }
-            }
-            if (request.action !== 'patch') {
-              throw new Error('Expected a versioned patch request.')
-            }
-            return {
-              action: 'patch',
-              automationId,
-              created: false,
-              effectiveTimeZone: 'America/New_York',
-              lookupId: newSlug ?? slug,
-              occurrenceProjection: {
-                nextOccurrenceAt: resolvedAt,
-                status: 'resolved' as const,
-              },
-              routeBinding: 'current_conversation',
-              schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
-              status: 'active',
-              updatedAt: '2026-03-08T05:01:00.000Z',
-            }
-          },
-        },
-        computerToolsAvailable: false,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        sendVaultFile: async () => {
-          throw new Error('Vault file sends are unavailable in this test.')
-        },
-        vaultFileSendAvailable: false,
-      },
-      prompt: 'Set or update my medication reminder for tomorrow.',
-    })
-
-    expect(ownerRequests.map((request) => request.action)).toEqual([
-      'save',
-      'inspect',
-      'patch',
-    ])
-    for (const request of ownerRequests) {
-      expect(request).not.toHaveProperty('localAtRecoveryKey')
-    }
-    expect(ownerRequests[2]).toMatchObject({
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { at: resolvedAt, kind: 'at' },
-    })
-    const medicationQuestion =
-      `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
-    expect(result.finalMessage).not.toContain(medicationQuestion)
-    expect(result.transcriptMessage).not.toContain(medicationQuestion)
-    if (secondPending) {
-      const callQuestion =
-        `For reminder "Call reminder (call-reminder)", the trusted date is ${date}.`
-      expect(result.finalAction).toBeNull()
-      expect(result.responseCard).toBeNull()
-      expect(result.finalMessage).toContain(callQuestion)
-      expect(result.transcriptMessage).toContain(callQuestion)
-    } else {
-      expect(result.responseCard).toEqual(responseCard)
-      expect(result.finalMessage).not.toContain('the trusted date is')
-      expect(result.transcriptMessage).not.toContain('the trusted date is')
-    }
-  })
 
   it('suppresses a response card until the trusted DST clarification is delivered', {
     timeout: TURN_TIMEOUT_MS,
@@ -6679,6 +6413,160 @@ text(JSON.stringify(result));
     expect(result.finalMessage).toMatch(/automatically|no action is needed/iu)
     expect(result.finalMessage).not.toMatch(
       /if you want|inspect|10:30|tomorrow|unconfirmed|not confirmed|could not verify/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it.each([
+    {
+      action: 'inspect' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The daily reminder remains active, but its occurrence is overdue and I couldn't confirm the next occurrence.",
+      prompt: 'Is my daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection',
+    },
+    {
+      action: 'patch' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The edit was saved, and the daily reminder remains active on its daily schedule. Its occurrence is overdue, and I couldn't confirm the next occurrence.",
+      prompt: 'Update my daily interval reminder now.',
+      title: 'reports an overdue recurring reminder edit',
+    },
+    {
+      action: 'inspect' as const,
+      audience: 'group' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The room's daily reminder remains active, but its occurrence is overdue and the next occurrence couldn't be confirmed.",
+      prompt: 'Is this room\'s daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection to its group',
+    },
+  ])('$title without promising automatic recovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    action,
+    audience,
+    expectedRequest,
+    finalMessage,
+    prompt,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    const toolInput = action === 'patch'
+      ? `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+      : `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: toolInput,
+          name: 'exec',
+        },
+      },
+      { text: finalMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt(audience, true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== action) {
+              throw new Error(`Expected an automation ${action} request.`)
+            }
+            const response = {
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              occurrenceProjection: {
+                issues: ['stale_recurring_occurrence'] as const,
+                status: 'unavailable' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+            if (request.action === 'patch') {
+              return {
+                action: 'patch' as const,
+                ...response,
+                created: false,
+              }
+            }
+            return {
+              action: 'inspect' as const,
+              ...response,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt,
+    })
+
+    expect(automationRequests).toEqual([expectedRequest])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"issues":["stale_recurring_occurrence"]',
+    )
+    expect(toolOutputs).toContain('"status":"unavailable"')
+    expect(result.finalMessage).toBe(finalMessage)
+    expect(result.finalMessage).toMatch(/active/iu)
+    expect(result.finalMessage).toMatch(/overdue/iu)
+    expect(result.finalMessage).toMatch(
+      /could(?:n't| not)(?: be)? confirm(?:ed)?/iu,
+    )
+    if (action === 'patch') {
+      expect(result.finalMessage).toMatch(/edit .*saved/iu)
+      expect(result.finalMessage).toMatch(/daily schedule/iu)
+    }
+    if (audience === 'group') {
+      expect(result.finalMessage).toMatch(/room/iu)
+      expect(result.finalMessage).not.toMatch(/\bI\b|\bmy\b|\byou(?:r)?\b/iu)
+    }
+    expect(result.finalMessage).not.toMatch(
+      /automatically|no action|nothing .*need|current .*work/iu,
     )
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -7650,7 +7538,7 @@ if (!tool) {
       : null
 
     const ordinaryScenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: ordinaryScenario.turnInput.codexCommand,
       directory: ordinaryScenario.turnInput.codexHome,
     })
@@ -7762,7 +7650,7 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -7882,7 +7770,10 @@ text(JSON.stringify(result));
       turnTrigger: null,
     })
     expect(groupDeveloperInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(groupDeveloperInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(groupDeveloperInstructions).not.toContain(
       'Do not use or offer `murph.assistant_configuration` here',
@@ -7995,7 +7886,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -9558,7 +9449,7 @@ async function prepareScriptedTurnScenario(
   }
 }
 
-async function writeOpenAiFlexModelCatalogJson(input: {
+async function writeHostedOpenAiFlexModelCatalogJson(input: {
   codexCommand: string
   directory: string
 }): Promise<string> {
@@ -9571,30 +9462,37 @@ async function writeOpenAiFlexModelCatalogJson(input: {
     },
   )
   const catalog = readRecord(JSON.parse(stdout))
-  const models = Array.isArray(catalog?.models) ? catalog.models : []
-  const targetModel = models
-    .map(readRecord)
-    .find((model) => model?.slug === SCRIPTED_MODEL)
-  if (!targetModel) {
-    throw new Error(`Bundled Codex model catalog did not include ${SCRIPTED_MODEL}.`)
+  if (!catalog) {
+    throw new Error('Bundled Codex model catalog was not an object.')
   }
-
-  const serviceTiers = Array.isArray(targetModel.service_tiers)
-    ? targetModel.service_tiers
+  const bundledModels = Array.isArray(catalog.models)
+    ? catalog.models.map(readRecord)
     : []
-  const hasFlex = serviceTiers
-    .map(readRecord)
-    .some((tier) => tier?.id === 'flex')
-  if (!hasFlex) {
-    targetModel.service_tiers = [
-      ...serviceTiers,
-      {
-        description: 'Lower-cost flexible processing',
-        id: 'flex',
-        name: 'Flex',
-      },
-    ]
-  }
+  const productModels = HOSTED_ASSISTANT_PRODUCT_MODELS.map((slug) => {
+    const model = bundledModels.find((candidate) => candidate?.slug === slug)
+    if (!model) {
+      throw new Error(`Bundled Codex model catalog did not include ${slug}.`)
+    }
+
+    const serviceTiers = Array.isArray(model.service_tiers)
+      ? model.service_tiers
+      : []
+    const hasFlex = serviceTiers
+      .map(readRecord)
+      .some((tier) => tier?.id === 'flex')
+    if (!hasFlex) {
+      model.service_tiers = [
+        ...serviceTiers,
+        {
+          description: 'Lower-cost flexible processing',
+          id: 'flex',
+          name: 'Flex',
+        },
+      ]
+    }
+    return model
+  })
+  catalog.models = productModels
 
   const modelCatalogJson = path.join(
     input.directory,
@@ -9640,6 +9538,7 @@ function buildScriptedCodexConfigToml(
       ? [
           '[features.multi_agent_v2]',
           'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
           'max_concurrent_threads_per_session = 4',
           '',
         ]

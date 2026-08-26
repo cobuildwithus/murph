@@ -328,8 +328,7 @@ function bloodTestResultValidationRecovery(
         ))
     ) {
       return {
-        message:
-          "Provide at least one of low, high, or text.",
+        message: "Provide at least one of low, high, or text.",
         issues: [
           publicValidationIssue(
             { code: "invalid_union" },

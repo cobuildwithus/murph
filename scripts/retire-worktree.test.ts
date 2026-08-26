@@ -131,6 +131,26 @@ fi
   }
 }
 
+function addTaskWorktree(
+  harness: Harness,
+  directoryName: string,
+  branch: string,
+): Harness {
+  const target = path.join(harness.root, directoryName)
+  runGit(harness.primary, ['worktree', 'add', '-b', branch, target])
+  const canonicalTarget = realpathSync(target)
+  const changePath = path.join(canonicalTarget, `${directoryName}-change.txt`)
+  writeFileSync(changePath, `${directoryName} change\n`)
+  runGit(canonicalTarget, ['add', path.basename(changePath)])
+  runGit(canonicalTarget, ['commit', '-m', `${directoryName} change`])
+  return {
+    ...harness,
+    branch,
+    head: runGit(canonicalTarget, ['rev-parse', 'HEAD']),
+    target: canonicalTarget,
+  }
+}
+
 function terminalPullRequest(harness: Harness): Record<string, string | null> {
   return {
     headRefName: harness.branch,
@@ -246,6 +266,171 @@ describe('retire-worktree', () => {
     },
     180_000,
   )
+
+  it('dry-runs and retires multiple eligible targets while preserving their branches', () => {
+    const harness = createHarness()
+    try {
+      const second = addTaskWorktree(
+        harness,
+        'second-task-worktree',
+        'codex/batch-retirement-second',
+      )
+      const pullRequests = [
+        terminalPullRequest(harness),
+        terminalPullRequest(second),
+      ]
+
+      const dryRun = runRetirement(harness, pullRequests, [
+        '--dry-run',
+        harness.target,
+        second.target,
+      ])
+      expect(dryRun.status, dryRun.stderr).toBe(0)
+      expect(dryRun.stdout).toContain(harness.target)
+      expect(dryRun.stdout).toContain(second.target)
+      expect(existsSync(harness.target)).toBe(true)
+      expect(existsSync(second.target)).toBe(true)
+
+      const removal = runRetirement(harness, pullRequests, [
+        harness.target,
+        second.target,
+      ])
+      expect(removal.status, removal.stderr).toBe(0)
+      expect(existsSync(harness.target)).toBe(false)
+      expect(existsSync(second.target)).toBe(false)
+      expect(
+        runGit(harness.primary, [
+          'show-ref',
+          '--verify',
+          `refs/heads/${harness.branch}`,
+        ]),
+      ).toContain(harness.head)
+      expect(
+        runGit(harness.primary, [
+          'show-ref',
+          '--verify',
+          `refs/heads/${second.branch}`,
+        ]),
+      ).toContain(second.head)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses the full batch before removal when any target fails preflight', () => {
+    const harness = createHarness()
+    try {
+      const second = addTaskWorktree(
+        harness,
+        'dirty-task-worktree',
+        'codex/batch-retirement-dirty',
+      )
+      writeFileSync(path.join(second.target, 'untracked.txt'), 'preserve me\n')
+
+      const result = runRetirement(
+        harness,
+        [terminalPullRequest(harness), terminalPullRequest(second)],
+        [harness.target, second.target],
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('tracked or untracked changes')
+      expect(existsSync(harness.target)).toBe(true)
+      expect(existsSync(second.target)).toBe(true)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects duplicate canonical targets before destructive work', () => {
+    const harness = createHarness()
+    try {
+      const alias = path.join(harness.root, 'task-worktree-alias')
+      symlinkSync(
+        harness.target,
+        alias,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      )
+
+      const result = runRetirement(
+        harness,
+        [terminalPullRequest(harness)],
+        [harness.target, alias],
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('duplicate canonical target worktree')
+      expect(existsSync(harness.target)).toBe(true)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it('stops after a later target fails immediate revalidation and preserves the remainder', () => {
+    const harness = createHarness()
+    try {
+      const second = addTaskWorktree(
+        harness,
+        'second-task-worktree',
+        'codex/batch-revalidation-second',
+      )
+      const third = addTaskWorktree(
+        harness,
+        'third-task-worktree',
+        'codex/batch-revalidation-third',
+      )
+      const ghCallCount = path.join(harness.root, 'gh-call-count')
+      const lateDependencyLink = path.join(
+        harness.primary,
+        'node_modules',
+        'late-batch-link',
+      )
+      mkdirSync(path.dirname(lateDependencyLink), { recursive: true })
+      const initialPullRequests = [
+        terminalPullRequest(harness),
+        terminalPullRequest(second),
+        terminalPullRequest(third),
+      ]
+      writeExecutable(
+        path.join(harness.fakeBin, 'gh'),
+        `#!/usr/bin/env bash
+set -euo pipefail
+call_count=0
+if [[ -f "\${RETIRE_TEST_GH_CALL_COUNT:?}" ]]; then
+  read -r call_count < "\${RETIRE_TEST_GH_CALL_COUNT}"
+fi
+call_count=$((call_count + 1))
+printf '%s\n' "$call_count" > "\${RETIRE_TEST_GH_CALL_COUNT}"
+if [[ "$call_count" -eq 5 ]]; then
+  ln -s "\${RETIRE_TEST_LINK_TARGET:?}" "\${RETIRE_TEST_LINK_PATH:?}"
+fi
+printf '%s\n' "\${RETIRE_TEST_PR_JSON:?}"
+`,
+      )
+
+      const result = runRetirement(
+        harness,
+        initialPullRequests,
+        [harness.target, second.target, third.target],
+        {
+          RETIRE_TEST_GH_CALL_COUNT: ghCallCount,
+          RETIRE_TEST_LINK_PATH: lateDependencyLink,
+          RETIRE_TEST_LINK_TARGET: second.target,
+        },
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(
+        'primary dependency link resolves through the target',
+      )
+      expect(readFileSync(ghCallCount, 'utf8').trim()).toBe('5')
+      expect(existsSync(harness.target)).toBe(false)
+      expect(existsSync(second.target)).toBe(true)
+      expect(existsSync(third.target)).toBe(true)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
 
   it('refuses dirty targets and exact-head mismatches', () => {
     const harness = createHarness()

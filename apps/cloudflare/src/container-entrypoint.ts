@@ -263,6 +263,7 @@ interface HostedRunnerBundleManifestSummary {
   buildSkipped?: boolean;
   bundleFingerprint?: string;
   generatedAt?: string;
+  releaseSha?: string;
   schemaVersion?: number;
   sourceFingerprint?: string;
 }
@@ -917,6 +918,7 @@ export async function startHostedContainerEntrypoint(input: {
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         ...(orchestrationMilestones ? { orchestration: orchestrationMilestones } : {}),
         runnerJobAcceptedAt,
+        releaseSha: runnerBundle?.releaseSha ?? null,
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
         supervisorEnv: runtime.startupConfig.supervisorEnv,
@@ -2725,6 +2727,7 @@ async function readHostedRunnerBundleManifestSummary(
     ...(typeof manifest.buildSkipped === "boolean" ? { buildSkipped: manifest.buildSkipped } : {}),
     ...(typeof manifest.bundleFingerprint === "string" ? { bundleFingerprint: manifest.bundleFingerprint } : {}),
     ...(typeof manifest.generatedAt === "string" ? { generatedAt: manifest.generatedAt } : {}),
+    ...(typeof manifest.releaseSha === "string" ? { releaseSha: manifest.releaseSha } : {}),
     ...(typeof manifest.schemaVersion === "number" ? { schemaVersion: manifest.schemaVersion } : {}),
     ...(typeof manifest.sourceFingerprint === "string" ? { sourceFingerprint: manifest.sourceFingerprint } : {}),
   };

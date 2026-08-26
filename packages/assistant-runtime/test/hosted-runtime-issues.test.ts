@@ -22,14 +22,18 @@ const TEST_ISSUE_ID = 'ari_0123456789abcdef_abcdef123456abcdef123456'
 
 function createPendingIssueRecord(input: {
   component?: string
+  environment?: 'hosted' | 'local'
   issueKind?: 'dev_note_stripped' | 'retry_used'
   occurredAt: string
+  releaseSha?: string | null
+  runtimeAttemptId?: string | null
+  runtimeName?: string | null
   severity?: 'warning' | 'error'
   surface?: string | null
 }): {
   component: string
   details: Record<string, unknown>
-  environment: 'local'
+  environment: 'hosted' | 'local'
   errorCode: null
   fingerprint: string
   issueId: string
@@ -37,6 +41,9 @@ function createPendingIssueRecord(input: {
   occurredAt: string
   operation: null
   phase: 'final_response'
+  releaseSha: string | null
+  runtimeAttemptId: string | null
+  runtimeName: string | null
   schema: 'murph.assistant-runtime-issue.v1'
   severity: 'warning' | 'error'
   summary: string
@@ -62,7 +69,7 @@ function createPendingIssueRecord(input: {
     details: {
       noteCharCount: 42,
     },
-    environment: 'local',
+    environment: input.environment ?? 'local',
     errorCode: null,
     fingerprint,
     issueId: createAssistantRuntimeIssueId({
@@ -73,6 +80,9 @@ function createPendingIssueRecord(input: {
     occurredAt: input.occurredAt,
     operation: null,
     phase: 'final_response',
+    releaseSha: input.releaseSha ?? null,
+    runtimeAttemptId: input.runtimeAttemptId ?? null,
+    runtimeName: input.runtimeName ?? null,
     schema: 'murph.assistant-runtime-issue.v1',
     severity,
     summary,
@@ -98,6 +108,9 @@ describe('exportHostedPendingAssistantRuntimeIssues', () => {
         occurredAt: '2026-04-08T12:00:00.000Z',
         operation: null,
         phase: 'final_response' as const,
+        releaseSha: null,
+        runtimeAttemptId: null,
+        runtimeName: null,
         schema: 'murph.assistant-runtime-issue.v1' as const,
         severity: 'warning' as const,
         summary: 'Assistant produced a visible developer note on a surface where developer notes are hidden.',
@@ -297,12 +310,20 @@ describe('exportHostedPendingAssistantRuntimeIssues', () => {
 
     try {
       const firstRecord = createPendingIssueRecord({
+        environment: 'hosted',
         occurredAt: '2026-04-08T12:02:00.000Z',
+        releaseSha: '0123456789abcdef0123456789abcdef01234567',
+        runtimeAttemptId: 'runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda',
+        runtimeName: 'cloudflare-hosted-runner',
       })
       const secondRecord = createPendingIssueRecord({
         component: 'assistant.retry-monitor',
+        environment: 'hosted',
         issueKind: 'retry_used',
         occurredAt: '2026-04-08T12:03:00.000Z',
+        releaseSha: '0123456789abcdef0123456789abcdef01234567',
+        runtimeAttemptId: 'runtime-write-f810791d-177e-4149-b5af-120f289ab33a',
+        runtimeName: 'cloudflare-hosted-runner',
       })
 
       for (const record of [firstRecord, secondRecord]) {
@@ -334,6 +355,18 @@ describe('exportHostedPendingAssistantRuntimeIssues', () => {
         pending: 1,
       })
       expect(issueExportPort.recordIssues).toHaveBeenCalledTimes(3)
+      expect(issueExportPort.recordIssues).toHaveBeenNthCalledWith(
+        1,
+        [firstRecord, secondRecord],
+      )
+      expect(issueExportPort.recordIssues).toHaveBeenNthCalledWith(
+        2,
+        [firstRecord],
+      )
+      expect(issueExportPort.recordIssues).toHaveBeenNthCalledWith(
+        3,
+        [secondRecord],
+      )
       expect(warnSpy).toHaveBeenNthCalledWith(
         1,
         expect.stringContaining(
