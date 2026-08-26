@@ -1,13 +1,20 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { isDeepStrictEqual } from "node:util";
+
+import type {
+  HostedMemberBillingRef,
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
-  assertNoHostedMemberStripeEffectTx,
+  assertHostedStripeEffectClaimAbsent,
   bindHostedMemberStripeCustomerIdIfMissingTx,
+  projectHostedMemberStripeBillingRefSnapshot,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import { requireHostedStripeApiMode } from "./runtime";
@@ -16,6 +23,16 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "./shared";
+
+type HostedMemberStripeCustomerPreparation =
+  | {
+      kind: "create";
+      expectedBillingRef: HostedMemberBillingRef | null;
+    }
+  | {
+      kind: "existing";
+      stripeCustomerId: string;
+    };
 
 /**
  * Reuses the member-scoped Stripe Customer identity and its existing provider
@@ -35,56 +52,119 @@ export async function ensureHostedMemberStripeCustomer(input: {
   }
 
   const { stripe } = requireHostedStripeApiMode();
+  const prepared = await prepareHostedMemberStripeCustomer({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (prepared.kind === "existing") {
+    return prepared.stripeCustomerId;
+  }
 
-  return prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    const member = await tx.hostedMember.findUnique({
-      select: {
-        suspendedAt: true,
-        threadContainer: { select: { memberId: true } },
-      },
-      where: { id: input.memberId },
-    });
-    if (!member || member.suspendedAt || member.threadContainer) {
-      throw buildHostedUsageCreditPayerNotEligibleError();
-    }
-    await assertNoHostedMemberStripeEffectTx({
+  const candidateStripeCustomerId = await createOrReconcileHostedMemberStripeCustomer({
+    memberId: input.memberId,
+    requestOptions: {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
+    },
+    stripe,
+  });
+
+  return finalizeHostedMemberStripeCustomer({
+    candidateStripeCustomerId,
+    expectedBillingRef: prepared.expectedBillingRef,
+    memberId: input.memberId,
+    prisma,
+  });
+}
+
+async function prepareHostedMemberStripeCustomer(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<HostedMemberStripeCustomerPreparation> {
+  return input.prisma.$transaction(async (tx) => {
+    const billingRef = await readHostedMemberStripeCustomerOwnerStateTx({
       memberId: input.memberId,
       tx,
     });
+    if (billingRef?.stripeCustomerLookupKey) {
+      const current = await projectHostedMemberStripeBillingRefSnapshot(
+        billingRef,
+        tx,
+      );
+      if (current.stripeCustomerId) {
+        return {
+          kind: "existing",
+          stripeCustomerId: current.stripeCustomerId,
+        } as const;
+      }
+    }
 
-    const current = await readHostedMemberStripeBillingRef({
+    return {
+      expectedBillingRef: billingRef,
+      kind: "create",
+    } as const;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function finalizeHostedMemberStripeCustomer(input: {
+  candidateStripeCustomerId: string;
+  expectedBillingRef: HostedMemberBillingRef | null;
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<string> {
+  return input.prisma.$transaction(async (tx) => {
+    const currentBillingRef = await readHostedMemberStripeCustomerOwnerStateTx({
       memberId: input.memberId,
-      prisma: tx,
+      tx,
     });
-    const candidateStripeCustomerId = current?.stripeCustomerId
-      ?? await createHostedMemberStripeCustomer({
-        memberId: input.memberId,
-        requestOptions: {
-          maxNetworkRetries: 0,
-          timeout: 5_000,
-        },
-        stripe,
-      });
-    const billingRef = current?.stripeCustomerId
-      ? current
-      : await bindHostedMemberStripeCustomerIdIfMissingTx({
-          memberId: input.memberId,
-          stripeCustomerId: candidateStripeCustomerId,
-          tx,
-        });
+    if (currentBillingRef?.stripeCustomerLookupKey) {
+      const current = await projectHostedMemberStripeBillingRefSnapshot(
+        currentBillingRef,
+        tx,
+      );
+      if (current.stripeCustomerId) {
+        return current.stripeCustomerId;
+      }
+    }
+
+    if (!isDeepStrictEqual(input.expectedBillingRef, currentBillingRef)) {
+      throw buildHostedUsageCreditCustomerBindFailedError();
+    }
+
+    const billingRef = await bindHostedMemberStripeCustomerIdIfMissingTx({
+      memberId: input.memberId,
+      stripeCustomerId: input.candidateStripeCustomerId,
+      tx,
+    });
     if (!billingRef?.stripeCustomerId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_USAGE_CREDIT_CUSTOMER_BIND_FAILED",
-        httpStatus: 409,
-        message: "Murph could not prepare Stripe checkout. Try again.",
-        retryable: true,
-      });
+      throw buildHostedUsageCreditCustomerBindFailedError();
     }
     return billingRef.stripeCustomerId;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+async function readHostedMemberStripeCustomerOwnerStateTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberBillingRef | null> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    select: {
+      suspendedAt: true,
+      threadContainer: { select: { memberId: true } },
+    },
+    where: { id: input.memberId },
+  });
+  if (!member || member.suspendedAt || member.threadContainer) {
+    throw buildHostedUsageCreditPayerNotEligibleError();
+  }
+
+  const billingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+  return billingRef;
+}
 
 type HostedMemberStripeCustomerRequestOptions = Pick<
   Stripe.RequestOptions,
@@ -92,12 +172,12 @@ type HostedMemberStripeCustomerRequestOptions = Pick<
 >;
 
 /**
- * Creates the reusable member-scoped Stripe Customer. The legacy idempotency
- * key and request metadata are intentionally preserved so a rolling-deploy
- * retry cannot create a second Customer after an earlier provider success.
- * They no longer imply or create a trial.
+ * Creates or replays the reusable member-scoped Stripe Customer. The legacy
+ * idempotency key and request metadata are intentionally preserved so an
+ * unknown provider outcome is reconciled by repeating this exact request,
+ * rather than by creating a new provider identity.
  */
-async function createHostedMemberStripeCustomer(input: {
+async function createOrReconcileHostedMemberStripeCustomer(input: {
   memberId: string;
   requestOptions?: HostedMemberStripeCustomerRequestOptions;
   stripe: Stripe;
@@ -123,6 +203,15 @@ async function createHostedMemberStripeCustomer(input: {
   );
 
   return customer.id;
+}
+
+function buildHostedUsageCreditCustomerBindFailedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_USAGE_CREDIT_CUSTOMER_BIND_FAILED",
+    httpStatus: 409,
+    message: "Murph could not prepare Stripe checkout. Try again.",
+    retryable: true,
+  });
 }
 
 function buildHostedUsageCreditPayerNotEligibleError() {
