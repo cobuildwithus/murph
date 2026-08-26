@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { WorkoutExercise, WorkoutSet } from '@murphai/contracts'
 
 import {
+  deriveLegacyWorkoutActionBindingV4,
   deriveWorkoutActionBinding,
-  deriveWorkoutRefreshBinding,
   deriveWorkoutSetRemovalBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
+  workoutActionBindingTargetsWorkout,
 } from '../src/workout-action-binding.js'
 
 const BASE_EXERCISES = [{
@@ -102,6 +104,74 @@ describe('workout action binding', () => {
     })).not.toBe(original)
   })
 
+  it('keeps a stable lookup prefix while the exact write suffix changes', () => {
+    const initial = { exercises: BASE_EXERCISES }
+    const changed = {
+      ...initial,
+      lastMemberActionId: '2f1c1fdc-c7b0-4d90-b902-8e6295959243',
+    }
+    const initialBinding = deriveWorkoutActionBinding('evt_workout', initial)
+    const changedBinding = deriveWorkoutActionBinding('evt_workout', changed)
+
+    expect(initialBinding.slice(0, 32)).toBe(changedBinding.slice(0, 32))
+    expect(initialBinding.slice(32)).not.toBe(changedBinding.slice(32))
+    expect(workoutActionBindingMatchesCurrentState(
+      'evt_workout',
+      changed,
+      initialBinding,
+    )).toBe(false)
+    expect(workoutActionBindingTargetsWorkout(
+      'evt_workout',
+      changed,
+      initialBinding,
+    )).toBe(true)
+    expect(workoutActionBindingTargetsWorkout(
+      'evt_workout_2',
+      changed,
+      initialBinding,
+    )).toBe(false)
+    expect(workoutActionBindingTargetsWorkout(
+      'evt_workout',
+      changed,
+      initialBinding.slice(0, 32),
+    )).toBe(false)
+  })
+
+  it('accepts the exact legacy write token and an initial legacy refresh token', () => {
+    const initial = { exercises: BASE_EXERCISES }
+    const changed = {
+      ...initial,
+      lastMemberActionId: '2f1c1fdc-c7b0-4d90-b902-8e6295959243',
+    }
+    const initialLegacyBinding = deriveLegacyWorkoutActionBindingV4(
+      'evt_workout',
+      initial,
+    )
+    const currentLegacyBinding = deriveLegacyWorkoutActionBindingV4(
+      'evt_workout',
+      changed,
+    )
+
+    expect(workoutActionBindingMatchesCurrentState(
+      'evt_workout',
+      changed,
+      currentLegacyBinding,
+    )).toBe(true)
+    expect(workoutActionBindingTargetsWorkout(
+      'evt_workout',
+      changed,
+      initialLegacyBinding,
+    )).toBe(true)
+    expect(workoutActionBindingTargetsWorkout(
+      'evt_workout',
+      changed,
+      deriveLegacyWorkoutActionBindingV4('evt_workout', {
+        ...initial,
+        lastMemberActionId: '80a3e280-3fb6-4fe5-86dd-dddad75dc4d0',
+      }),
+    )).toBe(false)
+  })
+
   it('preserves the binding across unrelated set result and annotation changes', () => {
     const changed: WorkoutExercise[] = structuredClone(BASE_EXERCISES)
     changed[0]!.sets[1] = {
@@ -126,17 +196,6 @@ describe('workout action binding', () => {
     })).not.toBe(deriveWorkoutActionBinding('evt_workout', {
       exercises: BASE_EXERCISES,
     }))
-  })
-})
-
-describe('workout refresh binding', () => {
-  it('is deterministic, opaque, and scoped to the canonical workout identity', () => {
-    const binding = deriveWorkoutRefreshBinding('evt_workout')
-
-    expect(binding).toMatch(/^[0-9a-f]{64}$/u)
-    expect(binding).toBe(deriveWorkoutRefreshBinding('evt_workout'))
-    expect(binding).not.toBe(deriveWorkoutRefreshBinding('evt_workout_2'))
-    expect(binding).not.toContain('evt_workout')
   })
 })
 

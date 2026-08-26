@@ -62,9 +62,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
   isHostedRuntimeProcessEnv,
   isMurphAndroidAppEnabled,
-  isMurphIMessageWorkoutLiveRefreshEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
-  MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -610,9 +608,6 @@ describe("hosted execution coverage gaps", () => {
       "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
     );
     expect(MURPH_ANDROID_APP_ENABLED_ENV).toBe("MURPH_ANDROID_APP_ENABLED");
-    expect(MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV).toBe(
-      "MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED",
-    );
     expect(
       isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
     ).toBe(true);
@@ -628,12 +623,6 @@ describe("hosted execution coverage gaps", () => {
       isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "true" }),
     ).toBe(false);
     expect(isMurphAndroidAppEnabled({})).toBe(false);
-    expect(isMurphIMessageWorkoutLiveRefreshEnabled({
-      [MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV]: "1",
-    })).toBe(true);
-    expect(isMurphIMessageWorkoutLiveRefreshEnabled({
-      [MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV]: "true",
-    })).toBe(false);
   });
 
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {

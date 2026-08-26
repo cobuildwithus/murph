@@ -175,9 +175,9 @@ export function buildLiveWorkoutCardEditor(input: {
     return null
   }
   const snapshot = buildLiveWorkoutCardSnapshot(input)
-  return snapshot?.editor === null || snapshot === null
-    ? null
-    : { editor: snapshot.editor, workout: snapshot.workout }
+  return snapshot?.editor
+    ? { editor: snapshot.editor, workout: snapshot.workout }
+    : null
 }
 
 export function buildLiveWorkoutCardSnapshot(input: {

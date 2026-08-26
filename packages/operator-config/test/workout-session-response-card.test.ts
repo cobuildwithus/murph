@@ -8,6 +8,7 @@ import {
   buildLinqIMessageAppLayout,
   encodeCompactTableAppCardUrl,
   encodeWorkoutSessionAppCardUrl,
+  encodeWorkoutSessionSnapshotAppCardUrl,
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
@@ -208,36 +209,22 @@ describe('workout session response cards', () => {
     expect(JSON.stringify(imageEnvelope)).not.toContain('"b"')
   })
 
-  it('encodes refreshable workouts as schema 7 while static images stay V4', () => {
-    const refreshable = {
-      ...ACTIVE_WORKOUT_CARD,
-      refresh: {
-        version: 1 as const,
-        workoutBinding: 'c'.repeat(64),
-      },
-    } satisfies AssistantResponseCard
-
+  it('encodes a refreshed snapshot through the existing V6 wire', () => {
     const envelope = decodeAppCardUrl(
-      encodeWorkoutSessionAppCardUrl(refreshable),
+      encodeWorkoutSessionSnapshotAppCardUrl({
+        title: ACTIVE_WORKOUT_CARD.title,
+        subtitle: ACTIVE_WORKOUT_CARD.subtitle,
+        footer: ACTIVE_WORKOUT_CARD.footer,
+        workout: ACTIVE_WORKOUT_CARD.workout,
+        editor: ACTIVE_WORKOUT_CARD.editor,
+      }),
     )
-    expect(envelope).toMatchObject({
-      schemaVersion: 7,
-      card: {
-        e: ACTIVE_WORKOUT_CARD.workout.exercises.map((exercise) => [
-          exercise.name,
-          expect.any(Array),
-        ]),
-      },
-      editor: {
-        actionBinding: ACTIVE_WORKOUT_CARD.editor.actionBinding,
-        version: 1,
-      },
-      refresh: refreshable.refresh,
-    })
+
+    expect(envelope).toEqual(decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),
+    ))
+    expect(envelope).toMatchObject({ schemaVersion: 6 })
     expect(JSON.stringify(envelope)).not.toContain('evt_')
-    expect(decodeImageCardUrl(
-      buildLinqIMessageAppLayout(refreshable).image_url ?? '',
-    )).toMatchObject({ schemaVersion: 4 })
   })
 
   it('routes enhanced compact tables through V6 and ordinary tables through V3', () => {
@@ -338,6 +325,31 @@ describe('workout session response cards', () => {
 
     expect(urls.map((url) => url.length)).toEqual([1624, 1905, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
+
+    const oversizedEditorCard = {
+      ...buildCard('active', 18),
+      title: 'T'.repeat(60),
+      subtitle: 'S'.repeat(120),
+      footer: 'F'.repeat(120),
+    }
+    expect(() => encodeWorkoutSessionAppCardUrl(oversizedEditorCard)).toThrow(
+      'exceeds the inline Messages card limit',
+    )
+    if (
+      !('workout' in oversizedEditorCard)
+      || oversizedEditorCard.editor === undefined
+    ) {
+      throw new TypeError('Expected an editable workout fixture.')
+    }
+    const fallback = encodeWorkoutSessionSnapshotAppCardUrl({
+      title: oversizedEditorCard.title,
+      subtitle: oversizedEditorCard.subtitle,
+      footer: oversizedEditorCard.footer,
+      workout: oversizedEditorCard.workout,
+      editor: oversizedEditorCard.editor,
+    })
+    expect(fallback.length).toBeLessThan(2_048)
+    expect(decodeAppCardUrl(fallback)).toMatchObject({ schemaVersion: 4 })
   })
 
   it('encodes a complete 11×3 late-active card when its measured URL fits', () => {

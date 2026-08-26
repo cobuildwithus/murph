@@ -16,7 +16,7 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 - A saved workout format owns planned exercises, stable exercise identity, planned sets, and target values.
 - One canonical `activity_session` workout event owns session timing, unlogged set coordinates, and actual completed-set values. Planned targets are not copied into those placeholders.
 - A transcript response card is an immutable snapshot and never owns workout
-  state. A schema-7 card may refresh only its expanded in-memory presentation
+  state. An active V6 card may refresh only its expanded in-memory presentation
   from canonical state; the sent bubble and offline fallback remain unchanged.
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
@@ -390,8 +390,11 @@ write, those compatible bundles are the rollback floor. Legacy saved-routine
 exercises with no finite marker retain finite-plan semantics, while new
 targetless exercises write `setPlanIsFinite: false` so they cannot inherit that
 legacy default. Legacy ad hoc workouts remain explicit-finish sessions. The
-workout action binding version changes, so already-sent editable cards fail
-closed and require a refreshed card rather than being reinterpreted.
+workout action binding keeps its existing 64-hex wire. The current derivation
+combines a stable lookup prefix with an exact mutable-state suffix; the whole
+token remains the optimistic write precondition. Runtime also accepts the
+preceding full-length derivation when it exactly matches current state, so
+already-sent editable cards remain valid until the workout changes.
 
 Backward compatibility is a permanent iMessage app-card contract, not a
 one-time V6 rollout step. Linq's app-capability result does not negotiate a
@@ -444,145 +447,75 @@ final balloon, image-failure behavior, accessibility behavior, and App Store
 affordance. Provider acceptance, direct route renders, and delivery receipts do
 not prove those device behaviors.
 
-## Schema-7 workout-card foundation
+## V4/V6 live refresh
 
-Status: implemented behind the platform-owned
-`MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED=1` producer gate. V1–V6 remain the
-production contract until the schema-7 iOS reader and every server-side reader
-are deployed and verified. Enabling the producer before that reader-first gate
-is prohibited.
+Live refresh preserves the permanent card-reader contract: no new workout-card
+schema, producer flag, capability registry, or duplicated native result model is
+introduced. V4 remains the complete read-only wire and V6 remains the complete
+editable wire. Previously released readers continue to render both exactly as
+before; only a newer Messages extension elects to make the additional read.
 
-### Permanent envelope
+### Binding and authority
 
-Schema 7 introduces one permanent outer envelope for native workout cards:
+New V6 action bindings retain the existing 64-lowercase-hex shape. The first
+half is a domain-separated, one-way lookup correlation for the high-entropy
+canonical workout id. The second half covers the same workout id, ordered
+hidden exercise/set-slot identity, and last applied member-action generation.
+The complete 64-character value is required for a write, so a stable lookup
+prefix does not weaken stale-write rejection or become write authority.
 
-```json
-{
-  "schemaVersion": 7,
-  "card": { "...complete readable workout presentation...": "..." },
-  "editor": { "...optional typed editing capability...": "..." },
-  "refresh": { "version": 1, "workoutBinding": "...opaque 64 hex..." }
-}
-```
+The expanded reader submits the V6 action binding through the existing
+member-scoped bearer as `workout.live.snapshot`, together with the complete
+embedded presentation skeleton. Runtime searches only that authenticated
+member's bounded workout collection, requires exactly one binding target, and
+then requires the canonical exercise/set structure to match before preserving
+embedded labels and projecting current results. A forwarded card therefore
+cannot read its sender's vault. The token exposes neither canonical id nor
+member identity; it intentionally permits same-workout correlation across new
+cards held by one credential owner.
 
-- `schemaVersion: 7` is frozen permanently. Future compatible capabilities do
-  not increment the outer version.
-- `card` is required, strict, and self-sufficient. It carries the complete
-  readable V4-style workout presentation, so rendering never depends on
-  `editor` or another capability.
-- `editor` is optional and independently versioned. A reader validates it
-  separately from `card`; an absent, malformed, unsupported, or unfamiliar
-  editor is ignored in full and the unchanged card renders read-only.
-- A schema-7 reader validates the known base while ignoring unrecognized
-  optional top-level capability fields. Add a future capability as one direct
-  optional field only when the product needs it. Introduce no generic module or
-  capability registry until multiple implemented capabilities demonstrate a
-  shared abstraction.
-- V1–V6 decoders remain permanent historical readers. Schema 7 does not
-  reinterpret, migrate, or delete already-sent envelopes.
+For cards sent before the composite derivation, snapshot lookup accepts either
+the exact current legacy binding or the legacy binding for the workout before
+its first member action. This keeps ordinary already-sent initial V6 cards
+refreshable after their first save. It cannot recover an arbitrary historical
+last-action generation without adding another identity store, so other stale
+legacy cards fail closed and retain their embedded snapshot. Legacy writes are
+accepted only when their full binding still exactly matches current state.
 
-The editor remains only a typed projection for actions against one immutable
-card. In addition to its own version and the existing opaque stale-action
-binding, its presentation delta needs only the unit for each exercise and typed
-results for completed sets. Pending-set editor placeholders are redundant:
-their coordinates and readable state already come from `card`. The editor does
-not become canonical workout state, an authorization source, or a duplicate
-readable presentation.
+### Result and fallback
 
-Authorization, access checks, stale-card rejection, action delivery, and the
-canonical workout mutation remain with their existing owners. This foundation
-adds no client-version negotiation, device registry, server handshake,
-per-member rollout state, dynamic UI protocol, compression scheme, queue,
-cache, or service.
+The result contains one bounded canonical Murph card URL, not another workout
+or editor wire. The server encodes the current projection as ordinary V6 when
+the workout is active, structurally supported, editable, and the complete URL
+fits below 2,048 characters. Otherwise it emits ordinary V4 read-only when that
+complete presentation fits. The native result passes that URL through the
+existing strict card decoder. It never merges parallel result models or
+partially installs an editor.
 
-The optional `refresh` capability is a read-only correlation hint, not
-authentication or write authority. It is a domain-separated one-way digest of
-the high-entropy canonical workout id. The expanded Messages reader submits it
-through the existing member-scoped bearer as `workout.live.snapshot`; runtime
-searches only that authenticated member's bounded workout collection and
-returns current presentation plus an optional fresh editor projection. A
-forwarded card therefore finds no workout in the recipient's vault. The stable
-digest intentionally permits same-workout correlation across cards for one
-credential holder; it exposes neither the canonical id nor member identity.
-The extension keeps no cache, performs no background refresh, and never
-replaces a dirty, admitted, submitting, or failed local draft. Network,
-credential, stale-structure, or unsupported-result failure leaves the complete
-embedded card visible.
+The extension renders the embedded card immediately, keeps one transient
+selected-message session, and replaces that session only while its entire draft
+equals the card baseline, no admitted request exists, and submission state is
+idle. Network, credential, decode, non-unique-target, structural, or size
+failure leaves the complete embedded card and any local state unchanged. The
+extension performs no background refresh and stores no result. An oversized V4
+result or a V4/read-only returned result cannot continue refreshing because it
+contains no action binding.
 
-### Encoding and bounded fallback
+### Rollout and proof
 
-The producer uses one deterministic sequence:
+Backend-first is the preferred deployment order, followed by the iOS extension.
+Both skew directions are safe: an older extension only renders its existing
+V4/V6 snapshot, while a newer extension against an older backend treats the
+unsupported snapshot action as a refresh failure and keeps that snapshot. The
+composite binding remains opaque to old iOS readers. No new card schema is
+persisted, so this change creates no installed-reader rollback floor or producer
+gate beyond the existing V4/V6 floor.
 
-1. Build and validate the complete readable `card`.
-2. When editing is eligible, encode schema 7 with the whole `editor`.
-3. If that URL exceeds the existing 2,048-character ceiling, remove the entire
-   `editor` and encode the exact same schema-7 `card` read-only. Do not truncate
-   either projection or emit a partial editor.
-4. If the readable base still does not fit, use the existing complete
-   semantic-text recovery path.
-
-The representative six-exercise, four-set measurement that justifies this
-fallback is:
-
-| Snapshot | Encoded length | Result |
-| --- | ---: | --- |
-| Initial card with editor | 1,695 characters | Fits |
-| Late card with editor | 2,299 characters | Too large |
-| Same late card without editor | 1,612 characters | Fits read-only |
-
-These measurements establish the algorithm, not a second capacity limit.
-Validation of the final encoded URL remains authoritative.
-
-### Deliberately narrow scope
-
-Schema 7 applies only to native workout cards. The static workout-image route
-continues using its authority-free V4 envelope. Generic compact tables,
-nutrition cards, standings, and other card families keep their current
-protocols. Their implementations may reuse parsing mechanics where useful, but
-uniformity alone is not a reason to migrate them.
-
-### Reader-first rollout and compatibility boundary
-
-Rollout is global and reader-first:
-
-1. Release an iOS Messages-extension reader that renders the schema-7 `card`
-   independently and preserves every V1–V6 decoder.
-2. Update every existing server, outbox, renderer, and recovery reader that can
-   encounter the envelope. Prove that each accepts schema 7 without requiring
-   `editor` and ignores an invalid or unknown editor without changing the card.
-3. Only after those readers are live, switch the workout-card producer globally.
-   Do not add negotiation or per-member rollout machinery for the transition.
-
-Previously released pre-foundation extensions cannot understand schema 7 and
-are the one explicit compatibility exception to the permanent rule above.
-Reader-first deployment narrows but cannot eliminate that installed-build
-window because the provider does not negotiate decoder versions. This exception
-must be acknowledged in the release decision and is not precedent for later
-breaks. Once schema 7 ships, every later optional capability degrades in the
-original schema-7 client to the same complete read-only `card`.
-
-The server persisted-state rollback floor still applies: all strict readers
-must be live before the first schema-7 envelope is persisted or emitted. After
-that point, recovery is a forward fix or a compatible bundle, never rollback to
-a reader that rejects schema 7.
-
-### Required implementation proof
-
-Implementation is complete only when focused fixtures and end-to-end proof
-cover all of the following:
-
-- the same card renders from a valid editor, no editor, a malformed editor, and
-  an unknown editor version;
-- unknown optional schema-7 capability fields do not prevent base-card
-  rendering;
-- every V1–V6 historical fixture still decodes through its original path;
-- editor projection contains completed-set typed results and per-exercise units
-  without pending-set placeholders or a second readable presentation;
-- boundary tests prove the editor-first, whole-editor-drop, and semantic-text
-  branches at the actual URL ceiling;
-- the static image remains V4 and non-workout card families retain their
-  existing envelopes;
-- persisted outbox and hosted-delivery round trips accept both editable and
-  read-only schema-7 workout cards; and
-- physical Messages-extension proof covers editable schema 7, read-only
-  fallback, malformed or unsupported editor fallback, and legacy V1–V6 cards.
+Required proof covers exact V4/V6 historical decoding; current and legacy
+binding matching; cross-member, ambiguous, and structurally changed rejection;
+V6 result decoding through the existing native decoder; whole-editor fallback
+to V4 at the real URL ceiling; clean-session replacement; dirty, admitted,
+submitting, saved, and failed session preservation; presentation transitions;
+and physical Messages-extension behavior when an Xcode/device host is
+available. The static image remains V4 and all non-workout card families retain
+their existing envelopes.

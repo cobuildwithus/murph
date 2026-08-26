@@ -1519,37 +1519,6 @@ describe('murph.attach_response_card', () => {
     })
   })
 
-  it('adds a stable read-only refresh capability only behind the rollout flag', async () => {
-    const fixture = await createLiveWorkoutCardVault()
-    const result = await executeCardTool({
-      env: { MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED: '1' },
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
-      vaultRoot: fixture.root,
-    })
-    const card = result.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected an attached workout card.')
-    }
-
-    expect(card.refresh).toEqual({
-      version: 1,
-      workoutBinding: expect.stringMatching(/^[0-9a-f]{64}$/u),
-    })
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: 'live-refresh',
-      vaultRoot: fixture.root,
-    })
-    expect(delivery.envelope.schemaVersion).toBe(7)
-    expect(delivery.envelope).toMatchObject({
-      card: { k: 'w' },
-      refresh: card.refresh,
-    })
-  })
-
   it('keeps ambiguous duplicate exercise coordinates on the V4 card', async () => {
     const fixture = await createLiveWorkoutCardVault({
       ambiguousDuplicate: true,

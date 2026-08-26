@@ -17,10 +17,11 @@ import {
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
 } from '@murphai/operator-config/workout-action-binding'
+import { encodeWorkoutSessionSnapshotAppCardUrl } from '@murphai/operator-config/assistant-response-cards'
 
 import { showWorkoutFormat } from './workout-format.js'
 import {
@@ -109,7 +110,7 @@ export async function readLiveWorkoutCardSnapshot(input: {
   try {
     const shown = targets[0]!
     const snapshot = buildLiveWorkoutCardSnapshot({
-      presentation: input.action.presentation,
+      presentation: input.action.presentation.workout,
       workout: parseShownWorkout(shown),
       workoutId: shown.entity.id,
     })
@@ -118,10 +119,13 @@ export async function readLiveWorkoutCardSnapshot(input: {
     }
     return {
       result: {
-        editor: snapshot.editor,
+        cardUrl: encodeWorkoutSessionSnapshotAppCardUrl({
+          ...input.action.presentation,
+          ...(snapshot.editor === null ? {} : { editor: snapshot.editor }),
+          workout: snapshot.workout,
+        }),
         kind: 'workout.live.snapshot',
         version: 1,
-        workout: snapshot.workout,
       },
       status: 'unchanged',
     }
@@ -191,8 +195,11 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     return { reason: 'workout_changed', status: 'rejected' }
   }
   if (
-    input.action.expectedWorkout.actionBinding
-      !== deriveWorkoutActionBinding(shown.entity.id, workout)
+    !workoutActionBindingMatchesCurrentState(
+      shown.entity.id,
+      workout,
+      input.action.expectedWorkout.actionBinding,
+    )
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }

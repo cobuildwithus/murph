@@ -1,7 +1,6 @@
 import * as z from "./zod-runtime.ts";
 import {
-  workoutSessionDetailV1Schema,
-  workoutSessionEditorProjectionV1Schema,
+  workoutSessionPresentationV1Schema,
 } from "./workout-session-card.ts";
 import {
   workoutMemberActionExpectedSetResultV1Schema,
@@ -26,6 +25,8 @@ export const memberActionV1Bounds = {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SINGLE_LINE_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029\r\n]+$/u;
+const WORKOUT_APP_CARD_URL_PATTERN =
+  /^https:\/\/www\.withmurph\.ai\/#murph-card=[A-Za-z0-9_-]+$/u;
 
 function singleLineText(maxLength: number) {
   return z
@@ -421,7 +422,7 @@ export type WorkoutLiveApplyMemberActionV1 = z.infer<
 export const workoutLiveSnapshotMemberActionV1Schema = z
   .object({
     kind: z.literal("workout.live.snapshot"),
-    presentation: workoutSessionDetailV1Schema,
+    presentation: workoutSessionPresentationV1Schema,
     version: z.literal(1),
     workoutBinding: z.string().regex(/^[0-9a-f]{64}$/u),
   })
@@ -468,10 +469,9 @@ export type MemberActionRejectionReasonV1 = z.infer<
 
 export const workoutLiveSnapshotMemberActionResultV1Schema = z
   .object({
-    editor: workoutSessionEditorProjectionV1Schema.nullable(),
+    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
     kind: z.literal("workout.live.snapshot"),
     version: z.literal(1),
-    workout: workoutSessionDetailV1Schema,
   })
   .strict();
 

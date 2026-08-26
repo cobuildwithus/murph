@@ -7,9 +7,9 @@ import {
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
-  deriveWorkoutActionBinding,
-  deriveWorkoutRefreshBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
+  workoutActionBindingTargetsWorkout,
 } from '@murphai/operator-config/workout-action-binding'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -118,7 +118,11 @@ export async function findLiveWorkoutActionTargets(
     if (
       isOpenLiveWorkout(workout)
       && !hasAmbiguousWorkoutActionExerciseCoordinates(workout)
-      && deriveWorkoutActionBinding(shown.entity.id, workout) === actionBinding
+      && workoutActionBindingMatchesCurrentState(
+        shown.entity.id,
+        workout,
+        actionBinding,
+      )
     ) {
       bindingMatches.push(shown)
     }
@@ -143,7 +147,11 @@ export async function findLiveWorkoutRefreshTargets(
       vault,
       entity: toCommandShowEntity(record),
     }
-    return deriveWorkoutRefreshBinding(shown.entity.id) === workoutBinding
+    return workoutActionBindingTargetsWorkout(
+      shown.entity.id,
+      workout,
+      workoutBinding,
+    )
       ? [shown]
       : []
   })

@@ -20,17 +20,9 @@ describe("hosted member action runtime", () => {
     mocks.applyLiveWorkoutMemberAction.mockResolvedValue({ status: "applied" });
     mocks.readLiveWorkoutCardSnapshot.mockResolvedValue({
       result: {
-        editor: null,
+        cardUrl: "https://www.withmurph.ai/#murph-card=card",
         kind: "workout.live.snapshot",
         version: 1,
-        workout: {
-          exercises: [{
-            name: "Bench press",
-            sets: [{ actual: "8 reps", status: "completed", target: null }],
-          }],
-          state: "active",
-          version: 1,
-        },
       },
       status: "unchanged",
     });
@@ -145,12 +137,17 @@ describe("hosted member action runtime", () => {
     const action = {
       kind: "workout.live.snapshot" as const,
       presentation: {
-        exercises: [{
-          name: "Bench press",
-          sets: [{ actual: null, status: "pending" as const, target: null }],
-        }],
-        state: "active" as const,
-        version: 1 as const,
+        title: "Strength",
+        subtitle: null,
+        footer: null,
+        workout: {
+          exercises: [{
+            name: "Bench press",
+            sets: [{ actual: null, status: "pending" as const, target: null }],
+          }],
+          state: "active" as const,
+          version: 1 as const,
+        },
       },
       version: 1 as const,
       workoutBinding: "c".repeat(64),
@@ -176,10 +173,8 @@ describe("hosted member action runtime", () => {
       outcome: {
         reason: null,
         result: {
+          cardUrl: "https://www.withmurph.ai/#murph-card=card",
           kind: "workout.live.snapshot",
-          workout: {
-            exercises: [{ sets: [{ actual: "8 reps" }] }],
-          },
         },
         status: "unchanged",
       },

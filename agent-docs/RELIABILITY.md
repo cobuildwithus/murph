@@ -2595,22 +2595,28 @@ outcome as an existing post-checkpoint effect before releasing the requested
 item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
-requires the V6 card's opaque workout-revision binding under the existing
-workout mutation lock. That binding combines the canonical workout identity,
-ordered hidden exercise/set-slot identity, and the last applied member-action
-generation. Delayed or forwarded cards therefore cannot retarget a later
-workout, a set shifted by another direct action, or a same-name exercise moved
-by the generic workout editor. Mutable set results and annotations remain under
-their existing result-family optimistic comparisons rather than the positional
-identity binding.
-Schema-7 expanded readers use a separate stable read-only workout binding and
-the same mailbox delivery path for `workout.live.snapshot`. The member-scoped
-credential supplies identity; runtime scans only that member's bounded
-canonical workout collection, requires one structural match to the embedded
-target skeleton, and returns current progress plus an editor only when the
-canonical result families remain supported. This action never writes the
-workout. Missing, duplicate, structurally changed, or cross-member targets fail
-closed as `workout_changed`, leaving the embedded snapshot in place.
+requires the V6 card's opaque workout binding under the existing workout
+mutation lock. Its stable lookup prefix covers the canonical workout identity
+while its exact state suffix covers that identity, ordered hidden
+exercise/set-slot identity, and the last applied member-action generation. A
+write must
+match the complete current token; delayed or forwarded cards therefore cannot
+retarget a later workout, a set shifted by another direct action, or a same-name
+exercise moved by the generic workout editor. Mutable set results and
+annotations remain under their existing result-family optimistic comparisons
+rather than the positional identity binding. An exact current legacy binding
+remains valid for an already-sent V6 write.
+Expanded V6 readers reuse that binding with the same mailbox delivery path for
+`workout.live.snapshot`. The member-scoped credential supplies identity;
+runtime scans only that member's bounded canonical workout collection, requires
+one structural match to the embedded target skeleton, and returns one ordinary
+V6 card URL with current progress and editor state, or an ordinary V4 read-only
+URL when editing is unavailable or too large. Legacy lookup accepts only an
+exact current token or the empty-prior-action derivation used by an initial
+card. This action never writes the workout. Missing, duplicate, structurally
+changed, oversized, or cross-member targets fail closed as `workout_changed`,
+leaving the embedded snapshot in place. The result reuses the existing strict
+card decoder rather than defining a parallel workout wire.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;

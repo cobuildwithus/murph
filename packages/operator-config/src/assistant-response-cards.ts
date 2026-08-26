@@ -12,7 +12,6 @@ import {
   assistantResponseCardMatchesConversationAudience,
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
-  buildWorkoutSessionAppCardEnvelopeV7,
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
   compactTableResponseCardAuthoringV1Schema,
@@ -46,6 +45,8 @@ import {
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
+  type WorkoutSessionEditorProjectionV1,
+  type WorkoutSessionPresentationV1,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -455,6 +456,35 @@ export function encodeWorkoutSessionAppCardUrl(
   return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed, true))
 }
 
+export function encodeWorkoutSessionSnapshotAppCardUrl(
+  presentation: WorkoutSessionPresentationV1 & {
+    editor?: WorkoutSessionEditorProjectionV1
+  },
+): string {
+  if (presentation.editor !== undefined) {
+    const editablePayload = encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV6({
+        editor: presentation.editor,
+        title: presentation.title,
+        subtitle: presentation.subtitle,
+        footer: presentation.footer,
+        workout: presentation.workout,
+      }),
+    )
+    if (
+      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
+      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
+    ) {
+      return encodeAppCardEnvelopeUrl(editablePayload)
+    }
+  }
+  return encodeAppCardEnvelopeUrl(
+    encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV4(presentation),
+    ),
+  )
+}
+
 function encodeCompactTableAppCardPayload(
   card: CompactTableResponseCardV1,
   includeActionBinding: boolean,
@@ -524,32 +554,6 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
-  if (includeActionBinding && card.refresh !== undefined) {
-    const editableEnvelope = buildWorkoutSessionAppCardEnvelopeV7({
-      ...(card.editor === undefined ? {} : { editor: card.editor }),
-      refresh: card.refresh,
-      title: card.title,
-      subtitle: card.subtitle,
-      footer: card.footer,
-      workout: card.workout,
-    })
-    const editablePayload = encodeAppCardEnvelopePayload(editableEnvelope)
-    if (
-      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
-      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
-    ) {
-      return editablePayload
-    }
-    return encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV7({
-        refresh: card.refresh,
-        title: card.title,
-        subtitle: card.subtitle,
-        footer: card.footer,
-        workout: card.workout,
-      }),
-    )
-  }
   return encodeAppCardEnvelopePayload(
     includeActionBinding
       && card.editor !== undefined
@@ -576,8 +580,7 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
-    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>
-    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV7>,
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')

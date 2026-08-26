@@ -41,10 +41,8 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-  isMurphIMessageWorkoutLiveRefreshEnabled,
   isMurphAndroidAppEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
-  MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -1957,9 +1955,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...guardedRuntime.userEnv,
       ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
         ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
-        : {}),
-      ...(isMurphIMessageWorkoutLiveRefreshEnabled(guardedRuntime.platformEnv)
-        ? { [MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV]: "1" }
         : {}),
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }

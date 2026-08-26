@@ -6,11 +6,9 @@ import { isStrictIsoDateTime } from "./time.ts";
 import {
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
-  buildWorkoutSessionAppCardEnvelopeV7,
   parseWorkoutSessionAppCardEnvelopeV4,
   workoutSessionDetailV1Schema,
   workoutSessionEditorProjectionV1Schema,
-  workoutSessionRefreshCapabilityV1Schema,
 } from "./workout-session-card.ts";
 
 export const compactTableCardV1Bounds = {
@@ -210,7 +208,6 @@ const compactTableWorkoutResponseCardV1Schema = z
     ...compactTableResponseCardHeaderV1Shape,
     editor: workoutSessionEditorProjectionV1Schema.optional(),
     footer: singleLineText(compactTableCardV1Bounds.footer).nullable(),
-    refresh: workoutSessionRefreshCapabilityV1Schema.optional(),
     tracking: compactTableTrackingSourceV1Schema,
     workout: workoutSessionDetailV1Schema,
   })
@@ -226,53 +223,24 @@ const compactTableWorkoutResponseCardV1Schema = z
       presentationEnvelope,
       context,
       "workout session",
-      {
-        image: true,
-        inline: card.editor === undefined && card.refresh === undefined,
-      },
+      { image: true, inline: card.editor === undefined },
     );
-    if (card.refresh !== undefined) {
+    if (card.editor === undefined) {
+      return;
+    }
+    try {
       addEncodedLengthIssues(
-        buildWorkoutSessionAppCardEnvelopeV7({
-          refresh: card.refresh,
+        buildWorkoutSessionAppCardEnvelopeV6({
+          editor: card.editor,
           title: card.title,
           subtitle: card.subtitle,
           footer: card.footer,
           workout: card.workout,
         }),
         context,
-        "refreshable workout",
+        "workout editor",
         { image: false, inline: true },
       );
-    }
-    if (card.editor === undefined) {
-      return;
-    }
-    try {
-      const editableEnvelope = card.refresh === undefined
-        ? buildWorkoutSessionAppCardEnvelopeV6({
-            editor: card.editor,
-            title: card.title,
-            subtitle: card.subtitle,
-            footer: card.footer,
-            workout: card.workout,
-          })
-        : buildWorkoutSessionAppCardEnvelopeV7({
-            editor: card.editor,
-            refresh: card.refresh,
-            title: card.title,
-            subtitle: card.subtitle,
-            footer: card.footer,
-            workout: card.workout,
-          });
-      if (card.refresh === undefined) {
-        addEncodedLengthIssues(
-          editableEnvelope,
-          context,
-          "workout editor",
-          { image: false, inline: true },
-        );
-      }
     } catch {
       context.addIssue({
         code: "custom",
@@ -315,22 +283,6 @@ export type CompactTablePresentationCardV1 =
 export function parseCompactTableAppCardEnvelope(
   value: unknown,
 ): CompactTablePresentationCardV1 | null {
-  if (
-    typeof value === "object"
-    && value !== null
-    && !Array.isArray(value)
-    && (value as Record<string, unknown>).schemaVersion === 7
-    && Object.hasOwn(value, "card")
-  ) {
-    const parsed = parseWorkoutSessionAppCardEnvelopeV4(value);
-    return parsed === null
-      ? null
-      : {
-          kind: "compact_table",
-          version: 1,
-          ...parsed,
-        };
-  }
   if (!isExactAppCardEnvelope(value)) {
     return null;
   }
