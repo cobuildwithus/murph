@@ -1,6 +1,6 @@
 # Product feedback 5,000-character recovery
 
-Status: candidate packaging and review active
+Status: final-review remediation verification active
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -20,9 +20,9 @@ Effort: Patch.
   tool call is correctable.
 - Reaches: Verified private support requests and ordinary product-feedback
   capture through the existing `murph.submit_product_feedback` tool.
-- Proof: Deterministic tool-contract tests plus one focused real-Codex journey
-  show one actionable validation error, one corrected retry, one durable
-  accepted effect, and truthful member-visible confirmation.
+- Proof: Deterministic tool-contract tests plus focused real-Codex journeys
+  cover one actionable validation error, one corrected retry, one durable
+  accepted effect, a terminal second rejection, and silent ordinary feedback.
 
 Affected paths:
 
@@ -40,8 +40,8 @@ Affected paths:
 ## Scope
 
 - In scope: the shared summary limit, model-visible tool schema and recovery
-  contract, deterministic parser/executor/Web boundary tests, one focused
-  production-derived real-Codex journey, and matching durable owner docs when
+  contract, deterministic parser/executor/Web boundary tests, focused
+  production-derived real-Codex journeys, and matching durable owner docs when
   numeric or recovery claims require them.
 - Out of scope: new persistence, raw transcript retention, recipient changes,
   support-email retries, provider changes, new feedback fields, and automatic
@@ -66,8 +66,9 @@ Affected paths:
 2. Raise the single shared constant to 5,000 and align exact boundary tests.
 3. Return an explicit value-free correction contract for invalid product-
    feedback arguments and align the model-facing retry rule.
-4. Add deterministic proof and one focused real-Codex recovery journey, then
-   review the actual reply for truthful acceptance/failure language.
+4. Add deterministic proof and focused real-Codex recovery journeys, then
+   review the actual replies for truthful support and ordinary-feedback
+   language.
 5. Run focused tests and typechecks, inspect the complete diff, commit and push
    the candidate, and complete the required specialist, final ReviewGPT, CI,
    Product UX walkthrough, parent review, and plan closure gates.
@@ -97,25 +98,41 @@ Results so far:
 - Hosted Execution, Assistant Engine, Cloudflare runner, and Web typechecks
   pass. The final prompt-contract run passes all 74 tests.
 - The deterministic recovery proof returns value-free `path`, `code`, and
-  5,000-character `maximum` facts plus a one-retry recovery action, then records
-  exactly one corrected escalation. The Web boundary accepts an exact
+  5,000-character `maximum` facts, then records exactly one corrected
+  escalation. Retry policy has one prompt owner; the validation result carries
+  facts only and no attempt state. The Web boundary accepts an exact
   5,000-character summary.
 - The required live journey was attempted twice. Both attempts stopped before
   any provider action with the subscription usage-limit error, so deterministic
   behavior is `Ready` and live model behavior remains `Hold` rather than being
   inferred.
+- Preliminary and final review correctly found a stale no-retry instruction,
+  unscoped support outcome wording, self-directing live-test copy, and repeated
+  recovery metadata. The remediation deletes those duplicate owners, scopes
+  outcomes to explicit private support, and adds separate accepted, second-
+  rejection, and ordinary-silence model journeys. Focused deterministic tests
+  pass 101 assertions, the real-journey file compiles, and Assistant Engine
+  typecheck passes.
+- The remediated live journey was attempted with the default local profile and
+  two authenticated alternate Codex homes. All three stopped before any
+  provider action with the same subscription usage-limit error, so the live
+  verdict remains `Hold`; no additional profile attempts are planned.
 - Complete first-provider request capture used the pinned real Codex App
   Server, identical synthetic direct/group turns, production code mode, and
   `gpt-tokenizer` 3.4.0 `o200k_harmony`. It serialized `include`, `input`,
   `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools` when
   present, then normalized checkout/temp paths and generated request ids.
-  Direct moved from 26,344 tokens / 122,123 UTF-8 bytes to 26,390 / 122,445
-  (+46 tokens, +0.1746%; +322 bytes, +0.2637%). Group moved from 22,523 /
-  104,859 to 22,569 / 105,181 (+46 tokens, +0.2042%; +322 bytes, +0.3071%).
-  The delta is confined to assembled product-feedback retry instructions and
-  tool/schema guidance; other provider-visible fields are unchanged. Repeated
-  base and head captures matched exactly, and temporary instrumentation was
-  removed.
+  Direct moved from 26,344 tokens / 122,123 UTF-8 bytes to 26,381 / 122,456
+  (+37 tokens, +0.1404%; +333 bytes, +0.2727%). Group moved from 22,523 /
+  104,859 to 22,560 / 105,192 (+37 tokens, +0.1643%; +333 bytes, +0.3176%).
+  The final-review remediation reduced both routes by nine tokens versus the
+  first-reviewed head while adding 11 bytes for explicit ordinary-versus-
+  support wording. The base-to-head delta remains confined to assembled
+  product-feedback instructions and tool/schema guidance; other provider-
+  visible fields are unchanged. Repeated base and first-reviewed-head captures
+  matched exactly. A deterministic current-versus-first-reviewed replay
+  reconstructed the changed provider-visible fields, and all temporary
+  instrumentation was removed.
 
 ## Deployment
 

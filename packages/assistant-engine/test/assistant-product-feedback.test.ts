@@ -121,7 +121,7 @@ describe("assistant product feedback", () => {
     });
   });
 
-  it("advertises one schema-repair retry and optional changelog metadata", () => {
+  it("advertises value-free schema issues and optional changelog metadata", () => {
     const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
@@ -144,11 +144,12 @@ describe("assistant product feedback", () => {
     expect(description).toContain('beginning exactly "Support escalation:"');
     expect(description).toContain("waits for the durable callback");
     expect(description).toContain(
-      "correct the listed validation issues and retry once",
+      "An input-schema rejection includes value-free validation issues",
     );
     expect(description).toContain(
       "Accepted, already accepted, unavailable, and callback-failure results are terminal",
     );
+    expect(description).not.toContain("retry once");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
@@ -425,12 +426,9 @@ describe("assistant product feedback", () => {
     const feedbackText = oversizedResult.rpcResult.contentItems[0]?.text ?? "";
 
     expect(oversizedResult.rpcResult.success).toBe(false);
-    expect(JSON.parse(feedbackText)).toMatchObject({
+    const parsedFeedback = JSON.parse(feedbackText);
+    expect(parsedFeedback).toMatchObject({
       error: "invalid_product_feedback_arguments",
-      recovery: {
-        action: "correct_validation_issues_and_retry",
-        retryLimit: 1,
-      },
       validationIssues: expect.arrayContaining([
         expect.objectContaining({
           code: "too_big",
@@ -439,6 +437,7 @@ describe("assistant product feedback", () => {
         }),
       ]),
     });
+    expect(parsedFeedback).not.toHaveProperty("recovery");
     expect(feedbackText).not.toContain(privateMarker);
     expect(feedbackText).not.toContain("xxxx");
 

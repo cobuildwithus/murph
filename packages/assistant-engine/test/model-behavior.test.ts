@@ -1181,14 +1181,15 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain('Still help with the immediate request or best fallback')
     expect(prompt).toContain(
-      'capture the single most material gap silently; at most one accepted call',
+      'capture the single most material gap; at most one candidate may be accepted',
     )
-    expect(prompt).toContain('Do not mention ordinary acceptance')
+    expect(prompt).toContain('Ordinary feedback stays silent for every result')
     expect(prompt).toContain('Persistence is best-effort after the reply')
-    expect(prompt).toContain('Reserved support follows Support; skip discovery')
+    expect(prompt).toContain('Reserved support follows Support and skips discovery')
     expect(prompt).toContain(
-      'On input-schema rejection, correct only the returned issues and retry once',
+      'On the first input-schema rejection, correct only the returned issues and retry once',
     )
+    expect(prompt).toContain('A second rejection is terminal')
     expect(prompt).toContain(
       'Accepted, already accepted, unavailable, and callback-failure results are terminal',
     )
@@ -1207,6 +1208,19 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')
     expect(prompt).not.toContain('flagged for the product team')
+    expect(prompt).not.toContain('one-candidate, no-retry')
+    const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${prompt}`
+    expect(
+      composedPrompt.split(
+        'On the first input-schema rejection, correct only the returned issues and retry once',
+      ),
+    ).toHaveLength(2)
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'For that explicit verified-private support call only',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Keep ordinary feedback silent for every result, including after corrected validation',
+    )
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {

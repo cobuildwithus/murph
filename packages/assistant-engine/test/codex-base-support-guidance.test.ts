@@ -19,7 +19,7 @@ describe("Murph Codex base support guidance", () => {
       "de-identified non-`Support escalation:` summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Keep ordinary feedback silent",
+      "Keep ordinary feedback silent for every result, including after corrected validation",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Give support@withmurph.ai only when asked.",
@@ -49,7 +49,10 @@ describe("Murph Codex base support guidance", () => {
       "promise a ticket/response/fix/follow-up/timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "correct only the returned validation issues and retry once",
+      "For that explicit verified-private support call only",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "follow the Product feedback contract's single allowed schema correction",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Do not retry accepted, already accepted, unavailable, or callback-failure results",
