@@ -112,6 +112,7 @@ describe("dedicated hosted runtime log store", () => {
       clientResults: [
         {},
         {},
+        {},
         { rowCount: 2 },
         {},
       ],
@@ -144,13 +145,17 @@ describe("dedicated hosted runtime log store", () => {
     expect(database.client.calls.map((call) => compactSql(call.text))).toEqual([
       "BEGIN",
       "SELECT pg_advisory_xact_lock($1::bigint)",
+      expect.stringContaining(
+        "SELECT true AS fenced FROM hosted_runtime_log_deletion_fence",
+      ),
       expect.stringContaining("INSERT INTO hosted_runtime_log"),
       "COMMIT",
     ]);
     expect(database.client.calls[1]?.values).toEqual([
       hostedRuntimeLogLockKey(subjectKey),
     ]);
-    const insert = database.client.calls[2]!;
+    expect(database.client.calls[2]?.values).toEqual([subjectKey]);
+    const insert = database.client.calls[3]!;
     expect(insert.values).toHaveLength(34);
     expect(insert.values.filter((value) => value === subjectKey)).toHaveLength(2);
     expect(insert.values.slice(7, 17)).toEqual([
@@ -166,6 +171,38 @@ describe("dedicated hosted runtime log store", () => {
       JSON.stringify({ testMarker: "bounded" }),
     ]);
     expect(insert.text).not.toContain(userId);
+  });
+
+  it("drops a primary-authorized batch after the isolated deletion fence exists", async () => {
+    const userId = "member_runtime_logs_fenced";
+    const subjectKey = hostedRuntimeLogSubjectKey(userId);
+    const isUserActive = vi.fn(async () => true);
+    const database = new FakeSqlDatabase({
+      clientResults: [
+        {},
+        {},
+        { rows: [{ fenced: true }] },
+        {},
+      ],
+    });
+
+    await expect(recordHostedRuntimeLogs({
+      database,
+      entries: [runtimeEntry("mailbox.imported")],
+      isUserActive,
+      userId,
+    })).resolves.toBe(0);
+
+    expect(isUserActive).toHaveBeenCalledOnce();
+    expect(database.client.calls.map((call) => compactSql(call.text))).toEqual([
+      "BEGIN",
+      "SELECT pg_advisory_xact_lock($1::bigint)",
+      expect.stringContaining(
+        "SELECT true AS fenced FROM hosted_runtime_log_deletion_fence",
+      ),
+      "COMMIT",
+    ]);
+    expect(database.client.calls[2]?.values).toEqual([subjectKey]);
   });
 
   it("does not open a transaction for an empty diagnostic batch", async () => {
@@ -238,6 +275,7 @@ describe("dedicated hosted runtime log store", () => {
       clientResults: [
         {},
         {},
+        {},
         { rowCount: 7 },
         {},
       ],
@@ -260,16 +298,27 @@ describe("dedicated hosted runtime log store", () => {
       [...new Set(subjects.map((subject) => subject.lockKey))],
     ]);
     expect(compactSql(database.client.calls[2]!.text)).toContain(
-      "DELETE FROM hosted_runtime_log WHERE subject_key = ANY($1::text[])",
+      "INSERT INTO hosted_runtime_log_deletion_fence (subject_key)",
+    );
+    expect(compactSql(database.client.calls[2]!.text)).toContain(
+      "ON CONFLICT (subject_key) DO NOTHING",
     );
     expect(database.client.calls[2]?.values).toEqual([
       subjects.map((subject) => subject.subjectKey),
     ]);
+    expect(compactSql(database.client.calls[3]!.text)).toContain(
+      "DELETE FROM hosted_runtime_log WHERE subject_key = ANY($1::text[])",
+    );
+    expect(database.client.calls[3]?.values).toEqual([
+      subjects.map((subject) => subject.subjectKey),
+    ]);
+    expect(database.client.calls[2]!.text).not.toContain("member_");
   });
 
   it("bounds account-deletion lock and statement waits inside the transaction", async () => {
     const database = new FakeSqlDatabase({
       clientResults: [
+        {},
         {},
         {},
         {},
@@ -297,11 +346,18 @@ describe("dedicated hosted runtime log store", () => {
     expect(lockSql).toContain(
       "SELECT pg_advisory_xact_lock(lock_key) FROM ordered_locks ORDER BY lock_key",
     );
+    expect(compactSql(database.client.calls[3]!.text)).toContain(
+      "INSERT INTO hosted_runtime_log_deletion_fence",
+    );
+    expect(compactSql(database.client.calls[4]!.text)).toContain(
+      "DELETE FROM hosted_runtime_log",
+    );
   });
 
   it("rolls back and releases the client when a diagnostic insert fails", async () => {
     const database = new FakeSqlDatabase({
       clientResults: [
+        {},
         {},
         {},
         { error: new Error("secondary unavailable") },

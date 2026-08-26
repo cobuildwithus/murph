@@ -215,13 +215,23 @@ describe("hosted runtime log database migration", () => {
   });
 
   it("keeps the diagnostic schema isolated and free of raw member ids", async () => {
-    const [schema, primarySchema, migration, cleanupMigration, contractMigration] =
-      await Promise.all([
+    const [
+      schema,
+      primarySchema,
+      migration,
+      deletionFenceMigration,
+      cleanupMigration,
+      contractMigration,
+    ] = await Promise.all([
       readFile(path.join(appRoot, "prisma/runtime-logs/schema.prisma"), "utf8"),
       readFile(path.join(appRoot, "prisma/schema.prisma"), "utf8"),
       readFile(path.join(
         appRoot,
         "prisma/runtime-logs/migrations/20260729000000_init/migration.sql",
+      ), "utf8"),
+      readFile(path.join(
+        appRoot,
+        "prisma/runtime-logs/migrations/20260826150000_hosted_runtime_log_deletion_fence/migration.sql",
       ), "utf8"),
       readFile(path.join(
         appRoot,
@@ -234,6 +244,7 @@ describe("hosted runtime log database migration", () => {
     ]);
 
     expect(schema).toContain("model HostedRuntimeLog");
+    expect(schema).toContain("model HostedRuntimeLogDeletionFence");
     expect(schema).not.toContain("model HostedRuntimeLogSubject");
     expect(schema).toContain("subjectKey");
     expect(schema).not.toContain("userId");
@@ -246,6 +257,17 @@ describe("hosted runtime log database migration", () => {
     expect(migration).not.toContain('REFERENCES "hosted_member"');
     expect(migration.match(/CREATE TABLE/gu)).toHaveLength(1);
     expect(migration.match(/CREATE INDEX/gu)).toHaveLength(3);
+    expect(deletionFenceMigration).toContain(
+      'CREATE TABLE "hosted_runtime_log_deletion_fence"',
+    );
+    expect(deletionFenceMigration).toContain('"subject_key" TEXT NOT NULL');
+    expect(deletionFenceMigration).toContain(
+      '"deleted_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    );
+    expect(deletionFenceMigration).not.toContain('"user_id"');
+    expect(deletionFenceMigration).not.toContain("REFERENCES");
+    expect(deletionFenceMigration).not.toContain("DROP ");
+    expect(deletionFenceMigration.match(/CREATE TABLE/gu)).toHaveLength(1);
     expect(cleanupMigration).toContain(
       'ADD COLUMN "runtime_logs_completed_at" TIMESTAMP(3);',
     );

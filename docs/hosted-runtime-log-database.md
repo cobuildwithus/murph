@@ -36,12 +36,16 @@ The isolated schema is intentionally small:
 
 - `hosted_runtime_log` owns bounded redacted diagnostic rows keyed by a
   namespace-scoped SHA-256 digest of the random hosted member id.
-- Transaction-scoped advisory locks are derived from that digest; there is no
-  permanent subject or deletion-tombstone table.
+- `hosted_runtime_log_deletion_fence` owns one monotonic row for each digest
+  whose account-deletion cleanup reached the isolated database.
+- Transaction-scoped advisory locks are derived from the same digest and
+  serialize append with fence-and-delete.
 
 The isolated database does not store the raw hosted member id and has no
-cross-database foreign key. Attempt ids and other existing redacted operational
-correlation fields retain their current contract and limits.
+cross-database foreign key. The deletion fence stores only the existing opaque
+digest plus its database insertion time. It is never cleared or retention-
+pruned. Attempt ids and other existing redacted operational correlation fields
+retain their current contract and limits.
 
 ### Provider request diagnostics
 
@@ -103,38 +107,51 @@ messages, credentials, and paths remain excluded.
 
 ## Append and deletion serialization
 
-Every append runs in one short transaction:
+Append validates the complete batch and resolves primary member authority before
+any isolated pool checkout. A missing or suspended member returns
+`loggedCount: 0` without opening an isolated transaction. An active member then
+enters one short, isolated-database-only transaction:
 
 1. Take the subject's transaction-scoped advisory lock.
-2. Re-read the primary member row.
-3. Return `loggedCount: 0` when the member is missing or suspended.
-4. Insert the validated batch with one SQL statement.
+2. Return `loggedCount: 0` when the subject deletion fence exists.
+3. Insert the validated batch with one SQL statement.
+
+Moving only the primary read would leave a privacy gap: append could read an
+active member, account deletion could commit its primary suspension and complete
+the isolated delete under the subject lock, and the stale append could then
+open its isolated transaction after that lock was released. The monotonic fence
+closes that exact interval.
 
 The encrypted account-deletion cleanup receipt owns the exact runtime-member id
 set after primary deletion commits. Its `runtime_logs_completed_at` completion
-field is recorded only after the isolated delete succeeds; zero matching rows
-is idempotent success. Every immediate or hourly cleanup attempt enters one
-runtime-log database transaction:
+field is recorded only after the isolated transaction succeeds; zero matching
+rows is idempotent success. Every immediate or hourly cleanup attempt:
 
-1. Take every subject advisory lock in deterministic signed-lock-key order.
-2. Delete all matching runtime-log rows.
-3. Keep the existing cleanup receipt pending when the transaction fails.
+1. Takes every subject advisory lock in deterministic signed-lock-key order.
+2. Inserts each opaque subject digest into the deletion-fence table with
+   `ON CONFLICT DO NOTHING`.
+3. Deletes all matching runtime-log rows.
+4. Keeps the existing cleanup receipt pending when the transaction fails.
 
-This proves both races without a new lifecycle owner. The receipt stores one
-nullable `runtime_logs_completed_at` timestamp so a completed isolated cleanup
-is never re-gated on a later database outage:
+Fence insertion and row deletion commit or roll back together. The caller's
+bounded deletion budget is divided across lock acquisition, fence persistence,
+and deletion. A lock or statement timeout therefore leaves no partial fence or
+partial success, and a repeated cleanup safely retries the same transaction.
 
-- An append that owns the subject lock first commits before cleanup; cleanup
-  then removes that row.
-- Cleanup that owns the lock first completes after the primary suspension fence;
-  every later or delayed append rechecks that authority and writes zero rows.
+The two race orderings converge without a new service or lifecycle owner:
+
+- If append owns the subject lock first, it commits its row before cleanup;
+  cleanup then records the fence and removes the row.
+- If cleanup owns the lock after append's earlier primary-active read, cleanup
+  records the fence and deletes rows before releasing the lock; the delayed
+  append then sees the fence and writes zero rows.
 - If the isolated database is unavailable after canonical account deletion, the
-  receipt retries with bounded backoff until blocking and deletion converge,
-  then records the target complete independently of Cloudflare and vendors.
+  receipt retries with bounded backoff until fence-and-delete converges, then
+  records the target complete independently of Cloudflare and vendors.
 
-No isolated tombstone remains after account deletion. A warm runner or late
-network drain cannot recreate diagnostics because append checks primary member
-authority only after acquiring the same isolated advisory lock used by cleanup.
+A warm runner or late network drain cannot recreate diagnostics. The deletion
+fence is keyed only by the existing opaque digest, stores no raw member id, and
+is never cleared.
 
 ## Wearable import timing
 
@@ -273,8 +290,9 @@ pnpm --dir apps/web runtime-logs:migrate:deploy
 
 The optional real-Postgres proof needs only a loopback primary test URL. It
 creates a temporary second logical database, proves that the production
-topology preflight rejects it as the same physical cluster, applies both
-migrations, proves the deletion fences, and drops the database:
+topology preflight rejects it as the same physical cluster, applies the
+isolated schema and account-cleanup migrations, proves pool isolation plus both
+deletion race orderings, and drops the database:
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test \
@@ -291,17 +309,46 @@ verifies the canonical schema owner before invoking Prisma.
 ## Deployment
 
 The dedicated database and URL configuration must remain in place for every
-production Web deployment. Deploy the Web build that no longer references the
-primary runtime-log table, let prior functions drain, then run the post-deploy
-contract migration that drops the legacy table. No synchronized Cloudflare
-rollout is required because the signed callback protocol is unchanged. Verify
-dedicated append rate, callback failures, retention counts, status continuity,
-account deletion, and absence of the primary table after the contract lane.
+production Web deployment. The deletion-fence change is intentionally split
+into two Web commits in the applyable patch:
+
+1. Run the additive isolated migration that creates
+   `hosted_runtime_log_deletion_fence`.
+2. Deploy the compatibility commit that makes cleanup write the fence and makes
+   append honor it while retaining the prior primary-under-lock ordering.
+3. Let every pre-fence Web function drain.
+4. Deploy the final commit that resolves primary authority before isolated
+   checkout.
+
+This order makes every mixed pair safe. Pre-change and compatibility appends
+still re-read primary authority under the isolated lock; compatibility and final
+cleanup both write the fence; final appends can therefore rely on the fence only
+after every live cleanup writer knows how to create it. No synchronized
+Cloudflare rollout is required because the signed callback request and response
+remain unchanged.
+
+The earlier primary-table cutover remains unchanged: deploy the Web build that
+no longer references the primary runtime-log table, let prior functions drain,
+then run the post-deploy contract migration that drops the legacy table. Verify
+the pool-max-two zero-checkout proof, both deletion race orderings, repeated and
+timed-out cleanup, dedicated append rate, callback failures, retention counts,
+status continuity, account deletion, and absence of the primary table after the
+contract lane.
 
 ## Rollback
 
-After the contract migration drops the primary table, the rollback floor is the
-first Web deployment that no longer references it. Restoring an older build
-requires re-expanding the primary schema first. Keep both isolated URLs
-configured, do not repoint them at the primary database, and leave the isolated
-schema in place during an incident.
+The compatibility commit is the safe rollback waypoint for the final
+pre-authority-read commit. Roll back to that commit first and let final-version
+functions drain before moving farther back; its append path retains the old
+primary-under-lock protection while every cleanup it runs still records the
+additive fence. A later rollback to the pre-fence Web is then privacy-safe
+because all remaining appends and cleanup use the former shared-lock protocol.
+Leave the additive fence table and its rows in place throughout rollback; older
+Web versions ignore them, and clearing them would destroy the final version's
+privacy invariant.
+
+After the separate contract migration drops the primary runtime-log table, the
+rollback floor is still the first Web deployment that no longer references it.
+Restoring an older build requires re-expanding the primary schema first. Keep
+both isolated URLs configured, do not repoint them at the primary database, and
+leave the isolated schema in place during an incident.

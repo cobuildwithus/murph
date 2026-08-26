@@ -29,6 +29,8 @@ import {
 export { hostedRuntimeLogLockKey, hostedRuntimeLogSubjectKey } from "./subject-key";
 
 const HOSTED_RUNTIME_LOG_TABLE = "hosted_runtime_log";
+const HOSTED_RUNTIME_LOG_DELETION_FENCE_TABLE =
+  "hosted_runtime_log_deletion_fence";
 const HOSTED_RUNTIME_LOG_FIELD_COUNT = 17;
 
 export interface HostedRuntimeLogRecord {
@@ -128,6 +130,9 @@ export async function recordHostedRuntimeLogs(input: {
     if (!await isUserActive(userId)) {
       return 0;
     }
+    if (await hasHostedRuntimeLogDeletionFence(client, subjectKey)) {
+      return 0;
+    }
 
     const { text, values } = buildHostedRuntimeLogInsert({ entries, subjectKey });
     const inserted = await client.query<Record<string, never>>(text, values);
@@ -213,10 +218,9 @@ export async function listHostedRuntimeTurnTimingLogs(input: {
 
 /**
  * Account deletion commits the primary suspension fence before entering this
- * owner. Both deletion and append then take the same transaction-scoped
- * advisory lock in the isolated database. If append wins, cleanup deletes its
- * committed row. If deletion wins, the delayed append subsequently re-reads
- * primary member authority and observes suspended or missing state.
+ * owner. Under the isolated subject lock, cleanup records a monotonic digest-
+ * keyed deletion fence before deleting diagnostics. Appends take the same lock
+ * and refuse to write once that fence exists.
  */
 export async function deleteHostedRuntimeLogDataForUsers(input: {
   database?: HostedRuntimeLogSqlDatabase;
@@ -240,6 +244,9 @@ export async function deleteHostedRuntimeLogDataForUsers(input: {
     return 0;
   }
 
+  const subjectKeys = [...new Set(
+    subjects.map((subject) => subject.subjectKey),
+  )];
   const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
   const timeoutMs = input.timeoutMs === undefined
     ? null
@@ -253,15 +260,16 @@ export async function deleteHostedRuntimeLogDataForUsers(input: {
     if (deadlineAtMs !== null) {
       // Connection checkout and BEGIN consume the same caller-owned target
       // budget. Divide only the time still remaining between ordered lock
-      // acquisition and deletion, so a degraded pool cannot silently extend an
-      // account-deletion response beyond the target deadline.
+      // acquisition, fence persistence, and deletion, so a degraded pool
+      // cannot silently extend an account-deletion response beyond the target
+      // deadline.
       const remainingMs = deadlineAtMs - Date.now();
       if (remainingMs <= 0) {
         throw new Error(
           "Hosted runtime log deletion deadline expired before lock acquisition.",
         );
       }
-      const statementTimeoutMs = Math.max(1, Math.floor(remainingMs / 2));
+      const statementTimeoutMs = Math.max(1, Math.floor(remainingMs / 3));
       const timeout = `${String(statementTimeoutMs)}ms`;
       await client.query<Record<string, never>>(
         "SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $1, true)",
@@ -272,9 +280,18 @@ export async function deleteHostedRuntimeLogDataForUsers(input: {
       client,
       [...new Set(subjects.map((subject) => subject.lockKey))],
     );
+    await client.query<Record<string, never>>(
+      `
+        INSERT INTO ${HOSTED_RUNTIME_LOG_DELETION_FENCE_TABLE} (subject_key)
+        SELECT subject_key
+        FROM unnest($1::text[]) AS deletion_subjects(subject_key)
+        ON CONFLICT (subject_key) DO NOTHING
+      `,
+      [subjectKeys],
+    );
     const deleted = await client.query<Record<string, never>>(
       `DELETE FROM ${HOSTED_RUNTIME_LOG_TABLE} WHERE subject_key = ANY($1::text[])`,
-      [subjects.map((subject) => subject.subjectKey)],
+      [subjectKeys],
     );
     return deleted.rowCount ?? 0;
   });
@@ -356,6 +373,22 @@ async function lockHostedRuntimeLogSubjects(
     `,
     [lockKeys],
   );
+}
+
+async function hasHostedRuntimeLogDeletionFence(
+  client: HostedRuntimeLogSqlClient,
+  subjectKey: string,
+): Promise<boolean> {
+  const result = await client.query<{ fenced: boolean }>(
+    `
+      SELECT true AS fenced
+      FROM ${HOSTED_RUNTIME_LOG_DELETION_FENCE_TABLE}
+      WHERE subject_key = $1
+      LIMIT 1
+    `,
+    [subjectKey],
+  );
+  return result.rows.length > 0;
 }
 
 async function readHostedRuntimeLogUserActive(userId: string): Promise<boolean> {

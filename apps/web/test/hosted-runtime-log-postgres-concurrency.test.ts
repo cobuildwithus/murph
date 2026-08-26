@@ -29,6 +29,10 @@ const runtimeLogMigrationPath = path.resolve(
   testDirectory,
   "../prisma/runtime-logs/migrations/20260729000000_init/migration.sql",
 );
+const runtimeLogDeletionFenceMigrationPath = path.resolve(
+  testDirectory,
+  "../prisma/runtime-logs/migrations/20260826150000_hosted_runtime_log_deletion_fence/migration.sql",
+);
 const accountCleanupMigrationPath = path.resolve(
   testDirectory,
   "../prisma/migrations/20260729010000_hosted_account_cleanup_runtime_logs/migration.sql",
@@ -62,11 +66,17 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
       max: 8,
     });
-    const [runtimeLogMigration, accountCleanupMigration] = await Promise.all([
+    const [
+      runtimeLogMigration,
+      runtimeLogDeletionFenceMigration,
+      accountCleanupMigration,
+    ] = await Promise.all([
       readFile(runtimeLogMigrationPath, "utf8"),
+      readFile(runtimeLogDeletionFenceMigrationPath, "utf8"),
       readFile(accountCleanupMigrationPath, "utf8"),
     ]);
     await pool.query(runtimeLogMigration);
+    await pool.query(runtimeLogDeletionFenceMigration);
     await pool.query(`
       CREATE TABLE hosted_account_deletion_cleanup (
         id text PRIMARY KEY

@@ -27,3 +27,10 @@ model HostedRuntimeLog {
   @@index([at, id], map: "hosted_runtime_log_retention_idx")
   @@map("hosted_runtime_log")
 }
+
+model HostedRuntimeLogDeletionFence {
+  subjectKey String   @id @map("subject_key")
+  deletedAt  DateTime @default(now()) @map("deleted_at") @db.Timestamptz(3)
+
+  @@map("hosted_runtime_log_deletion_fence")
+}
