@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Group shares keep the speaker clear",
     "summary": "When you ask private Murph to share an update with a group, the group message now keeps your actions and claims attributed to a member instead of presenting them as Murph's own.",
-    "details": "Murph uses a name only when it is already established for that group; otherwise it uses a neutral member reference rather than guessing.",
+    "details": "Murph uses the sender's saved preferred name when available; otherwise it uses a neutral member reference rather than guessing.",
     "relevanceTags": ["groups", "messaging"],
     "sourcePullRequests": [2319]
   }

@@ -90,34 +90,40 @@ describe("assistant tool description call contracts", () => {
   it("keeps group handoff discovery and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("queued, not sent");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "never say told, shared, or posted",
+    );
   });
 
   it("keeps member attribution explicit in private-to-group handoffs", () => {
     const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
 
     expect(contextDescription).toContain(
-      "Attribute member actions, claims, and experiences in third person",
+      "Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name",
     );
     expect(contextDescription).toContain(
-      'using a name the member already uses in that group only when known and otherwise "a member"',
+      "which joined groups already receive",
     );
     expect(contextDescription).toContain(
-      "never write them as if Murph did, said, or experienced them",
+      'run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name',
+    );
+    expect(contextDescription).toContain(
+      "Never write them as if Murph did, said, or experienced them",
     );
   });
 
   it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "For a complete current-sender private request, use message_current_sender",
+      "Use message_current_sender for a complete private current-sender request",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Before asking any follow-up needed to complete a current-sender handoff, call clarify_current_sender",
+      "Call clarify_current_sender before a needed follow-up",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "continue_current_sender_privately or continue_current_sender_in_group only on a later Message",
+      "continue_current_sender_privately or continue_current_sender_in_group only for a later reply",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never for a fresh request",
+      "never a fresh request",
     );
   });
 });

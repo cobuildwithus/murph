@@ -1003,7 +1003,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         description:
-          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs. Attribute member actions, claims, and experiences in third person, using a name the member already uses in that group only when known and otherwise "a member"; never write them as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
+          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs. Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name, which joined groups already receive. If the name is not established in the current conversation, run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name. Never write them as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
       },
       question: {
         type: 'string',
@@ -1254,7 +1254,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask or hand off to a group/member/sender; host binds authority. For a complete current-sender private request, use message_current_sender. Before asking any follow-up needed to complete a current-sender handoff, call clarify_current_sender. Use continue_current_sender_privately or continue_current_sender_in_group only on a later Message answering that persisted clarification; never for a fresh request. Accepted handoff is queued, not sent.',
+    'Ask or hand off; the host binds group/member/sender authority. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
