@@ -146,3 +146,19 @@ without changing automation ownership or adding a second error framework.
   closure; runner total is 11,367,625 / 11,393,617 bytes. The total-only ratchet
   preserves the prior candidate's 126-byte allowance and leaves entry and
   static-startup limits unchanged.
+- Final ReviewGPT round 3 found that the strict mutation reader had also become
+  the read-only default-vault resolver, so malformed unrelated assistant state
+  blocked ordinary Vault reads. The finding is accepted: default-vault reads
+  must validate the root and `defaultVault` without taking ownership of the two
+  unrelated nested sections.
+- One private strict raw parser now owns JSON and root validation. Read-only
+  default-vault resolution consumes only its root result; ordinary patch paths
+  still validate both nested sections before preserving them. Hosted-assistant
+  replacement validates the preserved assistant section but intentionally
+  replaces an invalid hosted section. No public abstraction, compatibility
+  path, or additional state was added.
+- Focused operator-config proof passes 8/8: both default-vault resolvers ignore
+  malformed unrelated assistant and hosted-assistant sections, malformed root
+  data remains a typed terminal configuration error with neutral guidance, all
+  preserving mutations still reject invalid nested data without changing file
+  bytes, and hosted replacement accepts only the invalid section it replaces.

@@ -194,19 +194,9 @@ export async function saveAssistantOperatorDefaultsPatch(
 async function readOperatorConfigForPatch(
   homeDirectory: string,
 ): Promise<OperatorConfig | null> {
-  const raw = await readOperatorConfigFile(resolveOperatorConfigPath(homeDirectory))
-  if (raw === null) {
+  const parsed = await readStrictRawOperatorConfig(homeDirectory)
+  if (parsed === null) {
     return null
-  }
-
-  let parsed: RawOperatorConfig
-  try {
-    parsed = operatorConfigSchema.parse(JSON.parse(raw))
-  } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError) {
-      throw invalidOperatorConfigError()
-    }
-    throw error
   }
 
   const assistant = normalizeAssistantOperatorDefaultsForPatch(parsed.assistant)
@@ -224,6 +214,24 @@ async function readOperatorConfigForPatch(
     assistant,
     hostedAssistant,
   })
+}
+
+async function readStrictRawOperatorConfig(
+  homeDirectory: string,
+): Promise<RawOperatorConfig | null> {
+  const raw = await readOperatorConfigFile(resolveOperatorConfigPath(homeDirectory))
+  if (raw === null) {
+    return null
+  }
+
+  try {
+    return operatorConfigSchema.parse(JSON.parse(raw))
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      throw invalidOperatorConfigError()
+    }
+    throw error
+  }
 }
 
 function normalizeAssistantOperatorDefaultsForPatch(
@@ -265,7 +273,7 @@ function normalizeAssistantOperatorDefaultsForPatch(
 function invalidOperatorConfigError(): VaultCliError {
   return new VaultCliError(
     'operator_config_invalid',
-    'Operator config is malformed. Repair or restore it before retrying this mutation.',
+    'Operator config is malformed. Repair or restore it before retrying.',
     {
       retryable: false,
       stage: 'configuration',
@@ -295,7 +303,14 @@ export async function saveHostedAssistantConfig(
   hostedAssistant: HostedAssistantConfig | null,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig> {
-  const existing = await readOperatorConfig(homeDirectory)
+  const rawExisting = await readStrictRawOperatorConfig(homeDirectory)
+  const existing = rawExisting === null
+    ? null
+    : normalizeParsedOperatorConfig({
+        ...rawExisting,
+        assistant: normalizeAssistantOperatorDefaultsForPatch(rawExisting.assistant),
+        hostedAssistant: null,
+      })
   const config = buildOperatorConfig(
     {
       hostedAssistant,
@@ -400,7 +415,7 @@ export async function resolveDefaultVault(
     return expandConfiguredVaultPath(envVault, homeDirectory)
   }
 
-  const config = await readOperatorConfigForPatch(homeDirectory)
+  const config = await readStrictRawOperatorConfig(homeDirectory)
   if (config?.defaultVault) {
     const configuredDefaultVault = expandConfiguredVaultPath(
       config.defaultVault,
@@ -422,7 +437,7 @@ export async function resolveDefaultVault(
 export async function resolveConfiguredDefaultVault(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<string | null> {
-  const config = await readOperatorConfigForPatch(homeDirectory)
+  const config = await readStrictRawOperatorConfig(homeDirectory)
   if (!config?.defaultVault) {
     return null
   }
