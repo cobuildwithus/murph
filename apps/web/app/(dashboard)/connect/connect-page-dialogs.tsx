@@ -27,10 +27,12 @@ const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC = `/audio/garmin-historical-
 
 export function ConnectSourceDialog({
   children,
+  inert = false,
   onOpenChange,
   source,
 }: {
-  children: ReactNode;
+  children?: ReactNode;
+  inert?: boolean;
   onOpenChange: (open: boolean) => void;
   source: Pick<ConnectSource, "name"> | null;
 }) {
@@ -38,7 +40,10 @@ export function ConnectSourceDialog({
 
   return (
     <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md gap-0 overflow-y-auto p-6 md:p-7">
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] max-w-md gap-0 overflow-y-auto p-6 md:p-7"
+        inert={inert || undefined}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>{sourceName} connection</DialogTitle>
           <DialogDescription>

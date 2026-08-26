@@ -411,7 +411,11 @@ export function ConnectSourceCardStudy({
         onOpenChange={() => {}}
       />
 
-      <ConnectSourceDialog source={sourceDialogSource} onOpenChange={() => {}}>
+      <ConnectSourceDialog
+        inert
+        source={sourceDialogSource}
+        onOpenChange={() => {}}
+      >
         {sourceDialogSource ? (
           <div id="connect-source-dialog">
             <SourceCard
