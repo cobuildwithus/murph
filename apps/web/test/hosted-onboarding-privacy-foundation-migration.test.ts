@@ -1165,6 +1165,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260824120000_hosted_runtime_issue_attempt_provenance",
       "20260825050000_device_source_no_data_outreach_preference",
       "20260825193000_hosted_group_private_conversion",
+      "20260826201500_imessage_mini_app_renewal_credential",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
