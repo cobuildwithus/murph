@@ -2005,16 +2005,23 @@ Current hosted external-data lookup boundary: `apps/web` owns read-only product 
 
 Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
-admits up to 250 exact names without SQL-pattern semantics, a GiST trigram lane
-admits up to 5,000 nearest names, and a canonical-rank btree lane admits up to
-5,000 deterministic source-priority representatives for result diversity.
-Ranking is deterministic within that admitted set rather than exhaustive
-across the full food catalog. Exact-id and UPC lookups retain their direct
-indexed paths;
+admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
+lane admits up to 10,000 full-text matches without sorting the whole match set,
+and one GiST trigram branch is realized per query. Full-text searches supplement
+GIN recall with up to 10,000 strict-word-nearest names. When FTS finds nothing,
+typo recovery instead admits up to 10,000 names by whole-name distance and then
+applies the matching whole-name threshold; eligible names necessarily precede
+ineligible names because ordering and eligibility use the same similarity.
+Canonical-key deduplication happens only after those bounded admissions.
+The bounded admissions preserve representative choice and canonical diversity
+across the established 5,000-row boundary and ineligible-neighbor fixtures.
+Ranking is deterministic
+within the admitted set rather than exhaustive across the full food catalog.
+Exact-id and UPC lookups retain their direct indexed paths;
 supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
-foods name-rank, exact-name-rank, and canonical-rank indexes before this
-private-food query shape is deployed. The public
+foods name-rank and exact-name-rank indexes before this private-food query shape
+is deployed. The public
 projection of that database is Murph Safe at `/search` and the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to
