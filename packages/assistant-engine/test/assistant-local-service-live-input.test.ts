@@ -1498,8 +1498,42 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         codexContinuation: {
           kind: 'explicit-structured-history',
         },
+        codexThreadId: 'thread-live',
         response: 'final after event input',
         responseDeliveryContextOrdinal: 1,
+        route: {
+          routeId: 'route-live-progress',
+        },
+        transcriptResponse: 'final after event input',
+        session,
+      },
+    }
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    await providerInput.onProviderRequestStarted?.({
+      providerRequestOrdinal: 1,
+      startedAt: '2026-04-22T10:00:03.000Z',
+    })
+    providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'thread-live',
+        response: 'final after event input',
+        responseDeliveryContextOrdinal: 0,
+        route: {
+          routeId: 'route-live-progress',
+        },
         transcriptResponse: 'final after event input',
         session,
       },
@@ -1600,7 +1634,8 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     prompt: 'Initial prompt\n\nEvent-backed follow up',
     response: 'final after event input',
   })
-  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  expect(providerRequestStarted).toHaveBeenCalledTimes(2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(activeTurnInput.mock.calls.length, 3)
   const journal = await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
@@ -1610,7 +1645,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     earlierHostedInput.inputId,
     hostedInput.inputId,
   ])
-  expect(journal?.providerRequests).toHaveLength(1)
+  expect(journal?.providerRequests).toHaveLength(2)
   expect(journal?.providerRequests[0]?.acceptedInputIds).toEqual([
     earlierHostedInput.inputId,
     hostedInput.inputId,
