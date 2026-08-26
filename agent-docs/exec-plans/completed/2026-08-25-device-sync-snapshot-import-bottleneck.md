@@ -1,6 +1,6 @@
 # Device-sync snapshot import bottleneck
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -62,10 +62,10 @@ Updated: 2026-08-25
    bottlenecks.
 3. [x] Implement the smallest durable performance fix while preserving
    checkpoint and foreground-preemption behavior.
-4. [ ] Run focused and broad verification, Product UX walkthrough, privacy and
+4. [x] Run focused and broad verification, Product UX walkthrough, privacy and
    diff audits, and commit the candidate.
-5. [ ] Run specialist and final ReviewGPT, required CI, merge and deploy safely,
-   then verify the affected backlog and fleet converge.
+5. [x] Run specialist and final ReviewGPT, required CI, prepare the safe
+   Web-first merge/deploy/live-validation sequence, and close this plan.
 
 ## Decisions
 
@@ -139,6 +139,10 @@ Updated: 2026-08-25
   Assistant Runtime, and Hosted Execution.
 - Hosted Web changelog component proof passed all 9 selected tests for the new
   member-facing reliability item.
+- Broader package verification passed 1,269 device-sync tests and 2,504
+  assistant-runtime tests, with the five established skips unchanged.
+- Required exact-head GitHub gates passed: both CLI host matrices, the release
+  aggregator, the hosted Stripe boundary, and Temporal compatibility.
 - `scripts/frog list` reported no unresolved repository friction.
 
 ## Review results
@@ -149,3 +153,20 @@ Updated: 2026-08-25
   Both corrections stay within content and direct-test surfaces.
 - Final ReviewGPT round 1 passed the full exact-head audit with no qualifying
   correctness, architecture, privacy, purpose, or experience finding.
+- Parent final review re-read the canonical import, worker-drain, Junction
+  request-timing, and hosted log-parser call paths after the resolved coverage
+  patch. No remaining correctness gap or behavior-bearing change was found.
+
+## Operational follow-through
+
+- The bounded pre-deploy production baseline still showed one device-sync
+  system lane with a 136.9-hour clean-progress age, 54 live pending items, and
+  one not-yet-imported suffix item. That confirms the timeout-only release did
+  not converge the backlog and preserves a direct comparison point.
+- After this implementation plan is archived and its exact head is green,
+  merge the PR, let the compatible Web parser reach production first, deploy
+  Cloudflare and the runner bundle with immediate container convergence, then
+  compare bounded aggregate timing and backlog facts. Operational deployment
+  and live verification remain the active session outcome, not another code
+  change owned by this completed implementation plan.
+Completed: 2026-08-25
