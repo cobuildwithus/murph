@@ -1,6 +1,7 @@
 ---
 title: 'Graft rebuilds a large untracked index in fresh task worktrees'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2354'
 ---
 
 ## Expected Behavior

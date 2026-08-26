@@ -523,6 +523,10 @@
     {
       "issue": "cobuildwithus/murph#2284",
       "path": ".agents/friction-log/20260825162524-private-runner-composition/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2315",
+      "path": ".agents/friction-log/20260825203740-frog-autofix-implementation/friction.md"
     }
   ],
   "version": 1

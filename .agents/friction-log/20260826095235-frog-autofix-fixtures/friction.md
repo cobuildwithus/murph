@@ -1,6 +1,7 @@
 ---
 title: 'Frog autofix fixtures use a privacy-rejected git email'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2353'
 ---
 
 ## Expected Behavior
