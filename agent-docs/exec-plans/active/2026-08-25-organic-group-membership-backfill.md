@@ -50,9 +50,11 @@ Updated: 2026-08-25
 ### Product effects and exclusions
 
 - The normal owner membership qualifies through current membership-based
-  product rules such as Core eligibility without implying a vault-share grant.
-  Existing owner-authorized setup and explicit join flows retain their sharing
-  behavior.
+  product rules such as Core eligibility and current-participant group actions,
+  including outbound calls and physical notes, without implying a vault-share
+  grant. Those effects retain their independent exact-message, activation,
+  usage, explicit-request, and pre-provider checks. Existing owner-authorized
+  setup and explicit join flows retain their sharing behavior.
 - Funding remains available through the existing signed funding-only locator
   whenever no owner-created join code exists. The locator itself still writes
   no state or grants and remains invalid on join surfaces.

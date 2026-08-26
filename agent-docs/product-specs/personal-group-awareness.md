@@ -48,7 +48,12 @@ the existing group-store primitive in the same transaction. That structural
 write creates only the route owner membership. It does not grant a vault share,
 mint a join code, request health or email sharing, import a provider title, or
 enroll roster participants. Existing owner-authorized setup and explicit join
-flows retain their sharing behavior.
+flows retain their sharing behavior. Because this is the ordinary canonical
+membership rather than a discovery-only projection, the owner also qualifies
+for existing current-participant group actions, including outbound phone calls
+and physical notes. Those effects retain their independent exact-message,
+activation, usage, explicit-request, and pre-provider authority checks; an
+observed roster participant without a membership remains ineligible.
 
 The personal list derives its member id from the signed hosted callback. The
 model cannot choose another member. Results may include the member's own opaque

@@ -2624,7 +2624,11 @@ route. That same transaction materializes the routed chat's ordinary unnamed
 `HostedGroup` and route-owner `HostedGroupMember` through the canonical
 group-store primitive before it appends the activation wake. It creates no
 vault share, join code, requested health or email scope, or roster-participant
-membership. Failure rolls back the route and group state together. Later
+membership. The ordinary owner membership also participates in existing
+membership-gated group effects such as outbound calls and physical notes;
+their exact accepted-message, activation, usage, explicit-request, and final
+pre-provider checks remain the effect boundary. Failure rolls back the route
+and group state together. Later
 owner-authorized naming, join-link, and sharing changes retain their existing
 active-access gate and state owner. Only a newly created
 route applies sparse style through the synthetic

@@ -1,7 +1,46 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const groupActionAuthorityMocks = vi.hoisted(() => ({
+  hasActivationProof: vi.fn(),
+  readWake: vi.fn(),
+  resolveSenderMemberId: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-mailbox/store")
+  >();
+  return {
+    ...actual,
+    readHostedMailboxConversationWakeByAssistantInputId:
+      groupActionAuthorityMocks.readWake,
+  };
+});
+
+vi.mock("@/src/lib/hosted-groups/group-message-sender", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-groups/group-message-sender")
+  >();
+  return {
+    ...actual,
+    resolveHostedGroupMessageSenderMemberId:
+      groupActionAuthorityMocks.resolveSenderMemberId,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/member-activation")
+  >();
+  return {
+    ...actual,
+    hasHostedMemberActivationProof:
+      groupActionAuthorityMocks.hasActivationProof,
+  };
+});
 
 import {
   deleteHostedAddressBookProjection,
@@ -31,6 +70,9 @@ import {
 import {
   readHostedGroupMembershipsForMember,
 } from "@/src/lib/hosted-groups/group-store";
+import {
+  assertHostedGroupParticipantActionOriginHasOwnMurph,
+} from "@/src/lib/hosted-groups/participant-action-authority";
 import {
   ensureHostedThreadContainerRouteTx,
   type PreparedHostedThreadContainerCreation,
@@ -231,6 +273,44 @@ async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
     fixture.participantClient.$disconnect(),
     fixture.observer.$disconnect(),
   ]);
+}
+
+async function expectCanonicalOwnerActionAuthority(input: {
+  containerMemberId: string;
+  ownerMemberId: string;
+  prisma: PrismaClient;
+  threadId: string;
+}): Promise<void> {
+  const originAssistantInputId = `ain_${"a".repeat(32)}`;
+  const routeAuthority = {
+    accountLookupKey: "test-account",
+    channel: "linq" as const,
+    containerMemberId: input.containerMemberId,
+    threadId: input.threadId,
+  };
+  groupActionAuthorityMocks.readWake.mockResolvedValue({
+    userId: input.containerMemberId,
+  });
+  groupActionAuthorityMocks.resolveSenderMemberId
+    .mockResolvedValue(input.ownerMemberId);
+  groupActionAuthorityMocks.hasActivationProof.mockResolvedValue(true);
+
+  await expect(assertHostedGroupParticipantActionOriginHasOwnMurph({
+    originAssistantInputId,
+    prisma: input.prisma,
+    routeAuthority,
+  })).resolves.toBe(input.ownerMemberId);
+
+  groupActionAuthorityMocks.resolveSenderMemberId
+    .mockResolvedValue("member_roster_only");
+  await expect(assertHostedGroupParticipantActionOriginHasOwnMurph({
+    originAssistantInputId,
+    prisma: input.prisma,
+    routeAuthority,
+  })).rejects.toMatchObject({
+    code: "HOSTED_GROUP_PARTICIPANT_ACTION_AUTHORITY_REQUIRED",
+    httpStatus: 403,
+  });
 }
 
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
@@ -613,6 +693,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }],
           truncated: false,
         });
+        await expectCanonicalOwnerActionAuthority({
+          containerMemberId: fixture.containerMemberId,
+          ownerMemberId: fixture.ownerMemberId,
+          prisma: fixture.observer,
+          threadId: fixture.threadId,
+        });
         await expect(fixture.observer.hostedVaultShare.count({
           where: { destinationMemberId: fixture.containerMemberId },
         })).resolves.toBe(0);
@@ -854,6 +940,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             runtimeMemberId: containerMemberIds[0],
           }],
           truncated: false,
+        });
+        await expectCanonicalOwnerActionAuthority({
+          containerMemberId: containerMemberIds[0],
+          ownerMemberId: ownerMemberIds[0],
+          prisma: observer,
+          threadId,
         });
         await expect(observer.hostedVaultShare.count({
           where: { destinationMemberId: containerMemberIds[0] },
