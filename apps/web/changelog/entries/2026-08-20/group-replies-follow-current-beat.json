@@ -9,6 +9,6 @@
     "summary": "In active iMessage and Telegram groups, Murph now combines rapid still-relevant requests into one complete reply.",
     "details": "A clear correction replaces only what it changes; if the room has moved on, Murph can stay quiet. Completed actions are not repeated.",
     "relevanceTags": ["assistant", "groups", "messaging"],
-    "sourcePullRequests": [2107, 2232, 2264]
+    "sourcePullRequests": [2107, 2232, 2264, 2321]
   }
 }

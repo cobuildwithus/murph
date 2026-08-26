@@ -1767,7 +1767,7 @@ Last verified: 2026-08-23
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - Ordinary group automations reuse canonical cron occurrence state for both conversation and optional group-email effects. Current-chat output finishes through the ordinary conversation outbox and route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. When a turn uses `send_email`, the accepted generic group-email parent enters the same canonical pending-delivery field used by ordinary queued notifications, even when later turn work fails. A restart before that cron write derives the parent from its automation-id and occurrence-scoped outbox key before admitting the provider. Web marks the parent sent only after live authorization revalidation and durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. An automation that never calls the email effect has no email settlement expectation. No newsletter recognition, injected contract, migration queue, repair state, or second scheduler exists.
-- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0, keeps admission open for one four-second in-memory draft window, and atomically either closes at a quiet cutoff or admits late input for provider request 1 in the same thread. Request 1 is final and closes admission at its first completed response; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
+- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0 and keeps admission open for one four-second in-memory draft window. A genuinely quiet window closes atomically. Input accepted during the window selects provider request 1 in the same thread; input already live-steered and committed during request 0 also selects request 1 and keeps admission open through its first completed response. Request 1 is final; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
 - Reviewed Assistant Ask completions enter the existing foreground-causal,
   output-only continuation immediately; they do not wait for the routine idle
   checkpoint or a second wake. The caller Murph may compose from room context,
@@ -2583,8 +2583,10 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh conversation work keeps its
-foreground priority, but its first successful reply checkpoint includes one
+Runtime applies the closed action through its canonical domain owner. Fresh
+conversation work keeps its foreground priority. A safe-prefix prefetch imports
+a closed member action before a dirty runtime begins its long idle snapshot,
+and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
 arrived conversation cannot defer the already-accepted action into another
@@ -2593,20 +2595,36 @@ outcome as an existing post-checkpoint effect before releasing the requested
 item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
-requires the V6 card's opaque workout-revision binding under the existing
-workout mutation lock. That binding combines the canonical workout identity,
-ordered hidden exercise/set-slot identity, and the last applied member-action
-generation. Delayed or forwarded cards therefore cannot retarget a later
-workout, a set shifted by another direct action, or a same-name exercise moved
-by the generic workout editor. Mutable set results and annotations remain under
-their existing result-family optimistic comparisons rather than the positional
-identity binding.
+requires the V6 card's opaque workout binding under the existing workout
+mutation lock. Its stable lookup prefix covers the canonical workout identity
+and ordered hidden exercise/set-slot identity, while its exact state suffix
+covers the same identity plus the last applied member-action generation. The
+initial editor also requires the embedded logged/pending states to match the
+canonical workout; only the authenticated read-only refresh may advance those
+states. A write must match the complete current token; delayed or forwarded
+cards therefore cannot
+retarget a later workout, a set shifted by another direct action, or a same-name
+exercise moved by the generic workout editor. Mutable set results and
+annotations remain under their existing result-family optimistic comparisons
+rather than the positional identity binding. An exact current legacy binding
+remains valid for an already-sent V6 write.
+Expanded V6 readers reuse that binding with the same mailbox delivery path for
+`workout.live.snapshot`. The member-scoped credential supplies identity;
+runtime scans only that member's canonical workout records, requires
+one structural match to the embedded target skeleton, and returns one ordinary
+V6 card URL with current progress and editor state, or an ordinary V4 read-only
+URL when editing is unavailable or too large. Legacy lookup accepts only an
+exact current token or the empty-prior-action derivation used by an initial
+card. This action never writes the workout. Missing, duplicate, structurally
+changed, oversized, or cross-member targets fail closed as `workout_changed`,
+leaving the embedded snapshot in place. The result reuses the existing strict
+card decoder rather than defining a parallel workout wire.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and
+across the member's canonical workout records before revision and
 unfinished-record eligibility, so the generation change caused by the original
 write or workout completion cannot replace a committed success with a terminal
 rejection, and another unfinished workout cannot receive the action. Every
@@ -2616,3 +2634,16 @@ one last-applied id is sufficient until its terminal outcome commits, without a
 second receipt store. Validated set removal uses the existing exact-workout
 canonical rewrite after full binding validation, while generic structural edits
 remain fail-closed against saved-set loss.
+
+## Hosted operator tasks
+
+One Web transaction writes the operator-task audit row and its encrypted
+mailbox item. Stable caller idempotency maps to one task and mailbox identity;
+the persisted request-shape digest makes replay with different authority or
+content fail closed. Runtime wake is only a post-commit hint. Diagnostics use
+the existing retrying detached Assistant Ask controller and idempotent
+completion callback. Messages reauthorize the task before provider work and at
+the existing pre-delivery hook, then mark the task complete only after exactly
+one queue-only delivery intent exists. The existing notification identity,
+route check, transcript commit, outbox dedupe, line-health, and provider retry
+owners remain the delivery state machine.

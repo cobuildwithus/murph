@@ -1,10 +1,13 @@
+import { Buffer } from "node:buffer";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type {
-  WorkoutLiveApplyMemberActionV1,
-  WorkoutSession,
+import {
+  parseWorkoutSessionAppCardEnvelopeV4,
+  type WorkoutLiveApplyMemberActionV1,
+  type WorkoutLiveSnapshotMemberActionV1,
+  type WorkoutSession,
 } from "@murphai/contracts";
 import { initializeVault } from "@murphai/core";
 import {
@@ -20,6 +23,7 @@ import {
   applyLiveWorkoutMemberAction as applyLiveWorkoutMemberActionWithId,
   finishLiveWorkout,
   logLiveWorkoutSet,
+  readLiveWorkoutCardSnapshot,
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
 } from "../src/usecases/workout-live.js";
@@ -346,6 +350,45 @@ function putSameNameExerciseAction(input: {
   };
 }
 
+function snapshotAction(input: {
+  workout: WorkoutSession;
+  workoutId: string;
+}): WorkoutLiveSnapshotMemberActionV1 {
+  return {
+    kind: "workout.live.snapshot",
+    presentation: {
+      footer: null,
+      subtitle: null,
+      title: "Workout",
+      workout: {
+        exercises: input.workout.exercises
+          .slice()
+          .sort((left, right) => left.order - right.order)
+          .map((exercise) => ({
+            name: exercise.name,
+            sets: exercise.sets
+              .slice()
+              .sort((left, right) => left.order - right.order)
+              .map((set) => ({
+                actual: typeof set.reps === "number"
+                  ? `${set.reps} reps`
+                  : "Logged",
+                status: "completed" as const,
+                target: null,
+              })),
+          })),
+        state: "active",
+        version: 1,
+      },
+    },
+    version: 1,
+    workoutBinding: deriveWorkoutActionBinding(
+      input.workoutId,
+      input.workout,
+    ),
+  };
+}
+
 async function expectStoredReps(
   vault: string,
   workoutId: string,
@@ -630,6 +673,68 @@ test.each([
       { groupId: "left", reps: 8 },
     ]);
     expect(stored.lastMemberActionId).toBeUndefined();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("a stale snapshot cannot re-arm a card after a hidden same-name reorder", async () => {
+  const fixture = await createSameNameWorkout(12);
+  try {
+    const action = snapshotAction(fixture);
+    const [left, right] = fixture.workout.exercises;
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: [`workout.exercises=${JSON.stringify([
+        { ...right, order: 1 },
+        { ...left, order: 2 },
+      ])}`],
+      vault: fixture.vault,
+    });
+
+    await expect(readLiveWorkoutCardSnapshot({
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("a stale snapshot refreshes after a direct result save", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    const action = snapshotAction(fixture);
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: putFirstSetAction({
+        actionBinding: action.workoutBinding,
+        reps: 12,
+      }),
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "applied" });
+
+    const refreshed = await readLiveWorkoutCardSnapshot({
+      action,
+      vault: fixture.vault,
+    });
+    expect(refreshed.status).toBe("unchanged");
+    if (refreshed.status !== "unchanged") {
+      throw new TypeError("Expected a fresh snapshot after a direct save.");
+    }
+    const encoded = new URL(refreshed.result.cardUrl).hash
+      .replace(/^#murph-card=/u, "");
+    const envelope = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    );
+    expect(envelope).toMatchObject({ schemaVersion: 6 });
+    expect(
+      parseWorkoutSessionAppCardEnvelopeV4(envelope)
+        ?.workout.exercises[0]?.sets[0]?.actual,
+    ).toBe("12 reps");
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }

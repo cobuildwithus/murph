@@ -751,19 +751,24 @@ The current search path uses built-in Postgres full-text search plus the
 their existing 250-candidate SQL bound, and supplement searches retain their
 existing ranking path. Private food-name search uses a separate bounded
 retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 5,000 nearest-name matches, and 5,000
-deterministic canonical representatives from either its full-text arm or its
-trigram fallback before similarity scoring, canonical-key deduplication, and
-window sorting. Ranking is deterministic within that admitted set; it is
-intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
-continue to use direct lookup paths.
+most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
+nearest-name candidates before similarity scoring, canonical-key deduplication,
+and window sorting. Exactly one GiST branch is realized: full-text searches use
+strict-word-nearest names, while no-FTS typo searches use whole-name distance
+and its matching whole-name threshold. That shared metric keeps eligible typo
+matches ahead of ineligible names before the cap. The bounded admissions
+preserve representative choice and canonical diversity across the established
+5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
+within the admitted set; it is intentionally not an exhaustive whole-catalog
+ranking. Exact IDs and UPCs continue to use direct lookup
+paths.
 
 For an existing labels database, run
 `psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
-create the foods exact-name-rank, GiST name-rank, and canonical-rank indexes
-concurrently before deploying web code that uses this query shape. The
-production build preflight validates all three exact definitions plus their
-live/ready/valid state and fails closed if the rollout is missing or incomplete.
+create the foods exact-name-rank and GiST name-rank indexes concurrently before
+deploying web code that uses this query shape. The production build preflight
+validates both exact definitions plus their live/ready/valid state and fails
+closed if the rollout is missing or incomplete.
 `IF NOT EXISTS` cannot repair a same-named interrupted or wrong-definition
 index. When the preflight reports `not_live` or `wrong_definition`, inspect the
 reported fixed name, drop only that index without blocking table writes, and
@@ -772,7 +777,6 @@ rerun the rollout:
 ```sql
 DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_rank_idx;
 DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_exact_rank_idx;
-DROP INDEX CONCURRENTLY IF EXISTS public.foods_canonical_rank_idx;
 ```
 
 Run only the statement for each reported nonconforming index. Do not drop an
@@ -1513,34 +1517,14 @@ assignment and deployment contract is in
 `docs/hosted-linq-db-home-lines-migration.md`.
 
 New routed Linq and Telegram groups materialize their ordinary unnamed hosted
-group and route-owner membership inside the canonical route transaction. For
-the one-time repair of routed containers created before that invariant, deploy
-the replacement Web build first, prove the production alias, wait the configured
-prior-function drain, and prove the alias again. Production database variables
-are write-only in Vercel's local CLI path, so run the temporary repair through
-the existing protected production workflow. It performs the aggregate-only dry
-run, one bounded apply batch, and the zero-pending readiness check:
-
-```bash
-gh workflow run hosted-web-contract-migrations.yml \
-  --ref main \
-  -f deployed_sha=<CURRENT_PRODUCTION_SHA> \
-  -f deployment_url=<CURRENT_PRODUCTION_DEPLOYMENT_URL> \
-  -f run_group_materialization_backfill=true
-```
-
-Each candidate runs serially in its own short database-only transaction and
-reuses the same structural group-store primitive as future route creation. The
-operation creates only the unnamed group and route-owner membership. It does
+group and route-owner membership inside the canonical route transaction. The
+structural write creates only the unnamed group and owner membership. It does
 not add roster participants, create a join code, import a provider title, or
 grant profile, health, or email sharing. Existing owner-authorized setup and
 explicit join flows retain their sharing behavior. The ordinary owner
 membership also satisfies existing current-participant gates for group actions
 such as outbound calls and physical notes; those effects retain exact-message,
-activation, usage, explicit-request, and final pre-provider checks. Repeat bounded
-workflow runs if more than 50 rows remain, and require the final `--check` to
-pass. Do not install a recurring job; remove the temporary workflow input and
-command after production convergence is verified.
+activation, usage, explicit-request, and final pre-provider checks.
 
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a

@@ -1041,12 +1041,15 @@ Last verified: 2026-08-23
 - The automatic authenticated Linq speaker-label read is a third presentation-only consumer of that same route-authorized address-book projection. Web must first resolve exact current room membership: one unsuspended member's authorized `profile-name.v0` snapshot wins; ambiguous or suspended matches stay unnamed; and only a canonical phone with zero matches or one unsuspended match without a profile name may reach the existing set-based owner-contact reader. The response may contain only the sender handle, bounded display name, explicit profile or unverified-contact provenance, and exact handles proven to have no name after every applicable authorized source was checked—never a member id or participant id. The runner keeps only an operation memo plus the bounded private 14-day-positive/six-hour-proven-negative file cache under `.runtime/cache/**`; cache keys are opaque and route-scoped, the cache is excluded from snapshots, and corrupt, stale, unauthorized, or unreadable state is a miss. Neither the response nor either cache supplies identity, membership, consent, routing, matching, persistence, delivery, or effect authority. Only an exact accepted message reference plus trusted server derivation may authorize a participant-scoped effect.
 - A speaker-label result is cacheable only after its source is complete at the existing authority boundary. An active `profile-name.v0` grant with a null pending snapshot is unavailable, never evidence of profile absence or permission to fall through to an owner contact. The address-book reader checks at most 16 exact phones; only those submitted handles may receive contact labels or negative evidence, and batch overflow remains operation-local. This uses the existing next-operation recovery path and adds no invalidation or readiness state.
 - Messages mini-app credentials are random, member-scoped, and persisted only as Messages-domain-separated lookup hashes in one deterministic Messages-owned row per member in the existing short-lived session table; never persist the raw-token hash that the historical unscoped device-agent reader used. Before enrollment reads identity or authority, it must finish validating the bounded request body. Credential issuance must then lock the hosted member and active sponsorship rows, re-check active access and current launch consent, and atomically rotate that one feature-owned row in the same transaction so repeated enrollment stays bounded and account deletion serializes without post-deletion recreation. Every rotation mints a fresh bearer, replaces the lookup hash and expiry, clears revocation/replacement state, and leaves ordinary device-agent rows untouched. Explicit revocation and expired-session cleanup must compare-and-set on the exact authenticated lookup hash as well as the stable row id, so a stale credential generation cannot revoke its replacement. Device-agent routes must also require their distinct `hbds_agent_` prefix before hashing so an `hbds_imessage_` credential can never export wearable credentials across current operation or reader rollback. Re-check active hosted access and historical launch consent on every member action (the extension has no consent UI, so stale document versions must not break it while members with no launch grant stay fail-closed), while keeping authenticated self-revocation available after access or consent is lost so cleanup cannot be blocked. The member-action body must be a strict, bounded, versioned closed union; never admit client-selected member ids, canonical record ids from the card, arbitrary paths, generic patches, database operations, tool calls, or model fallback. Keep the message URL capability-less: the private-state exceptions are bounded presentation fragments containing immutable values already visible in that private-direct message. A fragment may contain health-related presentation values, but never a member identity, canonical record reference, credential, token, or other authority; it is decoded locally and never requested from the Web origin. Never log the full compact-table URL. Never link Privy into the extension, and never copy, persist, log, or share a raw Privy access, refresh, or identity token. The containing app must explicitly address the shared Keychain group for the derived credential while keeping each target's private group first so Privy's default Keychain storage remains private.
-- The same narrow capability-less presentation exception includes V4/V6 workout
+- The same narrow authority-free presentation exception includes V4/V6 workout
   envelopes and V5 challenge-standings envelopes. V3, V4, and V5 carry no
   tracking, identity, canonical references, credentials, tokens, or write
-  authority. V6 adds a 64-character lowercase SHA-256 workout-revision binding
-  derived from the canonical workout id, its ordered hidden exercise/set-slot
-  identity, and its last applied member-action generation. Ordered identity
+  authority. V6 adds one opaque 64-character lowercase workout binding. Its
+  domain-separated first half covers the high-entropy canonical workout id and
+  ordered hidden exercise/set-slot identity for member-scoped reads; its second
+  half covers the same identity plus the last applied member-action generation.
+  A write must match the complete current token under the workout lock, so the stable
+  lookup prefix grants no write authority. Ordered identity
   includes source/group identity and set type but excludes mutable set results
   and annotations, so a structural writer invalidates shifted coordinates
   without claiming ownership of unrelated fields when each exercise coordinate
@@ -1060,7 +1063,16 @@ Last verified: 2026-08-23
   binding reveals no raw hidden field and is checked only as a destructive
   stale-state precondition under the existing canonical workout lock; it never
   grants identity or write authority. Neither binding reveals a canonical id or
-  member. A destructive batch is invalid when its typed final visible set
+  member. Authenticated read-only refresh reuses the V6 workout binding: the
+  Messages bearer scopes lookup to the current member, runtime requires exactly
+  one matching workout in that member's canonical workout records, and the
+  embedded presentation must structurally match before current values replace
+  it. The current derivation intentionally permits same-workout correlation
+  across cards held by one credential owner. Already-sent legacy bindings are
+  accepted for reads only when they match current state or the workout's
+  empty-prior-action derivation; legacy writes still require an exact current
+  match. A forwarded card therefore cannot read the sender's vault. A
+  destructive batch is invalid when its typed final visible set
   sequence equals its submitted prestate, because the projection cannot prove
   whether that batch changes the visible structure; reject it before mailbox
   append rather than accepting a meaningless destructive command. Canonical
@@ -1678,3 +1690,15 @@ message-authorized claim creation remains single-attempt at the transport bounda
 Ordinary feedback and verified-private
 support escalation both require accepted-message authority; scheduled turns receive
 neither capability.
+
+## Hosted operator tasks
+
+Operator-task admission is restricted to the existing hosted Ops allowlist and
+same-origin mutation boundary. Every task is bound to one active member and the
+admitting operator, and a stable idempotency key is bound to an exact hashed
+request shape. A diagnostic receives one fixed read-only disclosure,
+cannot deliver to the member, and stores its bounded result with member-bound
+secure-box encryption. A message is restricted to an existing private direct
+route; Web reauthorizes the member-bound task immediately before model work and
+again at the normal notification/outbox boundary. Neither path creates
+first-contact, group, arbitrary tool, or runtime-shell authority.
