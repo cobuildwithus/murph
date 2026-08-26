@@ -684,7 +684,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
-              'vault-cli workout start [name] [--exercise <name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=...>]',
+              'vault-cli workout start [name] [--exercise <name=...;mode=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=...;unitOverride=...>]',
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout units show --format json',
             ].join('\n'),
@@ -767,9 +767,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           { order: 3 },
         ])
         expect(startCommands).toHaveLength(1)
-        expect(startCommands[0]).toContain(
-          '--exercise name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
-        )
+        expect(startCommands[0]).toContain('name=Bench press')
+        expect(startCommands[0]).toContain('sets=3')
+        expect(startCommands[0]).toContain('reps=8')
+        expect(startCommands[0]).toContain('targetWeight=135')
+        expect(startCommands[0]).toContain('targetWeightUnit=lb')
+        expect(startCommands[0]).toContain('mode=weight_reps')
         expect(workoutCommands.join('\n')).not.toMatch(
           /workout (?:exercise (?:add|set-reps)|set log)/u,
         )
@@ -1034,7 +1037,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout format show <format-id> --format json',
               'vault-cli workout show <event-id> --format json',
-              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
+              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> --mode <mode> [--unit-override <lb|kg>] [--sets <n>]',
               'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
               'vault-cli experiment show <id> --format json',
