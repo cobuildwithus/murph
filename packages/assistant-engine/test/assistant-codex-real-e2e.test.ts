@@ -5140,6 +5140,71 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
+describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', () => {
+  it(
+    'keeps a current-day readout on the saved automation task',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-weekly-digest-prompt-only-e2e-'),
+      )
+
+      try {
+        const savedInstructions = [
+          'Send one concise current-day hydration readout from the supplied evidence.',
+          'Mention the measured intake and whether the current status is on track.',
+          'Do not compare against earlier days.',
+        ].join(' ')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            savedInstructions,
+            'Current trusted evidence for this scheduled occurrence:',
+            '- Today\'s measured fluid intake is 1.4 liters.',
+            '- The current status is on track toward the established 2.3-liter target.',
+          ].join('\n\n'),
+          reasoningEffort: 'medium',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/1\.4 liters?/iu)
+          expect(decision.text).toMatch(/on track/iu)
+          expect(decision.text).not.toMatch(
+            /weekly?|recap|earlier days|past seven days/iu,
+          )
+          console.info(
+            `[real-codex weekly-digest prompt-only] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -5189,7 +5254,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
           ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5306,7 +5371,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions:
-          buildIndependentReminderDeveloperInstructions(scope),
+          buildScheduledAutomationDeveloperInstructions(scope),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5354,7 +5419,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildIndependentReminderDeveloperInstructions('group'),
+        buildScheduledAutomationDeveloperInstructions('group'),
       dynamicTools: [],
       env: config.env,
       excludeResumeTurns: true,
@@ -12359,7 +12424,7 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(
+function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
 ): string {
   return buildAssistantSystemPrompt({

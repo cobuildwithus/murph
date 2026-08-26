@@ -4108,11 +4108,6 @@ describe('assistant cron runtime orchestration', () => {
       'Conduct only the bounded review',
       'Do not record or apply that decision until the user replies in a later turn.',
     ],
-    [
-      'weekly_digest',
-      'Provide only the agreed weekly summary shape from current evidence.',
-      'Do not append a surprise accountability, repair, or coaching question.',
-    ],
   ] as const)(
     'passes the exact accepted %s support scope into the provider turn',
     async (supportKind, expectedScope, expectedBoundary) => {
@@ -4196,6 +4191,65 @@ describe('assistant cron runtime orchestration', () => {
       )
     },
   )
+
+  it('omits the support-scope override for a legacy weekly_digest automation', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-weekly-digest-prompt-only-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'current-day-hydration-readout',
+    )
+    const canonicalAutomation = findCanonicalAutomation(
+      vaultRoot,
+      canonicalJob.jobId,
+    )
+    expect(canonicalAutomation).toBeDefined()
+    if (!canonicalAutomation) {
+      throw new Error('Expected the canonical automation to exist.')
+    }
+    const savedInstructions = [
+      'Provide a concise current-day hydration readout.',
+      'Use only the current-day evidence supplied to this scheduled turn.',
+      'Mention the measured intake and whether it is on track.',
+    ].join(' ')
+    canonicalAutomation.instructions = savedInstructions
+    canonicalAutomation.supportKind = 'weekly_digest'
+    canonicalAutomation.tags.push(
+      'system:support-series:experiment:exp_synthetic_hydration',
+    )
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(savedInstructions),
+        outboxAutomationAuthority: {
+          automationId: canonicalAutomation.automationId,
+          expectedUpdatedAt: canonicalAutomation.updatedAt,
+          supportSeriesId: 'experiment:exp_synthetic_hydration',
+        },
+      }),
+    )
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).not.toContain(
+      'Accepted support scope (engine-supplied',
+    )
+    expect(providerInput?.instructions).not.toContain(
+      'Persisted support kind: weekly_digest.',
+    )
+    expect(providerInput?.instructions).not.toContain(
+      'agreed weekly summary shape',
+    )
+    expect(providerInput?.instructions).not.toContain(
+      'surprise accountability, repair, or coaching question',
+    )
+  })
 
   it.each([
     {
