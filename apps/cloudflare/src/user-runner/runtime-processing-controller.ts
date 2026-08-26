@@ -438,10 +438,18 @@ export class RuntimeProcessingController {
     }
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
+    const triggeredByTrustedWebDirect =
+      input.input.orchestration?.triggeredByWebDirect === true
+      && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+        input.input.orchestrationAttemptId,
+      );
     const foregroundWaitingOnModelFree =
       requestedProcessingMode === "default"
       && (
-        activeFence.processingMode === "system_mailbox"
+        (
+          activeFence.processingMode === "system_mailbox"
+          && !triggeredByTrustedWebDirect
+        )
         || activeFence.processingMode === "environment_interview"
       );
     const environmentWaitingOnForeground =
@@ -452,7 +460,13 @@ export class RuntimeProcessingController {
         activeFence.processingMode === "inbox_media_retention"
         || (
           activeFence.processingMode === "system_mailbox"
-          && requestedProcessingMode === "environment_interview"
+          && (
+            requestedProcessingMode === "environment_interview"
+            || (
+              requestedProcessingMode === "default"
+              && triggeredByTrustedWebDirect
+            )
+          )
         )
       ) {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({

@@ -11,6 +11,13 @@ export {
 export { VaultError, isVaultError } from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
 export {
+  createDeviceBatchImportSession,
+  type DeviceBatchImportSession,
+  type DeviceBatchImportTiming,
+  type ImportDeviceBatchExecutionOptions,
+  type ImportDeviceBatchInput,
+} from "./mutations.ts";
+export {
   reconcileAutomationSupportSeries,
   reconcileAutomationSupportSeriesNamespace,
 } from "./automation.ts";

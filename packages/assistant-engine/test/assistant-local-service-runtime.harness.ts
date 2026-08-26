@@ -45,6 +45,7 @@ export type Deferred<T> = {
 }
 
 type LocalServiceMockName =
+  | 'applyAssistantSessionCodexResumeStateAction'
   | 'appendAssistantTranscriptEntries'
   | 'appendAssistantTranscriptEntriesWithRefs'
   | 'appendAssistantTurnReceiptEvent'

@@ -64,6 +64,7 @@ import {
   loadJsonInputObject,
   loadTextInput,
 } from '@murphai/vault-usecases'
+import { publicValidationIssue } from './public-validation-issue.js'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const murphAgeModeSchema = z.enum(['product', 'research'])
@@ -201,6 +202,14 @@ export const murphAgeModelCardStatusResultSchema = z.object({
   researchReadyCardIds: z.array(murphAgeModelCardIdSchema),
   schemaVersion: z.literal('murph.age.model-card-status.v2'),
   warnings: z.array(z.object({
+    artifactIssue: z.enum([
+      'artifact_unreadable',
+      'directory_unreadable',
+      'duplicate_card_id',
+      'invalid_json',
+      'invalid_schema',
+      'policy_violation',
+    ]),
     code: murphAgeWarningCodeSchema,
   })),
 })
@@ -1579,11 +1588,123 @@ export const murphAgeSubmittedPreviewPayloadSchema = z.object({
   functionResidualParameterPack: murphAgeFunctionResidualParameterPackSchema.optional(),
   wearableResidualParameterPack: murphAgeWearableResidualParameterPackSchema.optional(),
   wearableResidualParameterPacks: z.array(murphAgeWearableResidualParameterPackSchema).min(1).optional(),
-})
+}).strict()
 type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
 type MurphAgeSubmittedPreviewOptions = {
   input: string;
   modelCardArtifactRoot?: string;
+}
+
+const murphAgeSubmittedPayloadTopLevelFields = new Set([
+  'asOf',
+  'cardId',
+  'chronologicalAgeYears',
+  'functionResidualParameterPack',
+  'modelCardArtifactRoot',
+  'sex',
+  'submittedMetrics',
+  'wearableResidualParameterPack',
+  'wearableResidualParameterPacks',
+])
+const murphAgeSubmittedMetricFields = new Set([
+  'confidence',
+  'context',
+  'effectiveDate',
+  'metricKey',
+  'observedAt',
+  'sourceKind',
+  'sourceLabel',
+  'unit',
+  'value',
+])
+const murphAgeSubmittedMetricContextFields = new Set([
+  'fastingStatus',
+  'flag',
+  'measurementMethodKey',
+  'qualifiers',
+  'referenceRange',
+])
+const murphAgeSubmittedMetricReferenceRangeFields = new Set([
+  'high',
+  'low',
+  'text',
+])
+
+function parseMurphAgeSubmittedPreviewPayload(
+  value: unknown,
+): MurphAgeSubmittedPreviewPayload {
+  const parsed = murphAgeSubmittedPreviewPayloadSchema.safeParse(value)
+  if (parsed.success) {
+    return parsed.data
+  }
+
+  throw new VaultCliError(
+    'invalid_payload',
+    'Input failed validation.',
+    {
+      issues: parsed.error.issues.map((issue) => publicValidationIssue(
+        issue,
+        projectMurphAgeSubmittedPayloadIssuePublicPath(issue.path),
+      )),
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
+function projectMurphAgeSubmittedPayloadIssuePublicPath(
+  path: readonly PropertyKey[],
+): (string | number)[] {
+  const [topLevelField, metricIndex, metricField, contextField, referenceRangeField] = path
+  if (
+    typeof topLevelField !== 'string' ||
+    !murphAgeSubmittedPayloadTopLevelFields.has(topLevelField)
+  ) {
+    return []
+  }
+  if (topLevelField !== 'submittedMetrics') {
+    return [topLevelField]
+  }
+
+  const projectedPath: (string | number)[] = [topLevelField]
+  if (
+    typeof metricIndex !== 'number' ||
+    !Number.isSafeInteger(metricIndex) ||
+    metricIndex < 0
+  ) {
+    return projectedPath
+  }
+  projectedPath.push(metricIndex)
+  if (
+    typeof metricField !== 'string' ||
+    !murphAgeSubmittedMetricFields.has(metricField)
+  ) {
+    return projectedPath
+  }
+  projectedPath.push(metricField)
+  if (metricField !== 'context') {
+    return projectedPath
+  }
+  if (
+    typeof contextField !== 'string' ||
+    !murphAgeSubmittedMetricContextFields.has(contextField)
+  ) {
+    return projectedPath
+  }
+  projectedPath.push(contextField)
+  if (contextField === 'qualifiers') {
+    return projectedPath
+  }
+  if (contextField !== 'referenceRange') {
+    return projectedPath
+  }
+  if (
+    typeof referenceRangeField === 'string' &&
+    murphAgeSubmittedMetricReferenceRangeFields.has(referenceRangeField)
+  ) {
+    projectedPath.push(referenceRangeField)
+  }
+  return projectedPath
 }
 
 export function registerMurphAgeCommands(
@@ -1894,7 +2015,10 @@ export function registerMurphAgeCommands(
           .filter((policy) => policy.researchUsable)
           .map((policy) => policy.cardId),
         schemaVersion: 'murph.age.model-card-status.v2' as const,
-        warnings: loaded.warnings.map((warning) => ({ code: warning.code })),
+        warnings: loaded.warnings.map((warning) => ({
+          artifactIssue: warning.artifactIssue,
+          code: warning.code,
+        })),
       }
     },
   })
@@ -2101,7 +2225,7 @@ function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayl
 async function loadMurphAgeSubmittedPreviewReport(
   options: MurphAgeSubmittedPreviewOptions,
 ) {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPreviewPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
   )
 
@@ -2114,7 +2238,7 @@ async function loadMurphAgeSubmittedPreviewReport(
 async function loadMurphAgeSubmittedCalculatorReport(
   options: MurphAgeSubmittedPreviewOptions & { mode: z.infer<typeof murphAgeModeSchema> },
 ) {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPreviewPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2153,7 +2277,7 @@ async function loadMurphAgeSubmittedCalculatorReport(
 async function loadMurphAgeSubmittedCalculatorViewBundle(
   options: MurphAgeSubmittedPreviewOptions & { includeResearchPreview: boolean },
 ): Promise<MurphAgeSubmittedCalculatorViewBundle> {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPreviewPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2248,7 +2372,46 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
     )
   }
   if (Array.isArray(parsed)) return parsed
-  if (!isPlainRecord(parsed)) return []
+  if (!isPlainRecord(parsed)) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Murph Age aggregate evidence input must be a receipt object, an array, or a supported wrapper object.',
+      {
+        issues: [{
+          code: 'invalid_type',
+          publicPath: [],
+        }],
+        retryable: false,
+        stage: 'validation',
+      },
+    )
+  }
+
+  const wrappers = [
+    'cards',
+    'receipts',
+    'evidenceCards',
+    'incrementEvaluationCards',
+  ] as const
+  for (const wrapper of wrappers) {
+    if (
+      Object.prototype.hasOwnProperty.call(parsed, wrapper) &&
+      !Array.isArray(parsed[wrapper])
+    ) {
+      throw new VaultCliError(
+        'invalid_payload',
+        'Murph Age aggregate evidence wrapper fields must contain arrays.',
+        {
+          issues: [{
+            code: 'invalid_type',
+            publicPath: [wrapper],
+          }],
+          retryable: false,
+          stage: 'validation',
+        },
+      )
+    }
+  }
   if (Array.isArray(parsed.cards)) return parsed.cards
   if (Array.isArray(parsed.receipts)) return parsed.receipts
   if (Array.isArray(parsed.evidenceCards)) return parsed.evidenceCards

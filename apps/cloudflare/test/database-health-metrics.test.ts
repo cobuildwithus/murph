@@ -309,6 +309,42 @@ describe("PlanetScale database health metrics", () => {
     }
   });
 
+  it("treats role-less primary-only metrics as incomplete telemetry", () => {
+    const roleLessMaxConnections = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      `planetscale_postgres_settings_max_connections{planetscale_database_branch_id="${BRANCH_ID}",planetscale_pod="pod-primary",planetscale_role="primary"} 50`,
+      `planetscale_postgres_settings_max_connections{planetscale_database_branch_id="${BRANCH_ID}",planetscale_pod="pod-primary"} 50`,
+    );
+
+    const observation = parsePlanetScaleDatabaseMetricObservation(
+      roleLessMaxConnections,
+      BRANCH_ID,
+    );
+
+    expect(observation.missingMetrics).toContain(
+      "planetscale_postgres_settings_max_connections",
+    );
+  });
+
+  it("ignores replica series when explicit primary series are present", () => {
+    const replicaLabels =
+      `planetscale_database_branch_id="${BRANCH_ID}",`
+      + 'planetscale_pod="pod-replica",planetscale_role="replica"';
+    const snapshot = parsePlanetScaleDatabaseMetrics(
+      [
+        buildMetricsBody({ branchId: BRANCH_ID }),
+        `planetscale_postgres_settings_max_connections{${replicaLabels}} 500`,
+        `planetscale_postgres_connection_state{${replicaLabels},state="active"} 400`,
+        "",
+      ].join("\n"),
+      BRANCH_ID,
+    );
+
+    expect(snapshot.postgresConnections).toBe(10);
+    expect(snapshot.postgresMaxConnections).toBe(50);
+  });
+
   it("fails closed when a selected label set is malformed", () => {
 
     const malformedLabels = buildMetricsBody({

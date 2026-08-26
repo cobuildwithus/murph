@@ -51,9 +51,6 @@ import {
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
-  readHostedMemberCoreState,
-} from "../hosted-onboarding/hosted-member-store";
-import {
   hasHostedMemberEstablishedLinqHomeRoute,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
@@ -142,8 +139,8 @@ export async function readHostedRuntimeReconciliationFacts(
 ): Promise<HostedRuntimeReconciliationFacts> {
   const prisma = getPrisma();
   const now = normalizeHostedRuntimeReconciliationDate(input.now);
-  const [member, workspace] = await Promise.all([
-    readHostedMemberCoreState({
+  const [hasActiveAccess, workspace] = await Promise.all([
+    readActiveHostedMemberAccess({
       memberId: input.userId,
       prisma,
     }),
@@ -151,10 +148,7 @@ export async function readHostedRuntimeReconciliationFacts(
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
-  if (!member || !(await readActiveHostedMemberAccess({
-    memberId: input.userId,
-    prisma,
-  }))) {
+  if (!hasActiveAccess) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",

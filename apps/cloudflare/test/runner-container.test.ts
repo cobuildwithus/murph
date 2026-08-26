@@ -5881,15 +5881,14 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("destroys a warm shell after preempting an active workspace invocation", async () => {
+  async function proveAcknowledgedChildAbortSettlement(
+    abortStatus: "accepted" | "queued",
+  ): Promise<void> {
     const runnerRequestSignal = createDeferred<AbortSignal>();
-    const destroyStarted = createDeferred<void>();
-    const allowDestroyToSettle = createDeferred<void>();
+    const releaseAdmittedBoundary = createDeferred<void>();
     let status: "running" | "stopped" = "running";
     let executeCallCount = 0;
     const destroy = vi.fn(async () => {
-      destroyStarted.resolve();
-      await allowDestroyToSettle.promise;
       status = "stopped";
     });
     const getState = vi.fn(async () => ({
@@ -5912,7 +5911,12 @@ describe("RunnerContainer", () => {
           leaseGeneration: request.leaseGeneration,
           userId: "member_123",
         });
-        return new Response(null, { status: 204 });
+        return new Response(null, {
+          headers: {
+            "x-workspace-invocation-abort-status": abortStatus,
+          },
+          status: 204,
+        });
       }
 
       if (!url.endsWith("/internal/workspace-invocation")) {
@@ -5933,13 +5937,8 @@ describe("RunnerContainer", () => {
         throw new Error("Expected active invocation request to receive an abort signal.");
       }
       runnerRequestSignal.resolve(signal);
-      await new Promise<never>((_resolve, reject) => {
-        signal.addEventListener("abort", () => {
-          reject(signal.reason instanceof Error
-            ? signal.reason
-            : new Error("workspace invocation request aborted"));
-        }, { once: true });
-      });
+      await releaseAdmittedBoundary.promise;
+      return createInvalidRunnerRequestResponse();
     });
     const { container, startAndWaitForPorts } = createContainerDouble({
       containerFetch,
@@ -5987,9 +5986,17 @@ describe("RunnerContainer", () => {
       },
     );
 
-    await destroyStarted.promise;
+    await vi.waitFor(() => {
+      expect(containerFetch.mock.calls.some(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation/abort")
+      )).toBe(true);
+    });
     expect(abortSettled).toBe(false);
-    allowDestroyToSettle.resolve();
+    expect(signal.aborted).toBe(false);
+    expect(executeCallCount).toBe(1);
+    expect(destroy).not.toHaveBeenCalled();
+
+    releaseAdmittedBoundary.resolve();
     await expect(abortResult).resolves.toBe("accepted");
 
     const replacementResult = container.invoke({
@@ -6000,9 +6007,7 @@ describe("RunnerContainer", () => {
       timeoutMs: 30_000,
       userId: "member_123",
     });
-    await expect(invokeResultPromise).resolves.toMatchObject({
-      message: "workspace invocation preempted",
-    });
+    await expect(invokeResultPromise).resolves.toBeInstanceOf(Error);
     for (const queuedInvokeResult of queuedInvokeResults) {
       await expect(queuedInvokeResult).resolves.toMatchObject({
         message: "workspace invocation preempted",
@@ -6016,8 +6021,13 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/workspace-invocation")
     )).toHaveLength(2);
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
+    expect(destroy).toHaveBeenCalledOnce();
+  }
+
+  it.each(["accepted", "queued"] as const)(
+    "waits for a %s child abort to settle before admitting a replacement",
+    proveAcknowledgedChildAbortSettlement,
+  );
 
   it("coalesces concurrent exact aborts until their child request settles", async () => {
     const runnerRequestStarted = createDeferred<void>();
@@ -6166,7 +6176,9 @@ describe("RunnerContainer", () => {
     expect(executeCallCount).toBe(2);
   });
 
-  it("preserves failed preemption until platform stop is observed", async () => {
+  async function proveFailClosedChildAbortFallback(
+    abortStatus: "failed" | "stale",
+  ): Promise<void> {
     const runnerRequestSignal = createDeferred<AbortSignal>();
     let status: "running" | "stopped" = "running";
     const destroy = vi.fn(async () => {
@@ -6187,7 +6199,14 @@ describe("RunnerContainer", () => {
       }
 
       if (url.endsWith("/internal/workspace-invocation/abort")) {
-        return new Response(null, { status: 204 });
+        return abortStatus === "failed"
+          ? new Response(null, { status: 503 })
+          : new Response(null, {
+            headers: {
+              "x-workspace-invocation-abort-status": "stale",
+            },
+            status: 204,
+          });
       }
 
       if (!url.endsWith("/internal/workspace-invocation")) {
@@ -6256,9 +6275,14 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBe("accepted");
+    })).resolves.toBe(abortStatus === "failed" ? "accepted" : "stale");
     expect(destroy).toHaveBeenCalledOnce();
-  });
+  }
+
+  it.each(["failed", "stale"] as const)(
+    "preserves %s preemption until platform stop is observed",
+    proveFailClosedChildAbortFallback,
+  );
 
   it("retries failed invocation cleanup from the next exact wake", async () => {
     let destroyAttempts = 0;

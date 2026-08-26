@@ -78,6 +78,7 @@ interface MeasurementAddResult {
 interface MeasurementShowResult {
   entity: {
     id: string
+    occurredAt?: string | null
     data: {
       source?: string
       tags?: string[]
@@ -97,6 +98,50 @@ interface MeasurementShowResult {
     }
   }
 }
+
+test('measurement add resolves date-only occurrence in its explicit event timezone', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-timezone-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const created = requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'weight',
+        '--value',
+        '72.5',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-03-08',
+        '--time-zone',
+        'America/New_York',
+      ])
+    ).envelope,
+  )
+
+  assert.equal(created.occurredAt, '2026-03-08T16:00:00.000Z')
+
+  const shown = requireData(
+    (
+      await runInProcessJsonCli<MeasurementShowResult>(cli, [
+        'measurement',
+        'show',
+        created.eventId,
+        '--vault',
+        vaultRoot,
+      ])
+    ).envelope,
+  )
+  assert.equal(shown.entity.occurredAt, '2026-03-08T16:00:00.000Z')
+  assert.equal(shown.entity.data.timeZone, 'America/New_York')
+})
 
 interface MeasurementEntryListResult {
   filters: {

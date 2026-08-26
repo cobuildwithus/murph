@@ -52,6 +52,12 @@ import {
   type HostedGrowthReferralLinkUsage,
 } from "@/src/lib/hosted-ops/growth-referral-link-usage";
 import {
+  buildHostedGrowthGroupPrivateDailySeries,
+  findHostedGrowthGroupPrivateConversions,
+  type HostedGrowthGroupPrivateDailyPoint,
+  type HostedGrowthResolvedGroupMessage,
+} from "@/src/lib/hosted-ops/growth-group-private-attribution";
+import {
   MONTHLY_REVENUE_MONTHS,
   buildHostedGrowthMonthlyRevenueSeries,
   startOfUtcMonthsAgo,
@@ -72,6 +78,7 @@ export type {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
+const GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_DAYS = 14;
 const WEEKLY_ROWS = 8;
 const SNAPSHOT_COMPARE_TARGET_DAYS = 7;
 const SNAPSHOT_COMPARE_MIN_DAYS = 6;
@@ -300,6 +307,10 @@ export interface HostedGrowthDashboard {
   };
   current: HostedGrowthCurrentMetrics;
   dailySeries: HostedGrowthDailyPoint[];
+  groupPrivateConversions: {
+    dailySeries: HostedGrowthGroupPrivateDailyPoint[];
+    total: number;
+  };
   messageSeries: HostedGrowthMessagePoint[];
   monthlyRevenueSeries: HostedGrowthMonthlyRevenuePoint[];
   mrrWowPercent: number | null;
@@ -798,6 +809,7 @@ interface HostedGrowthDecodedGroupMessages {
 interface HostedGrowthActiveUserCounts {
   previous7Days: number;
   previous7DaysComplete: boolean;
+  resolvedGroupMessages: HostedGrowthResolvedGroupMessage[];
   today: number;
   todayComplete: boolean;
   trailing30Days: number;
@@ -878,6 +890,16 @@ async function calculateHostedGrowthActiveUsers(input: {
       retiredMessageCreatedAt: decodedGroupMessages.retiredMessageCreatedAt,
       start: input.previousStart,
     }),
+    resolvedGroupMessages: groupMessages.map((message) => {
+      const identity = senderIdentities.get(message.evidence.identityKey);
+      if (!identity) {
+        throw new Error("Hosted growth group sender identity was not resolved.");
+      }
+      return {
+        memberId: readHostedGrowthMemberIdFromIdentity(identity),
+        observedAt: message.createdAt,
+      };
+    }),
     today: todayIdentities.size,
     todayComplete: !hasHostedGrowthRetiredMessageInWindow({
       end: input.now,
@@ -897,6 +919,31 @@ async function calculateHostedGrowthActiveUsers(input: {
       start: input.trailing7DayStart,
     }),
   };
+}
+
+async function resolveHostedGrowthGroupPrivateMessages(input: {
+  groupRows: readonly HostedGrowthGroupMailboxRow[];
+  prisma: HostedGrowthPrisma;
+}): Promise<HostedGrowthResolvedGroupMessage[]> {
+  const decodedGroupMessages = await decodeHostedGrowthGroupMessages(
+    input.groupRows,
+    input.prisma,
+  );
+  const senderIdentities = await resolveHostedGrowthGroupSenderIdentities(
+    decodedGroupMessages.messages.map((message) => message.evidence),
+    input.prisma,
+  );
+
+  return decodedGroupMessages.messages.map((message) => {
+    const identity = senderIdentities.get(message.evidence.identityKey);
+    if (!identity) {
+      throw new Error("Hosted growth group sender identity was not resolved.");
+    }
+    return {
+      memberId: readHostedGrowthMemberIdFromIdentity(identity),
+      observedAt: message.createdAt,
+    };
+  });
 }
 
 async function decodeHostedGrowthGroupMessages(
@@ -1193,6 +1240,11 @@ function hostedGrowthMemberIdentity(memberId: string): string {
   return `member:${memberId}`;
 }
 
+function readHostedGrowthMemberIdFromIdentity(identity: string): string | null {
+  const prefix = "member:";
+  return identity.startsWith(prefix) ? identity.slice(prefix.length) : null;
+}
+
 function hostedGrowthLinqEvidenceKey(
   kind: HostedLinqParticipantContactKind,
   lookupKey: string,
@@ -1234,6 +1286,8 @@ export async function readHostedGrowthDashboard(
     activeUsersTodayDirectRows,
     monthlyRevenuePurchases,
     referralLinkClaimRows,
+    groupPrivateConversionRows,
+    groupPrivateConversionTotal,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -1488,6 +1542,26 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    prisma.hostedMember.findMany({
+      select: {
+        groupPrivateConversionTrackedAt: true,
+      },
+      where: {
+        ...realHostedMemberWhere,
+        groupPrivateConversionTrackedAt: {
+          gte: dailyStart,
+          lte: now,
+        },
+      },
+    }),
+    prisma.hostedMember.count({
+      where: {
+        ...realHostedMemberWhere,
+        groupPrivateConversionTrackedAt: {
+          not: null,
+        },
+      },
+    }),
   ]);
   const activeUsers = await calculateHostedGrowthActiveUsers({
     currentDirectRows: activeUsersTrailing7DayDirectRows,
@@ -1588,6 +1662,14 @@ export async function readHostedGrowthDashboard(
     }),
     current,
     dailySeries,
+    groupPrivateConversions: {
+      dailySeries: buildHostedGrowthGroupPrivateDailySeries({
+        dayCount: DAILY_SERIES_DAYS,
+        trackingRows: groupPrivateConversionRows,
+        windowEnd: now,
+      }),
+      total: groupPrivateConversionTotal,
+    },
     messageSeries: buildHostedGrowthMessageSeries({
       messagesBeforeSeries: HOSTED_MESSAGE_VOLUME_BASE +
         (messagesBeforeSeries._sum.inboundMessagesPriorDay ?? 0) +
@@ -1675,6 +1757,10 @@ export async function captureHostedGrowthDailySnapshot(
   const snapshotDate = startOfUtcDay(now);
   const priorDayStart = addUtcDays(snapshotDate, -1);
   const trailing7DayStart = addUtcDays(snapshotDate, -7);
+  const groupPrivateAttributionStart = addUtcDays(
+    now,
+    -GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_DAYS,
+  );
   const activityCountsPromise = (async () => {
     const [
       activeUsersPriorDayDirectRows,
@@ -1716,15 +1802,21 @@ export async function captureHostedGrowthDailySnapshot(
             },
           },
           createdAt: {
-            gte: trailing7DayStart,
-            lt: snapshotDate,
+            gte: groupPrivateAttributionStart,
+            lt: now,
           },
         },
       }),
     ]);
+    const activityGroupRows = activeUsersGroupRows.filter((row) =>
+      row.createdAt >= trailing7DayStart && row.createdAt < snapshotDate
+    );
+    const groupPrivateOnlyRows = activeUsersGroupRows.filter((row) =>
+      row.createdAt < trailing7DayStart || row.createdAt >= snapshotDate
+    );
     const activeUsers = await calculateHostedGrowthActiveUsers({
       currentDirectRows: activeUsersTrailing7DayDirectRows,
-      groupRows: activeUsersGroupRows,
+      groupRows: activityGroupRows,
       monthlyDirectRows: activeUsersTrailing7DayDirectRows,
       monthlyStart: trailing7DayStart,
       now: snapshotDate,
@@ -1735,7 +1827,15 @@ export async function captureHostedGrowthDailySnapshot(
       todayStart: priorDayStart,
       trailing7DayStart,
     });
-
+    const groupPrivateOnlyMessages = await resolveHostedGrowthGroupPrivateMessages({
+      groupRows: groupPrivateOnlyRows,
+      prisma,
+    }).catch(() => {
+      console.error(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+      return [];
+    });
     return {
       available: true as const,
       activeUsersPriorDay: activeUsers.todayComplete
@@ -1744,6 +1844,10 @@ export async function captureHostedGrowthDailySnapshot(
       activeUsersTrailing7Days: activeUsers.trailing7DaysComplete
         ? activeUsers.trailing7Days
         : null,
+      resolvedGroupMessages: [
+        ...activeUsers.resolvedGroupMessages,
+        ...groupPrivateOnlyMessages,
+      ],
     };
   })().catch(() => {
     console.error(
@@ -1792,6 +1896,17 @@ export async function captureHostedGrowthDailySnapshot(
       }),
       activityCountsPromise,
     ]);
+  if (activityCounts.available) {
+    await recordHostedGrowthGroupPrivateConversions({
+      messages: activityCounts.resolvedGroupMessages,
+      trackedAt: now,
+      prisma,
+    }).catch(() => {
+      console.error(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+    });
+  }
   const outboundMessagesPriorDay =
     outboundLinqMessagesPriorDay + outboundTelegramEmailMessagesPriorDay;
   const activityCreateCounts = activityCounts.available
@@ -1851,6 +1966,67 @@ export async function captureHostedGrowthDailySnapshot(
     activityAvailable: activityCounts.available,
     snapshot,
   };
+}
+
+async function recordHostedGrowthGroupPrivateConversions(input: {
+  messages: readonly HostedGrowthResolvedGroupMessage[];
+  prisma: HostedGrowthPrisma;
+  trackedAt: Date;
+}): Promise<void> {
+  const memberIds = [...new Set(input.messages.flatMap((message) =>
+    message.memberId === null ? [] : [message.memberId]
+  ))];
+  if (memberIds.length === 0) {
+    return;
+  }
+
+  const members = await input.prisma.hostedMember.findMany({
+    select: {
+      hostedMailboxItems: {
+        orderBy: [
+          { createdAt: "asc" },
+          { id: "asc" },
+        ],
+        select: {
+          createdAt: true,
+        },
+        take: 1,
+        where: {
+          kind: "member.activated",
+        },
+      },
+      id: true,
+    },
+    where: {
+      ...realHostedMemberWhere,
+      groupPrivateConversionTrackedAt: null,
+      id: {
+        in: memberIds,
+      },
+    },
+  });
+  const convertedMemberIds = findHostedGrowthGroupPrivateConversions({
+    activations: members.map((member) => ({
+      memberId: member.id,
+      privateActivatedAt: member.hostedMailboxItems[0]?.createdAt ?? null,
+    })),
+    messages: input.messages,
+  });
+  if (convertedMemberIds.length === 0) {
+    return;
+  }
+
+  await input.prisma.hostedMember.updateMany({
+    data: {
+      groupPrivateConversionTrackedAt: input.trackedAt,
+    },
+    where: {
+      groupPrivateConversionTrackedAt: null,
+      id: {
+        in: convertedMemberIds,
+      },
+    },
+  });
 }
 
 /**

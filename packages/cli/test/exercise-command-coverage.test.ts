@@ -205,3 +205,52 @@ test('exercise show rejects ambiguous exact names and unknown lookups', async ()
   assert.equal(missing.envelope.ok, false)
   assert.match(missing.envelope.error.message ?? '', /No public exercise catalog item/u)
 })
+
+test('exercise commands classify catalog artifact failures without echoing internals', async () => {
+  const privateArtifactPath = '/private/catalog/PRIVATE_ARTIFACT_SENTINEL.json'
+  const unavailableError = Object.assign(
+    new Error(`ENOENT: no such file or directory, open '${privateArtifactPath}'`),
+    { code: 'ENOENT' },
+  )
+
+  for (const args of [
+    ['exercise', 'list'],
+    ['exercise', 'show', 'EX001'],
+    ['exercise', 'facets'],
+  ]) {
+    const result = await runInProcessJsonCli(
+      createExerciseSliceCli({
+        getCatalogReader() {
+          throw unavailableError
+        },
+      }),
+      args,
+    )
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    assert.equal(result.envelope.error.code, 'exercise_catalog_unavailable')
+    assert.equal(result.envelope.error.retryable, false)
+    assert.match(result.envelope.error.message ?? '', /simple conservative movement description/u)
+    assert.equal(result.envelope.error.hint, undefined)
+    assert.equal(result.envelope.error.stage, undefined)
+    assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_ARTIFACT_SENTINEL/u)
+  }
+
+  const invalid = await runInProcessJsonCli(
+    createExerciseSliceCli({
+      getCatalogReader() {
+        throw new SyntaxError('PRIVATE_CATALOG_CONTENT_SENTINEL')
+      },
+    }),
+    ['exercise', 'list'],
+  )
+  assert.equal(invalid.exitCode, 1)
+  assert.equal(invalid.envelope.ok, false)
+  assert.equal(invalid.envelope.error.code, 'exercise_catalog_invalid')
+  assert.equal(invalid.envelope.error.retryable, false)
+  assert.match(invalid.envelope.error.message ?? '', /stop instead of using catalog details/u)
+  assert.equal(invalid.envelope.error.hint, undefined)
+  assert.equal(invalid.envelope.error.stage, undefined)
+  assert.doesNotMatch(JSON.stringify(invalid.envelope), /PRIVATE_CATALOG_CONTENT_SENTINEL/u)
+})

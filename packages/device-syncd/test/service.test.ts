@@ -653,6 +653,10 @@ test("device sync service records privacy-safe job phase timings", async () => {
       async executeJob(context) {
         await context.listConnectionSources?.();
         await context.refreshAccountTokens();
+        advanceClock(300);
+        context.recordProviderRequestTiming?.("inventory", 300);
+        advanceClock(400);
+        context.recordProviderRequestTiming?.("resource", 400);
         await context.importSnapshot({ kind: "timing-test" });
         advanceClock(1_500);
         return {};
@@ -661,7 +665,16 @@ test("device sync service records privacy-safe job phase timings", async () => {
     importer: {
       async importDeviceProviderSnapshot() {
         advanceClock(2_000);
-        return { ok: true };
+        return {
+          deviceProviderSnapshotImportTiming: {
+            canonicalCoreElapsedMs: 1_600,
+            canonicalWriteElapsedMs: 200,
+            eventIdentityIndexCacheHit: true,
+            eventIdentityIndexElapsedMs: 1_200,
+            normalizationElapsedMs: 300,
+          },
+          ok: true,
+        };
       },
     },
   });
@@ -694,23 +707,32 @@ test("device sync service records privacy-safe job phase timings", async () => {
     await service.runWorkerOnce();
 
     assert.deepEqual(service.listJobTimingDiagnostics(), [{
-      at: "2026-08-25T10:00:05.000Z",
+      at: "2026-08-25T10:00:05.700Z",
       attempts: 1,
       connectionSourceReadCount: 1,
       connectionSourceReadElapsedMs: 1_000,
       credentialRefreshCount: 1,
       credentialRefreshElapsedMs: 500,
       durableProgressCommitted: true,
-      elapsedMs: 5_000,
+      elapsedMs: 5_700,
       jobCount: 1,
       jobKind: "resource",
       outcome: "completed",
       provider: "demo",
-      providerExecutionElapsedMs: 5_000,
+      providerExecutionElapsedMs: 5_700,
+      providerInventoryRequestCount: 1,
+      providerInventoryRequestElapsedMs: 300,
+      providerResourceRequestCount: 1,
+      providerResourceRequestElapsedMs: 400,
       providerUnattributedElapsedMs: 1_500,
       resource: "sleep",
       snapshotImportCount: 1,
       snapshotImportElapsedMs: 2_000,
+      snapshotCanonicalCoreElapsedMs: 1_600,
+      snapshotCanonicalWriteElapsedMs: 200,
+      snapshotEventIdentityIndexCacheHitCount: 1,
+      snapshotEventIdentityIndexElapsedMs: 1_200,
+      snapshotNormalizationElapsedMs: 300,
     }]);
   } finally {
     close();
@@ -6447,6 +6469,138 @@ test("device sync service counts provider batch rows against drainWorker limits"
   assert.equal(store.getJobById(fourth.id)?.status, "queued");
 
   close();
+});
+
+test("device sync drain shares one bounded import session and reports cumulative progress", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-session");
+  const importSessions: unknown[] = [];
+  const progress: number[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(_input, options) {
+        importSessions.push(options?.importSession);
+        return { events: [] };
+      },
+    },
+    providers: [createFakeProvider({
+      async executeJob(context) {
+        await context.importSnapshot({ kind: "session-test" });
+        return {};
+      },
+    })],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-import-session",
+    displayName: "Demo Import Session",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "import-session-access",
+      accessTokenEncrypted: encryptStoredAccessToken(
+        "demo",
+        "demo-import-session",
+        "import-session-access",
+      ),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  for (const [index, availableAt] of [
+    "2026-03-17T10:00:00.000Z",
+    "2026-03-17T10:00:01.000Z",
+  ].entries()) {
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "resource",
+      payload: { resource: `resource-${index}` },
+      availableAt,
+    });
+  }
+
+  try {
+    assert.equal(await service.drainWorker(2, account.id, {
+      onProcessedJobRows: (count) => progress.push(count),
+    }), 2);
+    assert.equal(importSessions.length, 2);
+    assert.ok(importSessions[0]);
+    assert.equal(importSessions[1], importSessions[0]);
+    assert.deepEqual(progress, [1, 2]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync drain stops before the next job when foreground work arrives", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-between-job-yield");
+  const progress: number[] = [];
+  let executionCount = 0;
+  let yieldRequested = false;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      shouldYieldJobExecution: () => yieldRequested,
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider({
+      async executeJob() {
+        executionCount += 1;
+        return {};
+      },
+    })],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-between-job-yield",
+    displayName: "Demo Between Job Yield",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "between-job-yield-access",
+      accessTokenEncrypted: encryptStoredAccessToken(
+        "demo",
+        "demo-between-job-yield",
+        "between-job-yield-access",
+      ),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { resource: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { resource: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+
+  try {
+    assert.equal(await service.drainWorker(2, account.id, {
+      onProcessedJobRows(count) {
+        progress.push(count);
+        yieldRequested = true;
+      },
+    }), 1);
+    assert.equal(executionCount, 1);
+    assert.deepEqual(progress, [1]);
+    assert.equal(store.getJobById(first.id)?.status, "succeeded");
+    assert.equal(store.getJobById(second.id)?.status, "queued");
+    assert.equal(store.getJobById(second.id)?.attempts, 0);
+  } finally {
+    close();
+  }
 });
 
 test("device sync service reclaims expired running batch candidates in due order", async () => {
@@ -12852,6 +13006,74 @@ test("device sync service omits unsafe free-form provider diagnostic reasons", a
   });
 
   close();
+});
+
+test("device sync service preserves only safe Junction ECG binding diagnostics", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ecg-diagnostics");
+  const warnings: Array<Record<string, unknown> | undefined> = [];
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn(_message, context) {
+          warnings.push(context);
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw deviceSyncError({
+            code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Junction ECG summary and voltage response were inconsistent.",
+            retryable: true,
+            details: {
+              reason: "sample_count_mismatch",
+              actualSampleCount: 1,
+              expectedSampleCount: 2,
+              recordingId: "private-recording-id",
+              unsafeFreeText: "private sample detail",
+            },
+          });
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "junction-ecg-diagnostic",
+    });
+
+    await service.runWorkerOnce();
+    const expected = {
+      junctionEcgActualSampleCount: 1,
+      junctionEcgBindingReason: "sample_count_mismatch",
+      junctionEcgExpectedSampleCount: 2,
+    };
+    assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
+      ...expected,
+      providerHttpStatus: 500,
+    });
+    assert.deepEqual(
+      {
+        junctionEcgActualSampleCount: warnings[0]?.junctionEcgActualSampleCount,
+        junctionEcgBindingReason: warnings[0]?.junctionEcgBindingReason,
+        junctionEcgExpectedSampleCount: warnings[0]?.junctionEcgExpectedSampleCount,
+      },
+      expected,
+    );
+    assert.equal("recordingId" in (warnings[0] ?? {}), false);
+    assert.equal("unsafeFreeText" in (warnings[0] ?? {}), false);
+  } finally {
+    close();
+  }
 });
 
 test("device sync service exposes sanitized cause details for transport failures", async () => {

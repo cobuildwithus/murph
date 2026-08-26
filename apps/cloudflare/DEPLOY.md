@@ -421,6 +421,17 @@ durable-progress presence, and bounded phase counts/durations. A timeout-yielded
 job must remain queued and report `durableProgressCommitted=false`; a completed
 job must report committed progress without exposing its identity or payload.
 
+The snapshot-import optimization expands each bounded timing summary with
+Junction inventory/resource request counts and durations, snapshot
+normalization/core/write durations, event-identity index duration, and cache-hit
+count. Deploy Web first so its runtime-log parser accepts the expanded bounded
+object, then deploy Cloudflare with `container_rollout=immediate`. After rollout,
+confirm the first event-bearing import in a drain reports a cache miss, later
+non-overlapping imports report hits, overlapping corrections report misses, and
+the job totals still reconcile to a nonnegative unattributed duration. A cache
+hit is an optimization signal only; correctness remains fenced by the live
+event-ledger fingerprint and overlapping identity scopes.
+
 If rollback is required, reverse the deploy order: roll back Cloudflare and the
 runner first, verify the exact old runner fingerprint across the fleet, and
 only then roll back Web. The intermediate pair can have a bounded telemetry gap
@@ -1812,7 +1823,7 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.147.0`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.149.1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.

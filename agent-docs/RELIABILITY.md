@@ -603,7 +603,10 @@ Last verified: 2026-08-23
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately. Metric families are normalized
-  independently: an absent or structurally unusable family remains unknown,
+  independently: primary-only Postgres and PgBouncer families require an
+  explicit `planetscale_role="primary"` label, while the edge connection-error
+  family remains role-less by provider contract. An absent or structurally
+  unusable family remains unknown,
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
   A collection that fails before producing a usable observation, including a
@@ -2454,6 +2457,21 @@ Last verified: 2026-08-23
   additional same-date recovery attempt but is not the cron's retry guarantee.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
+- Group-to-private growth attribution reuses that same snapshot pass and its
+  already decoded, identity-resolved group messages. For each resolved real
+  member in the bounded 14-day retained-message window, one set-based read
+  compares the earliest retained group receipt with the first canonical
+  `member.activated` receipt; one conditional batch update sets a nullable
+  member-owned tracking timestamp only when the group receipt came first. The
+  marker stores no message, sender, or group identifier, follows the member's
+  existing deletion lifecycle, and remains stable after message content
+  retires. This is sequence-based attribution limited on every run to group
+  evidence still available inside the rolling 14-day window, not causal proof;
+  sequences whose group evidence retires before activation are never counted.
+  Attribution-only decode or identity failures cannot invalidate the established
+  prior-day and trailing-seven-day activity aggregates. Attribution failures do
+  not block snapshot capture and retry only while the source evidence remains
+  retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the
@@ -2462,8 +2480,20 @@ Last verified: 2026-08-23
   serialization while the write preserves attempt and monotonic
   lease-generation authority, max-merges the publication deadline, sanitizes
   stored diagnostic JSON, and changes `updated_at` only when state changes. It
-  must not select trace ids into the application, lock an unbounded collection,
-  or open one transaction per trace.
+  selects at most 251 of the newest checkpoint candidates and locks those trace
+  rows in deterministic trace-id order inside one bounded `READ COMMITTED`
+  transaction. A second statement takes a fresh command snapshot, rechecks
+  current mailbox and lease eligibility, and updates at most the newest 250.
+  Provider, assistant, and ordinary runtime multi-row writers use the same
+  trace-id lock order. This common order prevents cross-writer row-lock cycles,
+  while the fresh checkpoint snapshot prevents an older waiting lease from
+  overwriting a newer one, without a broad transaction retry.
+  Persistence failures emit only event type, source, input cardinality, query
+  tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
+  stay out of failure logs. The bounded transaction-local trace-id list passes
+  only from the lock statement to the fresh update statement; it must not
+  escape that callback or appear in logs. The writer must not lock an unbounded
+  collection or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event

@@ -863,7 +863,7 @@ describe("hosted orchestration reconciliation facts", () => {
       revision: 3,
       supportsImages: false,
       verificationProfile:
-        "murph-codex-0.147.0-portable-responses-v1",
+        "murph-codex-0.149.1-portable-responses-v1",
     });
 
     const response = await reconciliationRoute.GET(
@@ -1277,6 +1277,24 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
+  it("retains Environment interview state for read-only status checks", async () => {
+    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
+      id: "mailbox_environment_interview_1",
+    });
+
+    const {
+      readHostedRuntimeReconciliationFacts,
+    } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
+    const facts = await readHostedRuntimeReconciliationFacts({
+      decisionSource: "status",
+      usageGateMode: "read_only",
+      userId: MEMBER_ID,
+    });
+
+    expect(facts.environmentInterviewPending).toBe(true);
+    expect(mocks.readPendingHostedEnvironmentInterviewMailboxItem).toHaveBeenCalledTimes(1);
+  });
+
   it("does not gate future model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:05:00.000Z",
@@ -1687,7 +1705,9 @@ describe("hosted orchestration reconciliation facts", () => {
         version: "4",
       },
     });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
   });
 });
 
