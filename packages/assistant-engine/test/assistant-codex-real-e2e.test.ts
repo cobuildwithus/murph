@@ -804,7 +804,171 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 
   it(
-    'requires typed modes and units while keeping live and reminder sets canonical across fresh threads',
+    'keeps resistance and bodyweight editor modes explicit before any load is logged',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-workout-result-mode-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic workout result mode proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeRealWorkoutVaultCli({ binDirectory }),
+        ])
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] [--exercise <name=...;mode=...;sets=...;reps=...;unitOverride=...>]',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout units show --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
+            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
+            WORKOUT_E2E_VAULT: workingDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Start a workout named Result field proof.',
+            'Add Seated cable curl for 3 sets of 7 reps; I use pounds but have not chosen the load.',
+            'Add unloaded Push-up for 3 sets of 8 reps.',
+            'Do not log any set yet.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const matching = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success
+            && parsed.data.exercises.some(
+              (exercise) => exercise.name === 'Seated cable curl',
+            )
+            && parsed.data.exercises.some(
+              (exercise) => exercise.name === 'Push-up',
+            )
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const commandLog = await readFile(commandLogPath, 'utf8')
+          .catch(() => '')
+        const commands = commandLog.trim().split('\n').filter(Boolean)
+
+        process.stdout.write(
+          `[workout-result-mode-e2e] ${JSON.stringify({
+            commands,
+            finalMessage: result.finalMessage,
+            responseCardKind: result.responseCard?.kind ?? null,
+          })}\n`,
+        )
+        expect(matching).toHaveLength(1)
+        const workout = matching[0]!
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: workout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'active' },
+        })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: workout.id,
+          events: result.jsonEvents,
+          state: 'active',
+        })
+        expect(result.runtimeIssueInputs).toEqual([])
+        const resistance = workout.workout.exercises.find(
+          (exercise) => exercise.name === 'Seated cable curl',
+        )
+        const bodyweight = workout.workout.exercises.find(
+          (exercise) => exercise.name === 'Push-up',
+        )
+        expect(resistance).toMatchObject({
+          memberRepsPerSet: 7,
+          mode: 'weight_reps',
+          setPlanIsFinite: true,
+          unitOverride: 'lb',
+        })
+        expect(resistance?.targetWeightPerSet).toBeUndefined()
+        expect(resistance?.sets).toEqual([
+          { order: 1 },
+          { order: 2 },
+          { order: 3 },
+        ])
+        expect(bodyweight).toMatchObject({
+          memberRepsPerSet: 8,
+          mode: 'bodyweight',
+          setPlanIsFinite: true,
+        })
+        expect(bodyweight?.unitOverride).toBeUndefined()
+        expect(bodyweight?.sets).toEqual([
+          { order: 1 },
+          { order: 2 },
+          { order: 3 },
+        ])
+        const startCommands = commands.filter((command) =>
+          command.startsWith('workout start ')
+        )
+        expect(startCommands).toHaveLength(1)
+        expect(startCommands[0]).toContain('mode=weight_reps')
+        expect(startCommands[0]).toContain('unitOverride=lb')
+        expect(startCommands[0]).toContain('mode=bodyweight')
+        expect(startCommands[0]?.match(/unitOverride=lb/gu)).toHaveLength(1)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -870,7 +1034,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout format show <format-id> --format json',
               'vault-cli workout show <event-id> --format json',
-              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> --mode <mode> [--unit-override <lb|kg>] [--sets <n>]',
+              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
               'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
               'vault-cli experiment show <id> --format json',
@@ -916,7 +1080,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           prompt: [
             'Start a live workout named Durable repetition proof.',
             'Add Seated cable curl with exactly eight finite sets.',
-            'Use pounds for this resistance exercise.',
             'Every set of that exercise is exactly 9 reps; persist that exercise-wide member count.',
             'Do not log a set yet and do not turn any target or suggestion into an actual result.',
           ].join(' '),
@@ -931,7 +1094,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ? [{ id: event.entityId, workout: parsed.data }]
             : []
         })
-
         expect(started.finalMessage).not.toMatch(/how many|which workout/iu)
         expect(matching).toHaveLength(1)
         const finiteWorkout = matching[0]!
@@ -959,10 +1121,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         }])
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
-          mode: 'weight_reps',
           name: 'Seated cable curl',
           setPlanIsFinite: true,
-          unitOverride: 'lb',
         })
         expect(finiteWorkout.workout.exercises[0]?.sets).toHaveLength(8)
         expect(
@@ -1095,9 +1255,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(completed.endedAt).toEqual(expect.any(String))
         const workoutCommands = await readFile(commandLogPath, 'utf8')
         expect(workoutCommands).toContain('workout set log')
-        expect(workoutCommands).toMatch(
-          /workout start[\s\S]*mode=weight_reps[\s\S]*unitOverride=lb/u,
-        )
         expect(workoutCommands).not.toMatch(/(?:experiment|regimen) /u)
 
         const commandCountBeforeReminder = workoutCommands.trim().split('\n').length
@@ -1219,11 +1376,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(nextWorkouts[0]?.workout.exercises[0]?.sets).toEqual([
           { order: 1, reps: 12 },
         ])
-        expect(nextWorkouts[0]?.workout.exercises[0]).toMatchObject({
-          mode: 'bodyweight',
-          name: 'Push-up',
-        })
-        expect(nextWorkouts[0]?.workout.exercises[0]?.unitOverride).toBeUndefined()
         expect(nextWorkouts[0]?.workout.endedAt).toEqual(expect.any(String))
         expect(olderStored.endedAt).toBeUndefined()
       } finally {
