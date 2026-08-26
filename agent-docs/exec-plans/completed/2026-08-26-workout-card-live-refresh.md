@@ -1,6 +1,6 @@
 # Workout card live refresh
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -10,7 +10,7 @@ Updated: 2026-08-26
   action waited behind idle-checkpoint preparation, then canonical application
   completed promptly once imported. The transcript card remained its original
   embedded snapshot by design.
-- Tasks 1-5 are implemented in the backend and companion worktrees. ReviewGPT's
+- Tasks 1-7 are implemented in the backend and companion worktrees. ReviewGPT's
   first native pass rejected the schema-7 and duplicated-result design; the
   accepted rewrite preserves V4/V6 and decodes refresh results through the
   existing card reader.
@@ -38,9 +38,14 @@ Updated: 2026-08-26
   typechecks, project generation, and review-workflow verification pass.
   Simulator, XCTest, and physical Messages proof remain blocked because the
   current host has Command Line Tools but no Xcode or iOS SDK.
-- Coordinated draft PRs are open. Remaining: push corrected exact heads, run
-  ReviewGPT to PASS, complete exact-head CI, record the native verification
-  gap, and archive this plan with the final backend commit.
+- ReviewGPT passed the final backend full-patch round and the corrected native
+  round. Both accepted backend findings and all three accepted native findings
+  are resolved without a second state, presentation, or completion owner.
+- Final parent review found no new correctness, security, privacy, architecture,
+  or purpose blocker. Both PR heads merge cleanly with current `main`; backend
+  PR-evidence and native verification checks pass. The coordinated PRs remain
+  draft under Product UX Hold until simulator/XCTest and physical Messages
+  expansion, refresh, fallback, and draft-preservation proof are available.
 
 ## Goal
 
@@ -159,3 +164,4 @@ Updated: 2026-08-26
   only for one authorized workout, native refresh replaces only a clean selected
   session, every failure retains the embedded card, and both repository heads
   pass their required gates.
+Completed: 2026-08-26
