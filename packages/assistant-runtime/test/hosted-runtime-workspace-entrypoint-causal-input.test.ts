@@ -851,6 +851,12 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       preCheckpointSafe: true,
     },
     {
+      dedupeKey: "member.action.requested:workout-card-synthetic",
+      kind: "member.action.requested",
+      label: "workout-card member action",
+      preCheckpointSafe: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_synthetic",
       kind: "assistant.notification.requested",

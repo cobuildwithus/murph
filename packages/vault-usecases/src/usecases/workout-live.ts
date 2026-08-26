@@ -1,5 +1,7 @@
 import {
   type WorkoutLiveApplyMemberActionV1,
+  type WorkoutLiveSnapshotMemberActionResultV1,
+  type WorkoutLiveSnapshotMemberActionV1,
   type WorkoutExercise,
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutMemberActionExpectedSetStateV1,
@@ -9,6 +11,7 @@ import {
   type WorkoutSet,
   memberActionIdV1Schema,
   workoutLiveApplyMemberActionV1Schema,
+  workoutLiveSnapshotMemberActionV1Schema,
   workoutSessionSchema,
   workoutTemplateSchema,
 } from '@murphai/contracts'
@@ -36,6 +39,7 @@ import {
   type SetLiveWorkoutExerciseRepsInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
+  buildLiveWorkoutCardSnapshot,
   buildLiveWorkoutSessionFromTemplate,
   elapsedDurationMinutes,
   hasCompletedFiniteLiveWorkoutPlan,
@@ -46,6 +50,7 @@ import {
   assertTargetableLiveWorkout,
   compactSetPatch,
   findLiveWorkoutActionTargets,
+  findLiveWorkoutRefreshTargets,
   normalizeLiveWorkoutActivityType,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
@@ -79,6 +84,50 @@ export async function readLiveWorkoutCardEditor(input: {
     workout,
     workoutId: shown.entity.id,
   })
+}
+
+export async function readLiveWorkoutCardSnapshot(input: {
+  action: WorkoutLiveSnapshotMemberActionV1
+  vault: string
+}): Promise<
+  | {
+      result: WorkoutLiveSnapshotMemberActionResultV1
+      status: 'unchanged'
+    }
+  | { reason: 'workout_changed'; status: 'rejected' }
+> {
+  if (!workoutLiveSnapshotMemberActionV1Schema.safeParse(input.action).success) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  const targets = await findLiveWorkoutRefreshTargets(
+    input.vault,
+    input.action.workoutBinding,
+  )
+  if (targets.length !== 1) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  try {
+    const shown = targets[0]!
+    const snapshot = buildLiveWorkoutCardSnapshot({
+      presentation: input.action.presentation,
+      workout: parseShownWorkout(shown),
+      workoutId: shown.entity.id,
+    })
+    if (snapshot === null) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    return {
+      result: {
+        editor: snapshot.editor,
+        kind: 'workout.live.snapshot',
+        version: 1,
+        workout: snapshot.workout,
+      },
+      status: 'unchanged',
+    }
+  } catch {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
 }
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100

@@ -1,4 +1,17 @@
 import * as z from "./zod-runtime.ts";
+import {
+  workoutSessionDetailV1Schema,
+  workoutSessionEditorProjectionV1Schema,
+} from "./workout-session-card.ts";
+import {
+  workoutMemberActionExpectedSetResultV1Schema,
+  type WorkoutMemberActionExpectedSetResultV1,
+} from "./workout-member-action-result.ts";
+
+export {
+  workoutMemberActionExpectedSetResultV1Schema,
+  type WorkoutMemberActionExpectedSetResultV1,
+} from "./workout-member-action-result.ts";
 
 export const memberActionV1Bounds = {
   actionId: 36,
@@ -37,12 +50,6 @@ const workoutSetPositionSchema = z
   .min(1)
   .max(memberActionV1Bounds.setsPerExercise);
 
-const canonicalNonnegativeIntegerSchema = z
-  .number()
-  .finite()
-  .min(0)
-  .refine((value) => Number.isInteger(value), "Expected an integer.");
-
 export const workoutMemberActionSetResultV1Schema = z.discriminatedUnion(
   "kind",
   [
@@ -71,38 +78,6 @@ export const workoutMemberActionSetResultV1Schema = z.discriminatedUnion(
 
 export type WorkoutMemberActionSetResultV1 = z.infer<
   typeof workoutMemberActionSetResultV1Schema
->;
-
-export const workoutMemberActionExpectedSetResultV1Schema = z.discriminatedUnion(
-  "kind",
-  [
-    z
-      .object({
-        kind: z.literal("note"),
-        note: singleLineText(
-          memberActionV1Bounds.expectedFreeformResult,
-        ).nullable(),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("reps"),
-        reps: canonicalNonnegativeIntegerSchema.nullable(),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("weight_reps"),
-        reps: canonicalNonnegativeIntegerSchema.nullable(),
-        weight: z.number().finite().min(0).nullable(),
-        weightUnit: z.enum(["lb", "kg"]).nullable(),
-      })
-      .strict(),
-  ],
-);
-
-export type WorkoutMemberActionExpectedSetResultV1 = z.infer<
-  typeof workoutMemberActionExpectedSetResultV1Schema
 >;
 
 export const workoutMemberActionExpectedSetStateV1Schema = z
@@ -443,8 +418,22 @@ export type WorkoutLiveApplyMemberActionV1 = z.infer<
   typeof workoutLiveApplyMemberActionV1Schema
 >;
 
+export const workoutLiveSnapshotMemberActionV1Schema = z
+  .object({
+    kind: z.literal("workout.live.snapshot"),
+    presentation: workoutSessionDetailV1Schema,
+    version: z.literal(1),
+    workoutBinding: z.string().regex(/^[0-9a-f]{64}$/u),
+  })
+  .strict();
+
+export type WorkoutLiveSnapshotMemberActionV1 = z.infer<
+  typeof workoutLiveSnapshotMemberActionV1Schema
+>;
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
   workoutLiveApplyMemberActionV1Schema,
+  workoutLiveSnapshotMemberActionV1Schema,
 ]);
 
 export type MemberActionV1 = z.infer<typeof memberActionV1Schema>;
@@ -477,11 +466,31 @@ export type MemberActionRejectionReasonV1 = z.infer<
   typeof memberActionRejectionReasonV1Schema
 >;
 
+export const workoutLiveSnapshotMemberActionResultV1Schema = z
+  .object({
+    editor: workoutSessionEditorProjectionV1Schema.nullable(),
+    kind: z.literal("workout.live.snapshot"),
+    version: z.literal(1),
+    workout: workoutSessionDetailV1Schema,
+  })
+  .strict();
+
+export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
+  typeof workoutLiveSnapshotMemberActionResultV1Schema
+>;
+
+export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
+  workoutLiveSnapshotMemberActionResultV1Schema,
+]);
+
+export type MemberActionResultV1 = z.infer<typeof memberActionResultV1Schema>;
+
 export const memberActionOutcomeV1Schema = z
   .object({
     actionId: memberActionIdV1Schema,
     completedAt: z.string().datetime({ offset: true }),
     reason: memberActionRejectionReasonV1Schema.nullable(),
+    result: memberActionResultV1Schema.optional(),
     schemaVersion: z.literal(1),
     status: z.enum(["applied", "rejected", "unchanged"]),
   })
@@ -492,6 +501,13 @@ export const memberActionOutcomeV1Schema = z
         code: "custom",
         message: "Only a rejected member action carries a reason.",
         path: ["reason"],
+      });
+    }
+    if (outcome.result !== undefined && outcome.status !== "unchanged") {
+      context.addIssue({
+        code: "custom",
+        message: "A member-action result requires a successful read-only outcome.",
+        path: ["result"],
       });
     }
   });

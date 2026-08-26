@@ -1,6 +1,8 @@
 import * as z from "./zod-runtime.ts";
 
-import { workoutMemberActionExpectedSetResultV1Schema } from "./member-action.ts";
+import {
+  workoutMemberActionExpectedSetResultV1Schema,
+} from "./workout-member-action-result.ts";
 
 export const workoutSessionCardV1Bounds = {
   title: 60,
@@ -199,6 +201,21 @@ export type WorkoutSessionEditorProjectionV1 = z.infer<
   typeof workoutSessionEditorProjectionV1Schema
 >;
 
+/**
+ * Stable, read-only correlation for an authenticated native workout refresh.
+ * It is not a write capability and contains no canonical workout identifier.
+ */
+export const workoutSessionRefreshCapabilityV1Schema = z
+  .object({
+    workoutBinding: z.string().regex(/^[0-9a-f]{64}$/u),
+    version: z.literal(1),
+  })
+  .strict();
+
+export type WorkoutSessionRefreshCapabilityV1 = z.infer<
+  typeof workoutSessionRefreshCapabilityV1Schema
+>;
+
 type WorkoutSessionEditorSetResultV1 = NonNullable<
   WorkoutSessionEditorProjectionV1["exercises"][number]["sets"][number]["result"]
 >;
@@ -262,6 +279,26 @@ export type WorkoutSessionAppCardEnvelopeV6 = {
     b: string;
     d: string;
   };
+};
+
+type WorkoutSessionEditorDeltaExerciseWireV1 = [
+  exerciseUnit: "l" | "k" | null,
+  completedSets: Array<[
+    setIndex: number,
+    result: WorkoutSessionEditorResultWireV1,
+  ]>,
+];
+
+export type WorkoutSessionAppCardEnvelopeV7 = {
+  schemaVersion: 7;
+  card: WorkoutSessionAppCardEnvelopeV4["card"];
+  editor?: {
+    version: 1;
+    actionBinding: string;
+    setRemovalBinding: string;
+    exercises: WorkoutSessionEditorDeltaExerciseWireV1[];
+  };
+  refresh?: WorkoutSessionRefreshCapabilityV1;
 };
 
 export type WorkoutSessionAppCardPresentationV4 = {
@@ -361,6 +398,72 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
 }
 
 /**
+ * Builds the permanent schema-7 workout envelope. The readable card is always
+ * complete; editor and refresh capabilities are independent and optional.
+ */
+export function buildWorkoutSessionAppCardEnvelopeV7(input: {
+  editor?: WorkoutSessionEditorProjectionV1;
+  refresh?: WorkoutSessionRefreshCapabilityV1;
+  title: string;
+  subtitle: string | null;
+  footer: string | null;
+  workout: WorkoutSessionDetailV1;
+}): WorkoutSessionAppCardEnvelopeV7 {
+  const base = buildWorkoutSessionAppCardEnvelopeV4(input);
+  const refresh = input.refresh === undefined
+    ? undefined
+    : workoutSessionRefreshCapabilityV1Schema.parse(input.refresh);
+  if (input.editor === undefined) {
+    return {
+      schemaVersion: 7,
+      card: base.card,
+      ...(refresh === undefined ? {} : { refresh }),
+    };
+  }
+
+  const editor = workoutSessionEditorProjectionV1Schema.parse(input.editor);
+  if (
+    input.workout.state !== "active"
+    || editor.exercises.length !== input.workout.exercises.length
+  ) {
+    throw new TypeError("Workout editor projection does not match the active card.");
+  }
+
+  const exercises = input.workout.exercises.map((exercise, exerciseIndex) => {
+    const editorExercise = editor.exercises[exerciseIndex];
+    if (!editorExercise || editorExercise.sets.length !== exercise.sets.length) {
+      throw new TypeError("Workout editor projection does not match the card sets.");
+    }
+    const completedSets: WorkoutSessionEditorDeltaExerciseWireV1[1] = [];
+    exercise.sets.forEach((set, setIndex) => {
+      const editorSet = editorExercise.sets[setIndex];
+      if (!editorSet || editorSet.logged !== (set.status === "completed")) {
+        throw new TypeError("Workout editor projection does not match set state.");
+      }
+      if (editorSet.result !== null) {
+        completedSets.push([setIndex, encodeWorkoutEditorResult(editorSet.result)]);
+      }
+    });
+    return [
+      encodeWorkoutWeightUnit(editorExercise.unitOverride),
+      completedSets,
+    ] satisfies WorkoutSessionEditorDeltaExerciseWireV1;
+  });
+
+  return {
+    schemaVersion: 7,
+    card: base.card,
+    editor: {
+      version: 1,
+      actionBinding: editor.actionBinding,
+      setRemovalBinding: editor.setRemovalBinding,
+      exercises,
+    },
+    ...(refresh === undefined ? {} : { refresh }),
+  };
+}
+
+/**
  * Restores the readable presentation snapshot from either workout-card wire.
  * The V6 action and removal bindings are validated and intentionally omitted
  * from presentation.
@@ -368,6 +471,18 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
 export function parseWorkoutSessionAppCardEnvelopeV4(
   value: unknown,
 ): WorkoutSessionAppCardPresentationV4 | null {
+  if (
+    typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>).schemaVersion === 7
+    && Object.hasOwn(value, "card")
+  ) {
+    return parseWorkoutSessionAppCardEnvelopeV4({
+      schemaVersion: 4,
+      card: (value as Record<string, unknown>).card,
+    });
+  }
   if (
     !isExactRecord(value, ["schemaVersion", "card"])
     || (value.schemaVersion !== 4 && value.schemaVersion !== 6)

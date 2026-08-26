@@ -15,7 +15,9 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 
 - A saved workout format owns planned exercises, stable exercise identity, planned sets, and target values.
 - One canonical `activity_session` workout event owns session timing, unlogged set coordinates, and actual completed-set values. Planned targets are not copied into those placeholders.
-- A response card is an immutable snapshot. It never owns workout state.
+- A transcript response card is an immutable snapshot and never owns workout
+  state. A schema-7 card may refresh only its expanded in-memory presentation
+  from canonical state; the sent bubble and offline fallback remain unchanged.
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
   enrolled by the containing app.
@@ -442,13 +444,13 @@ final balloon, image-failure behavior, accessibility behavior, and App Store
 affordance. Provider acceptance, direct route renders, and delivery receipts do
 not prove those device behaviors.
 
-## Deferred schema-7 workout-card foundation (not implemented)
+## Schema-7 workout-card foundation
 
-Status: the architecture is accepted for a future implementation, but V1–V6
-remain the complete production contract until the reader-first rollout below is
-finished. This section records the intended foundation; it does not authorize a
-producer change, relax any current rollout gate, or describe behavior already
-in production.
+Status: implemented behind the platform-owned
+`MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED=1` producer gate. V1–V6 remain the
+production contract until the schema-7 iOS reader and every server-side reader
+are deployed and verified. Enabling the producer before that reader-first gate
+is prohibited.
 
 ### Permanent envelope
 
@@ -458,7 +460,8 @@ Schema 7 introduces one permanent outer envelope for native workout cards:
 {
   "schemaVersion": 7,
   "card": { "...complete readable workout presentation...": "..." },
-  "editor": { "...optional typed editing capability...": "..." }
+  "editor": { "...optional typed editing capability...": "..." },
+  "refresh": { "version": 1, "workoutBinding": "...opaque 64 hex..." }
 }
 ```
 
@@ -491,6 +494,20 @@ canonical workout mutation remain with their existing owners. This foundation
 adds no client-version negotiation, device registry, server handshake,
 per-member rollout state, dynamic UI protocol, compression scheme, queue,
 cache, or service.
+
+The optional `refresh` capability is a read-only correlation hint, not
+authentication or write authority. It is a domain-separated one-way digest of
+the high-entropy canonical workout id. The expanded Messages reader submits it
+through the existing member-scoped bearer as `workout.live.snapshot`; runtime
+searches only that authenticated member's bounded workout collection and
+returns current presentation plus an optional fresh editor projection. A
+forwarded card therefore finds no workout in the recipient's vault. The stable
+digest intentionally permits same-workout correlation across cards for one
+credential holder; it exposes neither the canonical id nor member identity.
+The extension keeps no cache, performs no background refresh, and never
+replaces a dirty, admitted, submitting, or failed local draft. Network,
+credential, stale-structure, or unsupported-result failure leaves the complete
+embedded card visible.
 
 ### Encoding and bounded fallback
 

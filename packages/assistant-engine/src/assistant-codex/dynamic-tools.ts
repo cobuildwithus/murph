@@ -19,6 +19,9 @@ import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from '@murphai/hosted-execution'
 import {
+  MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV,
+} from '@murphai/hosted-execution/env'
+import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
@@ -103,6 +106,7 @@ import {
   type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { deriveWorkoutRefreshBinding } from '@murphai/operator-config/workout-action-binding'
 import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
@@ -168,6 +172,7 @@ import {
 import {
   resolveAssistantVaultImageResponseMedia,
 } from '../assistant/vault-file-send.js'
+
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -2289,6 +2294,7 @@ export async function executeMurphDynamicToolRequest(input: {
       }
       const card = await attachTrustedWorkoutCardEditor({
         card: input.request.card,
+        env: input.env,
         vaultRoot: input.vaultRoot ?? null,
       })
       return {
@@ -3585,6 +3591,7 @@ export async function executeMurphDynamicToolRequest(input: {
 
 async function attachTrustedWorkoutCardEditor(input: {
   card: AssistantResponseCard
+  env: NodeJS.ProcessEnv
   vaultRoot: string | null
 }): Promise<AssistantResponseCard> {
   if (
@@ -3607,6 +3614,16 @@ async function attachTrustedWorkoutCardEditor(input: {
     const candidate = assistantResponseCardSchema.safeParse({
       ...input.card,
       editor: trusted.editor,
+      ...(input.env[MURPH_IMESSAGE_WORKOUT_LIVE_REFRESH_ENABLED_ENV] === '1'
+        ? {
+            refresh: {
+              version: 1,
+              workoutBinding: deriveWorkoutRefreshBinding(
+                input.card.tracking.entityId,
+              ),
+            },
+          }
+        : {}),
       workout: trusted.workout,
     })
     return candidate.success ? candidate.data : input.card

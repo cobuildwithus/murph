@@ -3,6 +3,7 @@ import type { WorkoutExercise, WorkoutSet } from '@murphai/contracts'
 
 import {
   deriveWorkoutActionBinding,
+  deriveWorkoutRefreshBinding,
   deriveWorkoutSetRemovalBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
 } from '../src/workout-action-binding.js'
@@ -125,6 +126,17 @@ describe('workout action binding', () => {
     })).not.toBe(deriveWorkoutActionBinding('evt_workout', {
       exercises: BASE_EXERCISES,
     }))
+  })
+})
+
+describe('workout refresh binding', () => {
+  it('is deterministic, opaque, and scoped to the canonical workout identity', () => {
+    const binding = deriveWorkoutRefreshBinding('evt_workout')
+
+    expect(binding).toMatch(/^[0-9a-f]{64}$/u)
+    expect(binding).toBe(deriveWorkoutRefreshBinding('evt_workout'))
+    expect(binding).not.toBe(deriveWorkoutRefreshBinding('evt_workout_2'))
+    expect(binding).not.toContain('evt_workout')
   })
 })
 

@@ -15,6 +15,7 @@ import {
 import {
   buildLiveWorkoutSessionFromTemplate,
   buildLiveWorkoutCardEditor,
+  buildLiveWorkoutCardSnapshot,
   hasCompletedFiniteLiveWorkoutPlan,
   hasFiniteLiveWorkoutPlan,
   hasLoggedWorkoutSet,
@@ -29,6 +30,57 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('refreshes stale progress while retaining positional targets', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        sets: [
+          { order: 1, reps: 8, weight: 135, weightUnit: 'lb' },
+          { order: 2, reps: 8, weight: 135, weightUnit: 'lb' },
+          { order: 3 },
+        ],
+      }],
+    })
+    const snapshot = buildLiveWorkoutCardSnapshot({
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: [1, 2, 3].map(() => ({
+            actual: null,
+            status: 'pending' as const,
+            target: '135 lb × 8',
+          })),
+        }],
+      },
+      workout,
+      workoutId: 'evt_test_workout',
+    })
+
+    assert.equal(snapshot?.workout.exercises[0]?.sets[0]?.actual, '135 lb × 8')
+    assert.equal(snapshot?.workout.exercises[0]?.sets[1]?.status, 'completed')
+    assert.equal(snapshot?.workout.exercises[0]?.sets[2]?.status, 'pending')
+    assert.equal(
+      snapshot?.workout.exercises[0]?.sets[2]?.target,
+      '135 lb × 8',
+    )
+
+    const completed = buildLiveWorkoutCardSnapshot({
+      presentation: snapshot!.workout,
+      workout: { ...workout, endedAt: '2026-08-09T19:00:00.000Z' },
+      workoutId: 'evt_test_workout',
+    })
+    assert.equal(completed?.workout.state, 'completed')
+    assert.equal(completed?.workout.exercises[0]?.sets[2]?.status, 'skipped')
+    assert.equal(completed?.editor, null)
+  })
+
   test('projects exact editable field families from canonical set state', () => {
     const workout = workoutSessionSchema.parse({
       sourceApp: LIVE_WORKOUT_SOURCE_APP,

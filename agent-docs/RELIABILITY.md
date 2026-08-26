@@ -2583,8 +2583,10 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh conversation work keeps its
-foreground priority, but its first successful reply checkpoint includes one
+Runtime applies the closed action through its canonical domain owner. Fresh
+conversation work keeps its foreground priority. A safe-prefix prefetch imports
+a closed member action before a dirty runtime begins its long idle snapshot,
+and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
 arrived conversation cannot defer the already-accepted action into another
@@ -2601,6 +2603,14 @@ workout, a set shifted by another direct action, or a same-name exercise moved
 by the generic workout editor. Mutable set results and annotations remain under
 their existing result-family optimistic comparisons rather than the positional
 identity binding.
+Schema-7 expanded readers use a separate stable read-only workout binding and
+the same mailbox delivery path for `workout.live.snapshot`. The member-scoped
+credential supplies identity; runtime scans only that member's bounded
+canonical workout collection, requires one structural match to the embedded
+target skeleton, and returns current progress plus an editor only when the
+canonical result families remain supported. This action never writes the
+workout. Missing, duplicate, structurally changed, or cross-member targets fail
+closed as `workout_changed`, leaving the embedded snapshot in place.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;

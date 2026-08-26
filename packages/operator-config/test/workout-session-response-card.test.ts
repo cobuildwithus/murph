@@ -208,6 +208,38 @@ describe('workout session response cards', () => {
     expect(JSON.stringify(imageEnvelope)).not.toContain('"b"')
   })
 
+  it('encodes refreshable workouts as schema 7 while static images stay V4', () => {
+    const refreshable = {
+      ...ACTIVE_WORKOUT_CARD,
+      refresh: {
+        version: 1 as const,
+        workoutBinding: 'c'.repeat(64),
+      },
+    } satisfies AssistantResponseCard
+
+    const envelope = decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(refreshable),
+    )
+    expect(envelope).toMatchObject({
+      schemaVersion: 7,
+      card: {
+        e: ACTIVE_WORKOUT_CARD.workout.exercises.map((exercise) => [
+          exercise.name,
+          expect.any(Array),
+        ]),
+      },
+      editor: {
+        actionBinding: ACTIVE_WORKOUT_CARD.editor.actionBinding,
+        version: 1,
+      },
+      refresh: refreshable.refresh,
+    })
+    expect(JSON.stringify(envelope)).not.toContain('evt_')
+    expect(decodeImageCardUrl(
+      buildLinqIMessageAppLayout(refreshable).image_url ?? '',
+    )).toMatchObject({ schemaVersion: 4 })
+  })
+
   it('routes enhanced compact tables through V6 and ordinary tables through V3', () => {
     expect(encodeCompactTableAppCardUrl(ACTIVE_WORKOUT_CARD)).toBe(
       encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),

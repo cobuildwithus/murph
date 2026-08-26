@@ -75,6 +75,16 @@ export function deriveWorkoutActionBinding(
     .digest('hex')
 }
 
+/**
+ * Stable one-way correlation for authenticated read-only workout snapshots.
+ * Unlike action bindings, it intentionally survives workout mutations.
+ */
+export function deriveWorkoutRefreshBinding(workoutEntityId: string): string {
+  return createHash('sha256')
+    .update(`workout-refresh:v1:${workoutEntityId}`)
+    .digest('hex')
+}
+
 export function deriveWorkoutSetRemovalBinding(
   workoutEntityId: string,
   exercises: WorkoutExercise[],

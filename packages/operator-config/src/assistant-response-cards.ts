@@ -12,6 +12,7 @@ import {
   assistantResponseCardMatchesConversationAudience,
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
+  buildWorkoutSessionAppCardEnvelopeV7,
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
   compactTableResponseCardAuthoringV1Schema,
@@ -523,6 +524,32 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
+  if (includeActionBinding && card.refresh !== undefined) {
+    const editableEnvelope = buildWorkoutSessionAppCardEnvelopeV7({
+      ...(card.editor === undefined ? {} : { editor: card.editor }),
+      refresh: card.refresh,
+      title: card.title,
+      subtitle: card.subtitle,
+      footer: card.footer,
+      workout: card.workout,
+    })
+    const editablePayload = encodeAppCardEnvelopePayload(editableEnvelope)
+    if (
+      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
+      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
+    ) {
+      return editablePayload
+    }
+    return encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV7({
+        refresh: card.refresh,
+        title: card.title,
+        subtitle: card.subtitle,
+        footer: card.footer,
+        workout: card.workout,
+      }),
+    )
+  }
   return encodeAppCardEnvelopePayload(
     includeActionBinding
       && card.editor !== undefined
@@ -549,7 +576,8 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
-    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV7>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')

@@ -4,6 +4,7 @@ import {
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
+  buildWorkoutSessionAppCardEnvelopeV7,
   compactTableResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
   workoutSessionCardV1Bounds,
@@ -214,6 +215,47 @@ describe("workout session compact-table contract", () => {
         e: [["Bench press", "l", [["p", null, ["r", 8]]]]],
       },
     })).toBeNull();
+  });
+
+  it("keeps schema 7 readable while capabilities remain independent", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+    const envelope = buildWorkoutSessionAppCardEnvelopeV7({
+      editor: TRACKED_WORKOUT_EDITOR,
+      refresh: {
+        version: 1,
+        workoutBinding: "c".repeat(64),
+      },
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+
+    expect(envelope.schemaVersion).toBe(7);
+    expect(envelope.editor?.exercises[0]?.[1]).toEqual([
+      [0, ["w", 8, 185, null]],
+      [1, ["w", 7, 185, "l"]],
+    ]);
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      unknownFutureCapability: { version: 99 },
+    })).toEqual({
+      kind: "compact_table",
+      version: 1,
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+    expect(buildWorkoutSessionAppCardEnvelopeV7({
+      refresh: envelope.refresh,
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    }).card).toEqual(envelope.card);
   });
 
   it("keeps canonical zero and large finite snapshot values in the V6 wire", () => {
