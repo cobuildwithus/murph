@@ -1,8 +1,8 @@
 # Foreground replies preempt system mailbox work
 
-Status: active
+Status: completed
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -136,9 +136,13 @@ Updated: 2026-08-25
 - Current local proof: Cloudflare typecheck passed; the runner-container status
   matrix passed 216 tests; controller and test-control suites passed 184 tests;
   hosted-local helper/control suites passed 117 tests; and focused changelog
-  generation/rendering passed 58 tests. A broad hosted-web pass completed
-  11,122 tests with only the changelog render loaded during a concurrent copy
-  edit failing; regeneration plus the exact 58-test changelog rerun passed.
+  generation/rendering passed 58 tests. The Assistant Ask request, completion,
+  private-fallback, and post-Temporal direct-wake composition suites passed 36
+  tests, both Web and Cloudflare typechecks passed, and the final Cloudflare
+  node workspace passed 2,693 tests with two skips after obsolete test-barrier
+  type residue was deleted. A broad hosted-web pass completed 11,122 tests with
+  only the changelog render loaded during a concurrent copy edit failing;
+  regeneration plus the exact 58-test changelog rerun passed.
 - The full composed command reached the real Worker and runner image build but
   could not execute its Vitest cases on the current macOS Colima host because
   the proxy container's required socket option is unavailable in that kernel.
@@ -147,6 +151,12 @@ Updated: 2026-08-25
   device-sync being the first resumed system item. The assertion now accepts
   natural continuation of any seeded system item under a replacement attempt
   while retaining explicit device-row durability proof.
+- The corrected supported-host E2E passed on the exact pushed test head. Final
+  ReviewGPT round 2 and its disclosure-only verification retry both resolved:
+  the production ordering fix and shared Assistant Ask surface have zero
+  remaining accepted findings. Exact-head public CI passed the focused
+  ownership, evidence, Temporal, bundle, viewport, and host-matrix gates; final
+  release gates remain the GitHub handoff boundary after plan archival.
 
 ## Verification
 
@@ -156,3 +166,4 @@ Updated: 2026-08-25
 - Expected outcomes: foreground replacement is accepted without `retry_later`;
   abort failures preserve the old fence; background continuation survives;
   one reply is delivered; no overlapping writer or duplicate response occurs.
+Completed: 2026-08-26

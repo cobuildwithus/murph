@@ -89,7 +89,7 @@ interface HostedLocalTestRunnerContainerStubLike {
   ): Promise<unknown>;
   readShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
-  ): Promise<{ state: "aborted" | "armed" | "entered" | "unarmed" }>;
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
   releaseGeneratedImageProviderBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
