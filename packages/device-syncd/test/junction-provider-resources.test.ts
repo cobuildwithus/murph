@@ -4283,4 +4283,3 @@ test("Junction ECG voltage rejects overlapping summaries without reading an ambi
   );
   assert.equal(voltageRequests, 0);
 });
-

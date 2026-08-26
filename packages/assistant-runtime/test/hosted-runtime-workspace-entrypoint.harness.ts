@@ -203,6 +203,8 @@ type HostedWorkspaceEntrypointMocks = {
   actualRefreshHostedBrowserVaultReplicaFromRuntime:
     | RefreshHostedBrowserVaultReplicaFromRuntime
     | null;
+  drainHostedPreparedAssistantDeliveries:
+    Mock<DrainHostedPreparedAssistantDeliveries>;
 } & Record<HostedWorkspaceEntrypointMockName, Mock>;
 
 const mocks: HostedWorkspaceEntrypointMocks = vi.hoisted(() => ({
