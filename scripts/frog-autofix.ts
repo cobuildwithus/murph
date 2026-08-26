@@ -1963,12 +1963,17 @@ export function buildParentReviewArchive(
   );
   const config = path.join(reviewRoot, "review-gpt.config.sh");
   const sharedReviewConfig = path.join(primary, "scripts", "review-gpt.config.sh");
+  const implementationConfigHome = path.join(reviewRoot, "implementation-config");
+  const browserEndpointPath = path.join(reviewRoot, "browser-endpoint.txt");
+  rmSync(implementationConfigHome, { force: true, recursive: true });
+  mkdirSync(implementationConfigHome, { mode: 0o700, recursive: true });
+  rmSync(browserEndpointPath, { force: true });
   writePrivateFileAtomically(
     config,
-    `#!/bin/bash\nsource ${safeShellLiteral(sharedReviewConfig)}\nname_prefix="frog-autofix-parent"\nout_dir=""\npackage_script=${safeShellLiteral(emitScript)}\nresponse_timeout_ms="10800000"\nsnapshot_attachment_name="codebase.zip"\n`,
+    `#!/bin/bash\nfrog_review_gpt_xdg_config_home="\${XDG_CONFIG_HOME-}"\nfrog_review_gpt_xdg_config_home_set="\${XDG_CONFIG_HOME+x}"\nXDG_CONFIG_HOME=${safeShellLiteral(implementationConfigHome)}\nREVIEW_GPT_BROWSER_LANE="auto"\nsource ${safeShellLiteral(sharedReviewConfig)}\nif [[ "$frog_review_gpt_xdg_config_home_set" == "x" ]]; then\n  XDG_CONFIG_HOME="$frog_review_gpt_xdg_config_home"\nelse\n  unset XDG_CONFIG_HOME\nfi\nprintf 'http://127.0.0.1:%s\\n' "$managed_browser_port" > ${safeShellLiteral(browserEndpointPath)}\nname_prefix="frog-autofix-parent"\nout_dir=""\npackage_script=${safeShellLiteral(emitScript)}\nresponse_timeout_ms="10800000"\nsnapshot_attachment_name="codebase.zip"\n`,
     0o600,
   );
-  return { config, reviewRoot };
+  return { browserEndpointPath, config, reviewRoot };
 }
 
 export function reviewGptEntry(primary: string): string {
@@ -1986,10 +1991,11 @@ function runParentReview(options: {
   transient: string;
   worktree: string;
 }): {
+  browserEndpoint: string;
   chatUrl: string;
   response: string;
 } {
-  const { config, reviewRoot } = buildParentReviewArchive(
+  const { browserEndpointPath, config, reviewRoot } = buildParentReviewArchive(
     options.primary,
     options.worktree,
     options.transient,
@@ -2045,7 +2051,16 @@ function runParentReview(options: {
   }
   requireImplementationCompletion(response);
   const chatUrl = extractSingleConversationUrl(review.stdout);
-  return { chatUrl, response };
+  let browserEndpoint: string;
+  try {
+    browserEndpoint = readBoundedParentFile(browserEndpointPath, 128).trim();
+  } catch {
+    throw new TerminalPrePullRequestFailure("implementation-output");
+  }
+  if (!/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u.test(browserEndpoint)) {
+    throw new TerminalPrePullRequestFailure("implementation-output");
+  }
+  return { browserEndpoint, chatUrl, response };
 }
 
 export function assertExpectedPullRequestBody(options: {
@@ -2288,6 +2303,7 @@ function downloadImplementationPatch(
   primary: string,
   worktree: string,
   reviewRoot: string,
+  browserEndpoint: string,
   chatUrl: string,
   issueNumber: number,
   task: FrogTaskIdentity,
@@ -2300,7 +2316,7 @@ function downloadImplementationPatch(
       "thread",
       "wake",
       "--browser-endpoint",
-      "http://127.0.0.1:9452",
+      browserEndpoint,
       "--chat-url",
       chatUrl,
       "--delay",
@@ -4544,6 +4560,7 @@ async function runOnce() {
           primary,
           worktree,
           reviewRoot,
+          implementation.browserEndpoint,
           implementation.chatUrl,
           issue.number,
           repairTask,
