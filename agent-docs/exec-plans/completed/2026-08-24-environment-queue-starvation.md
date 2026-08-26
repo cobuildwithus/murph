@@ -1,7 +1,7 @@
 # Environment Queue Starvation
 
-Status: active
-Updated: 2026-08-24
+Status: completed
+Updated: 2026-08-26
 
 ## Outcome And Invariant
 
@@ -51,13 +51,22 @@ fix must not add another scheduler, queue, state owner, or polling loop.
    fence through checkpoint publication, then let ordinary reconciliation admit
    the waiting mode. Completed.
 4. Publish the existing Environment-pending fact on the Web reconciliation
-   wire and release the public hosted-execution contract so Temporal can select
-   the dedicated mode without a cross-repository source import. In progress.
-5. Update the private Temporal worker behind a replay-safe patch marker, run
-   focused and production-shaped full-stack proof, and deploy the compatible
-   public/private pair. In progress.
-6. Run exact-head specialist/final review with CI, merge, release, deploy, and
-   verify production convergence. Pending.
+   wire so Temporal can select the dedicated mode without a cross-repository
+   source import. Completed.
+5. Prepare the private Temporal worker behind a replay-safe patch marker and
+   run focused plus production-shaped full-stack proof against the public
+   candidate. Completed.
+6. Run exact-head specialist and final review on the public candidate and
+   resolve accepted findings. Completed.
+
+## Operational Follow-through
+
+- Require green exact-head public CI, then merge the public PR.
+- Cut the next shared public package release from merged `main` and replace the
+  private proof-only sibling link with that exact registry version.
+- Review and merge the private Temporal PR, deploy public runtime surfaces
+  before the private worker begins selecting the new mode, and prove both
+  contention directions in production.
 
 ## Deployment
 
@@ -82,19 +91,28 @@ the pending report converge.
 - Runtime regression was red before the fix because default mode continued
   after checkpoint; it now proves one foreground pass, one checkpoint, an
   immediate recheck, and no Environment import under the default owner.
-- All 155 UserRunner coordination tests pass.
-- The Environment handoff, Environment execution/Browser Vault refresh, and
-  existing provider-handoff runtime tests pass together.
-- Cloudflare and assistant-runtime package typechecks pass.
-- The hosted-execution package build, typecheck, and all 557 package tests pass;
-  the focused Web reconciliation test proves the pending fact reaches the
-  deployed orchestration wire.
+- Current-main Cloudflare ownership regressions pass 6/6, and the split
+  assistant-runtime Environment ownership regressions pass 3/3.
+- Cloudflare, assistant-runtime, hosted Web, and hosted-execution package
+  typechecks pass.
+- Hosted-execution contract tests pass 40/40; the focused Web reconciliation
+  projection tests pass 2/2.
 - A production-shaped public Web/Cloudflare/runner plus private Temporal
   full-stack scenario proves the exact fence and final Browser Vault frontier
   in both handoff directions.
+- Final ReviewGPT round 1 returned `PASS` on the exact pushed implementation
+  head. The preliminary specialist found two stale omitted-field assertions;
+  its test-only patch was independently reproduced, inspected, and applied.
+  The Temporal producer fixture passes 2/2. The Web boundary test's dynamic
+  route import remained blocked by its pre-existing 60-second hook limit before
+  reaching the corrected assertion, so exact-head Web CI owns that broad proof.
+- The broad local repo-tools run stalled with an idle Vitest worker and no
+  failure output; it was stopped only after exact current-session process-tree
+  ownership was proven. Exact-head Host Support CI owns the broad lane.
 - The required changelog fragment is privacy-safe and reuses the existing
-  archive; all 57 focused changelog tests and the prepared Web typecheck pass.
+  archive; the prepared Web typecheck passes.
 - Live desktop/phone changelog inspection is blocked because this session has
   no attached in-app browser; the existing archive/page render contracts are
   covered by the focused test set, and the PR will link the preview route for
   reviewer inspection.
+Completed: 2026-08-26
