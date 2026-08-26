@@ -72,16 +72,18 @@ function response(value, ok = true) {
 }
 
 function vercelEnv(overrides = {}) {
-  return {
+  const env = {
     VERCEL_ENV: "production",
     VERCEL_GIT_COMMIT_REF: "main",
     VERCEL_GIT_COMMIT_SHA: HEAD_SHA,
     VERCEL_GIT_PREVIOUS_SHA: BASE_SHA,
     ...overrides,
   };
+  env.VERCEL_TARGET_ENV = overrides.VERCEL_TARGET_ENV ?? env.VERCEL_ENV;
+  return env;
 }
 
-function gitRunner({ head = HEAD_SHA, inventory = "M\0README.md\0" } = {}) {
+function gitRunner({ head = HEAD_SHA, inventory = "M\0docs/release-notes/update.md\0" } = {}) {
   const calls = [];
   const runGit = (args) => {
     calls.push(args);
@@ -105,7 +107,7 @@ async function classify({
   env = actionsEnv(),
   event = eventPayload(),
   finalCurrent = current,
-  pages = [[file("README.md")]],
+  pages = [[file("docs/release-notes/update.md")]],
 } = {}) {
   const requests = [];
   let currentRequestCount = 0;
@@ -126,25 +128,28 @@ async function classify({
   return { requests, result };
 }
 
-test("allows only the narrow documentation roots", () => {
+test("allows only inert historical and research documentation roots", () => {
   for (const path of [
-    "AGENTS.md",
-    "ARCHITECTURE.md",
-    "README.md",
-    "docs/contracts/invariant.md",
-    "agent-docs/operations/workflow.md",
-    "apps/web/README.md",
-    "apps/cloudflare/DEPLOY.md",
-    "packages/core/README.md",
+    "agent-docs/research/audit.md",
+    "docs/incidents/incident.md",
+    "docs/release-notes/change.md",
   ]) {
     assert.equal(isEligibleMarkdownDocumentationPath(path), true, path);
   }
   for (const path of [
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "README.md",
     ".agents/skills/frog/SKILL.md",
+    "docs/contracts/invariant.md",
+    "agent-docs/operations/workflow.md",
     "agent-docs/generated/catalog.md",
     "agent-docs/prompts/reviewer.md",
+    "apps/web/README.md",
+    "apps/cloudflare/DEPLOY.md",
     "apps/web/changelog/README.md",
     "apps/web/docs/README.md",
+    "packages/core/README.md",
     "packages/core/DEPLOY.md",
     "scripts/README.md",
     "docs/runtime.json",
@@ -168,30 +173,34 @@ test("rejects unsafe or ambiguous repository paths", () => {
 
 test("accepts additions, modifications, deletions, and eligible renames", () => {
   assert.deepEqual(classifyChangedFiles([
-    file("docs/added.md", "added"),
-    file("README.md", "modified"),
-    file("agent-docs/removed.md", "removed"),
-    file("packages/core/README.md", "renamed", {
-      previous_filename: "packages/query/README.md",
+    file("docs/release-notes/added.md", "added"),
+    file("docs/incidents/updated.md", "modified"),
+    file("agent-docs/research/removed.md", "removed"),
+    file("docs/incidents/renamed.md", "renamed", {
+      previous_filename: "docs/release-notes/old.md",
     }),
   ]), { markdownOnly: true, reason: "eligible-markdown-docs" });
 });
 
 test("validates both sides of a rename", () => {
   assert.deepEqual(classifyChangedFiles([
-    file("docs/renamed.md", "renamed", { previous_filename: "apps/web/runtime.ts" }),
+    file("docs/release-notes/renamed.md", "renamed", { previous_filename: "apps/web/runtime.ts" }),
   ]), { markdownOnly: false, reason: "ineligible-rename-source" });
 });
 
 test("rejects unsupported status, duplicate paths, and mixed changes", () => {
-  assert.equal(classifyChangedFiles([file("README.md", "copied")]).markdownOnly, false);
-  assert.equal(classifyChangedFiles([file("README.md"), file("README.md")]).markdownOnly, false);
-  assert.equal(classifyChangedFiles([file("README.md"), file("package.json")]).markdownOnly, false);
+  const eligible = "docs/release-notes/change.md";
+  assert.equal(classifyChangedFiles([file(eligible, "copied")]).markdownOnly, false);
+  assert.equal(classifyChangedFiles([file(eligible), file(eligible)]).markdownOnly, false);
+  assert.equal(classifyChangedFiles([file(eligible), file("package.json")]).markdownOnly, false);
 });
 
 test("traverses every changed-file page and requires the exact count", async () => {
-  const firstPage = Array.from({ length: 100 }, (_, index) => file(`docs/page-${index}.md`));
-  const secondPage = [file("agent-docs/final.md")];
+  const firstPage = Array.from(
+    { length: 100 },
+    (_, index) => file(`docs/release-notes/page-${index}.md`),
+  );
+  const secondPage = [file("agent-docs/research/final.md")];
   const current = pullRequest({ changed_files: 101 });
   const event = eventPayload({ pullRequest: { changed_files: 101 } });
   const { requests, result } = await classify({ current, event, pages: [firstPage, secondPage] });
@@ -264,7 +273,7 @@ test("parses a complete no-rename Git inventory and rejects ambiguous statuses",
 
 test("skips only exact production main inventories containing eligible Markdown", () => {
   const eligible = gitRunner({
-    inventory: "D\0packages/core/README.md\0A\0packages/query/README.md\0M\0docs/guide.md\0",
+    inventory: "D\0docs/incidents/old.md\0A\0docs/release-notes/new.md\0M\0agent-docs/research/audit.md\0",
   });
   assert.deepEqual(
     classifyCurrentVercelBuild({ env: vercelEnv(), runGit: eligible.runGit }),
@@ -275,7 +284,9 @@ test("skips only exact production main inventories containing eligible Markdown"
     [BASE_SHA, HEAD_SHA, "--"],
   );
 
-  const mixed = gitRunner({ inventory: "M\0README.md\0M\0apps/web/app/page.tsx\0" });
+  const mixed = gitRunner({
+    inventory: "M\0docs/release-notes/change.md\0M\0apps/web/app/page.tsx\0",
+  });
   assert.deepEqual(
     classifyCurrentVercelBuild({ env: vercelEnv(), runGit: mixed.runGit }),
     { reason: "ineligible-path", skipBuild: false },
@@ -289,6 +300,16 @@ test("preserves preview skipping and fails production classification closed", ()
       throw new Error("preview classification must not run Git");
     },
   }), { reason: "non-production", skipBuild: true });
+
+  assert.deepEqual(classifyCurrentVercelBuild({
+    env: vercelEnv({
+      VERCEL_ENV: "preview",
+      VERCEL_TARGET_ENV: "native-ios-hosted-e2e",
+    }),
+    runGit: () => {
+      throw new Error("custom environment classification must not run Git");
+    },
+  }), { reason: "custom-environment", skipBuild: false });
 
   for (const input of [
     { env: vercelEnv({ VERCEL_GIT_COMMIT_REF: "release" }), runGit: gitRunner().runGit },

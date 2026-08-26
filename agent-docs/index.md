@@ -7,10 +7,13 @@ Last verified: 2026-08-25
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Markdown-only pull requests keep their seven existing required contexts but
-may use base-trusted exact-inventory receipts instead of runtime-heavy proof.
-The narrow path allowlist, fail-closed classifier boundary, unchanged GitHub
-main-push verification, production Web ignored-build reuse, and focused proof are specified by
+Markdown-only pull requests keep their seven existing required contexts, while
+inert incident, release-note, and research records may use base-trusted
+exact-inventory receipts instead of runtime-heavy proof. Operational or
+proof-consumed Markdown retains full CI, and Vercel custom environments always
+retain their builds. The narrow path allowlist, fail-closed classifier boundary,
+unchanged GitHub main-push verification, production Web ignored-build reuse,
+and focused proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 

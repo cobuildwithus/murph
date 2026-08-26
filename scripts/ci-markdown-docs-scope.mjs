@@ -8,15 +8,6 @@ const PAGE_SIZE = 100;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const SAFE_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const SAFE_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/u;
-const ROOT_MARKDOWN_DOCS = new Set([
-  "AGENTS.md",
-  "ARCHITECTURE.md",
-  "CLAUDE.md",
-  "DESIGN.md",
-  "PRODUCT.md",
-  "README.md",
-  "TODOS.md",
-]);
 const SUPPORTED_STATUSES = new Set(["added", "modified", "removed", "renamed"]);
 
 export function isSafeRepositoryPath(value) {
@@ -36,14 +27,9 @@ export function isSafeRepositoryPath(value) {
 
 export function isEligibleMarkdownDocumentationPath(value) {
   if (!isSafeRepositoryPath(value) || !value.endsWith(".md")) return false;
-  if (ROOT_MARKDOWN_DOCS.has(value)) return true;
-  if (value.startsWith("docs/")) return true;
-  if (value.startsWith("agent-docs/")) {
-    return !value.startsWith("agent-docs/generated/")
-      && !value.startsWith("agent-docs/prompts/");
-  }
-  if (/^apps\/[^/]+\/(?:README|DEPLOY)\.md$/u.test(value)) return true;
-  return /^packages\/[^/]+\/README\.md$/u.test(value);
+  return value.startsWith("agent-docs/research/")
+    || value.startsWith("docs/incidents/")
+    || value.startsWith("docs/release-notes/");
 }
 
 export function classifyChangedFiles(files) {
@@ -112,6 +98,12 @@ export function classifyCurrentVercelBuild({
 } = {}) {
   try {
     if (env.VERCEL_ENV === "preview" || env.VERCEL_ENV === "development") {
+      if (
+        typeof env.VERCEL_TARGET_ENV === "string"
+        && env.VERCEL_TARGET_ENV !== env.VERCEL_ENV
+      ) {
+        return { reason: "custom-environment", skipBuild: false };
+      }
       return { reason: "non-production", skipBuild: true };
     }
     if (

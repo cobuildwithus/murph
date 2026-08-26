@@ -87,13 +87,14 @@ it read-only contents and pull-request inventory access. The classifier compares
 the event base, head, merge ref, and repository identity with the current open
 PR, traverses and count-checks the complete GitHub file inventory up to 3,000
 files, revalidates that the live PR identity is still exact after pagination,
-validates both sides of every rename, and then applies one narrow
-allowlist: exact root documentation files, `docs/**/*.md`,
-`agent-docs/**/*.md` outside `generated/` and `prompts/`, exact
-`apps/*/README.md` or `apps/*/DEPLOY.md`, and exact
-`packages/*/README.md`. Skills, runtime prompts, changelog subtrees, workflow
-files, scripts, config, generated docs, mixed diffs, unsafe statuses or paths,
-stale refs, partial inventories, and classifier failures all retain full CI.
+validates both sides of every rename, and then applies one narrow allowlist:
+historical incident notes under `docs/incidents/`, release notes under
+`docs/release-notes/`, and research records under `agent-docs/research/`.
+Operational and proof-consumed Markdown such as `AGENTS.md`, architecture and
+contract docs, app/package READMEs, deploy guides, skills, runtime prompts, and
+changelog sources retains full CI. Workflow files, scripts, config, generated
+docs, mixed diffs, unsafe statuses or paths, stale refs, partial inventories,
+and classifier failures also retain full CI.
 The existing `Release checks (ubuntu)`, both platform-specific `CLI host matrix`
 contexts, required Stripe boundary, Repo Hygiene, foreground-cardinality, and
 viewport owners run the receipt; optional heavy jobs skip. Repo Hygiene still completes normally so the existing trusted
@@ -122,10 +123,12 @@ stale system variables, a shallow history gap, a non-ancestor, an unexpected Git
 status, an empty or oversized inventory, a current-HEAD mismatch, or any Git
 failure retains the production build. Runtime-consumed Markdown under Web legal
 and changelog subtrees, assistant skills, generated content, and prompt owners
-is outside the allowlist. Preview and development deployments retain the
-project's existing skip behavior. GitHub `main` push verification remains full;
-this boundary cancels only the redundant Vercel Web build after Vercel has
-created the deployment attempt.
+is outside the allowlist. Ordinary Preview and Development deployments retain
+the project's existing skip behavior. A distinct `VERCEL_TARGET_ENV` identifies
+a custom environment and always retains its build, including the native iOS
+hosted E2E target. GitHub `main` push verification remains full; this boundary
+cancels only the redundant Vercel Web build after Vercel has created the
+deployment attempt.
 
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
