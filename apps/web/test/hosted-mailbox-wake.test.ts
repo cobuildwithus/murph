@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
+  ensureRuntimeProcessing: vi.fn(),
+  readHostedExecutionControlClientIfConfigured: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
-  startHostedDirectRuntimeWakeBestEffort: vi.fn(),
 }));
 
 vi.mock("next/server", async () => {
@@ -13,9 +14,9 @@ vi.mock("next/server", async () => {
     after: mocks.after,
   };
 });
-vi.mock("@/src/lib/hosted-execution/direct-runtime-wake", () => ({
-  startHostedDirectRuntimeWakeBestEffort:
-    mocks.startHostedDirectRuntimeWakeBestEffort,
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured:
+    mocks.readHostedExecutionControlClientIfConfigured,
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -28,50 +29,84 @@ import {
 describe("hosted mailbox wake handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.startHostedDirectRuntimeWakeBestEffort.mockResolvedValue(undefined);
+    mocks.ensureRuntimeProcessing.mockResolvedValue({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-08-25T00:00:00.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("starts the direct latency hint only after Temporal accepts durable signaling", async () => {
-    let acceptTemporal!: () => void;
-    const order: string[] = [];
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() =>
-      new Promise<void>((resolve) => {
-        order.push("temporal");
-        acceptTemporal = resolve;
-      })
-    );
-    mocks.startHostedDirectRuntimeWakeBestEffort.mockImplementationOnce(
-      async () => {
+  it.each([
+    {
+      directWakeSource: "assistant-ask-request" as const,
+      expectedUserId: "member-group-runtime",
+      mailboxItemId: "aask_req_one",
+    },
+    {
+      directWakeSource: "assistant-ask-completion" as const,
+      expectedUserId: "member-private",
+      mailboxItemId: "aask_done_one",
+    },
+  ])(
+    "starts the $directWakeSource Web-direct hint only after Temporal accepts durable signaling",
+    async ({ directWakeSource, expectedUserId, mailboxItemId }) => {
+      let acceptTemporal!: () => void;
+      const order: string[] = [];
+      mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() =>
+        new Promise<void>((resolve) => {
+          order.push("temporal");
+          acceptTemporal = resolve;
+        })
+      );
+      mocks.ensureRuntimeProcessing.mockImplementationOnce(async () => {
         order.push("direct");
-      },
-    );
+        return {
+          action: "woken",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt: "2026-08-25T00:00:00.000Z",
+          runtimeAttemptId: "runtime-attempt-test",
+        };
+      });
 
-    const handoff = handoffHostedMailboxWake({
-      directWakeSource: "assistant-ask-completion",
-      expectedUserId: "member-private",
-      mailboxItemId: "aask_done_one",
-    });
+      const handoff = handoffHostedMailboxWake({
+        directWakeSource,
+        expectedUserId,
+        mailboxItemId,
+      });
 
-    expect(mocks.after).not.toHaveBeenCalled();
-    expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
-    acceptTemporal();
-    await handoff;
-    expect(mocks.startHostedDirectRuntimeWakeBestEffort).toHaveBeenCalledWith({
-      source: "assistant-ask-completion",
-      userId: "member-private",
-    });
-    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
-    expect(order).toEqual(["temporal", "direct"]);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member-private",
-      mailboxItemId: "aask_done_one",
-    });
-  });
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(
+        mocks.readHostedExecutionControlClientIfConfigured,
+      ).not.toHaveBeenCalled();
+      expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+      acceptTemporal();
+      await handoff;
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
+        commandTimeoutMs: expect.any(Number),
+        onTiming: expect.any(Function),
+        orchestrationAttemptId: expect.stringMatching(
+          /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
+        signal: expect.any(AbortSignal),
+        userId: expectedUserId,
+      });
+      expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
+      expect(order).toEqual(["temporal", "direct"]);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId,
+        mailboxItemId,
+      });
+    },
+  );
 
   it("rejects the handoff and never schedules a direct wake when Temporal rejects", async () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
@@ -86,7 +121,10 @@ describe("hosted mailbox wake handoff", () => {
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.after).not.toHaveBeenCalled();
-    expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedExecutionControlClientIfConfigured,
+    ).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
   it("aborts an unsettled Temporal handoff before the caller budget expires", async () => {
@@ -118,7 +156,10 @@ describe("hosted mailbox wake handoff", () => {
     resolveTemporal();
     await Promise.resolve();
     expect(mocks.after).not.toHaveBeenCalled();
-    expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedExecutionControlClientIfConfigured,
+    ).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
   it("does not wait for the best-effort direct wake before completing handoff", async () => {
@@ -126,7 +167,7 @@ describe("hosted mailbox wake handoff", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member-private",
     });
-    mocks.startHostedDirectRuntimeWakeBestEffort.mockReturnValueOnce(
+    mocks.ensureRuntimeProcessing.mockReturnValueOnce(
       new Promise<void>(() => {}),
     );
 
@@ -136,7 +177,7 @@ describe("hosted mailbox wake handoff", () => {
       mailboxItemId: "aask_done_one",
     })).resolves.toBeUndefined();
 
-    expect(mocks.startHostedDirectRuntimeWakeBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
   });
 });

@@ -766,19 +766,19 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-If a `system_mailbox` invocation owns the active fence when foreground/default
-work arrives, the runner wakes that exact child and leaves its fence intact.
+If a `system_mailbox` invocation owns the active fence when authenticated Web
+direct foreground/default work arrives, the runner preempts that exact child,
+clears its fence by identity, and starts the foreground request. Preemption
+authority requires both the server-derived Web-direct marker and its valid
+direct-ingress attempt identity; a Temporal or scheduled default request still
+wakes the system child, leaves its fence intact, and retries cooperatively.
 System-mailbox mode may import and run one bounded model-free device-sync,
-operator-maintenance, or browser-vault refresh item;
-it checkpoints any successfully applied unit, then observes the wake. When that
-wake contains a conversation while immutable projection delivery remains
-owned, the same invocation reuses the conversation prefetch and enters the
-ordinary foreground path without waiting for publication. Other wakes return
-before assistant admission, and the foreground request retries through the
-ordinary controller path after the system child releases its fence. Other
-system items remain pending for their default owner. A system-mailbox request
-behind an active default runtime remains deferred and cannot broaden that
-child's admission authority.
+operator-maintenance, or browser-vault refresh item. Already committed web
+updates remain authoritative, while an interrupted or not-yet-checkpointed unit
+stays recoverable from the durable system mailbox and its existing continuation
+contract. Other system items remain pending for their default owner. A
+system-mailbox request behind an active default runtime remains deferred and
+cannot broaden that child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -795,13 +795,13 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, the
-existing workspace-invocation abort seam is the sole preemption authority.
-UserRunner sends that exact abort directly instead of spending foreground
-command budget on a non-authoritative liveness preflight. System-mailbox work
-uses the exact-child wake-and-checkpoint handoff above instead, because aborting
-a bounded unit after canonical web updates but before its checkpoint would
-discard committed progress. A local exact-pointer abort enters the same
+For foreground/default work behind an `inbox_media_retention` fence, and for
+authenticated Web-direct foreground/default work behind a `system_mailbox`
+fence, the existing workspace-invocation abort seam is the sole preemption
+authority. UserRunner sends that exact abort directly instead of spending
+foreground command budget on a non-authoritative liveness preflight. A
+non-direct default request behind system-mailbox work retains the exact-child
+wake-and-checkpoint handoff. A local exact-pointer abort enters the same
 inactive-fence replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
@@ -809,16 +809,21 @@ and an exact abort can cancel already-queued successors before runner dispatch.
 While that abort is in flight, its exact operation remains the visible queue
 head: liveness reports the same identity, wake fails closed, and no successor
 can dispatch. The abort owner releases that token only after both the child
-abort request and exact invocation cleanup settle. Runtime wake also fails
-closed until the active invocation has reached its runner endpoint, and a child
-`absent` response cannot override a still-registered local operation while child
-admission is in flight. A pointerless wake is also rejected if a destroy request
-or observed stop begins while its child RPC is pending, even when teardown
-settles before the wake response. Conversely, a verified accepted pointerless
-wake publishes its completion before returning so an already-running expiry
-preflight yields instead of destroying that child. Failed fail-closed cleanup
-returns `failed` and preserves the fence; the next exact wake re-enters the same
-abort-and-stop owner instead of leaving that operation permanently active.
+abort request and exact invocation cleanup settle. When the child reports
+`accepted` or `queued`, it owns cancellation and settlement: the container keeps
+the outer invocation transport alive so any already-admitted canonical write
+can finish or fail before the exact operation and fence are released. A stale,
+failed, or unavailable child abort instead cancels the outer transport and keeps
+the existing fail-closed cleanup path. Runtime wake also fails closed until the
+active invocation has reached its runner endpoint, and a child `absent` response
+cannot override a still-registered local operation while child admission is in
+flight. A pointerless wake is also rejected if a destroy request or observed
+stop begins while its child RPC is pending, even when teardown settles before
+the wake response. Conversely, a verified accepted pointerless wake publishes
+its completion before returning so an already-running expiry preflight yields
+instead of destroying that child. Failed fail-closed cleanup returns `failed`
+and preserves the fence; the next exact wake re-enters the same abort-and-stop
+owner instead of leaving that operation permanently active.
 Explicit container destroy aborts every invocation registered before the
 destroy call, including lifecycle-lock successors. New invocation admission
 resumes only after the stop settles and those exact tokens are released, on a
