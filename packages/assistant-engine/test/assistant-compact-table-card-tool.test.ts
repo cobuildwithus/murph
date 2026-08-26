@@ -62,6 +62,16 @@ describe('murph.attach_response_card compact tables', () => {
     expect(readCardToolRequest({
       card: {
         ...TRACKED_WORKOUT_CARD,
+        tracking: {
+          kind: 'workout',
+          entityId: TRACKED_WORKOUT_CARD.tracking.entityId,
+        },
+      },
+    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+
+    expect(readCardToolRequest({
+      card: {
+        ...TRACKED_WORKOUT_CARD,
         rows: [{ label: 'Bench press', values: ['2 sets'] }],
       },
     })).toMatchObject({ kind: 'invalid-response-card-arguments' })

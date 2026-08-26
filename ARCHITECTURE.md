@@ -2631,7 +2631,18 @@ at processing
 time. The selected row stays locked through
 `ensureHostedThreadContainerRouteTx`, which remains the only route and
 `ownerMemberId` owner, and is deleted only when that transaction creates the
-route. Only a newly created route applies sparse style through the synthetic
+route. That same transaction materializes the routed chat's ordinary unnamed
+`HostedGroup` and route-owner `HostedGroupMember` through the canonical
+group-store primitive before it appends the activation wake. It creates no
+vault share, join code, requested health or email scope, or roster-participant
+membership. The ordinary owner membership also participates in existing
+membership-gated group effects such as outbound calls and physical notes;
+their exact accepted-message, activation, usage, explicit-request, and final
+pre-provider checks remain the effect boundary. Failure rolls back the route
+and group state together. Later
+owner-authorized naming, join-link, and sharing changes retain their existing
+active-access gate and state owner. Only a newly created
+route applies sparse style through the synthetic
 member's existing preference owner and carries explicit room context on the
 existing activation wake to initialize the fixed group-room-model page exactly
 once before conversation work. Existing-route convergence and transaction
@@ -3724,6 +3735,7 @@ subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
 - Treat `murph` and `vault-cli` as different UX layers over the same command graph: `murph` is the single-active-vault product entrypoint, while `vault-cli` remains the raw explicit-vault contract for development, automation, and assistant/runtime integration.
 - Treat output/discovery transport such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp` as incur-owned global behavior. Murph command docs should focus on domain semantics unless the repo intentionally constrains that surface.
 - `VaultCliError.context` is the sole structured recovery metadata source. A finite owner-written `publicPath` overrides an ordinary structural schema issue path; otherwise a bounded path made only of static field segments and non-negative occurrences may become field guidance. One pure, lazily loadable operator-config projection serves both setup and main CLI bridges. Escaped raw Zod errors still receive a fixed fieldless validation failure, while native Incur parse/validation errors bypass this projection. Known errors may preserve only the fixed stages `validation`, `read`, `write`, `configuration`, `authorization`, `transport`, `response`, `filesystem`, `render`, `persistence`, `conflict`, and `integrity`; owner issues infer `validation` only when no explicit stage exists. Bounded messages and owner hints remain model-visible recovery evidence, and stable error codes survive when they match the closed identifier shape. The projector masks concrete home-directory and credential shapes instead of replacing ordinary diagnostic prose or every absolute path. Fixed filesystem failures retain stable categories and prerequisites; other exceptions use `UNKNOWN` only when no stable code exists and use the generic message only when no useful bounded message exists. Failures before `serve()` use that same lazy projection when the caller requested machine output.
+- `food schedule` preflights the canonical core-owned generated scheduled-log slug and title before its first food or audit write; the core writer still revalidates both at persistence. Core and query validate stored scheduled-log frontmatter through the same contract schema and retain bounded issue code, static path, and reason so the CLI can distinguish submitted repair from a non-retryable stored-registry failure without reducing every failure to generic prose.
 - Keep the root CLI default-exported from `packages/cli/src/index.ts` and keep `packages/cli/src/incur.generated.ts` aligned with command-topology changes so typed CTAs and generated skill metadata stay truthful.
 - Source-only CLI checks are useful for triage, but repo acceptance still depends on the built CLI path because package tests execute `packages/cli/dist/bin.js`.
 

@@ -239,58 +239,94 @@ describe('assistant response cards', () => {
           ],
         },
         {
-          allOf: [
-            {
+          additionalProperties: false,
+          properties: {
+            columns: {
+              maxItems: 4,
+              minItems: 1,
+              type: 'array',
+            },
+            kind: { const: 'compact_table' },
+            title: {
+              minLength: 1,
+              pattern: '^\\S(?:.*\\S)?$',
+              type: 'string',
+            },
+            rows: {
+              maxItems: 8,
+              minItems: 1,
+              type: 'array',
+            },
+            tracking: {
               additionalProperties: false,
               properties: {
-                columns: {
-                  maxItems: 4,
-                  minItems: 1,
-                  type: 'array',
+                entityId: {
+                  maxLength: 30,
+                  pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
                 },
-                kind: { const: 'compact_table' },
-                title: {
-                  minLength: 1,
-                  pattern: '^\\S(?:.*\\S)?$',
-                  type: 'string',
+                kind: { const: 'workout' },
+                snapshotAt: {
+                  maxLength: 24,
+                  minLength: 24,
+                  pattern: expect.stringContaining('\\.\\d{3}Z'),
                 },
-                rows: {
-                  maxItems: 8,
-                  minItems: 1,
-                  type: 'array',
-                },
-                tracking: {
-                  additionalProperties: false,
-                  properties: {
-                    entityId: {
-                      maxLength: 30,
-                      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
-                    },
-                    kind: { const: 'workout' },
-                    snapshotAt: {
-                      maxLength: 24,
-                      minLength: 24,
-                      pattern: expect.stringContaining('\\.\\d{3}Z'),
-                    },
-                  },
-                  type: ['object', 'null'],
-                },
-                version: { const: 1 },
               },
-              required: [
-                'kind',
-                'version',
-                'title',
-                'subtitle',
-                'footer',
-                'tracking',
-              ],
+              required: ['kind', 'entityId', 'snapshotAt'],
+              type: ['object', 'null'],
             },
-            {},
+            version: { const: 1 },
+          },
+          required: [
+            'kind',
+            'version',
+            'title',
+            'subtitle',
+            'rowHeader',
+            'columns',
+            'rows',
+            'footer',
+            'tracking',
           ],
+          type: 'object',
+        },
+        {
+          additionalProperties: false,
+          properties: {
+            kind: { const: 'compact_table' },
+            subtitle: { type: 'null' },
+            tracking: {
+              additionalProperties: false,
+              properties: {
+                entityId: {
+                  maxLength: 30,
+                  pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+                },
+                kind: { const: 'workout' },
+              },
+              required: ['kind', 'entityId'],
+              type: 'object',
+            },
+            version: { const: 1 },
+            workout: { type: 'object' },
+          },
+          required: [
+            'kind',
+            'version',
+            'title',
+            'subtitle',
+            'footer',
+            'tracking',
+            'workout',
+          ],
+          type: 'object',
         },
       ],
     })
+    expect(JSON.stringify(assistantResponseCardJsonSchema.anyOf[1])).toContain(
+      'snapshotAt',
+    )
+    expect(JSON.stringify(assistantResponseCardJsonSchema.anyOf[2])).not
+      .toContain('snapshotAt')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
     expect(assistantResponseCardAuthoringSchema.parse(COMPLETE_CARD_V2)).toEqual(
       COMPLETE_CARD_V2,

@@ -29,6 +29,7 @@
     "clinical-records:providers:import": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/import-epic-clinical-provider-directory.ts",
     "linq:sync-lines": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/sync-hosted-linq-lines.ts",
     "linq:backfill-thread-route-accounts": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
+    "groups:backfill-materialization": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-group-materialization.ts",
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
     "privacy:backfill-vault-share-recent-dates": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts",
     "stripe:migrate-legacy-usage-items": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrate-legacy-stripe-usage-items.ts",

@@ -50,7 +50,8 @@ interface ParsedWorkoutOptions {
   sets: readonly ParsedWorkoutSet[] | undefined
   publicFields: WorkoutOptionPublicFields
   validationMessage: string
-  invalidOption: (message: string) => never
+  invalidExerciseOption: (message: string) => never
+  invalidSetOption: (message: string) => never
 }
 
 export function buildWorkoutFromParsedOptions(
@@ -59,7 +60,7 @@ export function buildWorkoutFromParsedOptions(
   const exercisesByOrder = new Map<number, ParsedWorkoutExercise>()
   for (const exercise of input.exercises ?? []) {
     if (exercisesByOrder.has(exercise.order)) {
-      input.invalidOption(`Duplicate --workout-exercise order ${exercise.order}.`)
+      input.invalidExerciseOption(`Duplicate --workout-exercise order ${exercise.order}.`)
     }
     exercisesByOrder.set(exercise.order, exercise)
   }
@@ -67,7 +68,7 @@ export function buildWorkoutFromParsedOptions(
   for (const { exerciseOrder, set } of input.sets ?? []) {
     const exercise = exercisesByOrder.get(exerciseOrder)
     if (!exercise) {
-      input.invalidOption(
+      input.invalidSetOption(
         `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
       )
     }

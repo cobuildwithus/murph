@@ -969,6 +969,13 @@ When that fast path applies:
 
 ## Current Command Meaning
 
+Keep hand-authored test modules behavior-cohesive. When one module mixes
+independent behavior families or repeatedly loads one heavy mock/import graph,
+split it at those behavior seams and keep only genuinely shared setup in one
+adjacent, owner-specific harness. File length is a signal to inspect, not a
+standalone gate; keep one coherent state-machine proof together when splitting
+would obscure its invariant.
+
 Repository package-test memory: `pnpm test` and `pnpm test:packages` execute the
 curated root `vitest.config.ts` lane once on the caller's ordinary Node heap.
 Assistant Engine's formerly monolithic local-service runtime coverage is split

@@ -199,24 +199,38 @@ Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text,
 
 Also include every canonical event set with no matching format set. Use `target=null`; mark it `completed` when an actual result exists, `pending` while the workout is live and the slot is empty, or `skipped` after the workout ends and the slot remains empty. An empty targetless slot is a verified logging coordinate, not evidence of a planned set. Preserve canonical exercise and set order. Build and attach the complete verified card without estimating its encoded size from exercise or set count. The card tool's validation of the actual encoded envelope is authoritative. Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation.
 
-The outer card remains `compact_table` V1. Set `workout` to:
+Send the complete tool input in this shape, replacing the synthetic values with
+the verified canonical workout snapshot:
 
 ```json
 {
-  "version": 1,
-  "state": "active",
-  "exercises": [
-    {
-      "name": "Bench press",
-      "sets": [
+  "card": {
+    "kind": "compact_table",
+    "version": 1,
+    "title": "Strength workout",
+    "subtitle": null,
+    "footer": "Reply with the exercise, set, and result.",
+    "tracking": {
+      "kind": "workout",
+      "entityId": "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ"
+    },
+    "workout": {
+      "version": 1,
+      "state": "active",
+      "exercises": [
         {
-          "status": "pending",
-          "target": "185 lb × 6–8",
-          "actual": null
+          "name": "Bench press",
+          "sets": [
+            {
+              "status": "pending",
+              "target": "185 lb × 6–8",
+              "actual": null
+            }
+          ]
         }
       ]
     }
-  ]
+  }
 }
 ```
 
@@ -231,7 +245,9 @@ use another control that is unavailable on macOS or without the extension.
 When continuation guidance is useful, tell them to reply with the exercise,
 set, and result.
 
-Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>", "snapshotAt": "<canonical verified UTC instant>" }`. The backend keeps tracking in durable transcript text and strips it from the native URL.
+Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>" }`.
+The runtime records the canonical `snapshotAt`, keeps tracking in durable
+transcript text, and strips it from the native URL.
 
 ## Card refresh behavior
 

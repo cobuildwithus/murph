@@ -758,9 +758,26 @@ window sorting. Ranking is deterministic within that admitted set; it is
 intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
 continue to use direct lookup paths.
 
-For an existing labels database, create the foods exact-name-rank, GiST
-name-rank, and canonical-rank indexes concurrently before deploying web code
-that uses this query shape.
+For an existing labels database, run
+`psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
+create the foods exact-name-rank, GiST name-rank, and canonical-rank indexes
+concurrently before deploying web code that uses this query shape. The
+production build preflight validates all three exact definitions plus their
+live/ready/valid state and fails closed if the rollout is missing or incomplete.
+`IF NOT EXISTS` cannot repair a same-named interrupted or wrong-definition
+index. When the preflight reports `not_live` or `wrong_definition`, inspect the
+reported fixed name, drop only that index without blocking table writes, and
+rerun the rollout:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_rank_idx;
+DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_exact_rank_idx;
+DROP INDEX CONCURRENTLY IF EXISTS public.foods_canonical_rank_idx;
+```
+
+Run only the statement for each reported nonconforming index. Do not drop an
+exact live/ready/valid index. Like the create script, concurrent drops must run
+outside a transaction.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new
@@ -1495,6 +1512,40 @@ drain, do not treat a dry-run as readiness, and do not drop the legacy
 assignment and deployment contract is in
 `docs/hosted-linq-db-home-lines-migration.md`.
 
+New routed Linq and Telegram groups materialize their ordinary unnamed hosted
+group and route-owner membership inside the canonical route transaction. For
+the one-time repair of routed containers created before that invariant, deploy
+the replacement Web build first, prove the production alias, wait the configured
+prior-function drain, and prove the alias again. Then run the aggregate-only
+dry run, bounded apply, and zero-pending readiness check:
+
+```bash
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web groups:backfill-materialization --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web groups:backfill-materialization --apply --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web groups:backfill-materialization --check
+```
+
+Each candidate runs serially in its own short database-only transaction and
+reuses the same structural group-store primitive as future route creation. The
+operation creates only the unnamed group and route-owner membership. It does
+not add roster participants, create a join code, import a provider title, or
+grant profile, health, or email sharing. Existing owner-authorized setup and
+explicit join flows retain their sharing behavior. The ordinary owner
+membership also satisfies existing current-participant gates for group actions
+such as outbound calls and physical notes; those effects retain exact-message,
+activation, usage, explicit-request, and final pre-provider checks. Repeat bounded
+apply batches until `remainingRows` is zero, then require `--check` to pass. Do
+not install a recurring job; remove the temporary command after production
+convergence is verified.
+
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
 narrow predeploy exception to that default. It replaces only the two existing
@@ -1533,12 +1584,15 @@ its existing cleanup contract. Keep session-persistent setup such as connection
 transactions between backend connections. The default pool limit is 15 clients
 per module runtime, with five seconds for connection acquisition and 30 seconds
 for idle retirement; tune those values only from measured pool and database
-pressure. Connection failure logs expose only a fixed failure category and
-numeric total, idle, and waiting counts.
+pressure. Connection failure logs expose only fixed operation/source labels,
+retry attempt and disposition, the configured pool limit, and numeric
+pre-attempt and post-failure pool counts.
 
-That module permits one jittered retry only for the two ambiguous transient
-failures that prove the database did no work. A `pool_checkout_timeout` means
-the statement never reached Postgres. A `transaction_start_timeout` is Prisma's
+That module permits one jittered retry only for ambiguous transient failures
+that prove the database did no work. A `pool_checkout_timeout` means the
+statement never reached Postgres. A `connection_establishment_timeout` means
+the driver failed while opening the physical connection. A
+`transaction_start_timeout` is Prisma's
 `P2028` raised before it invokes the transaction callback. When the local pool
 is already full or has waiters, either failure is returned immediately as
 backpressure instead of re-entering the same queue. `P2028` also covers
@@ -1550,20 +1604,23 @@ host, are reported and rethrown untouched.
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
 before the prospective first waiter queues, or whenever later callers are
-already waiting. It is rate limited to once per ten seconds per pool; a pool
-with idle capacity logs nothing. `Hosted web database slow transaction
+already waiting with no idle connection. It is rate limited to once per ten
+seconds per pool; a pool with idle capacity logs nothing. `Hosted web database slow transaction
 acquisition.` measures only the wait before an interactive callback begins,
-while `Hosted web database slow transaction hold.` measures only callback time
-with a connection. Batch-array transactions use `Hosted web database slow batch
+while `Hosted web database slow transaction callback.` measures callback wall
+time and reports the effective transaction timeout without claiming the
+connection remained held for the full callback. Batch-array transactions use
+`Hosted web database slow batch
 transaction.` for total wall time because Prisma does not expose a callback
-boundary there. Each emits only a duration at five seconds or more.
+boundary there. Each emits only safe operation, timeout, outcome, and duration
+fields at five seconds or more.
 
 `Hosted web database pool configured.` records the effective limit once per
 module runtime and whether it was `configured` or inherited as the `default`.
 That limit is per module runtime, not a global cap, so the real ceiling is this
 number multiplied by the live Fluid instance count. Leaving
 `DATABASE_POOL_MAX` unset deliberately keeps the inherited default visible
-without silently changing capacity. Use the new pressure, acquisition, and hold
+without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
 
@@ -1742,6 +1799,14 @@ These phases are sequential, so their limits do not compose. The same runner is
 used by the Vercel package build and the CI memory-observation lane. Forced-cold
 Standard previews remain the direct acceptance evidence, and a Next upgrade
 must revalidate the heap boundary.
+
+Next's static-generation export loop defaults to eight concurrent pages in each
+of the two configured export workers, allowing up to sixteen page renders at
+once. Hosted Web derives `staticGenerationMaxConcurrency` from the existing
+two-CPU production build constant, capping each worker at two concurrent pages
+and the composed build at four. This keeps page-render fanout explicit without
+skipping any static output; exact-head Vercel builds remain the duration and
+capacity proof.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
 script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
