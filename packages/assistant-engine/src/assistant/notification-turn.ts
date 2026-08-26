@@ -143,6 +143,14 @@ const ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
+const ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
 const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -1791,7 +1799,7 @@ function resolveAssistantNotificationTurnProfile(
     return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
   }
   if (input.notificationPromptProfile === 'operator-message') {
-    return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
+    return ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE
   }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {
     return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE

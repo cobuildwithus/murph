@@ -60,7 +60,7 @@ export interface HostedOperatorTaskView {
   memberId: string;
   result: HostedExecutionAssistantAskResult | null;
   source: HostedOperatorTaskSource;
-  status: "accepted" | "completed" | "queued" | "running";
+  status: "accepted" | "completed" | "failed" | "queued" | "running";
 }
 
 export async function admitHostedOperatorTask(
@@ -245,6 +245,10 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
   }
   const now = input.now ?? new Date();
   if (task.memberId !== input.boundRuntimeMemberId || task.expiresAt <= now) {
+    await prisma.hostedOperatorTask.updateMany({
+      data: { completedAt: now, status: "failed" },
+      where: { id: task.id, status: { in: ["queued", "running"] } },
+    });
     return {
       mailboxWake: null,
       response: {
@@ -266,6 +270,10 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       prisma,
     });
     if (!wake || wake.kind !== "assistant.ask.requested") {
+      await prisma.hostedOperatorTask.updateMany({
+        data: { completedAt: now, status: "failed" },
+        where: { id: task.id, status: { in: ["queued", "running"] } },
+      });
       return {
         mailboxWake: null,
         response: { action: "prepare", status: "terminal", terminalReason: "unavailable" },

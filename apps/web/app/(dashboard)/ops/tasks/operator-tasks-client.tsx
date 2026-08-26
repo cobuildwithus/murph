@@ -79,8 +79,9 @@ export function OperatorTasksClient({
       </header>
 
       <section className="rounded-xl border border-border/70 bg-card/90 p-5">
-        <div className="flex gap-2" role="group" aria-label="Task kind">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Task kind">
           <Button
+            aria-pressed={kind === "diagnostic"}
             onClick={() => setKind("diagnostic")}
             type="button"
             variant={kind === "diagnostic" ? "default" : "outline"}
@@ -88,6 +89,7 @@ export function OperatorTasksClient({
             Private diagnostic
           </Button>
           <Button
+            aria-pressed={kind === "member_message"}
             onClick={() => setKind("member_message")}
             type="button"
             variant={kind === "member_message" ? "default" : "outline"}
@@ -166,13 +168,18 @@ export function OperatorTasksClient({
               </Badge>
               <Badge variant="outline">
                 {task.status === "completed" ? <CheckCircle2Icon data-icon="inline-start" /> : null}
-                {task.status}
+                {describeTaskStatus(task)}
               </Badge>
               <span className="font-mono text-xs text-muted-foreground">{task.memberId}</span>
             </div>
             {task.result ? (
               <p className="mt-4 whitespace-pre-wrap text-sm leading-6">
                 {task.result.answer ?? "Murph could not answer this diagnostic."}
+              </p>
+            ) : null}
+            {task.kind === "member_message" ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Handed to the normal Murph conversation. Delivery receipts remain in the messaging system.
               </p>
             ) : null}
             <p className="mt-3 text-xs text-muted-foreground">
@@ -196,4 +203,17 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 function describeError(cause: unknown): string {
   return cause instanceof Error ? cause.message : "Request failed.";
+}
+
+function describeTaskStatus(task: HostedOperatorTaskView): string {
+  if (task.status === "accepted") {
+    return "Handed to Murph";
+  }
+  if (task.status === "running") {
+    return "Inspecting";
+  }
+  if (task.status === "failed") {
+    return "Could not complete";
+  }
+  return task.status === "completed" ? "Completed" : "Queued";
 }
