@@ -134,6 +134,43 @@ Results so far:
   reconstructed the changed provider-visible fields, and all temporary
   instrumentation was removed.
 
+## Review round 3 retrospective
+
+- Original requirement: keep one shared 5,000-character summary bound; after
+  the first input-schema rejection, expose value-free correction facts and
+  allow one corrected call; treat a second rejection as terminal; create at
+  most one accepted support escalation; confirm only explicit verified-private
+  support; and keep ordinary feedback silent.
+- Shape movement: the immutable first-reviewed head changed 14 files and 450
+  lines, including 37 authored-source lines. The current reviewed head changes
+  19 files and 624 lines, including 38 authored-source lines. Review remediation
+  therefore kept production churn essentially flat while adding five touched
+  files and 174 total changed lines, primarily deterministic and real-model
+  proof plus the owner documentation needed to state the corrected contract.
+- Attribution: required production consolidation deleted product-feedback-
+  specific recovery metadata and retry branching, removed the stale no-retry
+  instruction, made the Product feedback prompt the single retry-policy owner,
+  and scoped result wording to explicit support. Review-driven growth expanded
+  contract tests and three real-model journeys for accepted correction,
+  terminal second rejection, and silent ordinary feedback; the last review
+  correction only deleted six obsolete legacy-string assertions.
+- Concepts and owners: removed the recovery metadata object, feature-specific
+  validation formatter branch, and duplicate retry-policy owner. Retained the
+  existing dynamic-tool parser, recorder, persistence/effect owner, sanitizer,
+  and support authority. Introduced no runtime owner or persisted state; generic
+  validation facts remain at the existing validation boundary, the Product
+  feedback prompt owns retry policy, support guidance owns member-visible
+  outcome wording, and the expanded live journeys are durable regression proof
+  for model behavior rather than temporary review machinery.
+- Decision: continue as one patch. The numeric cross-deploy bound and recovery
+  behavior are the two requested parts of the same tool contract and together
+  close the reported failure. Splitting would create an avoidable window where
+  one side ships without the other; reverting the proof would remove direct
+  coverage for the behavior change. No further architecture is justified.
+  Future remediation may only shrink or clarify these owners and must not add
+  retry state, a second prompt-policy owner, product-feedback-specific
+  validation formatting, or another persistence/effect owner.
+
 ## Deployment
 
 The shared constant and runner-visible recovery prompt span Hosted Execution,
