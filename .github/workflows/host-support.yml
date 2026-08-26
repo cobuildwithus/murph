@@ -30,8 +30,63 @@ env:
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
 
 jobs:
+  markdown-docs-scope:
+    name: Classify host-support documentation scope
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    outputs:
+      markdown_only: ${{ steps.scope-result.outputs.markdown_only }}
+    steps:
+      - name: Check out trusted base classifier
+        id: checkout-base
+        continue-on-error: true
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci-markdown-docs-scope.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Run trusted exact-PR classifier
+        id: classify
+        if: ${{ steps.checkout-base.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
+          if [[ ! -f scripts/ci-markdown-docs-scope.mjs ]]; then
+            echo "markdown_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/ci-markdown-docs-scope.mjs
+
+      - name: Publish fail-closed scope result
+        id: scope-result
+        if: ${{ always() }}
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout-base.outcome }}
+          CLASSIFIER_OUTCOME: ${{ steps.classify.outcome }}
+          CLASSIFIER_MARKDOWN_ONLY: ${{ steps.classify.outputs.markdown_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          markdown_only=false
+          if [[ "$CHECKOUT_OUTCOME" == "success" && "$CLASSIFIER_OUTCOME" == "success" && "$CLASSIFIER_MARKDOWN_ONLY" == "true" ]]; then
+            markdown_only=true
+          fi
+          echo "markdown_only=$markdown_only" >> "$GITHUB_OUTPUT"
+          echo "Host-support scope classified with trusted base policy: markdown_only=$markdown_only"
+
   cli-host-matrix:
     name: CLI host matrix (${{ matrix.os }})
+    needs: markdown-docs-scope
+    if: ${{ always() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -46,14 +101,21 @@ jobs:
           echo "::error::Mark the pull request ready for review to run exact-head CI."
           exit 1
 
+      - name: Record Markdown documentation receipt
+        if: ${{ github.event_name == 'pull_request' && needs.markdown-docs-scope.result == 'success' && needs.markdown-docs-scope.outputs.markdown_only == 'true' }}
+        run: echo "CLI host matrix (${{ matrix.os }}) satisfied by exact-inventory Markdown documentation proof."
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         with:
           persist-credentials: false
 
       - name: Setup pnpm
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
@@ -62,9 +124,11 @@ jobs:
           cache: pnpm
 
       - name: Install deps
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         env:
           # The macOS host leg is the portability check, not the build-speed lane.
           # Keep package-script builds serial there so downstream `tsc -b --force`
@@ -73,13 +137,66 @@ jobs:
         run: pnpm build
 
       - name: Prepare built CLI runtime artifacts
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: pnpm build:test-runtime:prepared
 
       - name: Run cross-platform CLI coverage
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1
+
+  markdown-docs-proof:
+    name: Markdown documentation proof
+    needs: markdown-docs-scope
+    if: ${{ always() && github.event_name == 'pull_request' && needs.markdown-docs-scope.result == 'success' && needs.markdown-docs-scope.outputs.markdown_only == 'true' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact documentation candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Check exact documentation diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$BASE_SHA"
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git diff --check "$BASE_SHA" "$CANDIDATE_SHA" --
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install documentation tooling
+        run: pnpm install --frozen-lockfile
+
+      - name: Check durable documentation drift and references
+        env:
+          MURPH_DOCS_DRIFT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MURPH_DOCS_DRIFT_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm docs:drift
+
+      - name: Check documentation gardening
+        run: pnpm docs:gardening
 
   release-build-typecheck-linux:
     name: Release build/typecheck (ubuntu)
+    needs: markdown-docs-scope
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof
@@ -157,6 +274,8 @@ jobs:
 
   release-package-coverage-linux:
     name: Release package coverage (${{ matrix.shard }})
+    needs: markdown-docs-scope
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -244,6 +363,8 @@ jobs:
 
   release-app-verification-linux:
     name: Release app verification (ubuntu)
+    needs: markdown-docs-scope
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -310,6 +431,8 @@ jobs:
 
   production-runner-bundle-budget-linux:
     name: Production runner bundle budget (ubuntu)
+    needs: markdown-docs-scope
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
@@ -349,6 +472,8 @@ jobs:
 
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)
+    needs: markdown-docs-scope
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof
@@ -382,6 +507,8 @@ jobs:
     name: Release checks (ubuntu)
     runs-on: ubuntu-24.04
     needs:
+      - markdown-docs-scope
+      - markdown-docs-proof
       - release-build-typecheck-linux
       - release-package-coverage-linux
       - release-app-verification-linux
@@ -395,25 +522,54 @@ jobs:
           echo "::error::Mark the pull request ready for review to run exact-head CI."
           exit 1
 
-      - name: Check release shards
+      - name: Check release proof mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCOPE_RESULT: ${{ needs.markdown-docs-scope.result }}
+          MARKDOWN_ONLY: ${{ needs.markdown-docs-scope.outputs.markdown_only }}
+          DOCS_RESULT: ${{ needs.markdown-docs-proof.result }}
+          BUILD_RESULT: ${{ needs.release-build-typecheck-linux.result }}
+          PACKAGE_RESULT: ${{ needs.release-package-coverage-linux.result }}
+          APP_RESULT: ${{ needs.release-app-verification-linux.result }}
+          FIXTURE_RESULT: ${{ needs.release-fixture-coverage-linux.result }}
+          BUNDLE_RESULT: ${{ needs.production-runner-bundle-budget-linux.result }}
+        shell: bash
         run: |
-          if [[ "${{ needs.release-build-typecheck-linux.result }}" != "success" ]]; then
-            echo "Release build/typecheck shard failed or did not complete."
-            exit 1
+          set -euo pipefail
+          mode=full-shard
+          if [[ "$EVENT_NAME" == "pull_request" && "$SCOPE_RESULT" == "success" && "$MARKDOWN_ONLY" == "true" ]]; then
+            mode=docs-proof
           fi
-          if [[ "${{ needs.release-package-coverage-linux.result }}" != "success" ]]; then
-            echo "Release package coverage shard failed or did not complete."
-            exit 1
-          fi
-          if [[ "${{ needs.release-app-verification-linux.result }}" != "success" ]]; then
-            echo "Release app verification shard failed or did not complete."
-            exit 1
-          fi
-          if [[ "${{ needs.release-fixture-coverage-linux.result }}" != "success" ]]; then
-            echo "Release fixture coverage shard failed or did not complete."
-            exit 1
-          fi
-          if [[ "${{ needs.production-runner-bundle-budget-linux.result }}" != "success" ]]; then
-            echo "Production runner bundle budget failed or did not complete."
-            exit 1
-          fi
+
+          case "$mode" in
+            docs-proof)
+              if [[ "$DOCS_RESULT" != "success" ]]; then
+                echo "Markdown documentation proof did not succeed." >&2
+                exit 1
+              fi
+              for result in "$BUILD_RESULT" "$PACKAGE_RESULT" "$APP_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+                if [[ "$result" != "skipped" ]]; then
+                  echo "Markdown documentation proof requires every release shard to remain skipped." >&2
+                  exit 1
+                fi
+              done
+              echo "Release checks satisfied by exact-inventory Markdown documentation proof."
+              ;;
+            full-shard)
+              if [[ "$DOCS_RESULT" != "skipped" ]]; then
+                echo "Full release proof requires the documentation-only job to remain skipped." >&2
+                exit 1
+              fi
+              for result in "$BUILD_RESULT" "$PACKAGE_RESULT" "$APP_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+                if [[ "$result" != "success" ]]; then
+                  echo "Full release proof requires every release shard to succeed." >&2
+                  exit 1
+                fi
+              done
+              echo "Release checks satisfied by full release shards."
+              ;;
+            *)
+              echo "Unsupported release proof mode." >&2
+              exit 1
+              ;;
+          esac

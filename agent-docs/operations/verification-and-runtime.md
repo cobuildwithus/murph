@@ -78,6 +78,55 @@ rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
 `synchronize`, but owns only the event-time-ready read-only receipt consumed by
 the draft-reset controller. Main-branch push CI is unchanged.
 
+Eligible Markdown-only pull requests keep the same protected PR and required
+context owners while replacing runtime-heavy proof with narrowly scoped positive
+receipts across the required owners and two optional expensive checks.
+Each owning workflow independently checks out
+`scripts/ci-markdown-docs-scope.mjs` from the event's exact base SHA and grants
+it read-only contents and pull-request inventory access. The classifier compares
+the event base, head, merge ref, and repository identity with the current open
+PR, traverses and count-checks the complete GitHub file inventory up to 3,000
+files, revalidates that the live PR identity is still exact after pagination,
+validates both sides of every rename, and then applies one narrow
+allowlist: exact root documentation files, `docs/**/*.md`,
+`agent-docs/**/*.md` outside `generated/` and `prompts/`, exact
+`apps/*/README.md` or `apps/*/DEPLOY.md`, and exact
+`packages/*/README.md`. Skills, runtime prompts, changelog subtrees, workflow
+files, scripts, config, generated docs, mixed diffs, unsafe statuses or paths,
+stale refs, partial inventories, and classifier failures all retain full CI.
+The existing `Release checks (ubuntu)`, both platform-specific `CLI host matrix`
+contexts, required Stripe boundary, Repo Hygiene, foreground-cardinality, and
+viewport owners run the receipt; optional heavy jobs skip. Repo Hygiene still completes normally so the existing trusted
+Temporal controller can publish its sole no-owner status. The classifier never
+executes candidate code, creates no duplicate required check, uses no
+`pull_request_target` or workflow path filter, and does not change `main` push
+or non-PR manual behavior. The introducing PR necessarily uses full CI when its
+exact base does not yet contain the classifier.
+
+An affirmative classification also starts one `Markdown documentation proof`
+job in Host Support. It checks out the event's exact candidate SHA, fetches only
+the immutable event base when needed, runs `git diff --check` over those exact
+trees, installs the frozen repository tooling, and runs `pnpm docs:drift` plus
+`pnpm docs:gardening`. `Release checks (ubuntu)` accepts documentation mode only
+when that job succeeds and every runtime shard is skipped; full mode requires
+the documentation job to be skipped and every runtime shard to succeed.
+
+The production Web Vercel project reuses the same path policy through the
+checked-in `apps/web/vercel.json` ignored-build command. For an exact
+`production` deployment of `main`, the classifier compares the last successful
+branch deployment SHA with the checked-out `VERCEL_GIT_COMMIT_SHA`, requires the
+former to be an available ancestor, obtains a complete repository-root Git
+name-status inventory with rename detection disabled so both paths remain
+visible, and skips only when every net change is eligible Markdown. Missing or
+stale system variables, a shallow history gap, a non-ancestor, an unexpected Git
+status, an empty or oversized inventory, a current-HEAD mismatch, or any Git
+failure retains the production build. Runtime-consumed Markdown under Web legal
+and changelog subtrees, assistant skills, generated content, and prompt owners
+is outside the allowlist. Preview and development deployments retain the
+project's existing skip behavior. GitHub `main` push verification remains full;
+this boundary cancels only the redundant Vercel Web build after Vercel has
+created the deployment attempt.
+
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
 focused `scripts/install-playwright-chromium.test.ts` Vitest file. The test owns
@@ -662,7 +711,7 @@ a redundant root `pnpm typecheck`.
 | --- | --- | --- |
 | Vault-only data changes under `vault/**` | No repo-wide commands by default. | Read back the touched vault records plus any audit artifacts written by the mutation path. |
 | Review-only repo inspection with no file edits | No repo-wide commands by default. | Applies when the user asks for code review, architectural review, or repo inspection only and the task does not modify repo or vault files. Use direct file references and static analysis by default. Run tests, typecheck, or other commands only when the user explicitly asks for runtime proof or when a material review conclusion cannot be supported from static inspection alone. |
-| Text-only docs/process-only (`*.md` edits or deletions only) | No repo-wide commands by default. | Allowed only when the diff is limited to Markdown text changes or deletions in repo docs/process files and does not touch scripts, config, tests, generated docs, tracked artifacts, or workflow-enforcement files. Read back the touched docs, confirm any intended deletions directly, and check for obvious broken references when the removed or renamed doc might be linked elsewhere. |
+| Text-only docs/process-only (`*.md` edits or deletions only) | No repo-wide commands by default. | Allowed locally only when the diff is limited to Markdown text changes or deletions in repo docs/process files and does not touch scripts, config, tests, generated docs, tracked artifacts, or workflow-enforcement files. Read back the touched docs, confirm intended deletions, and check references for removed or renamed docs. On a PR, the exact-base classifier above may replace runtime-heavy required proof only when the complete current inventory matches its narrower allowlist; otherwise normal exact-head CI runs. A direct shared-default push always uses acceptance. |
 | Low-risk repo-internal workflow/tooling changes | `pnpm test:diff <path ...>` plus direct checks for the touched tooling files | Applies when the diff stays limited to repo-internal docs/process/verification tooling such as `agent-docs/**`, `docs/**`, `scripts/**`, `config/**`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `vitest.config.ts`, and root `tsconfig*.json`, without touching app/package runtime code, product behavior, persisted-state logic, or deploy/auth surfaces. The diff lane runs shell/Node syntax, architecture/privacy guards, repo-tools TypeScript, dependency policy, and focused repo-tool tests for `scripts/**` or `config/**` changes. Add direct checks such as `bash -n`, `node --check`, focused Vitest, or doc readback for the touched files. Do not precede it with root `pnpm typecheck` or add acceptance lanes unless the change broadens beyond this fast path. |
 | Docs/process-only with mechanics beyond text-only Markdown | `pnpm verify:acceptance` | Applies when docs/process work touches anything beyond text-only `.md` edits/deletions and does not qualify for the low-risk repo-internal workflow/tooling fast path above, including broader scripts, config, tests, generated docs, tracked artifact inventories, or workflow-enforcement files. `pnpm verify:acceptance` is the canonical repo acceptance entrypoint and runs `pnpm typecheck` plus the explicit coverage-heavy acceptance lane. When those repo-wide commands are already known red for unrelated reasons, the scoped verification mode below may be used instead. |
 | Fixture/e2e/package-doc changes | `pnpm verify:acceptance` | Verifies fixture corpus integrity, scenario-manifest wiring, package-runtime health, built CLI checks, command-surface coverage, and the source-artifact guard for handwritten JS-like files plus tracked `.env` / `.env.*` private files and generated residue such as `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, and `*.tsbuildinfo`. |
