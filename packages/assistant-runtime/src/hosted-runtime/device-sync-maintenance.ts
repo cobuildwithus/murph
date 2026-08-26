@@ -358,6 +358,10 @@ export async function runHostedDeviceSyncPass(
     try {
       processedJobs = await drainHostedDeviceSyncWorker({
         accountId: wakeLocalAccountId,
+        onProcessedJobs: (observedProcessedJobs) => {
+          processedJobs = observedProcessedJobs;
+          options.onProcessedJobs?.(observedProcessedJobs);
+        },
         service,
         shouldYield,
       });
@@ -376,7 +380,6 @@ export async function runHostedDeviceSyncPass(
         });
       }
     }
-    options.onProcessedJobs?.(processedJobs);
     const completedImports = promoteHostedCompletedDirtyPayloadAcks({
       service,
       state: syncState,
@@ -933,32 +936,32 @@ function remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
 
 async function drainHostedDeviceSyncWorker(input: {
   accountId: string | null;
+  onProcessedJobs?: ((processedJobs: number) => void) | null;
   service: DeviceSyncService;
   shouldYield?: (() => boolean) | null;
 }): Promise<number> {
   if (!input.accountId) {
+    input.onProcessedJobs?.(0);
     return 0;
   }
-  if (!input.shouldYield) {
-    return await input.service.drainWorker(
-      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
-      input.accountId,
-    );
+  if (input.shouldYield?.()) {
+    input.onProcessedJobs?.(0);
+    return 0;
   }
 
-  let processedJobs = 0;
-  for (let index = 0; index < HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT; index += 1) {
-    if (input.shouldYield()) {
-      break;
-    }
-    const processed = await input.service.drainWorker(1, input.accountId);
-    if (processed <= 0) {
-      break;
-    }
-    processedJobs += processed;
-    if (processed !== 1) {
-      break;
-    }
+  let reportedProcessedJobs = -1;
+  const processedJobs = await input.service.drainWorker(
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+    input.accountId,
+    {
+      onProcessedJobRows(observedProcessedJobs) {
+        reportedProcessedJobs = observedProcessedJobs;
+        input.onProcessedJobs?.(observedProcessedJobs);
+      },
+    },
+  );
+  if (reportedProcessedJobs !== processedJobs) {
+    input.onProcessedJobs?.(processedJobs);
   }
   return processedJobs;
 }
@@ -1535,12 +1538,22 @@ function summarizeHostedDeviceSyncJobTimings(
       outcome: toHostedRuntimeLogCode(diagnostic.outcome),
       provider: toHostedRuntimeLogCode(diagnostic.provider),
       providerExecutionElapsedMs: diagnostic.providerExecutionElapsedMs,
+      providerInventoryRequestCount: diagnostic.providerInventoryRequestCount,
+      providerInventoryRequestElapsedMs: diagnostic.providerInventoryRequestElapsedMs,
+      providerResourceRequestCount: diagnostic.providerResourceRequestCount,
+      providerResourceRequestElapsedMs: diagnostic.providerResourceRequestElapsedMs,
       providerUnattributedElapsedMs: diagnostic.providerUnattributedElapsedMs,
       ...(diagnostic.resource
         ? { resource: toHostedRuntimeLogCode(diagnostic.resource) }
         : {}),
       snapshotImportCount: diagnostic.snapshotImportCount,
       snapshotImportElapsedMs: diagnostic.snapshotImportElapsedMs,
+      snapshotCanonicalCoreElapsedMs: diagnostic.snapshotCanonicalCoreElapsedMs,
+      snapshotCanonicalWriteElapsedMs: diagnostic.snapshotCanonicalWriteElapsedMs,
+      snapshotEventIdentityIndexCacheHitCount:
+        diagnostic.snapshotEventIdentityIndexCacheHitCount,
+      snapshotEventIdentityIndexElapsedMs: diagnostic.snapshotEventIdentityIndexElapsedMs,
+      snapshotNormalizationElapsedMs: diagnostic.snapshotNormalizationElapsedMs,
     })),
     truncated: diagnostics.length > HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
   };

@@ -1,4 +1,8 @@
 import type { DeviceDataOrigin as ContractDeviceDataOrigin, EventSource, MealNutrition } from "@murphai/contracts";
+import type {
+  DeviceBatchImportSession,
+  DeviceBatchImportTiming,
+} from "@murphai/core";
 
 export interface DocumentImportPayload {
   vaultRoot?: string;
@@ -148,11 +152,19 @@ export interface DeviceBatchImportPayload {
   provenance?: Record<string, unknown>;
 }
 
+export interface DeviceBatchImportExecutionOptions {
+  onTiming?: (timing: DeviceBatchImportTiming) => void;
+  session?: DeviceBatchImportSession;
+}
+
 export interface CanonicalWritePort {
   importDocument(payload: DocumentImportPayload): unknown;
   addMeal(payload: MealImportPayload): unknown;
   importSamples(payload: SampleImportPayload): unknown;
-  importDeviceBatch(payload: DeviceBatchImportPayload): unknown;
+  importDeviceBatch(
+    payload: DeviceBatchImportPayload,
+    options?: DeviceBatchImportExecutionOptions,
+  ): unknown;
 }
 
 export type CanonicalWriteMethod = keyof CanonicalWritePort;
