@@ -17,6 +17,7 @@ import {
   initializeVault,
   readHabitatAspect,
   removeAutomaticMealPhoto,
+  upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
 } from '@murphai/core'
@@ -118,7 +119,17 @@ import {
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+  buildAssistantCronExecutionInstructions,
 } from '../src/assistant/cron/execution.ts'
+import {
+  findCanonicalAssistantCronRecordInList,
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  resolveCanonicalAssistantCronJobId,
+} from '../src/assistant/cron/canonical-jobs.ts'
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+} from '../src/assistant/cron/runtime-state.ts'
 import {
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
@@ -5150,11 +5161,59 @@ describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', ()
       )
 
       try {
+        await initializeVault({ vaultRoot: workingDirectory })
         const savedInstructions = [
           'Send one concise current-day hydration readout from the supplied evidence.',
           'Mention the measured intake and whether the current status is on track.',
           'Do not compare against earlier days.',
         ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-05T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-current-day-readout',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-current-day-readout',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '08:00' },
+          slug: 'synthetic-current-day-readout',
+          status: 'active',
+          supportKind: 'weekly_digest',
+          tags: [
+            'system:support-series:experiment:exp_synthetic_hydration',
+          ],
+          title: 'Synthetic current-day readout',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical automation source.')
+        }
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-05T12:00:00.000Z',
+        })
+        const prompt = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        expect(prompt).toContain(savedInstructions)
+        expect(prompt).not.toContain('Accepted support scope (engine-supplied')
+        expect(prompt).not.toContain('agreed weekly summary shape')
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -5169,7 +5228,7 @@ describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', ()
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
-            savedInstructions,
+            prompt,
             'Current trusted evidence for this scheduled occurrence:',
             '- Today\'s measured fluid intake is 1.4 liters.',
             '- The current status is on track toward the established 2.3-liter target.',

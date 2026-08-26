@@ -1790,9 +1790,12 @@ function resolveAssistantCronOutboxSupportSeriesId(
   return supportSeriesIds.length === 1 ? supportSeriesIds[0]! : null
 }
 
-function buildAssistantCronExecutionInstructions(
+export function buildAssistantCronExecutionInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1843,7 +1846,10 @@ function buildAssistantCronExecutionInstructions(
 
 function buildAssistantCronAutomationContextInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string | null {
   const context =
     job.kind === 'canonical'

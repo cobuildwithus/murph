@@ -45,9 +45,9 @@ Updated: 2026-08-26
 
 1. Risk: A legitimate weekly summary could expand beyond its saved purpose
    after losing the injected digest wording.
-   Mitigation: Preserve the exact saved instructions as authority and prove a
-   representative weekly prompt remains followed in deterministic and live
-   coverage.
+   Mitigation: Preserve the self-contained saved instructions as task authority
+   and all existing weekly-digest consent checks; do not introduce a second,
+   engine-authored version of that task.
 2. Risk: Removing the enum outright would make existing automation records
    unreadable or bypass consent checks.
    Mitigation: Keep `weekly_digest` as typed consent metadata in this patch;
@@ -61,13 +61,29 @@ Updated: 2026-08-26
    subscription returned `ASSISTANT_CODEX_USAGE_LIMIT` before provider entry;
    the explicitly authorized alternate-home retry passed with the target model.
 4. [ ] Complete the repository PR/review workflow after the live journey is
-   `Ready`.
+   `Ready`. The preliminary specialist pass returned two findings; parent
+   dispositions and the accepted coverage remediation are recorded below.
 
 ## Decisions
 
 - Treat `weekly_digest` as typed consent and lifecycle metadata only; it must not
   change the provider-visible task instructions.
 - Preserve the other three support-scope overlays in this patch.
+
+## Preliminary specialist dispositions
+
+1. Rejected restoring the weekly-digest prompt overlay. The member explicitly
+   selected the architecture in which saved automation instructions own the
+   task. `supportKind` selects the existing consent and lifecycle checks; it is
+   not an independent task author because Murph persists both fields in the
+   same operation. Restoring the overlay would reintroduce the observed prompt
+   contradiction. The contracts comment now states this ownership boundary.
+2. Accepted the live-proof finding. The first journey hand-assembled the saved
+   task after deterministic composition and therefore could not itself fail on
+   a cron-composer regression. The corrected journey persists a canonical
+   automation, projects its real cron job, calls the exported production
+   execution-instruction composer, asserts the conflicting overlay is absent,
+   and sends that composed prompt to the real target model.
 
 ## Verification
 
@@ -78,4 +94,8 @@ Updated: 2026-08-26
 - Passed: focused changelog archive coverage (nine tests) and Web typecheck.
 - Passed: the focused real-Codex journey through the authorized alternate local
   subscription produced one current-day readout with the exact supplied facts,
-  no tool actions, and no weekly or recap framing. UX verdict: Ready.
+  no tool actions, and no weekly or recap framing. After specialist remediation,
+  the corrected production-composed journey passed again. UX verdict: Ready.
+- Preliminary specialist result: findings. The parent rejected the requested
+  prompt-overlay restoration and accepted/remediated the production-composition
+  coverage finding; no coverage patch artifact was attached.
