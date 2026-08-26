@@ -64,6 +64,34 @@ describe("hosted member-action outcome route", () => {
     await expect(response.json()).resolves.toEqual({ recorded: true, schemaVersion: 1 });
   });
 
+  it("preserves a typed workout snapshot result from the signed runtime", async () => {
+    const outcome = {
+      ...OUTCOME,
+      result: {
+        cardUrl: "https://www.withmurph.ai/#murph-card=card",
+        kind: "workout.live.snapshot",
+        version: 1,
+      },
+      status: "unchanged",
+    };
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockResolvedValueOnce({
+      payload: outcome,
+      userId: "member-1",
+    });
+
+    const response = await route.POST(new Request(
+      "https://example.test/api/internal/hosted-mailbox/member-action-outcome",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordMemberActionOutcome).toHaveBeenCalledWith({
+      memberId: "member-1",
+      outcome,
+      prisma,
+    });
+  });
+
   it("rejects a malformed signed outcome before recording it", async () => {
     mocks.requireHostedCloudflareCallbackJsonRequest.mockResolvedValueOnce({
       payload: { ...OUTCOME, status: "maybe" },

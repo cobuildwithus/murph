@@ -2583,8 +2583,10 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh conversation work keeps its
-foreground priority, but its first successful reply checkpoint includes one
+Runtime applies the closed action through its canonical domain owner. Fresh
+conversation work keeps its foreground priority. A safe-prefix prefetch imports
+a closed member action before a dirty runtime begins its long idle snapshot,
+and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
 arrived conversation cannot defer the already-accepted action into another
@@ -2593,20 +2595,36 @@ outcome as an existing post-checkpoint effect before releasing the requested
 item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
-requires the V6 card's opaque workout-revision binding under the existing
-workout mutation lock. That binding combines the canonical workout identity,
-ordered hidden exercise/set-slot identity, and the last applied member-action
-generation. Delayed or forwarded cards therefore cannot retarget a later
-workout, a set shifted by another direct action, or a same-name exercise moved
-by the generic workout editor. Mutable set results and annotations remain under
-their existing result-family optimistic comparisons rather than the positional
-identity binding.
+requires the V6 card's opaque workout binding under the existing workout
+mutation lock. Its stable lookup prefix covers the canonical workout identity
+and ordered hidden exercise/set-slot identity, while its exact state suffix
+covers the same identity plus the last applied member-action generation. The
+initial editor also requires the embedded logged/pending states to match the
+canonical workout; only the authenticated read-only refresh may advance those
+states. A write must match the complete current token; delayed or forwarded
+cards therefore cannot
+retarget a later workout, a set shifted by another direct action, or a same-name
+exercise moved by the generic workout editor. Mutable set results and
+annotations remain under their existing result-family optimistic comparisons
+rather than the positional identity binding. An exact current legacy binding
+remains valid for an already-sent V6 write.
+Expanded V6 readers reuse that binding with the same mailbox delivery path for
+`workout.live.snapshot`. The member-scoped credential supplies identity;
+runtime scans only that member's canonical workout records, requires
+one structural match to the embedded target skeleton, and returns one ordinary
+V6 card URL with current progress and editor state, or an ordinary V4 read-only
+URL when editing is unavailable or too large. Legacy lookup accepts only an
+exact current token or the empty-prior-action derivation used by an initial
+card. This action never writes the workout. Missing, duplicate, structurally
+changed, oversized, or cross-member targets fail closed as `workout_changed`,
+leaving the embedded snapshot in place. The result reuses the existing strict
+card decoder rather than defining a parallel workout wire.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and
+across the member's canonical workout records before revision and
 unfinished-record eligibility, so the generation change caused by the original
 write or workout completion cannot replace a committed success with a terminal
 rejection, and another unfinished workout cannot receive the action. Every

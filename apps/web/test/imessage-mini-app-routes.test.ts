@@ -402,6 +402,66 @@ describe("iMessage mini-app routes", () => {
     });
   });
 
+  it("admits a workout snapshot read and returns its typed card result", async () => {
+    const requestBody = validSnapshotRequest();
+    const submitted = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      requestBody,
+    ));
+
+    expect(submitted.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        envelope: expect.objectContaining({
+          request: expect.objectContaining({
+            action: requestBody.action,
+          }),
+        }),
+      }));
+
+    const cardUrl = "https://www.withmurph.ai/#murph-card=card";
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValueOnce({
+      eventId: `member.action.completed:${requestBody.actionId}`,
+      kind: "member.action.completed",
+      occurredAt: "2026-08-12T15:00:01.000Z",
+      outcome: {
+        actionId: requestBody.actionId,
+        completedAt: "2026-08-12T15:00:01.000Z",
+        reason: null,
+        result: {
+          cardUrl,
+          kind: "workout.live.snapshot",
+          version: 1,
+        },
+        schemaVersion: 1,
+        status: "unchanged",
+      },
+      userId: "member-1",
+    });
+    const status = await memberActionStatusRoute.GET(createBearerRequest(
+      `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${requestBody.actionId}`,
+      MESSAGES_TOKEN,
+      { method: "GET" },
+    ), {
+      params: Promise.resolve({ actionId: requestBody.actionId }),
+    });
+
+    await expect(status.json()).resolves.toEqual({
+      actionId: requestBody.actionId,
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: null,
+      result: {
+        cardUrl,
+        kind: "workout.live.snapshot",
+        version: 1,
+      },
+      schemaVersion: 1,
+      status: "unchanged",
+    });
+  });
+
   it("rejects an indistinguishable destructive batch before mailbox append", async () => {
     const request = validMemberActionRequest();
     const response = await memberActionRoute.POST(jsonRequest(
@@ -667,6 +727,32 @@ function validMemberActionRequest() {
     requestedAt: new Date().toISOString(),
     schemaVersion: 1,
   };
+}
+
+function validSnapshotRequest() {
+  return {
+    action: {
+      kind: "workout.live.snapshot",
+      presentation: {
+        footer: "Log each set.",
+        subtitle: null,
+        title: "Strength",
+        workout: {
+          exercises: [{
+            name: "Leg press",
+            sets: [{ actual: null, status: "pending", target: "8 reps" }],
+          }],
+          state: "active",
+          version: 1,
+        },
+      },
+      version: 1,
+      workoutBinding: "a".repeat(64),
+    },
+    actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    requestedAt: new Date().toISOString(),
+    schemaVersion: 1,
+  } as const;
 }
 
 function readCredentialToken(body: unknown): string {
