@@ -12854,6 +12854,74 @@ test("device sync service omits unsafe free-form provider diagnostic reasons", a
   close();
 });
 
+test("device sync service preserves only safe Junction ECG binding diagnostics", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ecg-diagnostics");
+  const warnings: Array<Record<string, unknown> | undefined> = [];
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn(_message, context) {
+          warnings.push(context);
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw deviceSyncError({
+            code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Junction ECG summary and voltage response were inconsistent.",
+            retryable: true,
+            details: {
+              reason: "sample_count_mismatch",
+              actualSampleCount: 1,
+              expectedSampleCount: 2,
+              recordingId: "private-recording-id",
+              unsafeFreeText: "private sample detail",
+            },
+          });
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "junction-ecg-diagnostic",
+    });
+
+    await service.runWorkerOnce();
+    const expected = {
+      junctionEcgActualSampleCount: 1,
+      junctionEcgBindingReason: "sample_count_mismatch",
+      junctionEcgExpectedSampleCount: 2,
+    };
+    assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
+      ...expected,
+      providerHttpStatus: 500,
+    });
+    assert.deepEqual(
+      {
+        junctionEcgActualSampleCount: warnings[0]?.junctionEcgActualSampleCount,
+        junctionEcgBindingReason: warnings[0]?.junctionEcgBindingReason,
+        junctionEcgExpectedSampleCount: warnings[0]?.junctionEcgExpectedSampleCount,
+      },
+      expected,
+    );
+    assert.equal("recordingId" in (warnings[0] ?? {}), false);
+    assert.equal("unsafeFreeText" in (warnings[0] ?? {}), false);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service exposes sanitized cause details for transport failures", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-transport-failure-diagnostics");
   const { service, close } = createServiceFixture({
