@@ -68,7 +68,10 @@ are specified by
 Changes that can alter Murph's interpretation, tool behavior, silence
 decision, or user-visible reply require deterministic boundary proof plus one
 focused production-derived real-Codex journey and manual review of the actual
-synthetic replies. The one-command local subscription runner, provider-key
+synthetic replies. When the default subscription is usage-limited before any
+provider action, the repository grants one bounded retry through a discovered
+already-authenticated alternate Codex home without reading or copying auth or
+cycling profiles. The one-command local subscription runner, provider-key
 boundary, UX verdict, and PR evidence contract are specified by
 `.agents/skills/verify-murph-assistant/SKILL.md`,
 `agent-docs/operations/completion-workflow.md`,
