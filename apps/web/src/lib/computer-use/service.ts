@@ -400,7 +400,6 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(reservedRun, browserCreateNow),
       });
-      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const initialState = startUrl
         ? await this.navigateKernelBrowserToUrl({
             sessionId: browser.sessionId,
@@ -2479,7 +2478,6 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(run, createNow),
       });
-      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       return {
         replaceInput: {
           expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,

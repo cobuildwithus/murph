@@ -711,7 +711,9 @@ URLs.
 Kernel live-view iframe and WebSocket origins are code-owned from Kernel's
 documented CSP sources (`https://*.onkernel.com:8443` and
 `wss://*.onkernel.com:8443`) rather than operator-managed environment
-configuration.
+configuration. A Kernel browser session remains available to Web-owned
+automation when its optional live-view URL does not match those sources; human
+handoff validates the stored URL immediately before exposure and fails closed.
 
 ## Product label databases
 
