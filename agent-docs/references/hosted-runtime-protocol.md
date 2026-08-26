@@ -899,15 +899,17 @@ requester membership `participantId`; first-person references map only to the
 `read_shared` member with that exact id. Display name, handle, or member order
 cannot substitute, and the opaque id cannot appear in the answer.
 
-When a joined-group request or accepted-input completion reaches a dirty warm
-runtime, the mailbox prefetch may import it before the routine idle checkpoint
-only when the entire fetched prefix contains pre-checkpoint-safe system wakes.
+When a joined-group request, accepted-input completion, or closed
+`member.action.requested` reaches a dirty warm runtime, the mailbox prefetch may
+import it before the routine idle checkpoint only when the entire fetched
+prefix contains pre-checkpoint-safe system wakes.
 One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
 and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
-the existing foreground-causal delivery path. Neither starts or advances the
+the existing foreground-causal delivery path, and a member action uses its
+existing provider-free foreground-causal service path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
@@ -2767,8 +2769,10 @@ further steer, but retains the existing provider-turn correlation until the one
 steer already started under that exact key settles; a rejected steer is not
 acknowledged and its input remains pending. In the exception, request 0 pauses
 provider steering but keeps conversation admission registered until an atomic
-quiet cutoff or one reconsideration admission; request 1 closes at its first
-completed response. Missing input, a causal gap, a boundary change, capacity
+quiet cutoff or one reconsideration admission. A successfully committed live
+steer during request 0 also selects reconsideration and keeps registration open
+through request 1, which closes at its first completed response. Missing input,
+a causal gap, a boundary change, capacity
 overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and

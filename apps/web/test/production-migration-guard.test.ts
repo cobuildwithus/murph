@@ -1989,6 +1989,11 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /deployment_status/u);
     assert.match(workflow, /workflow_dispatch/u);
     assert.match(workflow, /deployed_sha/u);
+    assert.match(workflow, /run_group_materialization_backfill:/u);
+    assert.match(
+      workflow,
+      /RUN_GROUP_MATERIALIZATION_BACKFILL: \$\{\{ inputs\.run_group_materialization_backfill \|\| 'false' \}\}/u,
+    );
     assert.match(workflow, /deployment_url/u);
     assert.match(workflow, /github\.event_name == 'workflow_dispatch'/u);
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
@@ -2044,7 +2049,7 @@ describe("hosted web production migration guard", () => {
       workflow.match(
         /pnpm --dir apps\/web exec tsx scripts\/verify-vercel-production-deployment\.ts/gu,
       )?.length,
-      3,
+      4,
       "captured deployment proofs must bypass pnpm 10 lifecycle stdout",
     );
 
@@ -2109,6 +2114,20 @@ describe("hosted web production migration guard", () => {
       /MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"/u,
     );
     assert.match(contractMigrationStep, /release:production:contract-migrate/u);
+    assert.match(
+      contractMigrationStep,
+      /if \[ "\$\{RUN_GROUP_MATERIALIZATION_BACKFILL\}" != "true" \]; then/u,
+    );
+    assert.match(contractMigrationStep, /pnpm --dir apps\/web prisma:generate/u);
+    assert.match(
+      contractMigrationStep,
+      /groups:backfill-materialization --batch-size 50/u,
+    );
+    assert.match(
+      contractMigrationStep,
+      /groups:backfill-materialization --apply --batch-size 50/u,
+    );
+    assert.match(contractMigrationStep, /groups:backfill-materialization --check/u);
     const initialCurrentProof = productionProofStep.indexOf('current_sha="$(');
     const initialExactProof = productionProofStep.indexOf(
       "verify-vercel-production-deployment.ts",
@@ -2152,6 +2171,42 @@ describe("hosted web production migration guard", () => {
         < workflow.indexOf("release:production:contract-migrate"),
       "contract migrations must expose the database secret only after the alias proof output is set",
     );
+    const contractMigrationIndex = contractMigrationStep.indexOf(
+      "release:production:contract-migrate",
+    );
+    const backfillGateIndex = contractMigrationStep.indexOf(
+      'if [ "${RUN_GROUP_MATERIALIZATION_BACKFILL}" != "true" ]; then',
+    );
+    const prismaGenerateIndex = contractMigrationStep.indexOf(
+      "pnpm --dir apps/web prisma:generate",
+    );
+    const backfillCurrentProofIndex = contractMigrationStep.indexOf(
+      'current_sha="$(',
+      contractMigrationIndex + 1,
+    );
+    const backfillExactProofIndex = contractMigrationStep.indexOf(
+      "verify-vercel-production-deployment.ts",
+      contractMigrationIndex + 1,
+    );
+    const backfillDryRunIndex = contractMigrationStep.indexOf(
+      "groups:backfill-materialization --batch-size 50",
+    );
+    const backfillApplyIndex = contractMigrationStep.indexOf(
+      "groups:backfill-materialization --apply --batch-size 50",
+    );
+    const backfillCheckIndex = contractMigrationStep.indexOf(
+      "groups:backfill-materialization --check",
+    );
+    assert.ok(
+      contractMigrationIndex < backfillGateIndex
+        && backfillGateIndex < prismaGenerateIndex
+        && prismaGenerateIndex < backfillCurrentProofIndex
+        && backfillCurrentProofIndex < backfillExactProofIndex
+        && backfillExactProofIndex < backfillDryRunIndex
+        && backfillDryRunIndex < backfillApplyIndex
+        && backfillApplyIndex < backfillCheckIndex,
+      "the opt-in group backfill must re-prove production and run dry-run, apply, then check",
+    );
 
     const productionProofRun = extractWorkflowRunScript(productionProofStep);
     const contractMigrationRun = extractWorkflowRunScript(contractMigrationStep);
@@ -2185,6 +2240,27 @@ elif [[ "$*" == *"exec tsx scripts/verify-vercel-production-deployment.ts"* ]]; 
   printf '%s\\n' "\${DEPLOYED_SHA}"
 elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
   printf 'migrate\\n' >> "\${STUB_CALLS_FILE}"
+elif [[ "$*" == *"prisma:generate"* ]]; then
+  printf 'prisma-generate\\n' >> "\${STUB_CALLS_FILE}"
+elif [[ "$*" == *"groups:backfill-materialization"* ]]; then
+  if [[ "\${DATABASE_URL:-}" != "\${DIRECT_DATABASE_URL:-}" ]]; then
+    printf 'backfill did not receive the direct database URL\\n' >&2
+    exit 95
+  fi
+  if [[ "\${NODE_OPTIONS:-}" != "--conditions=react-server" ]]; then
+    printf 'backfill did not receive the react-server condition\\n' >&2
+    exit 94
+  fi
+  if [[ "$*" == *"--apply --batch-size 50"* ]]; then
+    printf 'backfill-apply\\n' >> "\${STUB_CALLS_FILE}"
+  elif [[ "$*" == *"--check"* ]]; then
+    printf 'backfill-check\\n' >> "\${STUB_CALLS_FILE}"
+  elif [[ "$*" == *"--batch-size 50"* ]]; then
+    printf 'backfill-dry\\n' >> "\${STUB_CALLS_FILE}"
+  else
+    printf 'unexpected backfill invocation: %s\\n' "$*" >&2
+    exit 93
+  fi
 else
   printf 'unexpected pnpm invocation: %s\\n' "$*" >&2
   exit 97
@@ -2237,6 +2313,7 @@ fi
       const runWorkflowBody = (options: {
         currentSha: string;
         requireCurrent: boolean;
+        runBackfill?: boolean;
       }) => spawnSync("bash", ["-c", contractMigrationRun], {
         encoding: "utf8",
         env: {
@@ -2246,6 +2323,7 @@ fi
           MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1",
           MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1",
           PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
+          RUN_GROUP_MATERIALIZATION_BACKFILL: options.runBackfill ? "true" : "false",
           SHOULD_REQUIRE_CURRENT: options.requireCurrent ? "true" : "false",
           STUB_CALLS_FILE: callsFile,
           STUB_CURRENT_SHA: options.currentSha,
@@ -2275,6 +2353,18 @@ fi
       });
       assert.equal(exactMatch.status, 0, exactMatch.stderr);
       assert.equal(await readFile(callsFile, "utf8"), "verify\nmigrate\n");
+      await rm(callsFile, { force: true });
+
+      const backfillExactMatch = runWorkflowBody({
+        currentSha: deployedSha,
+        requireCurrent: true,
+        runBackfill: true,
+      });
+      assert.equal(backfillExactMatch.status, 0, backfillExactMatch.stderr);
+      assert.equal(
+        await readFile(callsFile, "utf8"),
+        "verify\nmigrate\nprisma-generate\nverify\nbackfill-dry\nbackfill-apply\nbackfill-check\n",
+      );
     } finally {
       await rm(shellFixture, { force: true, recursive: true });
     }

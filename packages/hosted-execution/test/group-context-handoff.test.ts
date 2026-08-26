@@ -100,12 +100,12 @@ describe("private-to-group context handoff contracts", () => {
   it("parses the strict bounded model-hidden request and selection response", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "handoff",
-      context: "  Sunny logged a 405 lb deadlift personal record today.  ",
+      context: "  The member set a personal record today.  ",
       groupLabel: "  Lifting Club  ",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     })).toEqual({
       action: "handoff",
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "Lifting Club",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });

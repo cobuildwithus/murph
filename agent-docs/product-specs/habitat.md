@@ -1,6 +1,6 @@
 # Habitat: Progressive Member Life-Context
 
-Last verified: 2026-08-20
+Last verified: 2026-08-26
 
 ## Current State
 
@@ -61,7 +61,7 @@ updated: 2026-07-07
 
 ## Domain Catalog
 
-A typed, versioned catalog in `packages/contracts` (product spec, not per-member state) defines: domains → aspects → indicators, and per indicator: id, value type/enum, priority (`high | medium | low`), an example conversational question, and an optional evidence target (e.g. `co2 < 1000 ppm`). Low priority means: never proactively asked; filled only when context surfaces it.
+A typed, versioned catalog in `packages/contracts` (product spec, not per-member state) defines: domains → aspects → indicators, and per indicator: id, value type/enum, priority (`high | medium | low`), an example conversational question, and an optional evidence target (e.g. `co2 < 1000 ppm`). Low priority means context-only in normal conversation. The member-started Environment voice walkthrough may ask a low-priority condition when that condition contributes to report coverage; low-priority informational facts remain outside the main walkthrough.
 
 Questions in the catalog are conversation starters, not form fields. One natural question ("do you sleep with the window open?") routinely fills several indicators at once; the agent extracts every indicator the answer contains.
 
@@ -98,9 +98,11 @@ Ordered by importance:
 4. **Realtime voice walkthrough.** The authenticated Environment page streams
    microphone audio through a short-lived Realtime session while showing one
    topic at a time. With no resolved facts, the script covers all five
-   categories. A partial profile asks only for unresolved high- and
-   medium-priority facts. Once those facts are resolved, the script becomes one
-   free-form update prompt. The extractor saves explicit catalog values and an
+   categories. A partial profile asks for unresolved high- and medium-priority
+   facts plus every unresolved condition that contributes to report coverage,
+   regardless of catalog priority. Low-priority informational facts stay
+   optional. Once those facts are resolved, the script becomes one free-form
+   update prompt. The extractor saves explicit catalog values and an
    optional concise note for useful detail that the value cannot express. It
    receives the prior note during updates, preserves details that remain true,
    and removes contradicted details. Raw audio and the live transcript are not
@@ -117,7 +119,7 @@ Ordered by importance:
 
 ## Environment v1 — Aspects and Indicators
 
-Priorities: **H** = proactively collectable, **M** = ask when nearby topic arises, **L** = context-only, never proactively asked.
+Priorities: **H** = proactively collectable, **M** = ask when a nearby topic arises, **L** = context-only outside a member-started Environment voice walkthrough. The main walkthrough asks an L field only when it contributes to report coverage; a category walkthrough can include all unresolved fields in that category.
 
 ### `home-location` — location and climate
 
@@ -229,7 +231,7 @@ Zone/aspect grades (A–F or `unknown`) render on the home visualization — spe
 ## Environment UI
 
 - `/environment` reads the private Browser Vault replica. Production UI never substitutes fixtures for missing member data.
-- Zero-data members see a benefit-led empty state with voice and chat entry points. Sparse records keep the report visible and offer a voice script derived from unknown, non-declined high- and medium-priority facts, including useful informational context such as city, ventilation, and work mode. Once those collection-eligible facts are resolved, the fill-gaps action becomes a free-form voice or chat update. Each category also offers one voice action that covers all its unresolved fields, including optional context. There are no edit forms. The open page waits for a newer Browser Vault replica after accepted voice writes and updates the visible report without a full reload.
+- Zero-data members see a benefit-led empty state with voice and chat entry points. Sparse records keep the report visible and offer a voice script derived from unknown, non-declined high- and medium-priority facts plus every gradeable condition. This includes useful informational context such as city, ventilation, and work mode, while low-priority informational facts stay optional. Once those collection-eligible facts are resolved, the fill-gaps action becomes a free-form voice or chat update. Each category also offers one voice action that covers all its unresolved fields, including optional context. There are no edit forms. The open page waits for a newer Browser Vault replica after accepted voice writes and updates the visible report without a full reload.
 - The page shows derived A–F grades only after at least 50% of gradeable conditions are known. Missing and declined data never lower the grade. The overall score shows its condition base and positive capability bonus separately. Optional access can improve the score, but its absence is neutral.
 - Assessment coverage always names its known gradeable conditions. It remains
   distinct from the larger set of optional and conversational details that a
@@ -266,6 +268,7 @@ Zone/aspect grades (A–F or `unknown`) render on the home visualization — spe
 - 2026-08-25 — Environment letter grades use the A–F scale with 90/80/70/60 cutoffs, and a red flag caps a sufficiently covered audit at F. The earlier A–E scale with 90/75/55/35 cutoffs read as one letter too generous to anyone who knows the A–F scale. Percentages stay visible beside the letter, and every surface that carries a letter — hero, grade dialog, print report, and the share-card route validator — accepts the same set.
 - 2026-07-30 — The voice walkthrough uploads privately to the authenticated Murph path. Audio is staged application-encrypted, processed by a silent Habitat-only turn, deleted after the canonical checkpoint, and covered by a 24-hour R2 lifecycle backstop; no iMessage, Telegram, or browser share sheet is part of the primary flow.
 - 2026-07-30 — Voice guidance has three modes: five-category first walkthrough, catalog-derived gap filling for unknown high- and medium-priority facts that excludes declined facts, and one free-form update prompt once those collection-eligible facts are resolved. Grade coverage does not select the script.
+- 2026-08-26 — A member-started main Environment voice walkthrough includes every gradeable condition, regardless of catalog priority, so a complete set of answers can reach 100% report coverage. Low-priority informational facts remain outside the main walkthrough. This supersedes the 2026-07-30 selection rule for the authenticated Environment voice flow only.
 - 2026-07-30 — Every ordinary Habitat write and live-conditions egress may retain or send only a member-stated city or approximate region; precise addresses are rejected and unsafe legacy values fail closed before provider egress.
 - 2026-07-30 — First-seen Environment voice uploads use the existing AI-usage gate, one unconsumed recording per member, and a server-enforced three-minute media cap. Exact retries remain idempotent, and the open page polls Browser Vault long enough to show the processing result.
 - 2026-07-31 — `/environment/print` is authenticated and derives its printable

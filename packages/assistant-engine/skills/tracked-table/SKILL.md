@@ -23,7 +23,7 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 
 ## Live workout command surface
 
-- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;sets=...;reps=...'` value per ordered ad-hoc exercise. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
+- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise. `targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load; use the unit-selection rule in the required start flow below. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
 - Read one workout: `vault-cli workout show <evt_id> --format json`.
 - Delete one exact workout: `vault-cli workout delete <evt_id> --expected-revision <n>`. The expected revision must come from the exact approved workout read.
 - Add an exercise: `vault-cli workout exercise add <name> --workout-id <evt_id> --order <n> [--sets <n>]`. An explicit `--sets` count is a finite plan; omitting it creates one targetless log slot.

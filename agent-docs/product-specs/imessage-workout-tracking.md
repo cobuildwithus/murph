@@ -15,7 +15,9 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 
 - A saved workout format owns planned exercises, stable exercise identity, planned sets, and target values.
 - One canonical `activity_session` workout event owns session timing, unlogged set coordinates, and actual completed-set values. Planned targets are not copied into those placeholders.
-- A response card is an immutable snapshot. It never owns workout state.
+- A transcript response card is an immutable snapshot and never owns workout
+  state. An active V6 card may refresh only its expanded in-memory presentation
+  from canonical state; the sent bubble and offline fallback remain unchanged.
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
   enrolled by the containing app.
@@ -345,7 +347,7 @@ its original-edit, original-remove, or final-append namespace may appear at most
 once. The action carries no member id or plaintext canonical workout id. Its
 stable one-way workout-revision binding and destructive-state binding are
 stale-card preconditions, not authentication: after deriving the member from the
-scoped credential, the server scans the bounded workout records and admits a
+scoped credential, the server scans the member's canonical workout records and admits a
 first application only when exactly one unfinished record derives the supplied
 binding. That matched record supplies the canonical id and owns the mutation;
 there is no active/focused singleton or recency fallback. Stable identity,
@@ -391,8 +393,11 @@ write, those compatible bundles are the rollback floor. Legacy saved-routine
 exercises with no finite marker retain finite-plan semantics, while new
 targetless exercises write `setPlanIsFinite: false` so they cannot inherit that
 legacy default. Legacy ad hoc workouts remain explicit-finish sessions. The
-workout action binding version changes, so already-sent editable cards fail
-closed and require a refreshed card rather than being reinterpreted.
+workout action binding keeps its existing 64-hex wire. The current derivation
+combines a stable lookup prefix with an exact mutable-state suffix; the whole
+token remains the optimistic write precondition. Runtime also accepts the
+preceding full-length derivation when it exactly matches current state, so
+already-sent editable cards remain valid until the workout changes.
 
 Backward compatibility is a permanent iMessage app-card contract, not a
 one-time V6 rollout step. Linq's app-capability result does not negotiate a
@@ -447,6 +452,16 @@ not prove those device behaviors.
 
 ## Backward-compatible exact-plan rollout
 
+This is Product-level UX work because one member request crosses assistant
+interpretation, canonical workout persistence, V6 presentation, the closed
+member action, and the native editor. Release proof covers an exact ad-hoc
+plan, saved-routine target ownership, historical V4/V6 cards, stale actions,
+preference-only and mixed submissions, localized partial input, and all
+unfinished rows changing units together. The exact-plan release remains on
+Product UX Hold until the real assistant successfully creates the requested
+canonical plan and a physical Messages-extension smoke confirms the native
+flow; deterministic contract and simulator proof do not replace those gates.
+
 Workout cards continue to emit the permanent V6 editor wire. Exact ad-hoc
 planned weight and repetitions are canonical fields on the workout exercise and
 render deterministically into each pending V6 target as `<weight> <unit> ×
@@ -467,3 +482,81 @@ event is written; after that write, recovery requires a compatible reader or a
 forward fix. Focused proof must pin the exact V6 TypeScript/Swift fixture,
 exercise-reorder continuity, incompatible-unit rejection, planned defaults as
 incomplete until explicit completion, and preference-only/mixed action outcomes.
+
+## V4/V6 live refresh
+
+Live refresh preserves the permanent card-reader contract: no new workout-card
+schema, producer flag, capability registry, or duplicated native result model is
+introduced. V4 remains the complete read-only wire and V6 remains the complete
+editable wire. Previously released readers continue to render both exactly as
+before; only a newer Messages extension elects to make the additional read.
+
+### Binding and authority
+
+New V6 action bindings retain the existing 64-lowercase-hex shape. The first
+half is a domain-separated, one-way lookup correlation for the high-entropy
+canonical workout id plus ordered hidden exercise/set-slot identity. The second
+half covers the same identity plus the last applied member-action generation.
+The complete 64-character value is required for a write, so a stable lookup
+prefix does not weaken stale-write rejection or become write authority.
+
+The expanded reader submits the V6 action binding through the existing
+member-scoped bearer as `workout.live.snapshot`, together with the complete
+embedded presentation skeleton. Runtime searches only that authenticated
+member's canonical workout records, requires exactly one binding target, and
+then requires the canonical exercise/set structure to match before preserving
+embedded labels and projecting current results. A forwarded card therefore
+cannot read its sender's vault. The token exposes neither canonical id nor
+member identity; it intentionally permits same-workout correlation across new
+cards held by one credential owner.
+
+For cards sent before the composite derivation, snapshot lookup accepts either
+the exact current legacy binding or the legacy binding for the workout before
+its first member action. This keeps ordinary already-sent initial V6 cards
+refreshable after their first save. It cannot recover an arbitrary historical
+last-action generation without adding another identity store, so other stale
+legacy cards fail closed and retain their embedded snapshot. Legacy writes are
+accepted only when their full binding still exactly matches current state.
+
+### Result and fallback
+
+The result contains one bounded canonical Murph card URL, not another workout
+or editor wire. The server encodes the current projection as ordinary V6 when
+the workout is active, structurally supported, editable, and the complete URL
+fits below 2,048 characters. Otherwise it emits ordinary V4 read-only when that
+complete presentation fits. The native result passes that URL through the
+existing strict card decoder. It never merges parallel result models or
+partially installs an editor. Initial V6 authoring still requires the embedded
+logged/pending states to equal the canonical workout; the snapshot read alone
+may advance stale progress before it emits a replacement card.
+
+The extension renders the embedded card immediately, keeps one transient
+selected-message session, and replaces that session only while its entire draft
+equals the card baseline, no admitted request exists, and submission state is
+idle. Network, credential, decode, non-unique-target, structural, or size
+failure leaves the complete embedded card and any local state unchanged. The
+extension performs no background refresh and stores no result. An oversized V4
+result or a V4/read-only returned result cannot continue refreshing because it
+contains no action binding.
+
+### Rollout and proof
+
+Release the compatible iOS reader before enabling the backend path and
+publishing the changelog claim. Both skew directions are safe: an older
+extension only renders its existing V4/V6 snapshot, while a newer extension
+against an older backend treats the unsupported snapshot action as a refresh
+failure and keeps that snapshot. The
+composite binding remains opaque to old iOS readers. No new card schema is
+persisted, so this change creates no installed-reader rollback floor or producer
+gate beyond the existing V4/V6 floor.
+
+The release remains on Product UX Hold until physical Messages-extension proof
+confirms expansion, refresh, fallback, and draft preservation on a real Xcode/
+iOS device host. Required proof covers exact V4/V6 historical decoding; current and legacy
+binding matching; cross-member, ambiguous, and structurally changed rejection;
+V6 result decoding through the existing native decoder; whole-editor fallback
+to V4 at the real URL ceiling; clean-session replacement; dirty, admitted,
+submitting, saved, and failed session preservation; presentation transitions;
+and physical Messages-extension behavior when an Xcode/device host is
+available. The static image remains V4 and all non-workout card families retain
+their existing envelopes.

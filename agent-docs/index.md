@@ -498,7 +498,8 @@ provider-owned card masking, a concise date-and-meal-count nutrition
 caption with conditional partial-state and assessed-goal-direction subcaptions,
 one trusted provider reply-thread binding, bounded offline V3 compact-table,
 read-only V4 workout-session, editable V6 workout-session with a
-runtime-hydrated typed optimistic projection, V4 logical capacity of 16
+runtime-hydrated typed optimistic projection, and reader-first V7 workout
+refresh with a member-scoped authenticated canonical snapshot, V4 logical capacity of 16
 exercises and 16 sets per exercise with measured fragment/image length as the
 final gate, a compact four-exercise transcript summary plus remaining count,
 and V5 challenge-standings
@@ -606,7 +607,7 @@ contract is jointly specified by `ARCHITECTURE.md`,
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
-| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, closed generic/workout payload shapes, bounded read-only V4 and runtime-hydrated editable V6 native wires, typed optimistic set projections, deterministic member actions through the existing mailbox, immutable native and stateless image snapshots with the canonical Murph badge, bounded workout provider chrome with semantic text recovery, privacy boundaries, persisted-owner rollback floors, and reader-first release gating. | iMessage workout product spec | High | 2026-08-13 |
+| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, closed generic/workout payload shapes, bounded read-only V4 and runtime-hydrated editable V6, structurally fenced lookup-plus-state bindings, deterministic member actions and authenticated read-only snapshots through the existing mailbox and card decoder, immutable transcript and stateless image snapshots with the canonical Murph badge, bounded workout provider chrome with semantic text recovery, privacy boundaries, persisted-owner rollback floors, and native-first release gating. | iMessage workout product spec | High | 2026-08-26 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/member-owned-device-provider-applications.md` | Member-owned OAuth client application contract for provider-portal provisioning, exact app revision binding, polling-first runtime config, and optional signed webhooks. | Device-provider connection product spec | High | 2026-08-09 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history, including explicit admission, alias, and disclosure-layout contracts. | Biomarkers product spec | High | 2026-07-20 |

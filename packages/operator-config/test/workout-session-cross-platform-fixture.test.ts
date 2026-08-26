@@ -114,13 +114,59 @@ const CARD: CompactTableResponseCardV1 = {
   },
 }
 
+const EXACT_PLANNED_CARD: CompactTableResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Bench press — 135 lb × 8',
+  subtitle: null,
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [{
+      name: 'Bench press',
+      sets: Array.from({ length: 3 }, () => ({
+        status: 'pending' as const,
+        target: '135 lb × 8',
+        actual: null,
+      })),
+    }],
+  },
+  editor: {
+    actionBinding: 'a'.repeat(64),
+    version: 1,
+    setRemovalBinding: 'b'.repeat(64),
+    exercises: [{
+      unitOverride: 'lb',
+      sets: Array.from({ length: 3 }, () => ({
+        logged: false,
+        result: null,
+      })),
+    }],
+  },
+}
+
 const EXACT_SWIFT_FIXTURE_URL =
   'https://www.withmurph.ai/#murph-card=eyJzY2hlbWFWZXJzaW9uIjo2LCJjYXJkIjp7ImsiOiJ3IiwidiI6MSwidCI6IlB1c2ggZGF5IiwidSI6IjMgb2YgNiBzZXRzIGNvbXBsZXRlIiwicyI6ImEiLCJlIjpbWyJCZW5jaCBwcmVzcyIsImwiLFtbImMiLCIxODUgbGIgw5cgOCIsWyJ3Iiw4LDE4NSxudWxsXV0sWyJjIiwiMTg1IGxiIMOXIDgiLFsidyIsNywxODUsImwiXV0sWyJwIiwiMTg1IGxiIMOXIDbigJM4IixudWxsXV1dLFsiSW5jbGluZSBkdW1iYmVsbCBwcmVzcyIsImwiLFtbImMiLCI1NSBsYiDDlyAxMCIsWyJ3IiwxMCw1NSxudWxsXV0sWyJwIiwiNTUgbGIgw5cgOOKAkzEwIixudWxsXSxbInAiLG51bGwsbnVsbF1dXV0sImYiOiJSZXBseSB3aXRoIHRoZSBleGVyY2lzZSwgc2V0LCBhbmQgcmVzdWx0IHRvIGxvZyBvciBjb3JyZWN0IGl0LiIsImIiOiI5NTk1OGY5ZjgzZTY5NDNjZWI1NjcwNGUxOTIxNmY3ZmY2ZTEwNWE5Yjc0ZDhhNWU0NjY3NTRiMjY2ZjY3YTlhIiwiZCI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIifX0'
+
+const EXACT_PLANNED_SWIFT_FIXTURE_URL =
+  'https://www.withmurph.ai/#murph-card=eyJzY2hlbWFWZXJzaW9uIjo2LCJjYXJkIjp7ImsiOiJ3IiwidiI6MSwidCI6IkJlbmNoIHByZXNzIOKAlCAxMzUgbGIgw5cgOCIsInUiOm51bGwsInMiOiJhIiwiZSI6W1siQmVuY2ggcHJlc3MiLCJsIixbWyJwIiwiMTM1IGxiIMOXIDgiLG51bGxdLFsicCIsIjEzNSBsYiDDlyA4IixudWxsXSxbInAiLCIxMzUgbGIgw5cgOCIsbnVsbF1dXV0sImYiOm51bGwsImIiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwiZCI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIifX0'
 
 describe('workout-session TypeScript to Swift contract fixture', () => {
   it('keeps the exact production encoder output pinned for the iOS decoder', () => {
     const encoded = encodeWorkoutSessionAppCardUrl(CARD)
 
     expect(encoded).toBe(EXACT_SWIFT_FIXTURE_URL)
+  })
+
+  it('pins the exact planned set fields consumed by the iOS editor', () => {
+    const encoded = encodeWorkoutSessionAppCardUrl(EXACT_PLANNED_CARD)
+
+    expect(encoded).toBe(EXACT_PLANNED_SWIFT_FIXTURE_URL)
   })
 })

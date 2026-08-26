@@ -1,5 +1,7 @@
 import {
   type WorkoutLiveApplyMemberActionV1,
+  type WorkoutLiveSnapshotMemberActionResultV1,
+  type WorkoutLiveSnapshotMemberActionV1,
   type WorkoutExercise,
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutMemberActionExpectedSetStateV1,
@@ -9,15 +11,17 @@ import {
   type WorkoutSet,
   memberActionIdV1Schema,
   workoutLiveApplyMemberActionV1Schema,
+  workoutLiveSnapshotMemberActionV1Schema,
   workoutSessionSchema,
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
 } from '@murphai/operator-config/workout-action-binding'
+import { encodeWorkoutSessionSnapshotAppCardUrl } from '@murphai/operator-config/assistant-response-cards'
 
 import { showWorkoutFormat } from './workout-format.js'
 import {
@@ -36,6 +40,7 @@ import {
   type SetLiveWorkoutExerciseRepsInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
+  buildLiveWorkoutCardSnapshot,
   buildLiveWorkoutSessionFromTemplate,
   elapsedDurationMinutes,
   hasCompletedFiniteLiveWorkoutPlan,
@@ -46,6 +51,7 @@ import {
   assertTargetableLiveWorkout,
   compactSetPatch,
   findLiveWorkoutActionTargets,
+  findLiveWorkoutRefreshTargets,
   normalizeLiveWorkoutActivityType,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
@@ -79,6 +85,53 @@ export async function readLiveWorkoutCardEditor(input: {
     workout,
     workoutId: shown.entity.id,
   })
+}
+
+export async function readLiveWorkoutCardSnapshot(input: {
+  action: WorkoutLiveSnapshotMemberActionV1
+  vault: string
+}): Promise<
+  | {
+      result: WorkoutLiveSnapshotMemberActionResultV1
+      status: 'unchanged'
+    }
+  | { reason: 'workout_changed'; status: 'rejected' }
+> {
+  if (!workoutLiveSnapshotMemberActionV1Schema.safeParse(input.action).success) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  const targets = await findLiveWorkoutRefreshTargets(
+    input.vault,
+    input.action.workoutBinding,
+  )
+  if (targets.length !== 1) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  try {
+    const shown = targets[0]!
+    const snapshot = buildLiveWorkoutCardSnapshot({
+      presentation: input.action.presentation.workout,
+      workout: parseShownWorkout(shown),
+      workoutId: shown.entity.id,
+    })
+    if (snapshot === null) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    return {
+      result: {
+        cardUrl: encodeWorkoutSessionSnapshotAppCardUrl({
+          ...input.action.presentation,
+          ...(snapshot.editor === null ? {} : { editor: snapshot.editor }),
+          workout: snapshot.workout,
+        }),
+        kind: 'workout.live.snapshot',
+        version: 1,
+      },
+      status: 'unchanged',
+    }
+  } catch {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
 }
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100
@@ -142,8 +195,11 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     return { reason: 'workout_changed', status: 'rejected' }
   }
   if (
-    input.action.expectedWorkout.actionBinding
-      !== deriveWorkoutActionBinding(shown.entity.id, workout)
+    !workoutActionBindingMatchesCurrentState(
+      shown.entity.id,
+      workout,
+      input.action.expectedWorkout.actionBinding,
+    )
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
@@ -571,7 +627,6 @@ function buildInitialLiveWorkoutExercises(
           !Number.isFinite(exercise.targetWeight)
           || exercise.targetWeight < 0.01
           || exercise.targetWeight > 9999
-          || !Number.isInteger(exercise.targetWeight * 100)
         )
       )
     ) {

@@ -348,6 +348,8 @@ test("EnvironmentPage renders private habitat facts from Browser Vault", async (
   assert.match(markup, /href="\/environment\/print"/);
   assert.match(markup, /Print report/);
   assert.match(markup, /group\/category/);
+  assert.match(markup, /What to review next/);
+  assert.doesNotMatch(markup, /What to check next/);
   assert.doesNotMatch(markup, /fixture data|mock/i);
   assert.doesNotMatch(markup, /Overall picture/);
   assert.doesNotMatch(markup, /Target score/);
@@ -430,10 +432,18 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
 
   const markup = renderToStaticMarkup(await EnvironmentPage());
 
-  assert.match(markup, /See how your home supports your sleep, air and focus/);
-  assert.match(markup, /Start report/);
+  assert.match(
+    markup,
+    /Fill in your report to review your setup for sleep, air quality and focus/,
+  );
+  assert.match(markup, /Fill in my report/);
   assert.match(markup, /Prefer typing\? Use chat/);
-  assert.match(markup, /Murph saves each clear answer before moving on/);
+  assert.match(
+    markup,
+    /Murph turns your answers into a grade and practical next checks/,
+  );
+  assert.doesNotMatch(markup, /Habitat/);
+  assert.doesNotMatch(markup, /Private to you/);
   assert.match(markup, /Your report will cover/);
   assert.match(markup, /class="flex w-full flex-col gap-10"/);
   assert.doesNotMatch(

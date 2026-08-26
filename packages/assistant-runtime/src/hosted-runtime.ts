@@ -729,6 +729,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           item.lane === "system"
           && (
             item.kind === "runtime.pending-effects-reconcile-requested"
+            || item.kind === "member.action.requested"
             || item.kind === "assistant.ask.requested"
             || item.kind === "assistant.ask.completed"
             || (
