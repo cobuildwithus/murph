@@ -1,6 +1,7 @@
 ---
 title: 'Frog autofix native gate rejects the shipped launcher'
 severity: 'major'
+issue: 'cobuildwithus/murph#2301'
 ---
 
 ## Expected Behavior
