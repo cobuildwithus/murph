@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -570,6 +571,11 @@ describe("hosted local dev stack", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.mocked(readFile).mockImplementation(async () => {
+      const error = new Error("File not found") as Error & { code: string };
+      error.code = "ENOENT";
+      throw error;
+    });
     runCommand.mockImplementation(async () => {});
     spawnSync.mockImplementation(defaultSpawnSyncImplementation);
     vi.unstubAllEnvs();
@@ -1303,9 +1309,19 @@ describe("hosted local dev stack", () => {
       secret: "whsec_isolated_e2e",
     });
     vi.mocked(access).mockResolvedValueOnce(undefined);
-    vi.mocked(readFile).mockImplementationOnce(async (filePath) => {
+    const dockerContext = "desktop-linux";
+    const dockerContextId = createHash("sha256").update(dockerContext).digest("hex");
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
         return "smoke-build-id\n";
+      }
+      if (String(filePath) === "/tmp/host-docker-config/config.json") {
+        return JSON.stringify({
+          auths: { "registry.example.invalid": {} },
+          credHelpers: { "registry.example.invalid": "desktop" },
+          credsStore: "desktop",
+          currentContext: "ignored-config-context",
+        });
       }
 
       const error = new Error("File not found") as Error & { code: string };
@@ -1318,6 +1334,8 @@ describe("hosted local dev stack", () => {
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
+        DOCKER_CONFIG: "/tmp/host-docker-config",
+        DOCKER_CONTEXT: dockerContext,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
         MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -1418,14 +1436,24 @@ describe("hosted local dev stack", () => {
     expect(stack.config.workerPersistDir).toBe(".tmp/e2e/wrangler");
     expect(writeFile).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/docker-config/config.json",
-      '{"auths":{}}\n',
+      '{"auths":{},"currentContext":"desktop-linux"}\n',
       {
         encoding: "utf8",
         mode: 0o600,
       },
     );
+    expect(cp).toHaveBeenCalledWith(
+      `/tmp/host-docker-config/contexts/meta/${dockerContextId}`,
+      `/tmp/murph-dev-env-test/docker-config/contexts/meta/${dockerContextId}`,
+      { recursive: true },
+    );
+    expect(cp).toHaveBeenCalledWith(
+      `/tmp/host-docker-config/contexts/tls/${dockerContextId}`,
+      `/tmp/murph-dev-env-test/docker-config/contexts/tls/${dockerContextId}`,
+      { recursive: true },
+    );
     expect(symlink).toHaveBeenCalledWith(
-      expect.stringContaining(".docker/cli-plugins"),
+      "/tmp/host-docker-config/cli-plugins",
       "/tmp/murph-dev-env-test/docker-config/cli-plugins",
       "dir",
     );
@@ -1535,7 +1563,7 @@ describe("hosted local dev stack", () => {
       MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
       OPENAI_API_KEY: "local-openai-key",
     });
-    vi.mocked(readFile).mockImplementationOnce(async (filePath) => {
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
         return "smoke-build-id\n";
       }
@@ -1698,6 +1726,16 @@ describe("hosted local dev stack", () => {
       "/tmp/murph-dev-env-test/docker-config/cli-plugins",
       "dir",
     );
+  });
+
+  it("discovers the Apple Silicon Homebrew Docker CLI plugin directory on macOS", async () => {
+    const stackModule = await import("../../src/dev-hosted-local/stack.ts");
+
+    expect(stackModule.resolveDockerCliPluginSourceDirs(
+      {},
+      "darwin",
+      "/tmp/host-home",
+    )).toContain("/opt/homebrew/lib/docker/cli-plugins");
   });
 
   it("wires hosted-local MinIO endpoints into the Worker env before Cloudflare starts", async () => {
@@ -2427,9 +2465,15 @@ describe("hosted local dev stack", () => {
     );
     vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
     vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
-    vi.mocked(readFile).mockResolvedValueOnce(
-      `${JSON.stringify({ buildId: expectedBuildId })}\n`,
-    );
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith("runner-smoke-proved.json")) {
+        return `${JSON.stringify({ buildId: expectedBuildId })}\n`;
+      }
+
+      const error = new Error("File not found") as Error & { code: string };
+      error.code = "ENOENT";
+      throw error;
+    });
     const stderrTarget = new CapturingWritable();
     const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
