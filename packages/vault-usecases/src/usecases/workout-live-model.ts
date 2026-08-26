@@ -175,7 +175,18 @@ export function buildLiveWorkoutCardEditor(input: {
     return null
   }
   const snapshot = buildLiveWorkoutCardSnapshot(input)
-  return snapshot?.editor
+  if (snapshot === null) return null
+  const presentationMatchesLoggedState = snapshot.workout.exercises.every(
+    (exercise, exerciseIndex) => exercise.sets.every((set, setIndex) =>
+      (set.status === 'completed')
+        === (
+          input.presentation.exercises[exerciseIndex]
+            ?.sets[setIndex]?.status === 'completed'
+        ),
+    ),
+  )
+  if (!presentationMatchesLoggedState) return null
+  return snapshot.editor
     ? { editor: snapshot.editor, workout: snapshot.workout }
     : null
 }

@@ -344,7 +344,7 @@ its original-edit, original-remove, or final-append namespace may appear at most
 once. The action carries no member id or plaintext canonical workout id. Its
 stable one-way workout-revision binding and destructive-state binding are
 stale-card preconditions, not authentication: after deriving the member from the
-scoped credential, the server scans the bounded workout records and admits a
+scoped credential, the server scans the member's canonical workout records and admits a
 first application only when exactly one unfinished record derives the supplied
 binding. That matched record supplies the canonical id and owns the mutation;
 there is no active/focused singleton or recency fallback. Stable identity,
@@ -459,15 +459,15 @@ before; only a newer Messages extension elects to make the additional read.
 
 New V6 action bindings retain the existing 64-lowercase-hex shape. The first
 half is a domain-separated, one-way lookup correlation for the high-entropy
-canonical workout id. The second half covers the same workout id, ordered
-hidden exercise/set-slot identity, and last applied member-action generation.
+canonical workout id plus ordered hidden exercise/set-slot identity. The second
+half covers the same identity plus the last applied member-action generation.
 The complete 64-character value is required for a write, so a stable lookup
 prefix does not weaken stale-write rejection or become write authority.
 
 The expanded reader submits the V6 action binding through the existing
 member-scoped bearer as `workout.live.snapshot`, together with the complete
 embedded presentation skeleton. Runtime searches only that authenticated
-member's bounded workout collection, requires exactly one binding target, and
+member's canonical workout records, requires exactly one binding target, and
 then requires the canonical exercise/set structure to match before preserving
 embedded labels and projecting current results. A forwarded card therefore
 cannot read its sender's vault. The token exposes neither canonical id nor
@@ -490,7 +490,9 @@ the workout is active, structurally supported, editable, and the complete URL
 fits below 2,048 characters. Otherwise it emits ordinary V4 read-only when that
 complete presentation fits. The native result passes that URL through the
 existing strict card decoder. It never merges parallel result models or
-partially installs an editor.
+partially installs an editor. Initial V6 authoring still requires the embedded
+logged/pending states to equal the canonical workout; the snapshot read alone
+may advance stale progress before it emits a replacement card.
 
 The extension renders the embedded card immediately, keeps one transient
 selected-message session, and replaces that session only while its entire draft
@@ -503,15 +505,18 @@ contains no action binding.
 
 ### Rollout and proof
 
-Backend-first is the preferred deployment order, followed by the iOS extension.
-Both skew directions are safe: an older extension only renders its existing
-V4/V6 snapshot, while a newer extension against an older backend treats the
-unsupported snapshot action as a refresh failure and keeps that snapshot. The
+Release the compatible iOS reader before enabling the backend path and
+publishing the changelog claim. Both skew directions are safe: an older
+extension only renders its existing V4/V6 snapshot, while a newer extension
+against an older backend treats the unsupported snapshot action as a refresh
+failure and keeps that snapshot. The
 composite binding remains opaque to old iOS readers. No new card schema is
 persisted, so this change creates no installed-reader rollback floor or producer
 gate beyond the existing V4/V6 floor.
 
-Required proof covers exact V4/V6 historical decoding; current and legacy
+The release remains on Product UX Hold until physical Messages-extension proof
+confirms expansion, refresh, fallback, and draft preservation on a real Xcode/
+iOS device host. Required proof covers exact V4/V6 historical decoding; current and legacy
 binding matching; cross-member, ambiguous, and structurally changed rejection;
 V6 result decoding through the existing native decoder; whole-editor fallback
 to V4 at the real URL ceiling; clean-session replacement; dirty, admitted,

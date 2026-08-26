@@ -1045,10 +1045,10 @@ Last verified: 2026-08-23
   envelopes and V5 challenge-standings envelopes. V3, V4, and V5 carry no
   tracking, identity, canonical references, credentials, tokens, or write
   authority. V6 adds one opaque 64-character lowercase workout binding. Its
-  domain-separated first half correlates the high-entropy canonical workout id
-  for member-scoped reads; its second half covers that id, ordered hidden
-  exercise/set-slot identity, and last applied member-action generation. A write
-  must match the complete current token under the workout lock, so the stable
+  domain-separated first half covers the high-entropy canonical workout id and
+  ordered hidden exercise/set-slot identity for member-scoped reads; its second
+  half covers the same identity plus the last applied member-action generation.
+  A write must match the complete current token under the workout lock, so the stable
   lookup prefix grants no write authority. Ordered identity
   includes source/group identity and set type but excludes mutable set results
   and annotations, so a structural writer invalidates shifted coordinates
@@ -1065,7 +1065,7 @@ Last verified: 2026-08-23
   grants identity or write authority. Neither binding reveals a canonical id or
   member. Authenticated read-only refresh reuses the V6 workout binding: the
   Messages bearer scopes lookup to the current member, runtime requires exactly
-  one matching workout in that member's bounded canonical collection, and the
+  one matching workout in that member's canonical workout records, and the
   embedded presentation must structurally match before current values replace
   it. The current derivation intentionally permits same-workout correlation
   across cards held by one credential owner. Already-sent legacy bindings are

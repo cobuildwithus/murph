@@ -53,7 +53,9 @@ export function deriveWorkoutActionBinding(
 ): string {
   const positionalIdentity = workoutActionPositionalIdentity(workout.exercises)
   const lookup = createHash('sha256')
-    .update(`workout-action-lookup:v1:${workoutEntityId}`)
+    .update(
+      `workout-action-lookup:v1:${workoutEntityId}:${JSON.stringify(positionalIdentity)}`,
+    )
     .digest('hex')
     .slice(0, 32)
   const state = createHash('sha256')

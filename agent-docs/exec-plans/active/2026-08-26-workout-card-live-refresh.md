@@ -14,8 +14,13 @@ Updated: 2026-08-26
   first native pass rejected the schema-7 and duplicated-result design; the
   accepted rewrite preserves V4/V6 and decodes refresh results through the
   existing card reader.
+- ReviewGPT's first backend pass found that a workout-id-only refresh prefix
+  could re-arm a stale positional card after a hidden reorder. The accepted
+  correction binds that prefix to ordered hidden structure, restores the
+  initial editor's logged-state equality guard, and proves both reorder
+  rejection and result-save refresh through the real vault boundary.
 - Every affected package and Web typecheck passes. Full contracts (328),
-  operator-config (385), vault-usecases (379), assistant-runtime (2,508 pass,
+  operator-config (385), vault-usecases (381), assistant-runtime (2,508 pass,
   5 skip), and hosted-execution (557) tests pass, along with 78 focused Web
   member-action and changelog tests.
 - Companion formatting, source parsing, strict-concurrency API/workout-core
@@ -48,8 +53,10 @@ Updated: 2026-08-26
 - Network, credential, unsupported-reader, completed-workout, and projection
   failures retain the complete embedded snapshot without erasing a local
   draft or claiming freshness.
-- Backend-first is preferred, but either release skew retains the embedded V4/V6
-  card. No producer flag or new installed-reader schema floor is introduced.
+- Release the compatible iOS reader first, then enable the backend path and
+  publish the changelog claim. Either release skew retains the embedded V4/V6
+  card. No producer flag or new installed-reader schema floor is introduced,
+  and Product UX stays on Hold until physical Messages proof exists.
 
 ## Scope
 
@@ -78,10 +85,11 @@ Updated: 2026-08-26
 ## Risks and mitigations
 
 1. Risk: the stable half of an opaque binding correlates multiple snapshots of
-   one workout. Mitigation: derive it from the high-entropy canonical workout
-   id with a domain-separated one-way hash, expose no raw id, require the
-   member-scoped bearer, and scan only that member's bounded canonical workout
-   collection. The other half retains exact stale-write state.
+   one structurally unchanged workout. Mitigation: derive it from the
+   high-entropy canonical workout id and ordered hidden positional identity
+   with a domain-separated one-way hash, expose no raw fields, require the
+   member-scoped bearer, and scan only that member's canonical workout records.
+   The other half retains the last-action generation for exact stale-write state.
 2. Risk: a refresh races a local unsaved draft and silently discards edits.
    Mitigation: keep one selected-message session and replace it only when the
    entire draft equals its baseline, no request is admitted, and state is idle.

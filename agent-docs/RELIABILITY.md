@@ -2597,10 +2597,12 @@ mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
 requires the V6 card's opaque workout binding under the existing workout
 mutation lock. Its stable lookup prefix covers the canonical workout identity
-while its exact state suffix covers that identity, ordered hidden
-exercise/set-slot identity, and the last applied member-action generation. A
-write must
-match the complete current token; delayed or forwarded cards therefore cannot
+and ordered hidden exercise/set-slot identity, while its exact state suffix
+covers the same identity plus the last applied member-action generation. The
+initial editor also requires the embedded logged/pending states to match the
+canonical workout; only the authenticated read-only refresh may advance those
+states. A write must match the complete current token; delayed or forwarded
+cards therefore cannot
 retarget a later workout, a set shifted by another direct action, or a same-name
 exercise moved by the generic workout editor. Mutable set results and
 annotations remain under their existing result-family optimistic comparisons
@@ -2608,7 +2610,7 @@ rather than the positional identity binding. An exact current legacy binding
 remains valid for an already-sent V6 write.
 Expanded V6 readers reuse that binding with the same mailbox delivery path for
 `workout.live.snapshot`. The member-scoped credential supplies identity;
-runtime scans only that member's bounded canonical workout collection, requires
+runtime scans only that member's canonical workout records, requires
 one structural match to the embedded target skeleton, and returns one ordinary
 V6 card URL with current progress and editor state, or an ordinary V4 read-only
 URL when editing is unavailable or too large. Legacy lookup accepts only an
@@ -2622,7 +2624,7 @@ equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and
+across the member's canonical workout records before revision and
 unfinished-record eligibility, so the generation change caused by the original
 write or workout completion cannot replace a committed success with a terminal
 rejection, and another unfinished workout cannot receive the action. Every

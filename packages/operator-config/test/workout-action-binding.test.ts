@@ -41,9 +41,18 @@ describe('workout action binding', () => {
       { ...exercises[0]!, order: 2 },
     ]
 
-    expect(deriveWorkoutActionBinding('evt_workout', { exercises })).not.toBe(
-      deriveWorkoutActionBinding('evt_workout', { exercises: reordered }),
-    )
+    const original = deriveWorkoutActionBinding('evt_workout', { exercises })
+    const moved = deriveWorkoutActionBinding('evt_workout', {
+      exercises: reordered,
+    })
+
+    expect(moved).not.toBe(original)
+    expect(moved.slice(0, 32)).not.toBe(original.slice(0, 32))
+    expect(workoutActionBindingTargetsWorkout(
+      'evt_workout',
+      { exercises: reordered },
+      original,
+    )).toBe(false)
   })
 
   it('detects duplicate exercise coordinates that mutable results cannot distinguish', () => {
@@ -102,6 +111,19 @@ describe('workout action binding', () => {
     expect(deriveWorkoutActionBinding('evt_workout', {
       exercises: [{ ...BASE_EXERCISES[0]!, setPlanIsFinite: true }],
     })).not.toBe(original)
+
+    for (const structurallyChanged of [
+      [{
+        ...BASE_EXERCISES[0]!,
+        sets: [...BASE_EXERCISES[0]!.sets, { order: 3 }],
+      }],
+      [{ ...BASE_EXERCISES[0]!, memberRepsPerSet: 12 }],
+      [{ ...BASE_EXERCISES[0]!, unitOverride: 'kg' as const }],
+    ]) {
+      expect(deriveWorkoutActionBinding('evt_workout', {
+        exercises: structurallyChanged,
+      }).slice(0, 32)).not.toBe(original.slice(0, 32))
+    }
   })
 
   it('keeps a stable lookup prefix while the exact write suffix changes', () => {

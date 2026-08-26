@@ -63,6 +63,23 @@ describe('live workout model', () => {
       workoutId: 'evt_test_workout',
     })
 
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: [1, 2, 3].map(() => ({
+            actual: null,
+            status: 'pending' as const,
+            target: '135 lb × 8',
+          })),
+        }],
+      },
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+
     assert.equal(snapshot?.workout.exercises[0]?.sets[0]?.actual, '135 lb × 8')
     assert.equal(snapshot?.workout.exercises[0]?.sets[1]?.status, 'completed')
     assert.equal(snapshot?.workout.exercises[0]?.sets[2]?.status, 'pending')
