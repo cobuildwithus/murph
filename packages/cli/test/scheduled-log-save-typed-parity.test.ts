@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
-import { readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
 import { test } from "vitest";
 
+import { scheduledLogActionSchema } from "@murphai/contracts";
 import { initializeVault, parseFrontmatterDocument } from "@murphai/core";
 
-import { registerScheduledLogCommands } from "../src/commands/scheduled-log.js";
+import {
+  registerScheduledLogCommands,
+  scheduledLogActionOptionKeysByKind,
+} from "../src/commands/scheduled-log.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
@@ -33,6 +37,51 @@ interface ScheduledLogSaveResult {
   path?: string;
   created: boolean;
 }
+
+interface ScheduledLogShowResult {
+  scheduledLog: {
+    relativePath: string;
+    slug: string;
+    title: string;
+  };
+}
+
+type ScheduledLogActionOptionKey =
+  (typeof scheduledLogActionOptionKeysByKind)[keyof typeof scheduledLogActionOptionKeysByKind][number];
+
+const scheduledLogActionOptionArgs = {
+  actionTitle: ["--action-title", "Session"],
+  activityType: ["--activity-type", "walking"],
+  distanceKm: ["--distance-km", "1.5"],
+  durationMinutes: ["--duration-minutes", "20"],
+  foodId: ["--food-id", "food_fixture"],
+  ingredient: ["--ingredient", "oats"],
+  interventionType: ["--intervention-type", "sauna"],
+  measurementMetric: ["--measurement-metric", "weight"],
+  measurementNote: ["--measurement-note", "Morning"],
+  measurementQualifier: ["--measurement-qualifier", "fasting=true"],
+  measurementUnit: ["--measurement-unit", "kg"],
+  measurementValue: ["--measurement-value", "72.5"],
+  nutritionCalories: ["--nutrition-calories", "420"],
+  nutritionCarbsGrams: ["--nutrition-carbs-grams", "52"],
+  nutritionConfidence: ["--nutrition-confidence", "medium"],
+  nutritionFatGrams: ["--nutrition-fat-grams", "14"],
+  nutritionFiberGrams: ["--nutrition-fiber-grams", "9"],
+  nutritionProteinGrams: ["--nutrition-protein-grams", "28"],
+  nutritionSource: ["--nutrition-source", "estimated"],
+  nutritionSourceDetail: ["--nutrition-source-detail", "Fixture estimate"],
+  protocolId: ["--protocol-id", "protocol-fixture"],
+  workoutEndedAt: ["--workout-ended-at", "2026-05-02T10:25:00.000Z"],
+  workoutExercise: ["--workout-exercise", "order=1;name=Squat"],
+  workoutMedia: ["--workout-media", "kind=photo;relativePath=raw/workouts/example.jpg"],
+  workoutRoutineId: ["--workout-routine-id", "routine-fixture"],
+  workoutRoutineName: ["--workout-routine-name", "Fixture routine"],
+  workoutSessionNote: ["--workout-session-note", "Easy pace"],
+  workoutSet: ["--workout-set", "exercise=1;order=1;reps=10"],
+  workoutSourceApp: ["--workout-source-app", "fixture-app"],
+  workoutSourceWorkoutId: ["--workout-source-workout-id", "fixture-workout"],
+  workoutStartedAt: ["--workout-started-at", "2026-05-02T10:00:00.000Z"],
+} as const satisfies Record<ScheduledLogActionOptionKey, readonly string[]>;
 
 function createScheduledLogCli() {
   const cli = Cli.create("vault-cli", {
@@ -97,6 +146,20 @@ async function readSavedDocument(vaultRoot: string, relativePath: string) {
   return parseFrontmatterDocument(await readFile(path.join(vaultRoot, relativePath), "utf8"));
 }
 
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, string>> {
+  const snapshot = new Map<string, string>();
+  const relativePaths = await readdir(vaultRoot, { recursive: true });
+
+  for (const relativePath of relativePaths.sort((left, right) => left.localeCompare(right))) {
+    const absolutePath = path.join(vaultRoot, relativePath);
+    if ((await stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await readFile(absolutePath, "utf8"));
+    }
+  }
+
+  return snapshot;
+}
+
 test("scheduled-log save schema exposes typed parity fields while import-json remains JSON fallback", async () => {
   const cli = createScheduledLogCli();
 
@@ -156,7 +219,6 @@ test("scheduled-log save schema exposes typed parity fields while import-json re
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field);
   }
-
   const importJsonSchema = await readCommandSchema(cli, ["scheduled-log", "import-json"]);
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
@@ -534,6 +596,10 @@ test("scheduled-log save rejects unsupported workout compact fields before writi
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, "invalid_option");
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map(({ path }) => path),
+        ["workoutExercise"],
+      );
       assert.match(
         result.envelope.error.message ?? "",
         /Unsupported --workout-exercise field "unknown"/u,
@@ -660,6 +726,10 @@ test("scheduled-log save rejects unsupported workout compact fields before writi
     assert.equal(unsupportedSetField.envelope.ok, false);
     if (!unsupportedSetField.envelope.ok) {
       assert.equal(unsupportedSetField.envelope.error.code, "invalid_option");
+      assert.deepEqual(
+        unsupportedSetField.envelope.error.fieldErrors?.map(({ path }) => path),
+        ["workoutSet"],
+      );
       assert.match(
         unsupportedSetField.envelope.error.message ?? "",
         /Unsupported --workout-set field "weightUnt"/u,
@@ -713,6 +783,10 @@ test("scheduled-log save rejects malformed typed measurements before writing", a
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, "invalid_option");
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map(({ path }) => path),
+        ["measurementMetric", "measurementValue", "measurementUnit"],
+      );
       assert.match(result.envelope.error.message ?? "", /measurement\.add/u);
     }
 
@@ -770,6 +844,10 @@ test("scheduled-log save rejects ambiguous qualifiers for multiple measurements"
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, "invalid_option");
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map(({ path }) => path),
+        ["measurementQualifier"],
+      );
       assert.match(result.envelope.error.message ?? "", /N:key=value/u);
     }
 
@@ -819,6 +897,10 @@ test("scheduled-log save rejects sub-minute every schedules before writing", asy
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, "invalid_option");
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map(({ path }) => path),
+        ["scheduleEveryMs"],
+      );
       assert.match(result.envelope.error.message ?? "", /60000 ms/u);
     }
 
@@ -833,9 +915,754 @@ test("scheduled-log save rejects sub-minute every schedules before writing", asy
   }
 });
 
-test("scheduled-log save rejects workout fields on non-activity actions before writing", async () => {
+test("scheduled-log save rejects every action-kind-incompatible field before writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-scheduled-log-save-invalid-workout-",
+    "murph-cli-scheduled-log-save-incompatible-options-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    const actionKinds = [
+      "meal.add",
+      "activity_session.add",
+      "intervention_session.add",
+      "measurement.add",
+    ] as const;
+
+    for (const ownerKind of actionKinds) {
+      const incompatibleKind = ownerKind === "meal.add"
+        ? "activity_session.add"
+        : "meal.add";
+
+      for (const optionKey of scheduledLogActionOptionKeysByKind[ownerKind]) {
+        const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+          "scheduled-log",
+          "save",
+          `Incompatible ${optionKey}`,
+          "--schedule-kind",
+          "dailyLocal",
+          "--schedule-local-time",
+          "09:00",
+          "--action-kind",
+          incompatibleKind,
+          ...scheduledLogActionOptionArgs[optionKey],
+          "--vault",
+          vaultRoot,
+        ]);
+
+        assert.equal(result.exitCode, 1, `${ownerKind}:${optionKey}`);
+        assert.equal(result.envelope.ok, false, `${ownerKind}:${optionKey}`);
+        if (!result.envelope.ok) {
+          assert.equal(result.envelope.error.code, "invalid_option");
+          assert.deepEqual(
+            result.envelope.error.fieldErrors?.map(({ code, path }) => ({
+              code,
+              path,
+            })),
+            [{
+              code: "custom",
+              path: optionKey,
+            }],
+            `${ownerKind}:${optionKey}`,
+          );
+          assert.equal(result.envelope.error.hint, undefined);
+        }
+        assert.deepEqual(
+          await readdir(scheduledLogDir).catch(() => []),
+          [],
+          `${ownerKind}:${optionKey}`,
+        );
+      }
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("scheduled-log save accepts shared action fields for every action kind", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-shared-options-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const cases = [
+      {
+        kind: "meal.add",
+        slug: "shared-meal",
+        args: ["--food-id", "shared-food"],
+      },
+      {
+        kind: "activity_session.add",
+        slug: "shared-activity",
+        args: [
+          "--action-title",
+          "Walk",
+          "--activity-type",
+          "walking",
+          "--duration-minutes",
+          "20",
+        ],
+      },
+      {
+        kind: "intervention_session.add",
+        slug: "shared-intervention",
+        args: [
+          "--action-title",
+          "Sauna",
+          "--intervention-type",
+          "sauna",
+          "--duration-minutes",
+          "20",
+        ],
+      },
+      {
+        kind: "measurement.add",
+        slug: "shared-measurement",
+        args: [
+          "--action-title",
+          "Weight",
+          "--measurement-metric",
+          "weight",
+          "--measurement-value",
+          "72.5",
+          "--measurement-unit",
+          "kg",
+        ],
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+        "scheduled-log",
+        "save",
+        `Shared fields ${entry.kind}`,
+        "--slug",
+        entry.slug,
+        "--schedule-kind",
+        "dailyLocal",
+        "--schedule-local-time",
+        "09:00",
+        "--action-kind",
+        entry.kind,
+        ...entry.args,
+        "--action-note",
+        "Shared note",
+        "--action-tag",
+        "shared",
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, null, entry.kind);
+      const document = await readSavedDocument(
+        vaultRoot,
+        requireSavedPath(requireData(result.envelope)),
+      );
+      const action = scheduledLogActionSchema.parse(document.attributes.action);
+      assert.equal(action.kind, entry.kind);
+      assert.equal(action.note, "Shared note");
+      assert.deepEqual(action.tags, ["shared"]);
+    }
+
+    assert.equal(
+      (await readdir(path.join(vaultRoot, "bank", "scheduled-logs"))).length,
+      cases.length,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("scheduled-log save validates the canonical slug boundary before any registry or audit write", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-derived-slug-boundary-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const titleAtSlugLimit = "s".repeat(160);
+    const sharedArgs = [
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "72.5",
+      "--measurement-unit",
+      "kg",
+      "--vault",
+      vaultRoot,
+    ];
+
+    const saved = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      titleAtSlugLimit,
+      ...sharedArgs,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+    const savedData = requireData(saved.envelope);
+    assert.equal(savedData.lookupId, titleAtSlugLimit);
+    assert.equal(savedData.lookupId.length, 160);
+
+    const shown = await runInProcessJsonCli<ScheduledLogShowResult>(cli, [
+      "scheduled-log",
+      "show",
+      savedData.lookupId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(requireData(shown.envelope).scheduledLog.slug, titleAtSlugLimit);
+
+    const beforeRejectedSave = await snapshotVaultFiles(vaultRoot);
+    assert.equal(
+      [...beforeRejectedSave.keys()].some((relativePath) => relativePath.startsWith("audit/")),
+      true,
+    );
+    const privatePrefix = "private-derived-slug-sentinel-";
+    const slugOverLimit = `${privatePrefix}${"x".repeat(161 - privatePrefix.length)}`;
+    assert.equal(slugOverLimit.length, 161);
+
+    const rejected = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "Rejected schedule",
+      "--slug",
+      slugOverLimit,
+      ...sharedArgs,
+    ]);
+    assert.equal(rejected.exitCode, 1);
+    assert.equal(rejected.envelope.ok, false);
+    assert.equal(rejected.envelope.error.code, "invalid_option");
+    assert.equal(rejected.envelope.error.message, "Invalid scheduled-log payload fields.");
+    assert.deepEqual(
+      rejected.envelope.error.fieldErrors?.map(({ code, path }) => ({ code, path })),
+      [{ code: "too_big", path: "slug" }],
+    );
+    assert.equal(JSON.stringify(rejected.envelope).includes(slugOverLimit), false);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSave);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("scheduled-log save and import return bounded field recovery without echoing payloads", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-validation-recovery-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const saveSchema = await readCommandSchema(cli, ["scheduled-log", "save"]);
+    const beforeInvalidWrites = await snapshotVaultFiles(vaultRoot);
+
+    const typed = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "PRIVATE_TYPED_PAYLOAD_SENTINEL",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "15 6 * * 3",
+      "--action-kind",
+      "meal.add",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(typed.exitCode, 1);
+    assert.equal(typed.envelope.ok, false);
+    assert.equal(typed.envelope.error.code, "invalid_option");
+    assert.equal(typed.envelope.error.retryable, false);
+    assert.deepEqual(
+      typed.envelope.error.fieldErrors?.map(({ code, path }) => ({
+        code,
+        path,
+      })),
+      [{
+        code: "custom",
+        path: "foodId",
+      }],
+    );
+    assert.equal(typed.envelope.error.hint, undefined);
+    assert.doesNotMatch(JSON.stringify(typed.envelope), /PRIVATE_TYPED_PAYLOAD_SENTINEL/u);
+
+    const typedWorkout = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "PRIVATE_TYPED_WORKOUT_SENTINEL",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "15 6 * * 3",
+      "--action-kind",
+      "activity_session.add",
+      "--action-title",
+      "Strength",
+      "--duration-minutes",
+      "30",
+      "--workout-exercise",
+      "order=1;name=PRIVATE_TYPED_EXERCISE_SENTINEL",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(typedWorkout.exitCode, 1);
+    assert.equal(typedWorkout.envelope.ok, false);
+    assert.equal(typedWorkout.envelope.error.code, "invalid_option");
+    assert.equal(typedWorkout.envelope.error.fieldErrors?.[0]?.path, "workoutSet");
+    assert.equal("workoutSet" in saveSchema.options.properties, true);
+    assert.doesNotMatch(
+      JSON.stringify(typedWorkout.envelope),
+      /PRIVATE_TYPED_(?:WORKOUT|EXERCISE)_SENTINEL/u,
+    );
+
+    const invalidQualifierKey = "PRIVATE QUALIFIER KEY SENTINEL";
+    const invalidQualifierValue = "PRIVATE_QUALIFIER_VALUE_SENTINEL";
+    const typedQualifier = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "Invalid qualifier recovery",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "15 6 * * 3",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "72.5",
+      "--measurement-unit",
+      "kg",
+      "--measurement-qualifier",
+      `${invalidQualifierKey}=${invalidQualifierValue}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(typedQualifier.exitCode, 1);
+    assert.equal(typedQualifier.envelope.ok, false);
+    assert.equal(typedQualifier.envelope.error.code, "invalid_option");
+    const typedQualifierField = typedQualifier.envelope.error.fieldErrors?.[0]?.path;
+    assert.equal(typedQualifierField, "measurementQualifier");
+    assert.equal(
+      typeof typedQualifierField === "string" &&
+        typedQualifierField in saveSchema.options.properties,
+      true,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(typedQualifier.envelope),
+      new RegExp(`${invalidQualifierKey}|${invalidQualifierValue}`, "u"),
+    );
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidWrites);
+
+    const payloadPath = path.join(parentRoot, "invalid-scheduled-log.json");
+    await writeFile(payloadPath, JSON.stringify({
+      title: "PRIVATE_IMPORTED_PAYLOAD_SENTINEL",
+      schedule: { kind: "cron", expression: "15 6 * * 3" },
+      action: { kind: "meal.add" },
+      body: "PRIVATE_IMPORTED_BODY_SENTINEL",
+    }), "utf8");
+    const imported = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.equal(imported.envelope.error.code, "invalid_payload");
+    assert.equal(imported.envelope.error.retryable, false);
+    assert.equal(imported.envelope.error.fieldErrors?.[0]?.path, "action.foodId");
+    assert.doesNotMatch(
+      JSON.stringify(imported.envelope),
+      /PRIVATE_IMPORTED_(?:PAYLOAD|BODY)_SENTINEL/u,
+    );
+
+    const workoutPayloadPath = path.join(parentRoot, "invalid-scheduled-workout.json");
+    await writeFile(workoutPayloadPath, JSON.stringify({
+      title: "PRIVATE_IMPORTED_WORKOUT_SENTINEL",
+      schedule: { kind: "cron", expression: "15 6 * * 3" },
+      action: {
+        kind: "activity_session.add",
+        title: "Strength",
+        activityType: "strength",
+        durationMinutes: 30,
+        workout: {
+          exercises: [{
+            name: "PRIVATE_IMPORTED_EXERCISE_SENTINEL",
+            order: 1,
+            sets: [],
+          }],
+        },
+      },
+    }), "utf8");
+    const importedWorkout = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "import-json",
+      "--input",
+      `@${workoutPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(importedWorkout.exitCode, 1);
+    assert.equal(importedWorkout.envelope.ok, false);
+    assert.equal(importedWorkout.envelope.error.code, "invalid_payload");
+    assert.equal(
+      importedWorkout.envelope.error.fieldErrors?.[0]?.path,
+      "action.workout.exercises.0.sets",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(importedWorkout.envelope),
+      /PRIVATE_IMPORTED_(?:WORKOUT|EXERCISE)_SENTINEL/u,
+    );
+
+    const qualifierPayloadPath = path.join(
+      parentRoot,
+      "invalid-scheduled-qualifier.json",
+    );
+    const privateQualifierKey = "private_qualifier_key_sentinel";
+    const privateQualifierValue = `private-qualifier-value-${"x".repeat(160)}`;
+    await writeFile(qualifierPayloadPath, JSON.stringify({
+      title: "Invalid imported qualifier",
+      schedule: { kind: "cron", expression: "15 6 * * 3" },
+      action: {
+        kind: "measurement.add",
+        measurements: [{
+          metric: "weight",
+          value: 72.5,
+          unit: "kg",
+          qualifiers: {
+            [privateQualifierKey]: privateQualifierValue,
+          },
+        }],
+      },
+    }), "utf8");
+    const importedQualifier = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "import-json",
+      "--input",
+      `@${qualifierPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(importedQualifier.exitCode, 1);
+    assert.equal(importedQualifier.envelope.ok, false);
+    assert.equal(importedQualifier.envelope.error.code, "invalid_payload");
+    assert.equal(
+      importedQualifier.envelope.error.fieldErrors?.[0]?.path,
+      "action.measurements.0.qualifiers",
+    );
+    const importedQualifierEnvelope = JSON.stringify(importedQualifier.envelope);
+    assert.equal(importedQualifierEnvelope.includes(privateQualifierKey), false);
+    assert.equal(importedQualifierEnvelope.includes(privateQualifierValue), false);
+
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    assert.deepEqual(await readdir(scheduledLogDir).catch(() => []), []);
+    const afterInvalidWrites = await snapshotVaultFiles(vaultRoot);
+    assert.deepEqual(
+      [...afterInvalidWrites].filter(([relativePath]) =>
+        relativePath.startsWith("audit/")
+      ),
+      [...beforeInvalidWrites].filter(([relativePath]) =>
+        relativePath.startsWith("audit/")
+      ),
+    );
+    assert.deepEqual(afterInvalidWrites, beforeInvalidWrites);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("scheduled-log status commands return non-echoing not-found recovery", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-status-recovery-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+
+    for (const command of ["pause", "resume", "archive"] as const) {
+      const result = await runInProcessJsonCli(cli, [
+        "scheduled-log",
+        command,
+        "PRIVATE_LOOKUP_SENTINEL",
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.envelope.ok, false);
+      assert.equal(result.envelope.error.code, "not_found");
+      assert.equal(result.envelope.error.fieldErrors, undefined);
+      assert.equal(result.envelope.error.hint, undefined);
+      assert.equal(result.envelope.error.stage, undefined);
+      assert.match(result.envelope.error.message ?? "", /list scheduled logs and retry/u);
+      assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_LOOKUP_SENTINEL/u);
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("scheduled-log save classifies id/slug conflicts before changing either record", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-conflict-recovery-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const saved: ScheduledLogSaveResult[] = [];
+
+    for (const [title, slug] of [["First measurement", "first-measurement"], ["Second measurement", "second-measurement"]]) {
+      const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+        "scheduled-log",
+        "save",
+        title,
+        "--slug",
+        slug,
+        "--schedule-kind",
+        "dailyLocal",
+        "--schedule-local-time",
+        "09:00",
+        "--action-kind",
+        "measurement.add",
+        "--measurement-metric",
+        "weight",
+        "--measurement-value",
+        "72.5",
+        "--measurement-unit",
+        "kg",
+        "--vault",
+        vaultRoot,
+      ]);
+      saved.push(requireData(result.envelope));
+    }
+
+    const before = await Promise.all(saved.map((record) =>
+      readFile(path.join(vaultRoot, requireSavedPath(record)), "utf8")
+    ));
+    const first = saved[0];
+    const second = saved[1];
+    assert.ok(first && second);
+    const conflict = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "PRIVATE_CONFLICT_TITLE_SENTINEL",
+      "--id",
+      first.scheduledLogId,
+      "--slug",
+      second.lookupId,
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "10:00",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "73",
+      "--measurement-unit",
+      "kg",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(conflict.exitCode, 1);
+    assert.equal(conflict.envelope.ok, false);
+    assert.equal(conflict.envelope.error.code, "conflict");
+    assert.equal(conflict.envelope.error.fieldErrors, undefined);
+    assert.match(conflict.envelope.error.message ?? "", /identifiers from the same record/u);
+    assert.doesNotMatch(JSON.stringify(conflict.envelope), /PRIVATE_CONFLICT_TITLE_SENTINEL/u);
+    assert.deepEqual(
+      await Promise.all(saved.map((record) =>
+        readFile(path.join(vaultRoot, requireSavedPath(record)), "utf8")
+      )),
+      before,
+    );
+
+    const importPath = path.join(parentRoot, "conflicting-scheduled-log.json");
+    await writeFile(importPath, JSON.stringify({
+      scheduledLogId: first.scheduledLogId,
+      slug: second.lookupId,
+      title: "PRIVATE_IMPORT_CONFLICT_TITLE_SENTINEL",
+      schedule: { kind: "dailyLocal", localTime: "10:00" },
+      action: {
+        kind: "measurement.add",
+        measurements: [{ metric: "weight", value: 73, unit: "kg" }],
+      },
+    }), "utf8");
+    const importConflict = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "import-json",
+      "--input",
+      `@${importPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(importConflict.exitCode, 1);
+    assert.equal(importConflict.envelope.ok, false);
+    assert.equal(importConflict.envelope.error.code, "conflict");
+    assert.equal(importConflict.envelope.error.fieldErrors, undefined);
+    assert.match(importConflict.envelope.error.message ?? "", /identifiers from the same record/u);
+    assert.doesNotMatch(
+      JSON.stringify(importConflict.envelope),
+      /PRIVATE_IMPORT_CONFLICT_TITLE_SENTINEL/u,
+    );
+    assert.deepEqual(
+      await Promise.all(saved.map((record) =>
+        readFile(path.join(vaultRoot, requireSavedPath(record)), "utf8")
+      )),
+      before,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("scheduled-log commands stop on invalid stored registries without writing or echoing contents", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-invalid-registry-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    await mkdir(scheduledLogDir, { recursive: true });
+    const invalidPath = path.join(scheduledLogDir, "invalid.md");
+    const canonicalDocument = [
+      "---",
+      "schemaVersion: murph.frontmatter.scheduled-log.v1",
+      "docType: scheduled_log",
+      "scheduledLogId: slog_01JX8V9QY2M5ZBV64ZP4N1DRB9",
+      "slug: stored-registry-fixture",
+      "title: PRIVATE_STORED_TITLE_SENTINEL",
+      "status: active",
+      "schedule:",
+      "  kind: dailyLocal",
+      "  localTime: 09:00",
+      "action:",
+      "  kind: measurement.add",
+      "  measurements:",
+      "    -",
+      "      metric: weight",
+      "      value: 72.5",
+      "      unit: kg",
+      "tags:",
+      "  - valid-tag",
+      "createdAt: 2026-08-24T09:00:00.000Z",
+      "updatedAt: 2026-08-24T09:00:00.000Z",
+      "---",
+    ].join("\n");
+    const importPath = path.join(parentRoot, "valid-import.json");
+    await writeFile(importPath, JSON.stringify({
+      title: "PRIVATE_SUBMITTED_TITLE_SENTINEL",
+      slug: "submitted-import",
+      schedule: { kind: "dailyLocal", localTime: "10:00" },
+      action: {
+        kind: "measurement.add",
+        measurements: [{ metric: "weight", value: 73, unit: "kg" }],
+      },
+    }), "utf8");
+    const commands = [
+      ["scheduled-log", "list", "--vault", vaultRoot],
+      ["scheduled-log", "show", "stored-registry-fixture", "--vault", vaultRoot],
+      ["scheduled-log", "pause", "stored-registry-fixture", "--vault", vaultRoot],
+      ["scheduled-log", "resume", "stored-registry-fixture", "--vault", vaultRoot],
+      ["scheduled-log", "archive", "stored-registry-fixture", "--vault", vaultRoot],
+      [
+        "scheduled-log",
+        "save",
+        "PRIVATE_SUBMITTED_TITLE_SENTINEL",
+        "--slug",
+        "submitted-save",
+        "--schedule-kind",
+        "dailyLocal",
+        "--schedule-local-time",
+        "10:00",
+        "--action-kind",
+        "measurement.add",
+        "--measurement-metric",
+        "weight",
+        "--measurement-value",
+        "73",
+        "--measurement-unit",
+        "kg",
+        "--vault",
+        vaultRoot,
+      ],
+      [
+        "scheduled-log",
+        "import-json",
+        "--input",
+        `@${importPath}`,
+        "--vault",
+        vaultRoot,
+      ],
+    ] as const;
+    const invalidDocument = canonicalDocument.replace(
+      "updatedAt: 2026-08-24T09:00:00.000Z",
+      [
+        "updatedAt: 2026-08-24T09:00:00.000Z",
+        "PRIVATE_UNKNOWN_STORED_KEY_SENTINEL: private-stored-value",
+      ].join("\n"),
+    );
+    await writeFile(invalidPath, invalidDocument, "utf8");
+
+    for (const command of commands) {
+      const before = await snapshotVaultFiles(vaultRoot);
+      const result = await runInProcessJsonCli(cli, [...command]);
+      const label = command[1];
+
+      assert.equal(result.exitCode, 1, label);
+      assert.equal(result.envelope.ok, false, label);
+      assert.equal(result.envelope.error.code, "invalid_registry", label);
+      assert.equal(result.envelope.error.retryable, false, label);
+      assert.equal(result.envelope.error.fieldErrors, undefined, label);
+      assert.equal(result.envelope.error.stage, "read", label);
+      assert.match(
+        result.envelope.error.message ?? "",
+        /^Stored scheduled-log registry data is invalid \(code unrecognized_keys\)\. Stop without retrying or writing scheduled logs and report that operator repair is required\.$/u,
+        label,
+      );
+      assert.equal(
+        result.envelope.error.hint,
+        "Stop without retrying or writing scheduled logs and report that operator repair is required.",
+        label,
+      );
+      assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_[A-Z_]+_SENTINEL/u);
+      assert.equal(JSON.stringify(result.envelope).includes(parentRoot), false, label);
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), before, label);
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("scheduled-log save identifies missing meal food input before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-missing-food-",
   );
 
   try {
@@ -845,19 +1672,13 @@ test("scheduled-log save rejects workout fields on non-activity actions before w
     const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
       "scheduled-log",
       "save",
-      "Broken meal workout schedule",
-      "--slug",
-      "broken-meal-workout-schedule",
+      "Private meal template",
       "--schedule-kind",
       "dailyLocal",
       "--schedule-local-time",
       "09:00",
       "--action-kind",
       "meal.add",
-      "--workout-exercise",
-      "order=1;name=Goblet Squat",
-      "--workout-set",
-      "exercise=1;order=1;reps=10",
       "--vault",
       vaultRoot,
     ]);
@@ -866,17 +1687,19 @@ test("scheduled-log save rejects workout fields on non-activity actions before w
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, "invalid_option");
-      assert.match(result.envelope.error.message ?? "", /Workout template fields/u);
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "foodId");
+      assert.doesNotMatch(
+        JSON.stringify(result.envelope.error),
+        /Private meal template/u,
+      );
     }
 
     const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
     const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
     assert.deepEqual(writtenFiles, []);
   } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    });
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 

@@ -24,7 +24,7 @@ The rendered deploy helper path is the canonical direct Wrangler deploy contract
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; the total-byte cap is ratcheted from the exact Linux baseline with its ordinary 32 KiB graph allowance plus an 8 KiB reserve for Murph Cloud's measured managed-runtime overlay. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
@@ -420,6 +420,17 @@ the summaries contain only provider/job/resource classification, disposition,
 durable-progress presence, and bounded phase counts/durations. A timeout-yielded
 job must remain queued and report `durableProgressCommitted=false`; a completed
 job must report committed progress without exposing its identity or payload.
+
+The snapshot-import optimization expands each bounded timing summary with
+Junction inventory/resource request counts and durations, snapshot
+normalization/core/write durations, event-identity index duration, and cache-hit
+count. Deploy Web first so its runtime-log parser accepts the expanded bounded
+object, then deploy Cloudflare with `container_rollout=immediate`. After rollout,
+confirm the first event-bearing import in a drain reports a cache miss, later
+non-overlapping imports report hits, overlapping corrections report misses, and
+the job totals still reconcile to a nonnegative unattributed duration. A cache
+hit is an optimization signal only; correctness remains fenced by the live
+event-ledger fingerprint and overlapping identity scopes.
 
 If rollback is required, reverse the deploy order: roll back Cloudflare and the
 runner first, verify the exact old runner fingerprint across the fleet, and
@@ -2103,6 +2114,16 @@ Optional smoke env:
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
 ## Container Operator Access
+
+## Operator task rollout
+
+Deploy shared runner/Worker code that accepts the additive `operator_task` ask
+target and `operator-message` prompt profile before deploying the Web migration
+and `/ops/tasks` admission UI. Old Web remains safe with the new reader because
+it cannot enqueue the new shapes. After Web deploy, prove one private
+diagnostic and one synthetic direct-message admission. For rollback, disable or
+roll back Web admission first, allow admitted mailbox work to drain, then roll
+back the runner/Worker reader.
 
 Wrangler SSH is intentionally disabled for both runner Container classes. The
 checked-in scaffold and generated deploy config must set `ssh.enabled` to

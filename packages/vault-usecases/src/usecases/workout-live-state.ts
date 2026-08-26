@@ -7,8 +7,9 @@ import {
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
-  deriveWorkoutActionBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
+  workoutActionBindingTargetsWorkout,
 } from '@murphai/operator-config/workout-action-binding'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -117,13 +118,43 @@ export async function findLiveWorkoutActionTargets(
     if (
       isOpenLiveWorkout(workout)
       && !hasAmbiguousWorkoutActionExerciseCoordinates(workout)
-      && deriveWorkoutActionBinding(shown.entity.id, workout) === actionBinding
+      && workoutActionBindingMatchesCurrentState(
+        shown.entity.id,
+        workout,
+        actionBinding,
+      )
     ) {
       bindingMatches.push(shown)
     }
   }
 
   return { bindingMatches, exactReplays }
+}
+
+export async function findLiveWorkoutRefreshTargets(
+  vault: string,
+  workoutBinding: string,
+): Promise<WorkoutShowResult[]> {
+  const records = await findStructuredWorkoutRecords(vault)
+  return records.flatMap(({ record, workout }) => {
+    if (
+      workout.sourceApp !== LIVE_WORKOUT_SOURCE_APP
+      || typeof workout.startedAt !== 'string'
+    ) {
+      return []
+    }
+    const shown = {
+      vault,
+      entity: toCommandShowEntity(record),
+    }
+    return workoutActionBindingTargetsWorkout(
+      shown.entity.id,
+      workout,
+      workoutBinding,
+    )
+      ? [shown]
+      : []
+  })
 }
 
 async function findStructuredWorkoutRecords(vault: string) {

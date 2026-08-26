@@ -37,6 +37,7 @@ const lastPoolPressureSampleAtMs = new WeakMap<PgPool, number>();
 type DatabasePoolFailureCategory =
   | "active_connection_error"
   | "connection_closed"
+  | "connection_establishment_timeout"
   | "connection_limit"
   | "connection_timeout"
   | "idle_connection_error"
@@ -44,6 +45,25 @@ type DatabasePoolFailureCategory =
   | "tls_error"
   | "transaction_start_timeout"
   | "unreachable";
+
+interface DatabasePoolSnapshot {
+  idleConnections: number;
+  totalConnections: number;
+  waitingRequests: number;
+}
+
+type DatabasePoolFailureDisposition = "retrying" | "signal" | "terminal";
+type DatabasePoolFailureSource =
+  | "adapter_connection"
+  | "adapter_pool"
+  | "operation"
+  | "transaction";
+
+interface DatabaseRetryTelemetry {
+  operation: string;
+  retryableCategories: readonly DatabasePoolFailureCategory[];
+  source: Extract<DatabasePoolFailureSource, "operation" | "transaction">;
+}
 
 const DATABASE_POOL_FAILURE_BY_PRISMA_CODE = new Map<
   string,
@@ -115,17 +135,34 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
   return pool;
 }
 
-function createPrismaAdapter(pool: PgPool): PrismaPg {
+function createPrismaAdapter(pool: PgPool, poolMax: number): PrismaPg {
   return new PrismaPg(pool, {
     disposeExternalPool: true,
     onConnectionError: (error) => {
       reportDatabasePoolFailure(
-        pool,
+        readDatabasePoolSnapshot(pool),
         resolveDatabasePoolFailureCategory(error) ?? "active_connection_error",
+        {
+          attempt: null,
+          disposition: "signal",
+          operation: "adapter.connection",
+          poolMax,
+          source: "adapter_connection",
+        },
       );
     },
     onPoolError: () => {
-      reportDatabasePoolFailure(pool, "idle_connection_error");
+      reportDatabasePoolFailure(
+        readDatabasePoolSnapshot(pool),
+        "idle_connection_error",
+        {
+          attempt: null,
+          disposition: "signal",
+          operation: "adapter.pool",
+          poolMax,
+          source: "adapter_pool",
+        },
+      );
     },
   });
 }
@@ -136,7 +173,7 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
   const pool = createPrismaPool(input);
 
   const client = new PrismaClient({
-    adapter: createPrismaAdapter(pool),
+    adapter: createPrismaAdapter(pool, poolMax),
     ...(logLevels.length > 0 ? { log: logLevels } : {}),
     transactionOptions: {
       maxWait: PRISMA_TRANSACTION_MAX_WAIT_MS,
@@ -167,7 +204,14 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
         return runWithDatabaseRetry(
           pool,
           poolMax,
-          "pool_checkout_timeout",
+          {
+            operation: model ? `${model}.${operation}` : operation,
+            retryableCategories: [
+              "pool_checkout_timeout",
+              "connection_establishment_timeout",
+            ],
+            source: "operation",
+          },
           () => query(args),
         ).then(
           (result) => {
@@ -194,38 +238,68 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
 async function runWithDatabaseRetry<T>(
   pool: PgPool,
   poolMax: number,
-  retryableCategory: DatabasePoolFailureCategory,
+  telemetry: DatabaseRetryTelemetry,
   run: () => Promise<T>,
   canRetry: () => boolean = () => true,
 ): Promise<T> {
-  let pendingRetryError: unknown = null;
   for (let attempt = 1; ; attempt += 1) {
+    const beforeAttempt = readDatabasePoolSnapshot(pool);
     const locallyContendedBeforeAttempt = hasLocalDatabasePoolPressure(
-      pool,
+      beforeAttempt,
       poolMax,
     );
-    reportDatabasePoolPressure(pool, poolMax);
-    if (attempt > 1 && locallyContendedBeforeAttempt) {
-      throw pendingRetryError;
-    }
+    reportDatabasePoolPressure(pool, poolMax, beforeAttempt);
     try {
       return await run();
     } catch (error) {
       const category = resolveDatabasePoolFailureCategory(error);
-      if (category) {
-        reportDatabasePoolFailure(pool, category);
-      }
-      if (
-        category !== retryableCategory
-        || attempt >= DATABASE_RETRY_ATTEMPTS
-        || !canRetry()
-        || locallyContendedBeforeAttempt
-        || hasLocalDatabasePoolPressure(pool, poolMax)
-      ) {
+      const afterAttempt = readDatabasePoolSnapshot(pool);
+      const shouldRetry = category !== null
+        && telemetry.retryableCategories.includes(category)
+        && attempt < DATABASE_RETRY_ATTEMPTS
+        && canRetry()
+        && !locallyContendedBeforeAttempt
+        && !hasLocalDatabasePoolPressure(afterAttempt, poolMax);
+      if (!shouldRetry) {
+        if (category) {
+          reportDatabasePoolFailure(afterAttempt, category, {
+            attempt,
+            beforeAttempt,
+            disposition: "terminal",
+            operation: telemetry.operation,
+            poolMax,
+            source: telemetry.source,
+          });
+        }
         throw error;
       }
-      pendingRetryError = error;
+
       await delay(resolveDatabaseRetryDelayMs());
+      const beforeRetry = readDatabasePoolSnapshot(pool);
+      reportDatabasePoolPressure(pool, poolMax, beforeRetry);
+      if (hasLocalDatabasePoolPressure(beforeRetry, poolMax)) {
+        if (category) {
+          reportDatabasePoolFailure(beforeRetry, category, {
+            attempt,
+            beforeAttempt,
+            disposition: "terminal",
+            operation: telemetry.operation,
+            poolMax,
+            source: telemetry.source,
+          });
+        }
+        throw error;
+      }
+      if (category) {
+        reportDatabasePoolFailure(afterAttempt, category, {
+          attempt,
+          beforeAttempt,
+          disposition: "retrying",
+          operation: telemetry.operation,
+          poolMax,
+          source: telemetry.source,
+        });
+      }
     }
   }
 }
@@ -262,19 +336,39 @@ function withTransactionStartRetry(
             return await runWithDatabaseRetry(
               pool,
               poolMax,
-              "transaction_start_timeout",
+              {
+                operation: "transaction.batch",
+                retryableCategories: [
+                  "transaction_start_timeout",
+                  "pool_checkout_timeout",
+                  "connection_establishment_timeout",
+                ],
+                source: "transaction",
+              },
               () => Reflect.apply(value, target, args) as Promise<unknown>,
             );
           } finally {
-            reportSlowDatabaseBatchTransaction(Date.now() - startedAtMs);
+            reportSlowDatabaseBatchTransaction(
+              Date.now() - startedAtMs,
+              resolveTransactionTimeoutMs(args),
+            );
           }
         }
 
         let callbackStarted = false;
+        const transactionTimeoutMs = resolveTransactionTimeoutMs(args);
         return runWithDatabaseRetry(
           pool,
           poolMax,
-          "transaction_start_timeout",
+          {
+            operation: "transaction.interactive",
+            retryableCategories: [
+              "transaction_start_timeout",
+              "pool_checkout_timeout",
+              "connection_establishment_timeout",
+            ],
+            source: "transaction",
+          },
           async () => {
             callbackStarted = false;
             const acquisitionStartedAtMs = Date.now();
@@ -284,15 +378,23 @@ function withTransactionStartRetry(
                 Date.now() - acquisitionStartedAtMs,
               );
               const heldStartedAtMs = Date.now();
+              let callbackOutcome: "completed" | "error" | "timed_out" = "completed";
               try {
                 return await Reflect.apply(
                   transactionArgument,
                   undefined,
                   callbackArgs,
                 ) as unknown;
+              } catch (error) {
+                callbackOutcome = isExpiredTransactionError(error)
+                  ? "timed_out"
+                  : "error";
+                throw error;
               } finally {
-                reportSlowDatabaseTransactionHold(
+                reportSlowDatabaseTransactionCallback(
                   Date.now() - heldStartedAtMs,
+                  callbackOutcome,
+                  transactionTimeoutMs,
                 );
               }
             };
@@ -445,7 +547,7 @@ function resolveDatabasePoolFailureCategory(
       return "transaction_start_timeout";
     }
     if (message?.includes("Connection terminated due to connection timeout")) {
-      return "connection_timeout";
+      return "connection_establishment_timeout";
     }
     // Postgres words a SQLSTATE 53300 rejection differently depending on which
     // limit refused the connection, and some wrappers keep only the message.
@@ -464,14 +566,33 @@ function resolveDatabasePoolFailureCategory(
 }
 
 function reportDatabasePoolFailure(
-  pool: PgPool,
+  snapshot: DatabasePoolSnapshot,
   category: DatabasePoolFailureCategory,
+  telemetry: {
+    attempt: number | null;
+    beforeAttempt?: DatabasePoolSnapshot;
+    disposition: DatabasePoolFailureDisposition;
+    operation: string;
+    poolMax: number | null;
+    source: DatabasePoolFailureSource;
+  },
 ): void {
   console.warn("Hosted web database pool failure.", {
+    attempt: telemetry.attempt,
+    beforeAttemptIdleConnections:
+      telemetry.beforeAttempt?.idleConnections ?? null,
+    beforeAttemptTotalConnections:
+      telemetry.beforeAttempt?.totalConnections ?? null,
+    beforeAttemptWaitingRequests:
+      telemetry.beforeAttempt?.waitingRequests ?? null,
     category,
-    idleConnections: normalizePoolCount(pool.idleCount),
-    totalConnections: normalizePoolCount(pool.totalCount),
-    waitingRequests: normalizePoolCount(pool.waitingCount),
+    disposition: telemetry.disposition,
+    idleConnections: snapshot.idleConnections,
+    operation: telemetry.operation,
+    poolMax: telemetry.poolMax,
+    source: telemetry.source,
+    totalConnections: snapshot.totalConnections,
+    waitingRequests: snapshot.waitingRequests,
   });
 }
 
@@ -480,9 +601,12 @@ function reportDatabasePoolFailure(
  * the first prospective waiter before pg increments `waitingCount`; later
  * callers remain visible through that count. A healthy pool logs nothing.
  */
-function reportDatabasePoolPressure(pool: PgPool, poolMax: number): void {
-  const waitingRequests = normalizePoolCount(pool.waitingCount);
-  if (!hasLocalDatabasePoolPressure(pool, poolMax)) {
+function reportDatabasePoolPressure(
+  pool: PgPool,
+  poolMax: number,
+  snapshot: DatabasePoolSnapshot,
+): void {
+  if (!hasLocalDatabasePoolPressure(snapshot, poolMax)) {
     return;
   }
 
@@ -494,17 +618,22 @@ function reportDatabasePoolPressure(pool: PgPool, poolMax: number): void {
   lastPoolPressureSampleAtMs.set(pool, now);
 
   console.warn("Hosted web database pool pressure.", {
-    idleConnections: normalizePoolCount(pool.idleCount),
-    totalConnections: normalizePoolCount(pool.totalCount),
-    waitingRequests,
+    idleConnections: snapshot.idleConnections,
+    poolMax,
+    totalConnections: snapshot.totalConnections,
+    trigger: snapshot.waitingRequests > 0 ? "waiters" : "at_capacity",
+    waitingRequests: snapshot.waitingRequests,
   });
 }
 
-function hasLocalDatabasePoolPressure(pool: PgPool, poolMax: number): boolean {
-  return normalizePoolCount(pool.waitingCount) > 0
-    || (
-      normalizePoolCount(pool.idleCount) === 0
-      && normalizePoolCount(pool.totalCount) >= poolMax
+function hasLocalDatabasePoolPressure(
+  snapshot: DatabasePoolSnapshot,
+  poolMax: number,
+): boolean {
+  return snapshot.idleConnections === 0
+    && (
+      snapshot.waitingRequests > 0
+      || snapshot.totalConnections >= poolMax
     );
 }
 
@@ -515,28 +644,73 @@ function reportSlowDatabaseTransactionAcquisition(durationMs: number): void {
   );
 }
 
-function reportSlowDatabaseTransactionHold(durationMs: number): void {
+function reportSlowDatabaseTransactionCallback(
+  durationMs: number,
+  callbackOutcome: "completed" | "error" | "timed_out",
+  timeoutMs: number,
+): void {
   reportSlowDatabaseDuration(
-    "Hosted web database slow transaction hold.",
+    "Hosted web database slow transaction callback.",
     durationMs,
+    {
+      callbackOutcome,
+      operation: "transaction.interactive",
+      timeoutMs,
+    },
   );
 }
 
-function reportSlowDatabaseBatchTransaction(durationMs: number): void {
+function reportSlowDatabaseBatchTransaction(
+  durationMs: number,
+  timeoutMs: number,
+): void {
   reportSlowDatabaseDuration(
     "Hosted web database slow batch transaction.",
     durationMs,
+    {
+      operation: "transaction.batch",
+      timeoutMs,
+    },
   );
 }
 
-function reportSlowDatabaseDuration(message: string, durationMs: number): void {
+function reportSlowDatabaseDuration(
+  message: string,
+  durationMs: number,
+  metadata: Record<string, number | string> = {},
+): void {
   if (durationMs < SLOW_TRANSACTION_MS) {
     return;
   }
 
   console.warn(message, {
     durationMs: Math.trunc(durationMs),
+    ...metadata,
   });
+}
+
+function readDatabasePoolSnapshot(pool: PgPool): DatabasePoolSnapshot {
+  return {
+    idleConnections: normalizePoolCount(pool.idleCount),
+    totalConnections: normalizePoolCount(pool.totalCount),
+    waitingRequests: normalizePoolCount(pool.waitingCount),
+  };
+}
+
+function resolveTransactionTimeoutMs(args: readonly unknown[]): number {
+  const configuredTimeout = readUnknownProperty(args[1], "timeout");
+  return typeof configuredTimeout === "number"
+      && Number.isFinite(configuredTimeout)
+      && configuredTimeout > 0
+    ? Math.trunc(configuredTimeout)
+    : PRISMA_TRANSACTION_TIMEOUT_MS;
+}
+
+function isExpiredTransactionError(error: unknown): boolean {
+  return readUnknownStringProperty(error, "code") === "P2028"
+    && (readUnknownStringProperty(error, "message")?.includes(
+      "Transaction already closed",
+    ) ?? false);
 }
 
 function normalizePoolCount(value: number): number {

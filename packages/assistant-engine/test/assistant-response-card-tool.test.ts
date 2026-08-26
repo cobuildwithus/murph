@@ -228,6 +228,18 @@ const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
   },
 }
 
+function buildWorkoutCardAuthoringInput(
+  card: CompactTableWorkoutResponseCardV1,
+) {
+  return {
+    ...card,
+    tracking: {
+      entityId: card.tracking.entityId,
+      kind: card.tracking.kind,
+    },
+  }
+}
+
 const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
   kind: 'compact_table',
   version: 1,
@@ -263,6 +275,7 @@ const IMAGE: AssistantResponseMedia = {
 function executeCardTool(input: {
   currentResponseCard?: AssistantResponseCard | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  env?: NodeJS.ProcessEnv
   groupChallengeResponseCardAllowed?: boolean | null
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   knowledgePageReadTextFile?: (filePath: string) => Promise<string>
@@ -274,7 +287,7 @@ function executeCardTool(input: {
   return executeMurphDynamicToolRequest({
     currentResponseCard: input.currentResponseCard ?? null,
     currentResponseMedia: input.currentResponseMedia ?? [],
-    env: {},
+    env: input.env ?? {},
     fetchImpl: fetch,
     groupChallengeResponseCardAllowed:
       input.groupChallengeResponseCardAllowed ?? false,
@@ -709,6 +722,12 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).toContain('fiberGrams')
+    expect(JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[1],
+    )).toContain('snapshotAt')
+    expect(JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[2],
+    )).not.toContain('snapshotAt')
     expect(privateSchema).not.toContain('editor')
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')
@@ -886,6 +905,15 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'use the full deterministic text recovery',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never add rowHeader, columns, or rows',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'The runtime records tracking snapshotAt',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
@@ -1105,8 +1133,19 @@ describe('murph.attach_response_card', () => {
     })).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })
-    expect(readCardToolRequest({ card: REALISTIC_LATE_WORKOUT_CARD })).toEqual({
-      card: REALISTIC_LATE_WORKOUT_CARD,
+    const workoutAuthoringInput = buildWorkoutCardAuthoringInput(
+      REALISTIC_LATE_WORKOUT_CARD,
+    )
+    expect(readCardToolRequest({ card: workoutAuthoringInput })).toMatchObject({
+      card: {
+        ...workoutAuthoringInput,
+        tracking: {
+          ...workoutAuthoringInput.tracking,
+          snapshotAt: expect.stringMatching(
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+          ),
+        },
+      },
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest(
@@ -1238,19 +1277,61 @@ describe('murph.attach_response_card', () => {
     })
   })
 
+  it('adds runtime-owned tracking time before attaching a workout card', async () => {
+    const authoringInput = buildWorkoutCardAuthoringInput(
+      REALISTIC_LATE_WORKOUT_CARD,
+    )
+    const beforeParse = Date.now()
+    const request = readCardToolRequest({ card: authoringInput })
+    const afterParse = Date.now()
+    if (request?.kind !== 'attach-response-card') {
+      throw new TypeError('Expected a valid workout card request.')
+    }
+
+    const result = await executeCardTool({ request })
+    const attachedCard = result.responseCardPatch?.card
+    if (
+      !attachedCard
+      || attachedCard.kind !== 'compact_table'
+      || !('workout' in attachedCard)
+    ) {
+      throw new TypeError('Expected an attached workout card.')
+    }
+
+    const snapshotTime = Date.parse(attachedCard.tracking.snapshotAt)
+    expect(snapshotTime).toBeGreaterThanOrEqual(beforeParse)
+    expect(snapshotTime).toBeLessThanOrEqual(afterParse)
+    expect(attachedCard.tracking).toMatchObject(authoringInput.tracking)
+    expect(result.rpcResult.success).toBe(true)
+  })
+
   it('selects trusted full-text recovery only for a semantic workout that exceeds the envelope', async () => {
-    const request = readCardToolRequest({ card: OVERSIZED_WORKOUT_CARD })
-    expect(request).toEqual({
-      card: OVERSIZED_WORKOUT_CARD,
+    const authoringInput = buildWorkoutCardAuthoringInput(
+      OVERSIZED_WORKOUT_CARD,
+    )
+    const request = readCardToolRequest({ card: authoringInput })
+    expect(request).toMatchObject({
+      card: {
+        ...authoringInput,
+        tracking: {
+          ...authoringInput.tracking,
+          snapshotAt: expect.stringMatching(
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+          ),
+        },
+      },
       kind: 'response-card-envelope-too-large',
     })
-    if (request === null) {
+    if (
+      request === null
+      || request.kind !== 'response-card-envelope-too-large'
+    ) {
       throw new TypeError('Expected an oversized workout card request.')
     }
 
     const result = await executeCardTool({ request })
     expect(result).toMatchObject({
-      responseCardTextFallbackPatch: { card: OVERSIZED_WORKOUT_CARD },
+      responseCardTextFallbackPatch: { card: request.card },
       rpcResult: {
         contentItems: [{
           text: 'workout card envelope too large; full text recovery selected',

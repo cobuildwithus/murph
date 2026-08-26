@@ -53,7 +53,7 @@ export function inspectHostedStripeBillingWorkflow(
   requireText(
     "missing-hermetic-job",
     "billing-hermetic:",
-    "Every pull request requires a hermetic billing job.",
+    "Every non-documentation pull request requires a hermetic billing job.",
   );
   requireText(
     "missing-starter-checkout-proof",
@@ -88,8 +88,8 @@ export function inspectHostedStripeBillingWorkflow(
   }
   requireText(
     "missing-live-if",
-    "if: ${{ github.event_name == 'push' }}",
-    "The secret-bearing live job must run only on trusted push events, never on pull request code.",
+    "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+    "The secret-bearing live job must bypass a skipped PR-only ancestor only for trusted pushes with successful hermetic proof.",
   );
   requireText(
     "missing-dedicated-environment",
@@ -143,8 +143,8 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-required-boundary-always",
-    "  billing-required:\n    name: Required hosted Stripe billing boundary\n    needs:\n      - billing-hermetic\n      - live-stripe-browser\n    if: ${{ always() }}",
-    "The required billing boundary must always inspect hermetic and live results.",
+    "  billing-required:\n    name: Required hosted Stripe billing boundary\n    needs:\n      - markdown-docs-scope\n      - billing-hermetic\n      - live-stripe-browser\n    if: ${{ always() }}",
+    "The required billing boundary must always inspect the trusted docs scope plus hermetic and live results.",
   );
   requireText(
     "missing-required-live-result",
@@ -153,13 +153,18 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-fail-closed-live-gate",
-    'case "$EVENT_NAME" in\n            push)\n              if [[ "$LIVE_RESULT" != "success" ]]',
+    'case "$EVENT_NAME" in\n            push)\n              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]',
     "Main merges must fail when the live lane is missing, skipped, or unsuccessful.",
   );
   requireText(
     "missing-pr-live-exclusion",
-    'pull_request)\n              if [[ "$LIVE_RESULT" != "skipped" ]]',
-    "Pull requests must fail closed if the secret-bearing live job ever starts.",
+    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]',
+    "Full pull-request proof must fail closed if hermetic proof is absent or the secret-bearing live job starts.",
+  );
+  requireText(
+    "missing-docs-only-skip-boundary",
+    'if [[ "$HERMETIC_RESULT" != "skipped" || "$LIVE_RESULT" != "skipped" ]]',
+    "Markdown-only proof must require both Stripe runtime jobs to remain skipped.",
   );
   const workflowConcurrency = source.match(
     /^concurrency:\n  group: .+\n  cancel-in-progress: (true|false)$/mu,
