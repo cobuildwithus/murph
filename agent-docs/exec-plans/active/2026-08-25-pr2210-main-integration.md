@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -20,6 +20,15 @@ truthful stages, and no duplicate projector, repair transport, or state owner.
   recovery tests. Integration must retain only event/document domain mappings,
   their focused tests, authored plans, generated CLI artifacts, and measured
   lazy bundle allowance.
+- Current `main` is merged through `b9f8de1f95dd3adfcc819240b98c1af9f0acffee`.
+  The only manual composition keeps one shared bundle budget and adds the two
+  measured lazy-graph allowances without changing entry or startup topology.
+- Focused recovery proof passes 75 tests; the runner bundle guard passes 14
+  tests; importers, Vault Usecases, and CLI typechecks pass; prepared runtime,
+  package shape, docs drift, and docs gardening pass.
+- Canonical hosted-runner assembly passes all eight CLI parity probes. The CLI
+  measures 9,523,956 B total, 805 B entry, and 25,155 B static startup against
+  the composed guard; the runner measures 11,353,283 B total.
 
 ## Design
 

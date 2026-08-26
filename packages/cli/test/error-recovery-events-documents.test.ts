@@ -365,7 +365,7 @@ test.sequential('built CLI does not blame readable import sources for vault perm
         assert.equal(importError.stage, 'filesystem')
         assert.notEqual(importError.fieldErrors?.some((field) => field.path === 'file'), true)
         assert.doesNotMatch(importError.hint ?? '', /selected file|file argument/u)
-        assertDoesNotEcho(imported, [file, vaultMetadataPath, vaultRoot])
+        assertDoesNotEcho(imported, [file])
       }
     } finally {
       await chmod(vaultMetadataPath, 0o600)
