@@ -758,9 +758,26 @@ window sorting. Ranking is deterministic within that admitted set; it is
 intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
 continue to use direct lookup paths.
 
-For an existing labels database, create the foods exact-name-rank, GiST
-name-rank, and canonical-rank indexes concurrently before deploying web code
-that uses this query shape.
+For an existing labels database, run
+`psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
+create the foods exact-name-rank, GiST name-rank, and canonical-rank indexes
+concurrently before deploying web code that uses this query shape. The
+production build preflight validates all three exact definitions plus their
+live/ready/valid state and fails closed if the rollout is missing or incomplete.
+`IF NOT EXISTS` cannot repair a same-named interrupted or wrong-definition
+index. When the preflight reports `not_live` or `wrong_definition`, inspect the
+reported fixed name, drop only that index without blocking table writes, and
+rerun the rollout:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_rank_idx;
+DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_exact_rank_idx;
+DROP INDEX CONCURRENTLY IF EXISTS public.foods_canonical_rank_idx;
+```
+
+Run only the statement for each reported nonconforming index. Do not drop an
+exact live/ready/valid index. Like the create script, concurrent drops must run
+outside a transaction.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new
