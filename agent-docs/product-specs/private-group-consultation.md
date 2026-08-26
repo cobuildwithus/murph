@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-08-21
+Last verified: 2026-08-24
 
 ## Decision
 
@@ -80,6 +80,11 @@ provider thread. It has no tools, private-vault access, filesystem capability,
 follow-up effect, recursion, or second delivery protocol. Fresh foreground
 conversation input still preempts it, while the exact bounded handoff family may
 run before the normal idle-checkpoint floor so it cannot starve indefinitely.
+The provider returns only one ordinary natural-language group message. The
+runtime validates that required text, constructs the minimal internal send
+lifecycle value, and passes the text through the existing notification and
+outbox owners without requesting or parsing a model-authored notification
+decision.
 
 Do not add a table, queue, workflow, callback registry, delivery ledger, target
 selector API, or generalized cross-context message type for this action.

@@ -18,6 +18,9 @@ import {
 import type {
   HostedAssistantCustomInferenceOverride,
 } from "@murphai/hosted-execution/assistant-inference";
+import {
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
+} from "@murphai/hosted-execution/env";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -338,6 +341,51 @@ describe("hosted runner container identity", () => {
       .toBe(expectedModel);
   });
 
+  it.each([
+    { expected: "1", projected: true },
+    { expected: "0", projected: false },
+    { expected: "0", projected: undefined },
+  ])("forwards subagent model authority as $expected when projection is $projected", async ({
+    expected,
+    projected,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      hostedAssistantSubagentModelOverridesAllowed: projected,
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_subagent_model_authority",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(
+      prepared.job.runtime?.forwardedEnv?.[
+        HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV
+      ],
+    ).toBe(expected);
+  });
+
   it("applies Venice per member while retaining a scoped OpenAI tool credential", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -464,6 +512,7 @@ describe("hosted runner container identity", () => {
     };
     const service = createRuntimeInvocationService({
       hostedAssistantCustomInferenceOverride: override,
+      hostedAssistantSubagentModelOverridesAllowed: true,
       invokedContainerNames: [],
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource,
@@ -493,6 +542,9 @@ describe("hosted runner container identity", () => {
       MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
     });
     expect(forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_REASONING_EFFORT");
+    expect(
+      forwardedEnv?.[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV],
+    ).toBe("0");
     expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
     expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
 
@@ -940,6 +992,7 @@ function createRuntimeInvocationService(input: {
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
+  hostedAssistantSubagentModelOverridesAllowed?: boolean;
   invokedContainerNames: string[];
   platformAiUsageAllowed?: boolean;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
@@ -986,6 +1039,12 @@ function createRuntimeInvocationService(input: {
               input.hostedAssistantReasoningEffortOverride,
           }
         : {}),
+      ...(input.hostedAssistantSubagentModelOverridesAllowed === undefined
+        ? {}
+        : {
+            hostedAssistantSubagentModelOverridesAllowed:
+              input.hostedAssistantSubagentModelOverridesAllowed,
+          }),
       workspace: input.workspace ?? null,
     }),
     runnerContainerNamespace: createRunnerContainerNamespace({

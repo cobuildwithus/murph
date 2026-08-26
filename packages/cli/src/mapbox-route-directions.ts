@@ -73,7 +73,6 @@ export async function requestDirections(input: {
       fetchImpl: input.fetchImpl,
       timeoutMs: input.timeoutMs,
       url,
-      requestLabel: 'directions',
     }),
   )
 

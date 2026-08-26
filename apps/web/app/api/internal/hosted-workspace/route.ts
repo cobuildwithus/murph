@@ -118,9 +118,13 @@ export const GET = withJsonError(async (request: Request) => {
       userId,
     })
   ).status === "allowed";
+  const hostedAssistantSubagentModelOverridesAllowed =
+    customInferenceOverride === null
+    && assistantConfiguration?.solAvailable === true;
 
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
+    hostedAssistantSubagentModelOverridesAllowed,
     ...(customInferenceOverride
       ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }
       : assistantConfiguration?.hostedAssistantModelOverride

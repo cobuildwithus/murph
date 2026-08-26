@@ -65,6 +65,7 @@ type SmokeUserStatus = HostedRunnerStatusResponse;
 interface SmokeRunnerBundleManifest {
   buildSkipped?: boolean;
   bundleFingerprint?: string;
+  releaseSha?: string;
   sourceFingerprint?: string;
 }
 
@@ -583,6 +584,12 @@ async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<Smok
   ) {
     throw new Error("runner smoke manifest is missing bundle/source fingerprints.");
   }
+  if (
+    manifest.releaseSha !== undefined
+    && !/^[a-f0-9]{40}$/u.test(manifest.releaseSha)
+  ) {
+    throw new Error("runner smoke manifest has invalid public release provenance.");
+  }
 
   return manifest;
 }
@@ -610,7 +617,8 @@ function assertSmokeRunnerBundleManifest(
 
   if (
     typeof actual.bundleFingerprint !== "string" ||
-    typeof actual.sourceFingerprint !== "string"
+    typeof actual.sourceFingerprint !== "string" ||
+    (expected.releaseSha !== undefined && typeof actual.releaseSha !== "string")
   ) {
     throw createManifestError(
       "runner container smoke returned incomplete runner bundle metadata.",
@@ -619,12 +627,13 @@ function assertSmokeRunnerBundleManifest(
 
   if (
     actual.bundleFingerprint !== expected.bundleFingerprint ||
-    actual.sourceFingerprint !== expected.sourceFingerprint
+    actual.sourceFingerprint !== expected.sourceFingerprint ||
+    actual.releaseSha !== expected.releaseSha
   ) {
     throw createManifestError(
       "runner container smoke did not run the expected runner bundle. "
-        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint}; `
-        + `actual bundle=${actual.bundleFingerprint} source=${actual.sourceFingerprint}.`,
+        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint} release=${expected.releaseSha ?? "legacy"}; `
+        + `actual bundle=${actual.bundleFingerprint} source=${actual.sourceFingerprint} release=${actual.releaseSha ?? "legacy"}.`,
     );
   }
 }

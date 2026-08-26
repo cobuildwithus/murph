@@ -72,6 +72,9 @@ import {
   ensureHostedCompanionMemberId,
   requireHostedCompanionMemberIdFromRequest,
 } from "@/src/lib/hosted-onboarding/companion-member-access";
+import {
+  requirePrivyMemberAuthFromBearerToken,
+} from "@/src/lib/hosted-onboarding/request-auth";
 
 type AdmissionRouteModule = typeof import(
   "../app/api/device-sync/companion/admission/route"
@@ -184,6 +187,30 @@ describe("native companion hosted member admission", () => {
     });
 
     expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
+  });
+
+  it("exposes identity verification and member lookup as observable bearer stages", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    const observedStages: string[] = [];
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+
+    const result = await requirePrivyMemberAuthFromBearerToken(
+      admissionRequest(),
+      prisma,
+      {
+        runStage: async (stage, run) => {
+          observedStages.push(stage);
+          return run();
+        },
+      },
+    );
+
+    expect(result.member).toBe(activeMember);
+    expect(observedStages).toEqual([
+      "identity_token_verification",
+      "member_lookup",
+    ]);
   });
 
   it("maps an invalid non-empty bearer through the real member owner without device ingress", async () => {

@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -194,6 +194,7 @@ product-decision owners.
      the frontend lens and require enough redacted rendered evidence to judge
      each material visual, state, interaction, and responsive claim
    - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
+   - for behavior composed across multiple owners, map the complete production path and prefer one stable composed or end-to-end proof of the invariant; seam-level unit tests may localize failures but do not replace proof that the owners work together
    - any product-owned dimension activates the Product UX lens, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Once implementation is stable, run the focused local proof selected from the
@@ -258,6 +259,15 @@ product-decision owners.
     default completion bar; if a required check failed for a credibly unrelated
     pre-existing reason, name the command, failing target, and why the current
     diff did not cause it.
+    For every completed feature or bug fix, the final message to the developer
+    or user must also include a concise `How to verify` section for testing the
+    landed change. Name any prerequisite or environment, give the shortest
+    concrete action sequence, and state the observable expected result. For a
+    feature, cover its shortest end-to-end path. For a bug fix, start from the
+    original reproduction when practical and name the behavior that proves the
+    regression is gone. Automated check names may supplement these instructions
+    but do not replace them. If practical human verification is unavailable,
+    say why and point to the closest direct proof.
     If the completed task could break or degrade production when deployed components are temporarily out of sync, include a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, expected skew behavior, and post-deploy checks. For Cloudflare hosted execution changes, explicitly consider both web/Worker skew and Worker/container skew: a new Worker version can receive traffic while active warm `RunnerContainer` processes still run the previous runner bundle, process env, or provider-credential shape during gradual rollout.
 
 ## PR Description
@@ -311,9 +321,16 @@ Every PR includes:
   production component on `/design?tab=components`, consent surface on
   `/design?tab=consent`, or composed page section/flow under
   `/screenshots/<category>`. Refresh an expired or inaccessible preview; use a
-  production link only when it already renders the changed state. Add or update
-  the catalog/study state only when no existing route and anchor render the
-  changed state. In a dedicated `## Design proof` section, include that
+  production link only when it already renders the changed state. The only
+  content-only exception is an authored changelog diff under
+  `apps/web/changelog/entries/**` plus optional
+  `apps/web/changelog/editions/**`: follow the review-proof route in
+  `apps/web/changelog/README.md` and do not create or refresh a branch preview
+  solely for design proof. Any changelog renderer, component, style, visual, or
+  interaction change still needs the normal current-branch representation. Add
+  or update the catalog/study state only when no existing route and anchor
+  render the changed state. In a
+  dedicated `## Design proof` section, include that
   `Design page:` link, `Evidence:` matched to the changed visual, state,
   interaction, and responsive risks, and `Coverage:` naming the states and
   viewports checked. A reasoned walkthrough is valid when an image adds no

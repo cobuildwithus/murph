@@ -195,8 +195,6 @@ const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription:
-    "Two short topics, based on what Murph does not know yet.",
   idleTitle: "Only the missing details",
   topics: [
     {

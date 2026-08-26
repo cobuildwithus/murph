@@ -93,6 +93,7 @@ cd apps/web && pnpm typecheck
   change.
 - Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. Every user-facing hosted Web UI diff needs a repository-owned, reviewer-openable representation: the real production component or consent surface on the matching `/design` tab, or the composed section under `/screenshots/<category>`. Add or update a catalog/study state only when no existing route and anchor render the changed state.
 - Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
+- For content-only authored changelog entries and edition metadata, use the narrow no-preview proof route in `apps/web/changelog/README.md`. Any changelog renderer, component, style, visual, or interaction change uses the normal current-branch proof rule.
 - Treat the unlinked and noindex route as a discovery control, not security. Never put private member data or credentials there.
 - Match rendered evidence to the changed visual, state, interaction, and
   responsive risk. A change can need no screenshots, one screenshot, or many.

@@ -502,6 +502,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
   },
   {
+    slug: "prisma.device_source_no_data_outreach_preference",
+    label: "Wearable no-data outreach preferences",
+    deletion: "live-delete",
+    note: "Deletes member-scoped source-provider reminder intervals and opt-outs in the canonical account transaction.",
+  },
+  {
     slug: "prisma.device_provider_application",
     label: "Encrypted member-owned device provider applications",
     deletion: "live-delete",
@@ -3333,6 +3339,11 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE run.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
+        deleted_device_source_no_data_outreach_preferences AS (
+          DELETE FROM device_source_no_data_outreach_preference AS preference
+          WHERE preference.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
         deleted_device_connections AS (
           DELETE FROM device_connection AS connection
           WHERE connection.user_id IN (SELECT id FROM target_members)
@@ -3353,6 +3364,8 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_group_member",
           (SELECT count(*) FROM deleted_clinical_retrieval_runs)
             AS "prisma.clinical_record_retrieval_run",
+          (SELECT count(*) FROM deleted_device_source_no_data_outreach_preferences)
+            AS "prisma.device_source_no_data_outreach_preference",
           (SELECT count(*) FROM deleted_device_connections)
             AS "prisma.device_connection"
       `,

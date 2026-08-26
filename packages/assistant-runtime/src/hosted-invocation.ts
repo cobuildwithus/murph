@@ -53,6 +53,7 @@ export interface HostedWorkspaceInvocationInput {
     | HostedRuntimeBridgeCheckpointLease
     | null
     | Promise<HostedRuntimeBridgeCheckpointLease | null>;
+  runtimeIssueProvenance?: HostedAssistantRuntimeIssueProvenance | null;
   runtimeWakeSignal: RuntimeWakeSignal;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal | null;
@@ -60,6 +61,11 @@ export interface HostedWorkspaceInvocationInput {
   snapshotDiagnosticsHashSecret?: string | null;
   vaultRoot: string;
   waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
+}
+
+export interface HostedAssistantRuntimeIssueProvenance {
+  releaseSha: string | null;
+  runtimeName: string;
 }
 
 export async function runHostedWorkspaceInvocation(
@@ -87,6 +93,7 @@ export async function runHostedWorkspaceInvocation(
       onConversationActivityObserved: input.onConversationActivityObserved
         ? () => input.onConversationActivityObserved?.()
         : undefined,
+      runtimeIssueProvenance: input.runtimeIssueProvenance ?? null,
       runtimeWakeSignal,
       shutdownSignal: input.shutdownSignal ?? null,
       signal: input.signal ?? null,

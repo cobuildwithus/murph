@@ -1188,7 +1188,6 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       throw new VaultCliError(
         'invalid_payload',
         'Experiment plan does not produce valid experiment frontmatter.',
-        { errors: preflight.errors },
       )
     }
 

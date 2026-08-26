@@ -75,6 +75,7 @@ import {
   readHostedSystemMailboxState,
   resolveHostedSystemMailboxHandledThroughSeq,
   type HostedSystemMailboxPendingItem,
+  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -1057,6 +1058,173 @@ describe("hosted system mailbox notification execution context", () => {
       );
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
         .toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("persists the context handoff two-attempt fuse across mailbox state reload", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-context-handoff-fuse-",
+    );
+    const firstAttemptAt = new Date().toISOString();
+    const secondAttemptAt = new Date(
+      Date.parse(firstAttemptAt) + 60_000,
+    ).toISOString();
+    const wake = createGroupContextHandoffWake("d", firstAttemptAt);
+    const transientError = Object.assign(new Error("Temporary provider failure."), {
+      code: "ASSISTANT_PROVIDER_UNAVAILABLE",
+      retryable: true,
+    });
+    mocks.executeHostedMailboxEvent
+      .mockRejectedValueOnce(transientError)
+      .mockRejectedValueOnce(transientError);
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_context_handoff_fuse",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({});
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => firstAttemptAt,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        attemptCount: 1,
+        itemId: "mailbox_context_handoff_fuse",
+        status: "retryable_failed",
+      });
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toMatchObject({
+          pending: [{
+            attemptCount: 1,
+            itemId: "mailbox_context_handoff_fuse",
+            status: "pending",
+          }],
+        });
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => secondAttemptAt,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        item: {
+          attemptCount: 2,
+          itemId: "mailbox_context_handoff_fuse",
+        },
+        status: "processed",
+      });
+
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toEqual({ pending: [] });
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => new Date(Date.parse(secondAttemptAt) + 60_000).toISOString(),
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toBeNull();
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("terminally removes a context handoff after a non-retryable first failure", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-context-handoff-terminal-",
+    );
+    const attemptedAt = new Date().toISOString();
+    const wake = createGroupContextHandoffWake("e", attemptedAt);
+    mocks.executeHostedMailboxEvent.mockRejectedValueOnce(new VaultCliError(
+      "invalid_payload",
+      "Synthetic permanent output failure.",
+      { retryable: false },
+    ));
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_context_handoff_terminal",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => attemptedAt,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        item: {
+          attemptCount: 1,
+          itemId: "mailbox_context_handoff_terminal",
+        },
+        status: "processed",
+      });
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toEqual({ pending: [] });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("does not enter the provider after restoring a second in-flight handoff attempt", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-context-handoff-restored-limit-",
+    );
+    const attemptedAt = new Date().toISOString();
+    const wake = createGroupContextHandoffWake("f", attemptedAt);
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_context_handoff_restored_limit",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item) => ({
+          ...item,
+          attemptCount: 2,
+          lastAttemptAt: attemptedAt,
+          status: "sending",
+        })),
+      }));
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => new Date(Date.parse(attemptedAt) + 1_000).toISOString(),
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        item: {
+          attemptCount: 2,
+          itemId: "mailbox_context_handoff_restored_limit",
+        },
+        status: "processed",
+      });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toEqual({ pending: [] });
     } finally {
       await workspace.cleanup();
     }
@@ -4612,6 +4780,42 @@ function createResolvedNotificationItem(overrides: Partial<{
       state: "route",
     },
   };
+}
+
+function createGroupContextHandoffWake(seed: string, occurredAt = FIXED_NOW) {
+  const eventId =
+    `assistant.notification.requested:group-context-handoff:${seed.repeat(64)}`;
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId,
+    memberId: "member_123",
+    notification: {
+      deliveryDedupeToken: eventId,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: eventId,
+      externalThreadRouteAuthority: {
+        accountLookupKey: "account_synthetic",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "thread_synthetic",
+      },
+      groupContextHandoff: {
+        membershipId: "membership_synthetic",
+        originAssistantInputId: `ain_${seed.repeat(32)}`,
+      },
+      instructions: "Use bounded synthetic context.",
+      notificationPromptProfile: "context-handoff",
+      responsePolicy: { kind: "require_send" },
+      route: {
+        actorId: null,
+        channel: "linq",
+        delivery: { kind: "thread", target: "thread_synthetic" },
+        identityId: "identity_synthetic",
+        threadId: "thread_synthetic",
+        threadIsDirect: false,
+      },
+    },
+    occurredAt,
+  });
 }
 
 function createResolvedAssistantAskCompletionItem(overrides: Partial<{
