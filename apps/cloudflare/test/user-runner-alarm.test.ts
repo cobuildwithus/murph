@@ -7271,6 +7271,7 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotStartSessionCreateStorageDurationMs: 0,
       snapshotStartSubstageKind: "completed",
       snapshotStartWriteFenceOwnerValidationDurationMs: 0,
+      workspaceAttemptId: "attempt_1",
     });
   });
 
@@ -7364,6 +7365,7 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotStartOutcomeKind: "created",
       snapshotStartRecordedCandidateCount: 0,
       snapshotStartSubstageKind: "completed",
+      workspaceAttemptId: "attempt_1",
     });
     for (const key of [
       "snapshotStartAlarmCandidateWorkDurationMs",
@@ -7395,6 +7397,7 @@ describe("HostedUserRunner execution coordination", () => {
       "snapshotStartSessionCreateStorageDurationMs",
       "snapshotStartSubstageKind",
       "snapshotStartWriteFenceOwnerValidationDurationMs",
+      "workspaceAttemptId",
     ]);
     expect(JSON.stringify(details)).not.toContain("snapshot_create_no_scan_current");
     expect(JSON.stringify(details)).not.toContain(workspacePrefix);

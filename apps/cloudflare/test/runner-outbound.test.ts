@@ -4422,6 +4422,7 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotStartSubstageKind: "completed",
       snapshotStartTotalDurationMs: 60_000,
       userIdPresent: true,
+      workspaceAttemptId: "attempt_1",
     });
     const durationKeys = [
       "snapshotStartAlarmCandidateWorkDurationMs",
@@ -4458,6 +4459,7 @@ describe("handleRunnerOutboundRequest", () => {
       "snapshotStartTotalDurationMs",
       "snapshotStartWriteFenceOwnerValidationDurationMs",
       "userIdPresent",
+      "workspaceAttemptId",
     ]);
     const serializedDetails = JSON.stringify(details);
     expect(serializedDetails).not.toContain(requireTestString(
