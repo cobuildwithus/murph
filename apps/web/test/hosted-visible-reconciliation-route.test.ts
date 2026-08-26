@@ -53,6 +53,22 @@ describe("visible reconciliation facts route", () => {
     ).toHaveBeenCalledWith({ userId: "member_123" });
     await expect(response.json()).resolves.toEqual({
       blocked: null,
+      mailboxLag: [],
+      workspace: null,
+    });
+  });
+
+  it("projects Environment state only for a negotiated Temporal reader", async () => {
+    const response = await reconciliationRoute.GET(
+      new Request(
+        "https://join.example.test/api/internal/hosted-orchestration/users/member_123/reconciliation-facts?includeEnvironmentInterviewPending=1",
+      ),
+      { params: Promise.resolve({ userId: "member_123" }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      blocked: null,
       environmentInterviewPending: true,
       mailboxLag: [],
       workspace: null,

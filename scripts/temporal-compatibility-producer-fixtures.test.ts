@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
+  projectHostedRuntimeReconciliationFactsWireResponse,
 } from "../packages/hosted-execution/src/reconciliation-facts-wire.ts";
 
 import {
@@ -23,7 +24,6 @@ describe("Temporal compatibility producer fixtures", () => {
     );
     expect(fixtures[0]).toEqual({
       blocked: null,
-      environmentInterviewPending: false,
       mailboxLag: [],
       workspace: null,
     });
@@ -48,9 +48,22 @@ describe("Temporal compatibility producer fixtures", () => {
         systemMailboxFrontier: "default_owned",
       },
     });
-    expect(fixtures).toContainEqual(expect.objectContaining({
+    expect(fixtures.every((fixture) =>
+      !Object.hasOwn(fixture, "environmentInterviewPending"))).toBe(true);
+  });
+
+  it("projects Environment state only for a negotiated reader", () => {
+    expect(projectHostedRuntimeReconciliationFactsWireResponse({
+      blocked: null,
       environmentInterviewPending: true,
-    }));
+      mailboxLag: [],
+      workspace: null,
+    }, true)).toEqual({
+      blocked: null,
+      environmentInterviewPending: true,
+      mailboxLag: [],
+      workspace: null,
+    });
   });
 
   it("writes one canonical artifact for unprivileged CI handoff", async () => {

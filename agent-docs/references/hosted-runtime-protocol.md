@@ -798,11 +798,14 @@ foreground pass before re-admitting background Environment work. This preserves
 foreground authority without aborting canonical publication midway or creating
 a competing queue.
 
-Web projects the required `environmentInterviewPending` boolean on the
-reconciliation wire. The Temporal workflow selects `environment_interview`
-only when that fact is true and no runnable foreground/default work is due;
-older workflow histories retain their former `system_mailbox` command shape
-behind the private worker's Temporal patch marker. The public
+Web projects `environmentInterviewPending` only when the signed Temporal facts
+request uses the exact `?includeEnvironmentInterviewPending=1` compatibility
+search. The legacy no-search response keeps omitting that key because a still-
+routable immutable reader rejects unknown reconciliation keys. The new private
+worker opts in and selects `environment_interview` only when the fact is true
+and no runnable foreground/default work is due; older workflow histories retain
+their former `system_mailbox` command shape behind the private worker's Temporal
+patch marker. The public
 `@murphai/hosted-execution` package version containing both the fact and mode
 must be released before the private worker adopts them. Source links across the
 public/private repository boundary are development proof only and are never a
