@@ -331,15 +331,13 @@ describe("prisma module", () => {
   });
 
   it("logs only allowlisted metadata for adapter connection failures", async () => {
-    process.env = {
-      ...process.env,
-      NODE_ENV: "production",
-      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
-    };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { getPrisma } = await import("@/src/lib/prisma");
+    const { createPrismaClient } = await import("@/src/lib/prisma");
 
-    getPrisma();
+    createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/db?sslmode=require",
+      poolMax: 7,
+    });
     const pool = mocks.poolInstances[0];
     const options = mocks.adapterOptions[0];
     if (!pool || !options) {
@@ -365,7 +363,7 @@ describe("prisma module", () => {
       disposition: "signal",
       idleConnections: 2,
       operation: "adapter.connection",
-      poolMax: null,
+      poolMax: 7,
       source: "adapter_connection",
       totalConnections: 4,
       waitingRequests: 3,
@@ -379,7 +377,7 @@ describe("prisma module", () => {
       disposition: "signal",
       idleConnections: 2,
       operation: "adapter.pool",
-      poolMax: null,
+      poolMax: 7,
       source: "adapter_pool",
       totalConnections: 4,
       waitingRequests: 3,

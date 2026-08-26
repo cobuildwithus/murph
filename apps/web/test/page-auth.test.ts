@@ -107,19 +107,15 @@ describe("hosted page auth", () => {
     });
   });
 
-  it("returns an anonymous snapshot for Prisma P2024 checkout failures", async () => {
-    mocks.getHostedAppSession.mockRejectedValue(
-      Object.assign(new Error("connection pool checkout failed"), {
-        code: "P2024",
-      }),
+  it("rethrows Prisma P2024 checkout failures instead of presenting an anonymous session", async () => {
+    const error = Object.assign(
+      new Error("Timed out fetching a new connection from the connection pool."),
+      { code: "P2024" },
     );
+    mocks.getHostedAppSession.mockRejectedValue(error);
     const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 
-    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
-      authenticated: false,
-      authenticatedMember: null,
-      session: null,
-    });
+    await expect(getHostedPageAuthSnapshot()).rejects.toBe(error);
   });
 
   it("rethrows unexpected app-session failures", async () => {
@@ -284,6 +280,24 @@ describe("hosted dashboard page auth", () => {
       },
     );
     mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns an unavailable dashboard layout state for a Prisma P2024 checkout failure", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(Object.assign(
+      new Error("Timed out fetching a new connection from the connection pool."),
+      {
+        code: "P2024",
+        name: "PrismaClientKnownRequestError",
+      },
+    ));
     const { getHostedDashboardLayoutAuthSnapshot } =
       await import("@/src/lib/hosted-onboarding/page-auth");
 

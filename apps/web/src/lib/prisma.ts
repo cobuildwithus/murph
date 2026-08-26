@@ -135,7 +135,7 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
   return pool;
 }
 
-function createPrismaAdapter(pool: PgPool): PrismaPg {
+function createPrismaAdapter(pool: PgPool, poolMax: number): PrismaPg {
   return new PrismaPg(pool, {
     disposeExternalPool: true,
     onConnectionError: (error) => {
@@ -146,7 +146,7 @@ function createPrismaAdapter(pool: PgPool): PrismaPg {
           attempt: null,
           disposition: "signal",
           operation: "adapter.connection",
-          poolMax: null,
+          poolMax,
           source: "adapter_connection",
         },
       );
@@ -159,7 +159,7 @@ function createPrismaAdapter(pool: PgPool): PrismaPg {
           attempt: null,
           disposition: "signal",
           operation: "adapter.pool",
-          poolMax: null,
+          poolMax,
           source: "adapter_pool",
         },
       );
@@ -173,7 +173,7 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
   const pool = createPrismaPool(input);
 
   const client = new PrismaClient({
-    adapter: createPrismaAdapter(pool),
+    adapter: createPrismaAdapter(pool, poolMax),
     ...(logLevels.length > 0 ? { log: logLevels } : {}),
     transactionOptions: {
       maxWait: PRISMA_TRANSACTION_MAX_WAIT_MS,
