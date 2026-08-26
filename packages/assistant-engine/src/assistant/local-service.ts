@@ -2089,22 +2089,27 @@ export async function sendAssistantMessageLocal(
             signal: currentInput.abortSignal,
           })
           if (draftWindowOutcome.kind === 'review') {
+            const accepted = await acceptActiveTurnInput({
+              activeTurnInput: draftWindowOutcome.acceptedInput,
+              providerRequestAcceptedInputIds,
+              providerRequestOrdinal: 1,
+              sessionId: currentSession.sessionId,
+            })
+            replyDeliveryContexts.push(
+              pickAssistantReplyDeliveryContext(currentInput),
+            )
+            acceptedInputIdsByDeliveryContextOrdinal[
+              replyDeliveryContexts.length - 1
+            ] = accepted.acceptedInputItems.map((item) => item.id)
+          }
+          // Context zero includes every pre-provider input. Any later context
+          // proves that group input joined while request zero was running or
+          // during its draft window, so its result is only a draft.
+          if (replyDeliveryContexts.length > 1) {
             providerRequestOrdinal = 1
+            providerRequestDeliveryContextBaseOrdinal =
+              replyDeliveryContexts.length - 1
             try {
-              const accepted = await acceptActiveTurnInput({
-                activeTurnInput: draftWindowOutcome.acceptedInput,
-                providerRequestAcceptedInputIds,
-                providerRequestOrdinal,
-                sessionId: currentSession.sessionId,
-              })
-              replyDeliveryContexts.push(
-                pickAssistantReplyDeliveryContext(currentInput),
-              )
-              providerRequestDeliveryContextBaseOrdinal =
-                replyDeliveryContexts.length - 1
-              acceptedInputIdsByDeliveryContextOrdinal[
-                providerRequestDeliveryContextBaseOrdinal
-              ] = accepted.acceptedInputItems.map((item) => item.id)
               currentSession = applyAssistantProviderTurnResumeInMemory({
                 providerResult,
                 session: currentSession,

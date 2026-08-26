@@ -4293,3 +4293,167 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.appendAssistantTranscriptEntriesWithRefs.mock.invocationCallOrder[0]!,
   )
 })
+
+test('sendAssistantMessageLocal reconsiders group input live-steered into request zero', async () => {
+  vi.useFakeTimers()
+  try {
+    const session = createAssistantSession({
+      binding: {
+        actorId: null,
+        channel: 'telegram',
+        conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+        delivery: { kind: 'thread', target: 'thread-1' },
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+    })
+    const sharedPlan = createSharedPlan()
+    sharedPlan.conversationPolicy.audience.channel = 'telegram'
+    sharedPlan.conversationPolicy.audience.threadIsDirect = false
+    const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+      plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+      session,
+    })
+    const providerStarted = createDeferred<void>()
+    const providerRelease = createDeferred<void>()
+    const liveSteeredPrompts: string[] = []
+
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+      async (providerInput) => {
+        await providerInput.onProviderRequestPlanned?.({
+          providerAttemptId: 'attempt-live-0',
+          codexContinuation: { kind: 'explicit-structured-history' },
+        })
+        const releaseLiveTurn =
+          providerInput.activeTurnSteering?.registerLiveProviderTurn({
+            interrupt: async () => undefined,
+            codexThreadId: 'provider-thread-group-live-draft',
+            providerTurnId: 'provider-turn-group-live-draft-0',
+            sessionId: session.sessionId,
+            steer: async (steerInput) => {
+              liveSteeredPrompts.push(steerInput.prompt)
+            },
+            turnId: 'turn-1',
+          })
+        providerStarted.resolve()
+        await providerRelease.promise
+        providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+        releaseLiveTurn?.()
+        return {
+          kind: 'succeeded',
+          providerTurn: {
+            onboardingGuidanceInjected: true,
+            codexContinuation: { kind: 'explicit-structured-history' },
+            codexThreadId: 'provider-thread-group-live-draft',
+            response: 'Provisional answer to only the second request.',
+            responseDeliveryContextOrdinal: 1,
+            route: { routeId: 'route-group-live-draft' },
+            session,
+            transcriptResponse: 'Provisional answer to only the second request.',
+          },
+        }
+      },
+    )
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+      async (providerInput) => {
+        await providerInput.onProviderRequestPlanned?.({
+          providerAttemptId: 'attempt-live-1',
+          codexContinuation: { kind: 'explicit-structured-history' },
+        })
+        providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+        return {
+          kind: 'succeeded',
+          providerTurn: {
+            onboardingGuidanceInjected: true,
+            codexContinuation: { kind: 'explicit-structured-history' },
+            codexThreadId: 'provider-thread-group-live-draft',
+            response: 'One final answer covering both requests.',
+            responseDeliveryContextOrdinal: 0,
+            route: { routeId: 'route-group-live-draft' },
+            session,
+            transcriptResponse: 'One final answer covering both requests.',
+          },
+        }
+      },
+    )
+
+    const initialResult = sendAssistantMessageLocal({
+      activeTurnInput: async () => ({ kind: 'no-new-input' }),
+      conversation: {
+        channel: 'telegram',
+        directness: 'group',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      deliverResponse: true,
+      prompt: 'First group request',
+      turnTrigger: 'automation-auto-reply',
+      vault: '/vaults/test',
+    })
+    await providerStarted.promise
+    const { steerAssistantActiveTurnInputWithStatus } = await import(
+      '../src/assistant/active-turn-input-controller.ts'
+    )
+    const followUp = steerAssistantActiveTurnInputWithStatus({
+      conversation: {
+        channel: 'telegram',
+        directness: 'group',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-1',
+      prompt: 'Second group request',
+      vault: '/vaults/test',
+    })
+    assert.equal(followUp.kind, 'queued')
+    await vi.waitFor(() => {
+      expect(liveSteeredPrompts).toEqual(['Second group request'])
+    })
+    providerRelease.resolve()
+    await vi.waitFor(() => {
+      expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledOnce()
+    })
+    await vi.advanceTimersByTimeAsync(4_000)
+    const [initialOutcome, followUpOutcome] = await Promise.all([
+      initialResult,
+      followUp.completion,
+    ])
+
+    for (const outcome of [initialOutcome, followUpOutcome]) {
+      expect(outcome).toMatchObject({
+        prompt: 'First group request\n\nSecond group request',
+        response: 'One final answer covering both requests.',
+      })
+    }
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls.map(
+        ([providerInput]) => providerInput.providerRequestOrdinal,
+      ),
+    ).toEqual([0, 1])
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
+    ).toMatchObject({
+      prompt: 'First group request\n\nSecond group request',
+      turnContext: expect.stringContaining(
+        'The unsent draft neither answers a request nor keeps Murph\'s floor',
+      ),
+    })
+    expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+    expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
+      'One final answer covering both requests.',
+    )
+    expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
+      expect.objectContaining({ segments: [] }),
+    )
+    expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledOnce()
+    expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        precedingAssistantTranscriptTexts: [],
+        providerResumeStateAction: 'clear',
+      }),
+    )
+  } finally {
+    vi.useRealTimers()
+  }
+})
