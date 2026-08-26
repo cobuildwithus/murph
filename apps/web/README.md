@@ -1516,21 +1516,17 @@ New routed Linq and Telegram groups materialize their ordinary unnamed hosted
 group and route-owner membership inside the canonical route transaction. For
 the one-time repair of routed containers created before that invariant, deploy
 the replacement Web build first, prove the production alias, wait the configured
-prior-function drain, and prove the alias again. Then run the aggregate-only
-dry run, bounded apply, and zero-pending readiness check:
+prior-function drain, and prove the alias again. Production database variables
+are write-only in Vercel's local CLI path, so run the temporary repair through
+the existing protected production workflow. It performs the aggregate-only dry
+run, one bounded apply batch, and the zero-pending readiness check:
 
 ```bash
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web groups:backfill-materialization --batch-size 50
-
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web groups:backfill-materialization --apply --batch-size 50
-
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web groups:backfill-materialization --check
+gh workflow run hosted-web-contract-migrations.yml \
+  --ref main \
+  -f deployed_sha=<CURRENT_PRODUCTION_SHA> \
+  -f deployment_url=<CURRENT_PRODUCTION_DEPLOYMENT_URL> \
+  -f run_group_materialization_backfill=true
 ```
 
 Each candidate runs serially in its own short database-only transaction and
@@ -1542,9 +1538,9 @@ explicit join flows retain their sharing behavior. The ordinary owner
 membership also satisfies existing current-participant gates for group actions
 such as outbound calls and physical notes; those effects retain exact-message,
 activation, usage, explicit-request, and final pre-provider checks. Repeat bounded
-apply batches until `remainingRows` is zero, then require `--check` to pass. Do
-not install a recurring job; remove the temporary command after production
-convergence is verified.
+workflow runs if more than 50 rows remain, and require the final `--check` to
+pass. Do not install a recurring job; remove the temporary workflow input and
+command after production convergence is verified.
 
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
