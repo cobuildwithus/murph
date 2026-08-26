@@ -96,6 +96,7 @@ const mocks = vi.hoisted(() => ({
   hostedUsageCreditPurchase: {
     findMany: vi.fn(),
   },
+  queryRaw: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -141,6 +142,7 @@ let growthCronRoute: GrowthCronRouteModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
+  $queryRaw: mocks.queryRaw,
   hostedAccountGroup: mocks.hostedAccountGroup,
   hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
@@ -922,6 +924,22 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(1);
+    mocks.queryRaw.mockResolvedValueOnce([{
+      activeMonthlyCapUsdCents: 0n,
+      activeMonthlySponsorships: 0n,
+      monthlyPaidPurchasesThisMonth: 0n,
+      monthlyPaidThisMonthUsdCents: 0n,
+      oneTimePaidPurchasesThisMonth: 0n,
+      oneTimePaidThisMonthUsdCents: 0n,
+      paidPurchasesThisMonth: 0n,
+      paidThisMonthUsdCents: 0n,
+      remainingUsageUsdMicros: 0n,
+      usageConsumedThisMonthUsdMicros: 0n,
+    }]);
+    const guarded = createDatabaseConcurrencyGuard(
+      prisma as unknown as Record<string, unknown>,
+    );
+    mocks.getPrisma.mockReturnValue(guarded.client);
 
     const markup = renderToStaticMarkup(await growthPage.default());
 
@@ -941,6 +959,8 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toMatch(
       /Tracked fulfilled usage top-ups<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
     );
+    expect(guarded.peak()).toBe(8);
+    expect(mocks.queryRaw).toHaveBeenCalledOnce();
     expect(mocks.hostedGrowthDailySnapshot.upsert).not.toHaveBeenCalled();
     expect(mocks.hostedMember.updateMany).not.toHaveBeenCalled();
     expect(mocks.hostedUsageCreditEntry.findMany.mock.calls[0]?.[0]).toMatchObject({
@@ -1242,7 +1262,7 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     mocks.hostedUsageCreditEntry.count.mockResolvedValue(0);
     const guarded = createDatabaseConcurrencyGuard(
-      prisma as unknown as Record<string, Record<string, unknown>>,
+      prisma as unknown as Record<string, unknown>,
     );
 
     const dashboard = await readHostedGrowthDashboard(
@@ -3267,33 +3287,39 @@ function activeUserRows(count: number) {
 }
 
 function createDatabaseConcurrencyGuard(
-  client: Record<string, Record<string, unknown>>,
+  client: Record<string, unknown>,
 ): {
-  client: Record<string, Record<string, unknown>>;
+  client: Record<string, unknown>;
   peak: () => number;
 } {
   let active = 0;
   let peak = 0;
+  const guardOperation = (operation: unknown, receiver: object): unknown => {
+    if (typeof operation !== "function") {
+      return operation;
+    }
+    return async (...args: unknown[]) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        await Promise.resolve();
+        return await Reflect.apply(operation, receiver, args);
+      } finally {
+        active -= 1;
+      }
+    };
+  };
   const guardedClient = Object.fromEntries(
     Object.entries(client).map(([delegateName, delegate]) => [
       delegateName,
-      Object.fromEntries(
-        Object.entries(delegate).map(([methodName, method]) => [
-          methodName,
-          typeof method !== "function"
-            ? method
-            : async (...args: unknown[]) => {
-                active += 1;
-                peak = Math.max(peak, active);
-                try {
-                  await Promise.resolve();
-                  return await Reflect.apply(method, delegate, args);
-                } finally {
-                  active -= 1;
-                }
-              },
-        ]),
-      ),
+      delegate && typeof delegate === "object"
+        ? Object.fromEntries(
+            Object.entries(delegate).map(([methodName, method]) => [
+              methodName,
+              guardOperation(method, delegate),
+            ]),
+          )
+        : guardOperation(delegate, client),
     ]),
   );
   return {
