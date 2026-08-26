@@ -104,6 +104,16 @@ Updated: 2026-08-26
   returned `ASSISTANT_CODEX_USAGE_LIMIT` before any provider action, and no
   explicitly authorized alternate home was available.
 - Draft PR: #2361.
+- Final ReviewGPT round 1 returned one accepted `Complexity Collapse`: exact
+  handoff replay already owns a pinned membership and route, so repeating the
+  global membership selection can only add load or let an unrelated duplicate
+  label invalidate recovery. The correction compares the supplied normalized
+  label directly with the locked target label and deletes the replay scan.
+- The preliminary specialist packet was invalid because the audit ZIP omitted
+  the repository-owned assistant-verification skill. Its provisional live
+  coverage finding was accepted: the focused journey now exposes both group
+  tools so its exactly-one-handoff assertion forbids `list_memberships`. Its
+  replay finding was superseded by deleting replay membership selection.
 
 ## Verification
 

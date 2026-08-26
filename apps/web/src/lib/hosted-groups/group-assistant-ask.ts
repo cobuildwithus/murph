@@ -1933,18 +1933,12 @@ async function replayHostedGroupContextHandoffTx(input: {
   if (!authority) {
     return unavailableAdmission("membership_unavailable");
   }
-  if (input.requestedLabel !== null) {
-    const requestedTarget = resolveHostedAssistantAskMembership({
-      memberships: await readHostedAssistantAskMemberships({
-        memberId: input.memberId,
-        prisma: input.tx,
-        requestedLabel: input.requestedLabel,
-      }),
-      requestedLabel: input.requestedLabel,
-    });
-    if (requestedTarget.membership?.id !== handoff.membershipId) {
-      return unavailableAdmission("request_conflict");
-    }
+  if (
+    input.requestedLabel !== null
+    && normalizeHostedAssistantAskPersistedSelector(authority.targetLabel)
+      !== input.requestedLabel
+  ) {
+    return unavailableAdmission("request_conflict");
   }
 
   try {

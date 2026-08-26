@@ -3770,7 +3770,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          dynamicTools: [
+            MURPH_GROUP_CONSULT_TOOL,
+            MURPH_GROUP_MEMBERSHIP_TOOL,
+          ],
           env: {
             ...config.env,
             PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,

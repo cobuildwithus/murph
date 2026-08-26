@@ -955,7 +955,7 @@ describe("Hosted private-to-group context handoff admission", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("replays a committed wake without selecting or appending again", async () => {
+  it("replays a pinned wake without reselecting after membership-label changes", async () => {
     const context = "The original bounded fact.";
     const eventId = createHostedGroupContextHandoffEventId({
       memberId: ORIGIN_MEMBER_ID,
@@ -969,7 +969,14 @@ describe("Hosted private-to-group context handoff admission", () => {
     });
     tx.hostedGroupMember.findMany
       .mockResolvedValueOnce([target])
-      .mockResolvedValue(memberships);
+      .mockResolvedValue([
+        ...memberships,
+        membership({
+          displayName: "  TRAIL   CREW ",
+          id: "membership-later-duplicate",
+          runtimeMemberId: "member-later-duplicate-runtime",
+        }),
+      ]);
     mocks.readHostedMailboxItemById.mockImplementation(async () =>
       persistedWake ? mailboxItemForContextHandoff(persistedWake) : null
     );
@@ -1015,7 +1022,7 @@ describe("Hosted private-to-group context handoff admission", () => {
       },
       result: { status: "accepted", targetLabel: "Trail Crew" },
     });
-    expect(tx.hostedGroupMember.findMany).toHaveBeenCalledTimes(2);
+    expect(tx.hostedGroupMember.findMany).toHaveBeenCalledOnce();
     expect(mocks.resolveHostedAssistantNotificationDestination)
       .toHaveBeenCalledOnce();
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
