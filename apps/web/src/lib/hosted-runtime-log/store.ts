@@ -125,14 +125,18 @@ export async function recordHostedRuntimeLogs(input: {
   const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
   const isUserActive = input.isUserActive ?? readHostedRuntimeLogUserActive;
 
-  // Resolve cross-database authority before isolated checkout. The monotonic
-  // fence below rejects a stale active read if deletion commits in this gap.
+  // Reject inactive members before isolated checkout. Active members are
+  // revalidated under the subject lock because billing suspension is
+  // reversible and therefore does not create the permanent deletion fence.
   if (!await isUserActive(userId)) {
     return 0;
   }
 
   return withHostedRuntimeLogTransaction(database, async (client) => {
     await lockHostedRuntimeLogSubject(client, hostedRuntimeLogLockKey(subjectKey));
+    if (!await isUserActive(userId)) {
+      return 0;
+    }
     if (await hasHostedRuntimeLogDeletionFence(client, subjectKey)) {
       return 0;
     }

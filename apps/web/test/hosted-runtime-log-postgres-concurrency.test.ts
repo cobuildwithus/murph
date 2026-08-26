@@ -300,7 +300,48 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     }
 
     await expect(append).resolves.toBe(0);
+    expect(authorityChecks).toBe(2);
     await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+  });
+
+  it("drops an append after reversible suspension without creating a deletion fence", async () => {
+    const sql = requireDatabase(database);
+    const userId = `member_runtime_log_billing_suspension_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
+    const appendConnectEntered = deferred();
+    const releaseAppendConnect = deferred();
+    let active = true;
+    let authorityChecks = 0;
+
+    const append = recordHostedRuntimeLogs({
+      database: beforeConnect(sql, async () => {
+        appendConnectEntered.resolve();
+        await releaseAppendConnect.promise;
+      }),
+      entries: [runtimeEntry()],
+      isUserActive: async () => {
+        authorityChecks += 1;
+        return active;
+      },
+      userId,
+    });
+    await appendConnectEntered.promise;
+    expect(authorityChecks).toBe(1);
+
+    // Billing suspension is reversible and does not use the account-deletion
+    // cleanup owner, so it deliberately creates no permanent isolated fence.
+    active = false;
+    await expect(
+      countDeletionFences(requirePool(pool), subjectKey),
+    ).resolves.toBe(0);
+    releaseAppendConnect.resolve();
+
+    await expect(append).resolves.toBe(0);
+    expect(authorityChecks).toBe(2);
+    await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+    await expect(
+      countDeletionFences(requirePool(pool), subjectKey),
+    ).resolves.toBe(0);
   });
 
   it("rolls back a timed-out cleanup and lets repeated deletion converge", async () => {

@@ -104,7 +104,7 @@ describe("dedicated hosted runtime log store", () => {
     expect(BigInt(lockKey)).toBeLessThan(2n ** 63n);
   });
 
-  it("resolves primary authority before checkout, then locks and writes one validated batch", async () => {
+  it("prechecks authority before checkout, then revalidates under lock and writes", async () => {
     const userId = "member_runtime_logs_1";
     const subjectKey = hostedRuntimeLogSubjectKey(userId);
     const database = new FakeSqlDatabase({
@@ -117,7 +117,7 @@ describe("dedicated hosted runtime log store", () => {
       ],
     });
     const isUserActive = vi.fn(async () => {
-      expect(database.connectCount).toBe(0);
+      expect(database.connectCount).toBe(isUserActive.mock.calls.length === 1 ? 0 : 1);
       return true;
     });
 
@@ -142,6 +142,7 @@ describe("dedicated hosted runtime log store", () => {
     });
 
     expect(count).toBe(2);
+    expect(isUserActive).toHaveBeenCalledTimes(2);
     expect(isUserActive).toHaveBeenCalledWith(userId);
     expect(database.connectCount).toBe(1);
     expect(database.client.released).toBe(true);
@@ -196,7 +197,7 @@ describe("dedicated hosted runtime log store", () => {
       userId,
     })).resolves.toBe(0);
 
-    expect(isUserActive).toHaveBeenCalledOnce();
+    expect(isUserActive).toHaveBeenCalledTimes(2);
     expect(database.client.calls.map((call) => compactSql(call.text))).toEqual([
       "BEGIN",
       "SELECT pg_advisory_xact_lock($1::bigint)",
@@ -261,6 +262,35 @@ describe("dedicated hosted runtime log store", () => {
     expect(database.connectCount).toBe(0);
     expect(database.client.calls).toHaveLength(0);
     expect(database.client.released).toBe(false);
+  });
+
+  it("drops a batch when reversible suspension commits after the precheck", async () => {
+    const database = new FakeSqlDatabase({
+      clientResults: [{}, {}, {}],
+    });
+    const isUserActive = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await expect(recordHostedRuntimeLogs({
+      database,
+      entries: [runtimeEntry("mailbox.imported")],
+      isUserActive,
+      userId: "member_runtime_logs_billing_suspended",
+    })).resolves.toBe(0);
+
+    expect(isUserActive).toHaveBeenCalledTimes(2);
+    expect(database.client.calls.map((call) => compactSql(call.text))).toEqual([
+      "BEGIN",
+      "SELECT pg_advisory_xact_lock($1::bigint)",
+      "COMMIT",
+    ]);
+    expect(database.client.calls.some((call) =>
+      compactSql(call.text).includes("hosted_runtime_log_deletion_fence")
+    )).toBe(false);
+    expect(database.client.calls.some((call) =>
+      compactSql(call.text).includes("INSERT INTO hosted_runtime_log")
+    )).toBe(false);
   });
 
   it("locks subjects deterministically and deletes by full subject key", async () => {

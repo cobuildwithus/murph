@@ -110,11 +110,18 @@ messages, credentials, and paths remain excluded.
 Append validates the complete batch and resolves primary member authority before
 any isolated pool checkout. A missing or suspended member returns
 `loggedCount: 0` without opening an isolated transaction. An active member then
-enters one short, isolated-database-only transaction:
+enters one short isolated transaction:
 
 1. Take the subject's transaction-scoped advisory lock.
-2. Return `loggedCount: 0` when the subject deletion fence exists.
-3. Insert the validated batch with one SQL statement.
+2. Re-read primary member authority and return `loggedCount: 0` when the member
+   became missing or suspended.
+3. Return `loggedCount: 0` when the subject deletion fence exists.
+4. Insert the validated batch with one SQL statement.
+
+The early authority read keeps its entire wait ahead of isolated checkout. The
+final read preserves reversible billing-suspension authority under the subject
+lock; billing restoration can clear that suspension, so it must not create a
+permanent deletion fence.
 
 Moving only the primary read would leave a privacy gap: append could read an
 active member, account deletion could commit its primary suspension and complete
@@ -145,6 +152,8 @@ The two race orderings converge without a new service or lifecycle owner:
 - If cleanup owns the lock after append's earlier primary-active read, cleanup
   records the fence and deletes rows before releasing the lock; the delayed
   append then sees the fence and writes zero rows.
+- If reversible billing suspension commits after append's early active read,
+  the final authority read writes zero rows without creating a deletion fence.
 - If the isolated database is unavailable after canonical account deletion, the
   receipt retries with bounded backoff until fence-and-delete converges, then
   records the target complete independently of Cloudflare and vendors.
