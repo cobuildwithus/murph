@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "faster-connected-health-catch-up",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected health histories catch up faster",
+    "summary": "Large connected-health histories can now process new background updates without repeatedly rebuilding the same local history index.",
+    "details": "Corrections and outside changes still trigger a fresh safety scan, while new timing details help Murph identify any remaining slow provider work.",
+    "relevanceTags": ["connected-health", "wearables", "sync", "reliability"],
+    "sourcePullRequests": [2306]
+  }
+}
