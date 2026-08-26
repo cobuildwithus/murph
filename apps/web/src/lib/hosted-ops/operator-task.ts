@@ -31,6 +31,8 @@ import { handoffHostedMailboxWake } from "../hosted-orchestration/mailbox-wake";
 import {
   bindHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination,
+  type HostedAssistantNotificationBoundDestination,
+  type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
 
@@ -419,24 +421,10 @@ async function buildOperatorMessageWake(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  if (!destination || destination.conversationShape !== "direct-member") {
-    throw operatorTaskError(
-      "HOSTED_OPERATOR_TASK_DIRECT_ROUTE_REQUIRED",
-      "Member messaging requires an active private direct route.",
-      409,
-    );
-  }
-  const bound = bindHostedAssistantNotificationDestination({
+  const bound = bindHostedOperatorMessageDestination({
     destination,
     memberId: input.memberId,
   });
-  if (bound.route.threadIsDirect !== true) {
-    throw operatorTaskError(
-      "HOSTED_OPERATOR_TASK_DIRECT_ROUTE_REQUIRED",
-      "Member messaging requires an active private direct route.",
-      409,
-    );
-  }
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: input.requestMailboxItemId,
     memberId: input.memberId,
@@ -461,6 +449,39 @@ async function buildOperatorMessageWake(input: {
     },
     occurredAt: input.now.toISOString(),
   });
+}
+
+export function bindHostedOperatorMessageDestination(input: {
+  destination: HostedAssistantNotificationDestination | null;
+  memberId: string;
+}): HostedAssistantNotificationBoundDestination {
+  const { destination } = input;
+  if (
+    !destination
+    || destination.conversationShape !== "direct-member"
+    || destination.route.delivery.kind !== "thread"
+  ) {
+    throw operatorTaskError(
+      "HOSTED_OPERATOR_TASK_DIRECT_ROUTE_REQUIRED",
+      "Member messaging requires an active private direct route.",
+      409,
+    );
+  }
+  const bound = bindHostedAssistantNotificationDestination({
+    destination,
+    memberId: input.memberId,
+  });
+  if (
+    bound.route.threadIsDirect !== true
+    || bound.externalThreadRouteAuthority === null
+  ) {
+    throw operatorTaskError(
+      "HOSTED_OPERATOR_TASK_DIRECT_ROUTE_REQUIRED",
+      "Member messaging requires an active private direct route.",
+      409,
+    );
+  }
+  return bound;
 }
 
 function createOperatorTaskId(input: {

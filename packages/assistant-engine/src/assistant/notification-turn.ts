@@ -91,6 +91,7 @@ import {
 import {
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  readAssistantOutboxIntentByDeliveryIdempotencyKey,
 } from './outbox.js'
 import { createAssistantBinding } from './bindings.js'
 import {
@@ -330,6 +331,11 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const recoveredOperatorMessage =
+        await recoverQueuedAssistantOperatorMessage(input)
+      if (recoveredOperatorMessage) {
+        return recoveredOperatorMessage
+      }
       const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,
@@ -962,6 +968,60 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+async function recoverQueuedAssistantOperatorMessage(
+  input: AssistantNotificationInput,
+): Promise<AssistantNotificationResult | null> {
+  const deliveryIdempotencyKey = normalizeNullableString(
+    input.deliveryIdempotencyKey,
+  )
+  if (
+    input.notificationPromptProfile !== 'operator-message'
+    || input.deliveryDispatchMode !== 'queue-only'
+    || input.responsePolicy?.kind !== 'require_send'
+    || deliveryIdempotencyKey === null
+  ) {
+    return null
+  }
+
+  const intent = await readAssistantOutboxIntentByDeliveryIdempotencyKey({
+    deliveryIdempotencyKey,
+    vault: input.vault,
+  })
+  if (!intent) {
+    return null
+  }
+  if (intent.operation !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_OPERATOR_MESSAGE_REPLAY_INVALID',
+      'Hosted operator message retry matched a non-message outbox action.',
+    )
+  }
+  const response = normalizeRequiredText(
+    intent.message,
+    'Hosted operator message retry matched an empty outbox message.',
+  )
+  const session = await createAssistantRuntimeStateService(input.vault)
+    .sessions.get(intent.sessionId)
+
+  return {
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Previously queued operator message.',
+      subject: intent.subject,
+      text: response,
+    },
+    deliveryOutcome: {
+      error: intent.lastError,
+      intentId: intent.intentId,
+      kind: 'queued',
+      media: intent.media,
+      session,
+    },
+    response,
+    session,
+  }
 }
 
 function resolveAssistantNotificationPresentation(input: {

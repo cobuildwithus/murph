@@ -85,6 +85,41 @@ describe("hosted operator task notification", () => {
       .toEqual(["authorize", "authorize", "complete"]);
   });
 
+  it("completes a recovered outbox intent without requiring another authorization hook", async () => {
+    const controlOperatorTask = vi.fn().mockResolvedValue(
+      { status: "completed" } satisfies HostedOperatorTaskControlResponse,
+    );
+    mocks.sendAssistantNotification.mockResolvedValue({
+      decision: {
+        kind: "send_message" as const,
+        privateSummary: "Previously queued operator message.",
+        text: "Original member message.",
+      },
+      deliveryOutcome: {
+        error: null,
+        intentId: "intent_operator_original",
+        kind: "queued" as const,
+        media: [],
+        session: { sessionId: "session_operator_original" },
+      },
+      response: "Original member message.",
+      session: { sessionId: "session_operator_original" },
+    });
+
+    const outcome = await executeHostedAssistantNotificationWake({
+      effectsPort: { controlOperatorTask },
+      executionContext: EXECUTION_CONTEXT,
+      forceQueueOnly: true,
+      sourceMailboxItemId: EVENT_ID,
+      vaultRoot: "/synthetic-vault",
+      wake: createOperatorMessageWake(),
+    });
+
+    expect(outcome.deliveryIntentIds).toEqual(["intent_operator_original"]);
+    expect(controlOperatorTask).toHaveBeenCalledOnce();
+    expect(controlOperatorTask.mock.calls[0]?.[0].action).toBe("complete");
+  });
+
   it("terminally consumes an expired task before provider admission", async () => {
     const controlOperatorTask = vi.fn().mockResolvedValue(
       { status: "expired" } satisfies HostedOperatorTaskControlResponse,
