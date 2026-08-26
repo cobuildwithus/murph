@@ -1,6 +1,6 @@
 # Environment Reconciliation Wire Compatibility
 
-Status: active
+Status: completed
 Updated: 2026-08-26
 
 ## Outcome And Invariant
@@ -28,9 +28,9 @@ the change adds no persisted rollout state or second scheduling owner.
    strict parsing of the boolean fact. Completed.
 3. Cover legacy omission, negotiated inclusion, signed client search, workflow
    selection, and both ownership directions with focused and production-shaped
-   proof. In progress.
-4. Push and rerun sensitive exact-head ReviewGPT, required CI, and the protected
-   immutable-reader matrix before merge. Pending.
+   proof. Completed.
+4. Push and rerun sensitive exact-head ReviewGPT before admitting the candidate
+   to required CI and the protected immutable-reader matrix. Completed.
 
 ## Deployment
 
@@ -50,3 +50,10 @@ pins the released public package, signs the exact search, and only then selects
 - The production-shaped local journey setup was blocked before runtime by the
   macOS runner static-closure budget; exact-head Linux CI owns that platform
   check, while the previously reviewed ownership behavior remains unchanged.
+- Sensitive final ReviewGPT round 2 audited the full exact-head snapshot and
+  returned `ROUND_OUTCOME: PASS` with no qualifying findings. Its recovered
+  exact-turn response hash and compatible Pro-model metadata are verified.
+- Current-base `git merge-tree --write-tree` is clean after the single bounded
+  base reconciliation. Required exact-head CI and the protected immutable-reader
+  matrix remain the Ready/merge admission gates.
+Completed: 2026-08-26
