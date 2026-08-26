@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -259,12 +259,14 @@ count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
 If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
-any provider action and an explicitly authorized absolute alternate path is
-already available, rerun that same focused journey once with
-`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. The runner selects that home's
-existing auth and config without copying credentials. Do not auto-discover
-profiles or cycle through homes. If no authorized alternate path is available,
-or if the supplied alternate is also blocked, record `Hold`.
+any provider action, this repository grants standing authorization to discover
+alternate local Codex homes by directory and non-empty auth-file presence only,
+select one already-authenticated home that has not been used for that focused
+journey, and rerun the same journey once with
+`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Never read, print, copy, or move
+auth material. Do not cycle through additional homes. If no authenticated
+alternate is available, or if that one alternate is also blocked, record
+`Hold`.
 
 Assistant Engine's lower-level opt-in live Codex journeys still use
 `MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
