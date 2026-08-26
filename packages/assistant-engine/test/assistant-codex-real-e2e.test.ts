@@ -7559,6 +7559,10 @@ describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
           action.kind === 'dynamic'
           && action.tool === MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name
         )
+        const imageCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )
         const sendCalls = actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
@@ -7571,6 +7575,7 @@ describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
           })}\n`,
         )
         expect(recoveryCalls).toHaveLength(1)
+        expect(imageCalls).toHaveLength(0)
         expect(sendCalls).toHaveLength(0)
         expect(resolveRequests).toEqual([{
           originAssistantInputId: messageRef,

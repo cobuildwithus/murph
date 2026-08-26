@@ -185,6 +185,21 @@ describe("check-provider-request-boundaries", () => {
     ]);
   });
 
+  it("rejects object-literal Lob request params around an official SDK call", () => {
+    expect(violations(`
+      import { LettersApi } from "@lob/lob-typescript-sdk";
+      async function findLetter(letters: LettersApi, query: Record<string, string>) {
+        return letters.list(2, undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, { params: query });
+      }
+      function createLobFetchAdapter(fetchImpl: typeof fetch) {
+        return (url: string) => fetchImpl(url);
+      }
+    `, "apps/web/src/lib/physical-notes/lob-runtime.ts")).toEqual([
+      "official-sdk-request-override",
+    ]);
+  });
+
   it("keeps providers without a verified TypeScript SDK outside the ban", () => {
     expect(violations(`
       fetch("https://api.telegram.org/bot/example/sendMessage");
