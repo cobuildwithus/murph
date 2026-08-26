@@ -1513,34 +1513,14 @@ assignment and deployment contract is in
 `docs/hosted-linq-db-home-lines-migration.md`.
 
 New routed Linq and Telegram groups materialize their ordinary unnamed hosted
-group and route-owner membership inside the canonical route transaction. For
-the one-time repair of routed containers created before that invariant, deploy
-the replacement Web build first, prove the production alias, wait the configured
-prior-function drain, and prove the alias again. Production database variables
-are write-only in Vercel's local CLI path, so run the temporary repair through
-the existing protected production workflow. It performs the aggregate-only dry
-run, one bounded apply batch, and the zero-pending readiness check:
-
-```bash
-gh workflow run hosted-web-contract-migrations.yml \
-  --ref main \
-  -f deployed_sha=<CURRENT_PRODUCTION_SHA> \
-  -f deployment_url=<CURRENT_PRODUCTION_DEPLOYMENT_URL> \
-  -f run_group_materialization_backfill=true
-```
-
-Each candidate runs serially in its own short database-only transaction and
-reuses the same structural group-store primitive as future route creation. The
-operation creates only the unnamed group and route-owner membership. It does
+group and route-owner membership inside the canonical route transaction. The
+structural write creates only the unnamed group and owner membership. It does
 not add roster participants, create a join code, import a provider title, or
 grant profile, health, or email sharing. Existing owner-authorized setup and
 explicit join flows retain their sharing behavior. The ordinary owner
 membership also satisfies existing current-participant gates for group actions
 such as outbound calls and physical notes; those effects retain exact-message,
-activation, usage, explicit-request, and final pre-provider checks. Repeat bounded
-workflow runs if more than 50 rows remain, and require the final `--check` to
-pass. Do not install a recurring job; remove the temporary workflow input and
-command after production convergence is verified.
+activation, usage, explicit-request, and final pre-provider checks.
 
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
