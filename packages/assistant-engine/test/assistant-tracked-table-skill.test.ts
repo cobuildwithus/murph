@@ -127,6 +127,8 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout start')
     expect(skill).toContain('vault-cli workout show <evt_id> --format json')
     expect(skill).toContain('vault-cli workout exercise add')
+    expect(skill).toContain('--mode <mode>')
+    expect(skill).toContain('[--unit-override <lb|kg>]')
     expect(skill).toContain('[--sets <n>]')
     expect(skill).toContain('vault-cli workout exercise set-reps')
     expect(skill).toContain('vault-cli workout set log')
@@ -185,7 +187,14 @@ describe('assistant tracked workout table skill', () => {
       'Starting a new workout is independent of every older unfinished workout',
     )
     expect(skill).toContain(
-      "one repeated `--exercise 'name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise",
+      "one repeated `--exercise 'name=...;mode=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise",
+    )
+    expect(skill).toContain('Every ad-hoc exercise must have one explicit editor mode.')
+    expect(skill).toContain(
+      'Every `weight_reps` exercise also needs an exact unit hint',
+    )
+    expect(skill).toContain(
+      'the missing load stays an empty weight field',
     )
     expect(skill).toContain(
       '`targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load',
