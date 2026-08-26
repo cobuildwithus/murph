@@ -51,6 +51,8 @@ export interface UpdateMemoryInput {
   text: string;
 }
 
+type MemoryPersistenceOperation = "forget" | "set-name" | "update" | "upsert";
+
 export class MemoryRecordNotFoundError extends Error {
   readonly code = "MEMORY_RECORD_NOT_FOUND";
 
@@ -62,9 +64,9 @@ export class MemoryRecordNotFoundError extends Error {
 
 export class MemoryPersistenceError extends Error {
   readonly code = "MEMORY_PERSISTENCE_INVALID";
-  readonly operation: "update" | "upsert";
+  readonly operation: MemoryPersistenceOperation;
 
-  constructor(operation: "update" | "upsert") {
+  constructor(operation: MemoryPersistenceOperation) {
     super("The canonical memory write could not be verified after it completed.");
     this.name = "MemoryPersistenceError";
     this.operation = operation;
@@ -145,6 +147,7 @@ export async function setMemoryDisplayName(
         record: next.record,
       };
     }
+    const markdown = renderMemoryDocument({ document: next.document });
     await writeCanonicalMarkdownDocument({
       vaultRoot,
       operationType: "memory_upsert",
@@ -154,7 +157,7 @@ export async function setMemoryDisplayName(
         relativePath: memoryDocumentRelativePath,
         created: !snapshot.exists,
       }),
-      markdown: renderMemoryDocument({ document: next.document }),
+      markdown,
       audit: {
         action: "memory_upsert",
         commandName: "core.setMemoryDisplayName",
@@ -162,7 +165,12 @@ export async function setMemoryDisplayName(
         targetIds: [next.record.id],
       },
     });
-    const persisted = await readPersistedMemoryRecord(vaultRoot, next.record.id, "upsert");
+    const persisted = await readPersistedMemoryRecord(
+      vaultRoot,
+      next.record.id,
+      "set-name",
+      markdown,
+    );
 
     return {
       created: next.created,
@@ -204,17 +212,19 @@ export async function updateMemory(
           section: input.section ?? existing.section,
           text: input.text,
         });
+        const markdown = renderMemoryDocument({ document: next.document });
         await stageMarkdownDocumentWrite(
           batch,
           resolveSingletonMarkdownDocumentTarget({
             relativePath: memoryDocumentRelativePath,
             created: !snapshot.exists,
           }),
-          renderMemoryDocument({ document: next.document }),
+          markdown,
         );
 
         return {
           result: {
+            expectedMarkdown: markdown,
             recordId: next.record.id,
           },
           changes: [
@@ -226,7 +236,12 @@ export async function updateMemory(
         };
       },
     });
-    const persisted = await readPersistedMemoryRecord(vaultRoot, result.result.recordId, "update");
+    const persisted = await readPersistedMemoryRecord(
+      vaultRoot,
+      result.result.recordId,
+      "update",
+      result.result.expectedMarkdown,
+    );
 
     return {
       document: persisted.document,
@@ -253,7 +268,6 @@ export async function forgetMemory(
         record: null,
       };
     }
-
     const markdown = renderMemoryDocument({ document: next.document });
     await writeCanonicalMarkdownDocument({
       vaultRoot,
@@ -271,7 +285,7 @@ export async function forgetMemory(
         targetIds: [next.record.id],
       },
     });
-    const nextSnapshot = await readMemoryDocument(vaultRoot);
+    const nextSnapshot = await readPersistedMemoryDocument(vaultRoot, "forget", markdown);
 
     return {
       document: nextSnapshot,
@@ -299,12 +313,13 @@ async function withLockedMemoryDocument<TResult>(
 async function readPersistedMemoryRecord(
   vaultRoot: string,
   recordId: string,
-  operation: "update" | "upsert",
+  operation: MemoryPersistenceOperation,
+  expectedMarkdown: string,
 ): Promise<{
   document: MemoryDocumentSnapshot;
   record: MemoryRecord;
 }> {
-  const document = await readMemoryDocument(vaultRoot);
+  const document = await readPersistedMemoryDocument(vaultRoot, operation, expectedMarkdown);
   const record = document.records.find((entry) => entry.id === recordId) ?? null;
   if (record === null) {
     throw new MemoryPersistenceError(operation);
@@ -314,6 +329,23 @@ async function readPersistedMemoryRecord(
     document,
     record,
   };
+}
+
+async function readPersistedMemoryDocument(
+  vaultRoot: string,
+  operation: MemoryPersistenceOperation,
+  expectedMarkdown: string,
+): Promise<MemoryDocumentSnapshot> {
+  let document: MemoryDocumentSnapshot;
+  try {
+    document = await readMemoryDocument(vaultRoot);
+  } catch {
+    throw new MemoryPersistenceError(operation);
+  }
+  if (document.markdown !== expectedMarkdown) {
+    throw new MemoryPersistenceError(operation);
+  }
+  return document;
 }
 
 async function persistUpsertMemory(
@@ -326,6 +358,7 @@ async function persistUpsertMemory(
   record: MemoryRecord;
 }> {
   const next = upsertMemoryRecord(snapshot, input);
+  const markdown = renderMemoryDocument({ document: next.document });
   await writeCanonicalMarkdownDocument({
     vaultRoot,
     operationType: "memory_upsert",
@@ -334,7 +367,7 @@ async function persistUpsertMemory(
       relativePath: memoryDocumentRelativePath,
       created: !snapshot.exists,
     }),
-    markdown: renderMemoryDocument({ document: next.document }),
+    markdown,
     audit: {
       action: "memory_upsert",
       commandName: "core.upsertMemory",
@@ -342,7 +375,12 @@ async function persistUpsertMemory(
       targetIds: [next.record.id],
     },
   });
-  const persisted = await readPersistedMemoryRecord(vaultRoot, next.record.id, "upsert");
+  const persisted = await readPersistedMemoryRecord(
+    vaultRoot,
+    next.record.id,
+    "upsert",
+    markdown,
+  );
 
   return {
     created: next.created,

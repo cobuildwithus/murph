@@ -40,6 +40,16 @@ fields, terminal read semantics, and no failed-read writes.
   9,516,785 bytes against a composed 9,525,527-byte budget; the runner is
   11,346,601 bytes against an 11,393,617-byte budget. Entry and static-startup
   limits remain unchanged.
+- The next exact-head review found that post-write read/parse failures and stale
+  read-backs did not all converge on the existing `MemoryPersistenceError`.
+  One private read-back boundary now verifies the exact rendered Markdown for
+  upsert, update, set-name, and forget; every failure after the canonical write
+  is terminal persistence uncertainty, while all pre-write reads remain outside
+  that boundary.
+- Core memory proof passes 10/10 and CLI memory proof passes 11/11, including
+  one persisted write, malformed/stale read-back, terminal inspect-first
+  guidance, non-echo, and byte-identical no-write behavior for pre-write parse
+  failure. Core and CLI typechecks plus `git diff --check` pass.
 
 ## Design
 
