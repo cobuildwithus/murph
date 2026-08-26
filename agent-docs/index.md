@@ -14,7 +14,8 @@ Assistant Engine local-service runtime verification is partitioned into
 behavior-owned test modules backed by one adjacent shared harness. Root,
 diff-aware, package, and release coverage lanes run that owner on the ordinary
 Node heap without a package-specific invocation branch. The command contract
-and proof map are specified by
+and proof map, including the general behavior-cohesion rule for hand-authored
+test modules and owner-specific harnesses, are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
