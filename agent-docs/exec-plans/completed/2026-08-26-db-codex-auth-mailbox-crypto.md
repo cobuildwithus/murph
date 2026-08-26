@@ -32,7 +32,8 @@ Updated: 2026-08-26
 - Technical constraints: reuse the existing prepared mailbox crypto owner and
   transaction adapter; add no new state, queue, manager, or abstraction.
 - Product/process constraints: preserve connect/disconnect behavior and
-  idempotency; keep the PR draft; do not merge or mark Ready.
+  idempotency; keep the PR draft through ordinary pushes and remediation, then
+  admit the exact final head to required CI; do not merge.
 
 ## Risks and mitigations
 
