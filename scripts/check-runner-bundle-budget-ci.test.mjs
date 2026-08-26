@@ -33,8 +33,8 @@ test("rejects synchronize admission to the deployment budget gate", async () => 
 
 test("rejects moving the authoritative byte measurement to macOS", async () => {
   const source = (await readWorkflow()).replace(
-    "  production-runner-bundle-budget-linux:\n    name: Production runner bundle budget (ubuntu)\n    needs: markdown-docs-scope\n    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}\n    runs-on: ubuntu-24.04",
-    "  production-runner-bundle-budget-linux:\n    name: Production runner bundle budget (ubuntu)\n    needs: markdown-docs-scope\n    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}\n    runs-on: macos-latest",
+    "  production-runner-bundle-budget-linux:\n    name: Production runner bundle budget (ubuntu)\n    needs: markdown-docs-scope\n    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}\n    runs-on: ubuntu-24.04",
+    "  production-runner-bundle-budget-linux:\n    name: Production runner bundle budget (ubuntu)\n    needs: markdown-docs-scope\n    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}\n    runs-on: macos-latest",
   );
   assert.ok(issueCodes(source).includes("wrong-budget-platform"));
 });
