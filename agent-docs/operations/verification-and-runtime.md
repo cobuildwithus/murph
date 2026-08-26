@@ -260,7 +260,7 @@ must never depend on local subscription state or make the paid call.
 
 If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
 any provider action, rerun that same focused journey once with
-`--codex-home <ALTERNATE_CODEX_HOME>`. Use only another already-authenticated,
+`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Use only another already-authenticated,
 authorized local home; the runner selects its existing auth and config without
 copying credentials. Do not auto-discover profiles or cycle through homes. If
 the alternate home is also blocked, record `Hold`.

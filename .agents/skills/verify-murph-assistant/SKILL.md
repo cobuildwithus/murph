@@ -48,7 +48,7 @@ the acceptance result.
    already-authenticated local home:
 
    ```bash
-   pnpm test:assistant:live -- --test "<unique test-name pattern>" --codex-home <ALTERNATE_CODEX_HOME>
+   pnpm test:assistant:live -- --test "<unique test-name pattern>" --codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>
    ```
 
    The explicit home selects existing local auth and config; it does not copy

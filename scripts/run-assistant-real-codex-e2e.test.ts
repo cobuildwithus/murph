@@ -62,6 +62,11 @@ describe('assistant real Codex local runner', () => {
       '--codex-home',
       '/alternate-codex-home',
     ])).toThrow('--codex-home is available only with subscription auth.')
+    expect(() => parseAssistantRealCodexRunArgs([
+      'member preference',
+      '--codex-home',
+      'relative-codex-home',
+    ])).toThrow('--codex-home requires an absolute path.')
   })
 
   it('sets only the live-test controls owned by the selected auth mode', () => {
