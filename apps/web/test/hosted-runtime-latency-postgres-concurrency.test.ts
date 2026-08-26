@@ -150,6 +150,11 @@ describe.skipIf(!runPostgresProof)(
       const assistantInputId = `assistant_input_latency_skip_locked_${suffix}`;
       const mailboxItemId = `hmi_latency_skip_locked_${suffix}`;
       const traceId = `hil_latency_skip_locked_${suffix}`;
+      const availableAssistantInputId =
+        `assistant_input_latency_skip_locked_available_${suffix}`;
+      const availableMailboxItemId =
+        `hmi_latency_skip_locked_available_${suffix}`;
+      const availableTraceId = `hil_latency_skip_locked_available_${suffix}`;
       const runtimeAttemptId = `runtime_latency_skip_locked_${suffix}`;
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
       const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -271,22 +276,103 @@ describe.skipIf(!runPostgresProof)(
           "Expected the skipped assistant claim to release its pooled client.",
         )).resolves.toEqual([{ value: 1 }]);
 
+        await writer.hostedMailboxItem.create({
+          data: {
+            dedupeKey: `latency-skip-locked-available:${suffix}`,
+            id: availableMailboxItemId,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: 2n,
+            occurredAt: new Date(acceptedAt.getTime() + 1_000),
+            payloadSchema: "murph.hosted-execution.conversation-message.v1",
+            userId: memberId,
+          },
+        });
+        await writer.hostedIngressLatencyTrace.create({
+          data: {
+            acceptedAt: new Date(acceptedAt.getTime() + 1_000),
+            assistantInputId: availableAssistantInputId,
+            id: availableTraceId,
+            mailboxItemId: availableMailboxItemId,
+            mailboxLane: "conversation",
+            mailboxLaneSeq: 2n,
+            runtimeAttemptId,
+            source: "linq",
+            userId: memberId,
+          },
+        });
+
+        const batchedProviderInput = {
+          ...providerInput,
+          assistantInputIds: [assistantInputId, availableAssistantInputId],
+        } satisfies Parameters<typeof recordHostedIngressProviderStarted>[0];
+        const batchedProviderWhileLocked = recordHostedIngressProviderStarted(
+          batchedProviderInput,
+        );
+        inFlight.push(batchedProviderWhileLocked);
+        await expect(withPostgresProofDeadline(
+          batchedProviderWhileLocked,
+          "Expected provider-start to update free rows without waiting.",
+        )).resolves.toEqual({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 1,
+        });
+
+        const batchedAssistantInput = {
+          ...assistantInput,
+          assistantInputIds: [assistantInputId, availableAssistantInputId],
+        } satisfies Parameters<typeof recordHostedIngressAssistantMilestone>[0];
+        const batchedAssistantWhileLocked =
+          recordHostedIngressAssistantMilestone(
+            batchedAssistantInput,
+          );
+        inFlight.push(batchedAssistantWhileLocked);
+        await expect(withPostgresProofDeadline(
+          batchedAssistantWhileLocked,
+          "Expected assistant milestone to update free rows without waiting.",
+        )).resolves.toEqual({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 1,
+        });
+
+        const availableTrace =
+          await writer.hostedIngressLatencyTrace.findUniqueOrThrow({
+            select: {
+              phaseBreakdownJson: true,
+              providerRequestOrdinal: true,
+              providerStartAt: true,
+            },
+            where: { id: availableTraceId },
+          });
+        expect(availableTrace.providerRequestOrdinal).toBe(0);
+        expect(availableTrace.providerStartAt).toEqual(providerStartedAt);
+        expect(
+          requireJsonRecord(
+            requireJsonRecord(availableTrace.phaseBreakdownJson).assistant,
+          ),
+        ).toMatchObject({
+          firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
+        });
+
         releaseTraceLock();
         await blockerPromise;
 
         await expect(
-          recordHostedIngressProviderStarted(providerInput),
+          recordHostedIngressProviderStarted(batchedProviderInput),
         ).resolves.toEqual({
-          matchedCount: 1,
+          matchedCount: 2,
           recorded: true,
           unmatchedCount: 0,
         });
-        await expect(recordHostedIngressAssistantMilestone(assistantInput))
-          .resolves.toEqual({
-            matchedCount: 1,
-            recorded: true,
-            unmatchedCount: 0,
-          });
+        await expect(
+          recordHostedIngressAssistantMilestone(batchedAssistantInput),
+        ).resolves.toEqual({
+          matchedCount: 2,
+          recorded: true,
+          unmatchedCount: 0,
+        });
 
         const trace = await writer.hostedIngressLatencyTrace.findUniqueOrThrow({
           select: {
