@@ -3713,7 +3713,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'uses the saved preferred name in a private-to-group handoff',
+    'queues an exact named private-to-group handoff without listing memberships',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -3800,7 +3800,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                   action: 'handoff',
                   result: {
                     status: 'accepted',
-                    targetLabel: 'Training Circle',
+                    targetLabel: 'Trail Crew',
                   },
                 }
               },
@@ -3813,7 +3813,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'Tell Training Circle that I completed the planned session.',
+            'Tell Trail Crew that I completed the planned session.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,
@@ -3848,7 +3848,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const handoffRequest = groupRequests[0]
         expect(handoffRequest).toMatchObject({
           action: 'handoff',
-          groupLabel: 'Training Circle',
+          groupLabel: 'Trail Crew',
         })
         if (
           !handoffRequest
