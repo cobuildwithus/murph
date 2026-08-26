@@ -14,6 +14,7 @@ import {
   LoaderCircle,
   Mic,
   RotateCcw,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
@@ -287,6 +288,7 @@ export function EnvironmentVoiceCapture({
   const savedFieldValuesRef = useRef(
     new Map<string, string | number | boolean>(),
   );
+  const canonicalScriptRef = useRef(script);
   const hasAcceptedWriteRef = useRef(
     (preview?.completionSummary?.savedDetails ?? 0) > 0,
   );
@@ -510,7 +512,6 @@ export function EnvironmentVoiceCapture({
     setAudioNeedsAttention(false);
     setCapturedFieldKeys(new Set());
     setPendingFieldKeys(new Set());
-    savedFieldValuesRef.current = new Map();
     savedFieldNotesRef.current = new Map();
     hasAcceptedWriteRef.current = false;
     setCompletionHasAcceptedWrite(false);
@@ -1280,8 +1281,23 @@ export function EnvironmentVoiceCapture({
     void startRealtime(true);
   }, [script, sessionScript, startRealtime]);
 
+  const resumeScript = () => {
+    if (canonicalScriptRef.current !== script) {
+      canonicalScriptRef.current = script;
+      savedFieldValuesRef.current = keepUnreflectedWrites(
+        script,
+        savedFieldValuesRef.current,
+      );
+    }
+    return withoutSavedFields(script, savedFieldValuesRef.current);
+  };
+
   const openInterview = () => {
-    const selectedScript = script;
+    const selectedScript = resumeScript();
+    if (selectedScript === null) {
+      openAlreadyAnswered();
+      return;
+    }
     const selectedIndex = initialTopicId
       ? selectedScript.topics.findIndex(
           (candidate) => candidate.id === initialTopicId,
@@ -1296,13 +1312,32 @@ export function EnvironmentVoiceCapture({
   };
 
   const startInlineInterview = () => {
-    setSessionScript(script);
-    savedFieldNotesRef.current = readScriptIndicatorNotes(script);
+    const selectedScript = resumeScript();
+    if (selectedScript === null) {
+      openAlreadyAnswered();
+      return;
+    }
+    setSessionScript(selectedScript);
+    savedFieldNotesRef.current = readScriptIndicatorNotes(selectedScript);
     setTopicIndex(0);
     setCapturedFieldKeys(new Set());
     updateTranscript("");
     setOpen(true);
     void startRealtime();
+  };
+
+  const openAlreadyAnswered = () => {
+    setSessionScript(script);
+    setCompletionSummary(
+      summarizeEnvironmentInterviewCompletion(
+        script,
+        savedFieldValuesRef.current,
+      ),
+    );
+    setCompletionHasAcceptedWrite(hasAcceptedWriteRef.current);
+    updateTranscript("");
+    setState("complete");
+    setOpen(true);
   };
 
   const onOpenChange = (nextOpen: boolean) => {
@@ -1531,8 +1566,8 @@ export function EnvironmentVoiceCapture({
           </DialogHeader>
 
           {state === "idle" ? (
-            <div className="grid min-h-0 flex-1 grid-rows-[auto_1fr] sm:grid-cols-[17rem_minmax(0,1fr)] sm:grid-rows-1">
-              <aside className="flex flex-col border-b border-border bg-muted/20 px-6 py-5 sm:border-b-0 sm:border-r sm:px-7 sm:py-9">
+            <div className="grid min-h-0 flex-1 sm:grid-cols-[17rem_minmax(0,1fr)]">
+              <aside className="flex flex-col justify-center sm:justify-start sm:border-r sm:border-border sm:bg-muted/20 px-6 py-5 sm:px-7 sm:py-9">
                 <Mic className="size-8 text-primary" aria-hidden="true" />
                 <p className="mt-4 font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary sm:mt-6">
                   Ready when you are
@@ -1540,9 +1575,6 @@ export function EnvironmentVoiceCapture({
                 <h2 className="mt-2 font-serif text-2xl font-semibold tracking-[-0.03em] text-foreground">
                   {scriptForView.idleTitle}
                 </h2>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:mt-3">
-                  {scriptForView.idleDescription}
-                </p>
                 <Button
                   className="mt-5 w-full sm:mt-6"
                   size="lg"
@@ -1551,19 +1583,25 @@ export function EnvironmentVoiceCapture({
                   <Mic data-icon="inline-start" aria-hidden="true" />
                   Start recording
                 </Button>
-                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                  Only confirmed details are added to your report. The live
-                  transcript is not saved there.
-                </p>
+                <details className="mt-3 text-xs text-muted-foreground">
+                  <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <ShieldCheck className="size-3.5" aria-hidden="true" />
+                    Private
+                  </summary>
+                  <p className="mt-2 leading-relaxed">
+                    Only confirmed details are saved. Audio and the live
+                    transcript are not added to your report.
+                  </p>
+                </details>
               </aside>
-              <main className="min-h-0 overflow-y-auto px-6 py-5 sm:px-10 sm:py-10">
+              <main className="hidden min-h-0 overflow-y-auto px-6 py-5 sm:block sm:px-10 sm:py-10">
                 <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
                   How it works
                 </p>
                 <h2 className="mt-2 max-w-[18ch] text-balance font-serif text-2xl font-semibold tracking-[-0.03em] text-foreground sm:mt-3 sm:text-4xl">
                   One topic at a time
                 </h2>
-                <p className="mt-4 hidden max-w-[52ch] text-pretty text-base leading-relaxed text-muted-foreground sm:block">
+                <p className="mt-4 max-w-[52ch] text-pretty text-base leading-relaxed text-muted-foreground">
                   Speak naturally. Murph processes clear details as you talk and
                   marks them on screen.
                 </p>
@@ -1586,7 +1624,7 @@ export function EnvironmentVoiceCapture({
                     </li>
                   ))}
                 </ol>
-                <p className="mt-7 hidden max-w-[54ch] text-sm leading-relaxed text-muted-foreground sm:block">
+                <p className="mt-7 max-w-[54ch] text-sm leading-relaxed text-muted-foreground">
                   You can also say “next”, “go back”, or “that’s all for now”.
                 </p>
               </main>
@@ -1652,17 +1690,20 @@ export function EnvironmentVoiceCapture({
             <main className="flex min-h-0 flex-1 flex-col px-5 py-5 sm:px-9 sm:py-8">
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary">
-                  Current topic · {topic.eyebrow}
+                  <span className="hidden sm:inline">Current topic · </span>
+                  {topic.eyebrow}
                 </p>
-                <h2 className="mt-2 max-w-[18ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.04em] text-foreground sm:text-5xl">
+                <h2 className="mt-2 max-w-[18ch] text-balance font-serif text-2xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl sm:leading-[1.04] sm:tracking-[-0.04em]">
                   {topic.title}
                 </h2>
-                <p className="mt-4 max-w-[52ch] text-pretty text-base leading-relaxed text-foreground sm:mt-5 sm:text-lg">
-                  {topic.prompt}
-                </p>
+                {topic.prompt ? (
+                  <p className="mt-4 max-w-[52ch] text-pretty text-base leading-relaxed text-foreground sm:mt-5 sm:text-lg">
+                    {topic.prompt}
+                  </p>
+                ) : null}
                 {topic.focus?.length ? (
                   <ul
-                    className="mt-5 grid grid-cols-1 gap-x-10 gap-y-2 text-sm text-muted-foreground min-[420px]:grid-cols-2 sm:mt-7 sm:max-w-2xl"
+                    className="mt-4 grid grid-cols-1 gap-x-10 gap-y-3 text-base text-foreground min-[420px]:grid-cols-2 sm:mt-7 sm:max-w-2xl"
                     role="list"
                   >
                     {topic.focus.slice(0, 4).map((item, index) => {
@@ -1674,13 +1715,13 @@ export function EnvironmentVoiceCapture({
                       const pending = pendingFieldKeys.has(key);
                       return (
                         <li
-                          className={`flex min-w-0 items-start gap-2 transition-colors duration-200 motion-reduce:transition-none ${
+                          className={`flex min-w-0 items-start gap-2.5 transition-colors duration-200 motion-reduce:transition-none ${
                             captured ? "text-primary" : ""
                           }`}
                           key={key}
                         >
                           <span
-                            className="mt-0.5 flex size-4 shrink-0 items-center justify-center"
+                            className="mt-1 flex size-4 shrink-0 items-center justify-center"
                             aria-hidden="true"
                           >
                             {pending ? (
@@ -1709,18 +1750,20 @@ export function EnvironmentVoiceCapture({
               </div>
 
               <div className="shrink-0 pt-5">
-                <div
-                  className="mb-3 h-24 overflow-y-auto overscroll-contain pr-2"
-                  ref={transcriptViewportRef}
-                >
+                <div className="mb-3 h-[5.5rem]">
                   {transcript ? (
                     <div className="border-l-2 border-primary/40 pl-3">
                       <p className="font-mono text-[9px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
                         Live transcript
                       </p>
-                      <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-foreground">
-                        {transcript}
-                      </p>
+                      <div
+                        className="mt-1 h-[4.5rem] overflow-y-auto overscroll-contain pr-2"
+                        ref={transcriptViewportRef}
+                      >
+                        <p className="whitespace-pre-line text-sm leading-6 text-foreground">
+                          {transcript}
+                        </p>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -2221,7 +2264,7 @@ function buildRealtimeFieldValueSchema(
   };
 }
 
-function buildTopicInstructions(
+export function buildTopicInstructions(
   current: EnvironmentVoiceTopic,
   next: EnvironmentVoiceTopic | null,
   languageCode: string,
@@ -2236,7 +2279,9 @@ function buildTopicInstructions(
     `The current topic id is ${JSON.stringify(
       current.id,
     )} and its title is ${JSON.stringify(current.title)}.`,
-    `The member sees this prompt: ${JSON.stringify(current.prompt)}`,
+    current.prompt
+      ? `The member sees this prompt: ${JSON.stringify(current.prompt)}`
+      : "The member sees the field labels below as the visible checklist for this topic.",
     "Allowed current fields:",
     describeFields(current.fields ?? []),
     next
@@ -2245,11 +2290,13 @@ function buildTopicInstructions(
         )}). Its allowed fields are:\n${describeFields(next.fields ?? [])}`
       : "There is no next visible topic.",
     "Listen only for explicit member facts. Use exact allowed values.",
-    "Treat the visible prompt and field labels as the question context for the member's answer.",
+    "Treat the visible field labels as the question context for the member's answer.",
     "When exactly one current field remains, bind a concise answer to that field when its meaning is a valid answer, even if the member does not repeat the field label or use a full sentence.",
     "When several current fields remain, bind a concise answer only when its meaning identifies the field clearly.",
     "For enum fields, normalize synonyms, natural descriptions, and more specific equivalent terms to the matching canonical value. Semantic normalization is not an unsupported inference.",
     "Save every allowed fact directly entailed by the member's words, even when they do not repeat a field label. A specific measurement, setting, device use, or result can directly establish a related field. Do not save facts that still require a guess.",
+    "For a number field, apply these rules in order. An explicit bounded range such as \"twelve to fourteen hours\" saves the rounded midpoint. An approximate single number such as \"about twelve\" saves that number. A one-sided bound, a vague quantifier, or a number the member states with explicit doubt leaves the field unresolved and writes nothing. Whenever a normalized number is saved, keep the member's own wording in the note for that field.",
+    "Members speak in their own units. Convert an imperial measurement to the canonical unit before saving: Fahrenheit to Celsius, feet to metres, pounds to kilograms. Keep the spoken measurement in the note.",
     "Preserve useful details beyond the canonical value in the optional note for that field. Keep measurements, brands, models, setup, location within the home, limits, and exceptions. Use one factual sentence in the member's spoken language. Do not add advice or inference.",
     "If the field has an existing note, return the full updated note whenever the answer changes or adds context. Preserve details that remain true, remove contradicted details, and use null when no useful extra context remains.",
     "Never store a street, building number, postal code, or exact home address in a note. For home location, keep only the city, region, or broad area type.",
@@ -2299,9 +2346,72 @@ function describeFields(fields: readonly EnvironmentVoiceField[]): string {
                 field.existingNote,
               )}.`
             : "";
-          return `- ${field.aspectId}.${field.indicatorId}: ${field.label}.${meaning} Allowed: ${allowed}.${existingNote}`;
+          const extractionGuidance = field.extractionGuidance
+            ? ` Extraction rule: ${field.extractionGuidance}`
+            : "";
+          return `- ${field.aspectId}.${field.indicatorId}: ${field.label}.${meaning} Allowed: ${allowed}.${existingNote}${extractionGuidance}`;
         })
         .join("\n");
+}
+
+export function keepUnreflectedWrites(
+  script: EnvironmentVoiceScript,
+  savedValues: ReadonlyMap<string, string | number | boolean>,
+): Map<string, string | number | boolean> {
+  const stillAsked = new Set(
+    script.topics.flatMap((topic) =>
+      (topic.fields ?? []).map((field) =>
+        environmentFieldKey(field.aspectId, field.indicatorId),
+      ),
+    ),
+  );
+  return new Map(
+    [...savedValues].filter(([key]) => stillAsked.has(key)),
+  );
+}
+
+export function withoutSavedFields(
+  script: EnvironmentVoiceScript,
+  savedValues: ReadonlyMap<string, string | number | boolean>,
+): EnvironmentVoiceScript | null {
+  if (savedValues.size === 0) {
+    return script;
+  }
+  let removedDetails = 0;
+  const topics = script.topics.flatMap((topic) => {
+    const fields = topic.fields ?? [];
+    if (fields.length === 0) {
+      return [topic];
+    }
+    const kept = fields.flatMap((field, index) =>
+      savedValues.has(environmentFieldKey(field.aspectId, field.indicatorId))
+        ? []
+        : [{ field, focus: topic.focus?.[index] ?? field.label }],
+    );
+    removedDetails += fields.length - kept.length;
+    if (kept.length === 0) {
+      return [];
+    }
+    return [
+      {
+        ...topic,
+        fields: kept.map((entry) => entry.field),
+        ...(topic.focus ? { focus: kept.map((entry) => entry.focus) } : {}),
+      },
+    ];
+  });
+  const firstTopic = topics[0];
+  if (!firstTopic) {
+    return null;
+  }
+  if (removedDetails === 0) {
+    return script;
+  }
+  return {
+    ...script,
+    initialCoveredDetails: (script.initialCoveredDetails ?? 0) + removedDetails,
+    topics: [firstTopic, ...topics.slice(1)],
+  };
 }
 
 function environmentFieldKey(aspectId: string, indicatorId: string): string {

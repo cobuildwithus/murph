@@ -235,6 +235,15 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain(
       'use one verified structured workout card as the complete response on a supported private card route',
     )
+    expect(skill).toContain('Send the complete tool input in this shape')
+    expect(skill).toContain('"card": {')
+    expect(skill).toContain('"title": "Strength workout"')
+    expect(skill).toContain('"subtitle": null')
+    expect(skill).toContain('"footer": "Reply with the exercise, set, and result."')
+    expect(skill).toContain('"entityId": "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ"')
+    expect(skill).toContain('"workout": {')
+    expect(skill).not.toContain('"snapshotAt":')
+    expect(skill).toContain('The runtime records the canonical `snapshotAt`')
   })
 
   it('keeps bare acknowledgements from advancing or inventing a workout set', async () => {

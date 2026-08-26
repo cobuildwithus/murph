@@ -177,6 +177,8 @@ import {
   EnvironmentEmptyState,
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
+import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
+import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
@@ -195,8 +197,6 @@ const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription:
-    "Two short topics, based on what Murph does not know yet.",
   idleTitle: "Only the missing details",
   topics: [
     {
@@ -607,6 +607,26 @@ const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
   },
 ];
 
+const DESIGN_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: Array.from({ length: 30 }, (_, index) => ({
+    conversions: index === 16 || index === 22
+      ? 1
+      : index === 28
+        ? 2
+        : 0,
+    date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
+const DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: DESIGN_GROUP_PRIVATE_CONVERSIONS.dailySeries.map(({ date }) => ({
+    conversions: 0,
+    date,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
@@ -670,6 +690,32 @@ export function ComponentsContent() {
           </p>
           <DashboardSidebarStudy />
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="growth-group-private-conversions"
+          id="growth-group-private-conversions"
+          inert
+        >
+          <Section title="Group-to-private growth conversions">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production ops component with synthetic populated and empty data.
+            </p>
+            <div className="flex flex-col gap-8">
+              <GroupPrivateConversions
+                conversions={DESIGN_GROUP_PRIVATE_CONVERSIONS}
+                titleId="design-growth-group-private-conversions-title"
+              />
+              <div id="growth-group-private-conversions-empty">
+                <GroupPrivateConversions
+                  conversions={DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS}
+                  titleId="design-growth-group-private-conversions-empty-title"
+                />
+              </div>
+            </div>
+          </Section>
+        </div>
 
         <Separator />
 

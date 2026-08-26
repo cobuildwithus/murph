@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   WorkoutMemberActionExpectedSetResultV1,
@@ -7,13 +9,16 @@ import type {
   WorkoutSet,
 } from "@murphai/contracts";
 import {
+  deriveLegacyWorkoutActionBindingV4,
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
+  workoutActionBindingMatchesCurrentState,
 } from "@murphai/operator-config/workout-action-binding";
 
 const mocks = vi.hoisted(() => ({
   candidateWorkouts: vi.fn(),
   findLiveWorkoutActionTargets: vi.fn(),
+  findLiveWorkoutRefreshTargets: vi.fn(),
   resolveLiveWorkout: vi.fn(),
   updateLiveWorkoutExercises: vi.fn(),
   withLiveWorkoutMutationLock: vi.fn(),
@@ -22,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/usecases/workout-live-state.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/usecases/workout-live-state.js")>(),
   findLiveWorkoutActionTargets: mocks.findLiveWorkoutActionTargets,
+  findLiveWorkoutRefreshTargets: mocks.findLiveWorkoutRefreshTargets,
   resolveLiveWorkout: mocks.resolveLiveWorkout,
   updateLiveWorkoutExercises: mocks.updateLiveWorkoutExercises,
   withLiveWorkoutMutationLock: mocks.withLiveWorkoutMutationLock,
@@ -29,6 +35,7 @@ vi.mock("../src/usecases/workout-live-state.js", async (importOriginal) => ({
 
 import {
   applyLiveWorkoutMemberAction as applyLiveWorkoutMemberActionWithId,
+  readLiveWorkoutCardSnapshot,
 } from "../src/usecases/workout-live.ts";
 
 const BASE_WORKOUT: WorkoutSession = {
@@ -200,6 +207,7 @@ describe("live workout member action", () => {
     );
     mocks.candidateWorkouts.mockResolvedValue([shownWorkout()]);
     mocks.resolveLiveWorkout.mockResolvedValue(shownWorkout());
+    mocks.findLiveWorkoutRefreshTargets.mockResolvedValue([shownWorkout()]);
     mocks.findLiveWorkoutActionTargets.mockImplementation(
       async (vault: string, actionId: string, actionBinding: string) => {
         const candidates = await mocks.candidateWorkouts(vault);
@@ -210,10 +218,11 @@ describe("live workout member action", () => {
         const bindingMatches = candidates.filter(
           (shown: ReturnType<typeof shownWorkout>) =>
             shown.entity.data.workout.endedAt === undefined
-            && deriveWorkoutActionBinding(
+            && workoutActionBindingMatchesCurrentState(
               shown.entity.id,
               shown.entity.data.workout,
-            ) === actionBinding,
+              actionBinding,
+            ),
         );
         if (bindingMatches.length === 1) {
           mocks.resolveLiveWorkout.mockResolvedValueOnce(bindingMatches[0]);
@@ -222,6 +231,42 @@ describe("live workout member action", () => {
       },
     );
     mocks.updateLiveWorkoutExercises.mockResolvedValue(shownWorkout());
+  });
+
+  it("returns a fresh workout through the existing V6 card wire", async () => {
+    const result = await readLiveWorkoutCardSnapshot({
+      action: {
+        kind: "workout.live.snapshot",
+        presentation: {
+          title: "Strength",
+          subtitle: null,
+          footer: "Log each set.",
+          workout: {
+            exercises: [{
+              name: "Leg press",
+              sets: [{ actual: null, status: "pending", target: "8 reps" }],
+            }],
+            state: "active",
+            version: 1,
+          },
+        },
+        version: 1,
+        workoutBinding: ACTION_BINDING,
+      },
+      vault: "/vault",
+    });
+
+    expect(result.status).toBe("unchanged");
+    if (result.status !== "unchanged") {
+      throw new TypeError("Expected the read-only workout result.");
+    }
+    const payload = result.result.cardUrl.split("#murph-card=")[1];
+    expect(payload).toBeDefined();
+    expect(JSON.parse(Buffer.from(payload!, "base64url").toString("utf8")))
+      .toMatchObject({
+        schemaVersion: 6,
+        card: { k: "w", t: "Strength" },
+      });
   });
 
   it("applies a bounded batch with one lock and one canonical write", async () => {
@@ -246,6 +291,20 @@ describe("live workout member action", () => {
       lastMemberActionId: ACTION_ID,
       observedAt: ACCEPTED_AT,
     });
+  });
+
+  it("keeps already-sent V6 cards valid through the legacy binding check", async () => {
+    const action = setAction({ kind: "reps", reps: 8 });
+    action.expectedWorkout.actionBinding = deriveLegacyWorkoutActionBindingV4(
+      "evt_test_workout",
+      BASE_WORKOUT,
+    );
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
   });
 
   it("closes a finite workout in the same accepted final-set write", async () => {

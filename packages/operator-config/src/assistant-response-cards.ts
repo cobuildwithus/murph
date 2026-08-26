@@ -45,6 +45,8 @@ import {
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
+  type WorkoutSessionEditorProjectionV1,
+  type WorkoutSessionPresentationV1,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -338,14 +340,9 @@ export function buildLinqIMessageAppLayout(
         subcaption: `${progress.completed}/${progress.total} sets complete`,
       }
     }
-    const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
-      caption: semantic.heading,
+      caption: parsed.title,
       image_url: imageUrl,
-      subcaption: semantic.detailLines.join('\n'),
-      ...(semantic.footer === null
-        ? {}
-        : { trailing_caption: semantic.footer }),
     }
   }
   if (parsed.kind === 'challenge_standings') {
@@ -457,6 +454,35 @@ export function encodeWorkoutSessionAppCardUrl(
     )
   }
   return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed, true))
+}
+
+export function encodeWorkoutSessionSnapshotAppCardUrl(
+  presentation: WorkoutSessionPresentationV1 & {
+    editor?: WorkoutSessionEditorProjectionV1
+  },
+): string {
+  if (presentation.editor !== undefined) {
+    const editablePayload = encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV6({
+        editor: presentation.editor,
+        title: presentation.title,
+        subtitle: presentation.subtitle,
+        footer: presentation.footer,
+        workout: presentation.workout,
+      }),
+    )
+    if (
+      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
+      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
+    ) {
+      return encodeAppCardEnvelopeUrl(editablePayload)
+    }
+  }
+  return encodeAppCardEnvelopeUrl(
+    encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV4(presentation),
+    ),
+  )
 }
 
 function encodeCompactTableAppCardPayload(
@@ -1255,16 +1281,19 @@ function createAssistantResponseCardJsonSchema() {
     },
     required: ['target', 'status'],
   } as const)
+  const workoutTrackingProperties = {
+    kind: { const: 'workout' },
+    entityId: {
+      type: 'string',
+      maxLength: 30,
+      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+    },
+  } as const
   const tracking = {
     type: ['object', 'null'],
     additionalProperties: false,
     properties: {
-      kind: { const: 'workout' },
-      entityId: {
-        type: 'string',
-        maxLength: 30,
-        pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
-      },
+      ...workoutTrackingProperties,
       snapshotAt: {
         type: 'string',
         minLength: 24,
@@ -1274,6 +1303,12 @@ function createAssistantResponseCardJsonSchema() {
       },
     },
     required: ['kind', 'entityId', 'snapshotAt'],
+  } as const
+  const workoutTracking = {
+    type: 'object',
+    additionalProperties: false,
+    properties: workoutTrackingProperties,
+    required: ['kind', 'entityId'],
   } as const
   const workoutSet = {
     type: 'object',
@@ -1409,18 +1444,24 @@ function createAssistantResponseCardJsonSchema() {
       'goals',
     ],
   } as const
-  const compactTableFields = {
+  const compactTableProperties = {
+    kind: { const: 'compact_table' },
+    version: { const: 1 },
+    title: responseCardTextSchema(
+      compactTableCardV1Bounds.title,
+    ),
+    subtitle: responseCardNullableTextSchema(
+      compactTableCardV1Bounds.subtitle,
+    ),
+    footer: responseCardNullableTextSchema(
+      compactTableCardV1Bounds.footer,
+    ),
+  } as const
+  const compactTableGeneric = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      kind: { const: 'compact_table' },
-      version: { const: 1 },
-      title: responseCardTextSchema(
-        compactTableCardV1Bounds.title,
-      ),
-      subtitle: responseCardNullableTextSchema(
-        compactTableCardV1Bounds.subtitle,
-      ),
+      ...compactTableProperties,
       rowHeader: responseCardTextSchema(
         compactTableCardV1Bounds.rowHeader,
       ),
@@ -1438,10 +1479,27 @@ function createAssistantResponseCardJsonSchema() {
         maxItems: compactTableCardV1Bounds.rows,
         items: row,
       },
-      footer: responseCardNullableTextSchema(
-        compactTableCardV1Bounds.footer,
-      ),
       tracking,
+    },
+    required: [
+      'kind',
+      'version',
+      'title',
+      'subtitle',
+      'rowHeader',
+      'columns',
+      'rows',
+      'footer',
+      'tracking',
+    ],
+  } as const
+  const compactTableWorkout = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      ...compactTableProperties,
+      subtitle: { type: 'null' },
+      tracking: workoutTracking,
       workout,
     },
     required: [
@@ -1451,35 +1509,13 @@ function createAssistantResponseCardJsonSchema() {
       'subtitle',
       'footer',
       'tracking',
-    ],
-  } as const
-  const compactTable = {
-    allOf: [
-      compactTableFields,
-      {
-        oneOf: [
-          {
-            properties: { workout: false },
-            required: ['rowHeader', 'columns', 'rows'],
-          },
-          {
-            properties: {
-              columns: false,
-              rowHeader: false,
-              rows: false,
-              subtitle: { type: 'null' },
-              tracking: { type: 'object' },
-            },
-            required: ['workout'],
-          },
-        ],
-      },
+      'workout',
     ],
   } as const
 
   return {
     description:
       'Author daily_nutrition V2, generic compact_table V1, or compact_table workout V1.',
-    anyOf: [nutrition, compactTable],
+    anyOf: [nutrition, compactTableGeneric, compactTableWorkout],
   } as const
 }

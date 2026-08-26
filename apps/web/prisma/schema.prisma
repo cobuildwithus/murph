@@ -620,6 +620,7 @@ model HostedMember {
   signupNotificationContextExpiresAt DateTime?                   @map("signup_notification_context_expires_at")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
+  groupPrivateConversionTrackedAt DateTime?                      @map("group_private_conversion_tracked_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
@@ -692,6 +693,7 @@ model HostedMember {
   groupCurrentSenderClarificationsAsTarget  HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")
 
   @@index([billingStatus])
+  @@index([groupPrivateConversionTrackedAt])
   @@map("hosted_member")
 }
 

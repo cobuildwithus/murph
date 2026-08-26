@@ -603,7 +603,10 @@ Last verified: 2026-08-23
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately. Metric families are normalized
-  independently: an absent or structurally unusable family remains unknown,
+  independently: primary-only Postgres and PgBouncer families require an
+  explicit `planetscale_role="primary"` label, while the edge connection-error
+  family remains role-less by provider contract. An absent or structurally
+  unusable family remains unknown,
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
   A collection that fails before producing a usable observation, including a
@@ -1267,13 +1270,20 @@ Last verified: 2026-08-23
   contains only bounded metadata: the last pass stage, outcome, elapsed time,
   processed-job count, checkpoint/retry presence, and a typed yield reason
   (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
-  `outer_signal`, or `unknown`). A persisted start without a matching finish is
-  the queryable abrupt-loss signal and must be correlated with runner,
+  `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
+  summaries with provider, job kind, code-owned resource class, outcome,
+  attempt/job counts, durable-progress presence, total/provider execution time,
+  provider time unattributed after subtracting measured callbacks, and measured
+  connection-source read, credential-refresh, and canonical-import counts and
+  durations. The service retains at most one pass budget of those summaries in
+  memory, and the terminal marker declares both the observed count and whether
+  the slowest-job sample was truncated. A persisted start without a matching
+  finish is the queryable abrupt-loss signal and must be correlated with runner,
   container, and checkpoint events for that attempt. The pair remains
   best-effort: abrupt loss before the background writer flushes can omit either
-  marker. These entries
-  never include member/account/job identifiers, provider payloads, resource
-  values, or raw abort/error messages.
+  marker. These entries never include member/account/job identifiers, provider
+  payloads, cursor values, provider responses, health values, or raw
+  abort/error messages.
   This event taxonomy is a strict Web parser boundary. Shared workspace packages
   are build inputs, not separately deployed planes. Deploy the Web artifact that
   contains its parser first, then deploy and fully recycle the Cloudflare
@@ -1574,7 +1584,7 @@ Last verified: 2026-08-23
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 90-second device-pass cancellation can release it as an unclassified
+  hosted 120-second device-pass cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
   UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
@@ -1587,8 +1597,17 @@ Last verified: 2026-08-23
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
-  owner. One admitted workout index yields serial exact-workout SDK reads; each
-  response has an 8 MiB cap and reduces before import to one compact overall
+  owner. Before the workout index, the existing control-plane current-import
+  admission predicate intersects with the current Junction provider inventory
+  so disconnect-fenced sources stay blocked while non-disconnected recovery
+  states can use currently advertised workout-stream capability. No eligible
+  source completes this optional resource without index or stream egress;
+  mixed-source indexes discard ineligible or unattributed workouts before
+  candidate progress is computed. An exact clear-unsupported HTTP 400 skips
+  only that candidate; ambiguous or request-shape HTTP 400s remain terminal.
+  Existing optional HTTP 404/422 candidate handling is unchanged. One admitted
+  workout index yields serial exact-workout SDK reads; each response
+  has an 8 MiB cap and reduces before import to one compact overall
   feature plus at most 64 fixed-distance splits. The stable workout/source
   identity and source update version form one authoritative facet set, so a
   newer correction withdraws omitted splits. Only reduced duration, distance,
@@ -1748,7 +1767,7 @@ Last verified: 2026-08-23
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - Ordinary group automations reuse canonical cron occurrence state for both conversation and optional group-email effects. Current-chat output finishes through the ordinary conversation outbox and route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. When a turn uses `send_email`, the accepted generic group-email parent enters the same canonical pending-delivery field used by ordinary queued notifications, even when later turn work fails. A restart before that cron write derives the parent from its automation-id and occurrence-scoped outbox key before admitting the provider. Web marks the parent sent only after live authorization revalidation and durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. An automation that never calls the email effect has no email settlement expectation. No newsletter recognition, injected contract, migration queue, repair state, or second scheduler exists.
-- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0, keeps admission open for one four-second in-memory draft window, and atomically either closes at a quiet cutoff or admits late input for provider request 1 in the same thread. Request 1 is final and closes admission at its first completed response; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
+- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0 and keeps admission open for one four-second in-memory draft window. A genuinely quiet window closes atomically. Input accepted during the window selects provider request 1 in the same thread; input already live-steered and committed during request 0 also selects request 1 and keeps admission open through its first completed response. Request 1 is final; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
 - Reviewed Assistant Ask completions enter the existing foreground-causal,
   output-only continuation immediately; they do not wait for the routine idle
   checkpoint or a second wake. The caller Murph may compose from room context,
@@ -2438,6 +2457,21 @@ Last verified: 2026-08-23
   additional same-date recovery attempt but is not the cron's retry guarantee.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
+- Group-to-private growth attribution reuses that same snapshot pass and its
+  already decoded, identity-resolved group messages. For each resolved real
+  member in the bounded 14-day retained-message window, one set-based read
+  compares the earliest retained group receipt with the first canonical
+  `member.activated` receipt; one conditional batch update sets a nullable
+  member-owned tracking timestamp only when the group receipt came first. The
+  marker stores no message, sender, or group identifier, follows the member's
+  existing deletion lifecycle, and remains stable after message content
+  retires. This is sequence-based attribution limited on every run to group
+  evidence still available inside the rolling 14-day window, not causal proof;
+  sequences whose group evidence retires before activation are never counted.
+  Attribution-only decode or identity failures cannot invalidate the established
+  prior-day and trailing-seven-day activity aggregates. Attribution failures do
+  not block snapshot capture and retry only while the source evidence remains
+  retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the
@@ -2446,8 +2480,20 @@ Last verified: 2026-08-23
   serialization while the write preserves attempt and monotonic
   lease-generation authority, max-merges the publication deadline, sanitizes
   stored diagnostic JSON, and changes `updated_at` only when state changes. It
-  must not select trace ids into the application, lock an unbounded collection,
-  or open one transaction per trace.
+  selects at most 251 of the newest checkpoint candidates and locks those trace
+  rows in deterministic trace-id order inside one bounded `READ COMMITTED`
+  transaction. A second statement takes a fresh command snapshot, rechecks
+  current mailbox and lease eligibility, and updates at most the newest 250.
+  Provider, assistant, and ordinary runtime multi-row writers use the same
+  trace-id lock order. This common order prevents cross-writer row-lock cycles,
+  while the fresh checkpoint snapshot prevents an older waiting lease from
+  overwriting a newer one, without a broad transaction retry.
+  Persistence failures emit only event type, source, input cardinality, query
+  tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
+  stay out of failure logs. The bounded transaction-local trace-id list passes
+  only from the lock statement to the fresh update statement; it must not
+  escape that callback or appear in logs. The writer must not lock an unbounded
+  collection or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event
@@ -2537,8 +2583,10 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh conversation work keeps its
-foreground priority, but its first successful reply checkpoint includes one
+Runtime applies the closed action through its canonical domain owner. Fresh
+conversation work keeps its foreground priority. A safe-prefix prefetch imports
+a closed member action before a dirty runtime begins its long idle snapshot,
+and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
 arrived conversation cannot defer the already-accepted action into another
@@ -2547,20 +2595,36 @@ outcome as an existing post-checkpoint effect before releasing the requested
 item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
-requires the V6 card's opaque workout-revision binding under the existing
-workout mutation lock. That binding combines the canonical workout identity,
-ordered hidden exercise/set-slot identity, and the last applied member-action
-generation. Delayed or forwarded cards therefore cannot retarget a later
-workout, a set shifted by another direct action, or a same-name exercise moved
-by the generic workout editor. Mutable set results and annotations remain under
-their existing result-family optimistic comparisons rather than the positional
-identity binding.
+requires the V6 card's opaque workout binding under the existing workout
+mutation lock. Its stable lookup prefix covers the canonical workout identity
+and ordered hidden exercise/set-slot identity, while its exact state suffix
+covers the same identity plus the last applied member-action generation. The
+initial editor also requires the embedded logged/pending states to match the
+canonical workout; only the authenticated read-only refresh may advance those
+states. A write must match the complete current token; delayed or forwarded
+cards therefore cannot
+retarget a later workout, a set shifted by another direct action, or a same-name
+exercise moved by the generic workout editor. Mutable set results and
+annotations remain under their existing result-family optimistic comparisons
+rather than the positional identity binding. An exact current legacy binding
+remains valid for an already-sent V6 write.
+Expanded V6 readers reuse that binding with the same mailbox delivery path for
+`workout.live.snapshot`. The member-scoped credential supplies identity;
+runtime scans only that member's canonical workout records, requires
+one structural match to the embedded target skeleton, and returns one ordinary
+V6 card URL with current progress and editor state, or an ordinary V4 read-only
+URL when editing is unavailable or too large. Legacy lookup accepts only an
+exact current token or the empty-prior-action derivation used by an initial
+card. This action never writes the workout. Missing, duplicate, structurally
+changed, oversized, or cross-member targets fail closed as `workout_changed`,
+leaving the embedded snapshot in place. The result reuses the existing strict
+card decoder rather than defining a parallel workout wire.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and
+across the member's canonical workout records before revision and
 unfinished-record eligibility, so the generation change caused by the original
 write or workout completion cannot replace a committed success with a terminal
 rejection, and another unfinished workout cannot receive the action. Every

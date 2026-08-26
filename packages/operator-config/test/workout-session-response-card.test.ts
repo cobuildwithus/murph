@@ -8,6 +8,7 @@ import {
   buildLinqIMessageAppLayout,
   encodeCompactTableAppCardUrl,
   encodeWorkoutSessionAppCardUrl,
+  encodeWorkoutSessionSnapshotAppCardUrl,
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
@@ -208,6 +209,24 @@ describe('workout session response cards', () => {
     expect(JSON.stringify(imageEnvelope)).not.toContain('"b"')
   })
 
+  it('encodes a refreshed snapshot through the existing V6 wire', () => {
+    const envelope = decodeAppCardUrl(
+      encodeWorkoutSessionSnapshotAppCardUrl({
+        title: ACTIVE_WORKOUT_CARD.title,
+        subtitle: ACTIVE_WORKOUT_CARD.subtitle,
+        footer: ACTIVE_WORKOUT_CARD.footer,
+        workout: ACTIVE_WORKOUT_CARD.workout,
+        editor: ACTIVE_WORKOUT_CARD.editor,
+      }),
+    )
+
+    expect(envelope).toEqual(decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),
+    ))
+    expect(envelope).toMatchObject({ schemaVersion: 6 })
+    expect(JSON.stringify(envelope)).not.toContain('evt_')
+  })
+
   it('routes enhanced compact tables through V6 and ordinary tables through V3', () => {
     expect(encodeCompactTableAppCardUrl(ACTIVE_WORKOUT_CARD)).toBe(
       encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),
@@ -306,6 +325,31 @@ describe('workout session response cards', () => {
 
     expect(urls.map((url) => url.length)).toEqual([1624, 1905, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
+
+    const oversizedEditorCard = {
+      ...buildCard('active', 18),
+      title: 'T'.repeat(60),
+      subtitle: 'S'.repeat(120),
+      footer: 'F'.repeat(120),
+    }
+    expect(() => encodeWorkoutSessionAppCardUrl(oversizedEditorCard)).toThrow(
+      'exceeds the inline Messages card limit',
+    )
+    if (
+      !('workout' in oversizedEditorCard)
+      || oversizedEditorCard.editor === undefined
+    ) {
+      throw new TypeError('Expected an editable workout fixture.')
+    }
+    const fallback = encodeWorkoutSessionSnapshotAppCardUrl({
+      title: oversizedEditorCard.title,
+      subtitle: oversizedEditorCard.subtitle,
+      footer: oversizedEditorCard.footer,
+      workout: oversizedEditorCard.workout,
+      editor: oversizedEditorCard.editor,
+    })
+    expect(fallback.length).toBeLessThan(2_048)
+    expect(decodeAppCardUrl(fallback)).toMatchObject({ schemaVersion: 4 })
   })
 
   it('encodes a complete 11×3 late-active card when its measured URL fits', () => {
@@ -492,29 +536,24 @@ describe('workout session response cards', () => {
 
   it('keeps the model-facing schema bounded and exposes workout detail', () => {
     expect(JSON.stringify(assistantResponseCardJsonSchema).length)
-      .toBeLessThanOrEqual(5_000)
-    expect(assistantResponseCardJsonSchema).toMatchObject({
-      anyOf: [
-        {},
-        {
-          allOf: [
-            {
-              properties: {
-                workout: {
-                  properties: {
-                    state: { enum: ['active', 'completed'] },
-                    exercises: {
-                      items: {
-                        properties: {
-                          sets: {
-                            items: {
-                              properties: {
-                                status: {
-                                  enum: ['pending', 'completed', 'skipped'],
-                                },
-                              },
-                            },
-                          },
+      .toBeLessThanOrEqual(5_500)
+    expect(assistantResponseCardJsonSchema.anyOf).toHaveLength(3)
+    expect(assistantResponseCardJsonSchema.anyOf[2]).toMatchObject({
+      properties: {
+        tracking: {
+          required: ['kind', 'entityId'],
+        },
+        workout: {
+          properties: {
+            state: { enum: ['active', 'completed'] },
+            exercises: {
+              items: {
+                properties: {
+                  sets: {
+                    items: {
+                      properties: {
+                        status: {
+                          enum: ['pending', 'completed', 'skipped'],
                         },
                       },
                     },
@@ -522,23 +561,17 @@ describe('workout session response cards', () => {
                 },
               },
             },
-            {
-              oneOf: [
-                {
-                  properties: { workout: false },
-                  required: ['rowHeader', 'columns', 'rows'],
-                },
-                {
-                  properties: {
-                    subtitle: { type: 'null' },
-                    tracking: { type: 'object' },
-                  },
-                  required: ['workout'],
-                },
-              ],
-            },
-          ],
+          },
         },
+      },
+      required: [
+        'kind',
+        'version',
+        'title',
+        'subtitle',
+        'footer',
+        'tracking',
+        'workout',
       ],
     })
   })

@@ -78,6 +78,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
+    'groupPrivateConversionTrackedAt DateTime? @map("group_private_conversion_tracked_at")',
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
@@ -1166,6 +1167,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260824120000_hosted_runtime_issue_attempt_provenance",
       "20260825050000_device_source_no_data_outreach_preference",
       "20260825180000_hosted_operator_task",
+      "20260825193000_hosted_group_private_conversion",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

@@ -91,7 +91,7 @@ export type AssistantActiveTurnDraftWindowOutcome =
       acceptedInput: Extract<
         AssistantActiveTurnInputAdmissionResult,
         { kind: 'accepted' }
-      >
+      > | null
       kind: 'review'
     }
 
@@ -107,6 +107,7 @@ class AssistantActiveTurnInputController {
   private liveProviderTurn: AssistantActiveTurnLiveProviderTurn | null = null
   private liveProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
   private completedProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
+  private liveSteeredInputCommitted = false
   private readonly draftWindowAbortController = new AbortController()
   private draftWindowEndsAtMs: number | null = null
   private draftWindowOutcome: Promise<AssistantActiveTurnDraftWindowOutcome> | null = null
@@ -327,6 +328,14 @@ class AssistantActiveTurnInputController {
         }
       }
 
+      if (this.liveSteeredInputCommitted) {
+        this.draftWindowEndsAtMs = null
+        return {
+          acceptedInput: null,
+          kind: 'review',
+        }
+      }
+
       this.closeTurnAdmission()
       return {
         controllerClosed: true,
@@ -389,6 +398,7 @@ class AssistantActiveTurnInputController {
       first.manualCompletion.accepted = true
     }
     this.tryStartLiveSteers()
+    this.liveSteeredInputCommitted = true
   }
 
   private async admitPending(input?: {

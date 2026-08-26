@@ -630,8 +630,7 @@ function parsePrometheusLabels(value: string): Readonly<Record<string, string>> 
 }
 
 function isPrimaryMetricPoint(point: PrometheusMetricPoint): boolean {
-  const role = point.labels[ROLE_LABEL];
-  return role === undefined || role === "primary";
+  return point.labels[ROLE_LABEL] === "primary";
 }
 
 function sumByLabel(

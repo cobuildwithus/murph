@@ -17,6 +17,7 @@ import {
   selectEnvironmentHabitatValues,
 } from "../habitat-values";
 import { resolveEnvironmentCoverage, resolveHabitatScene } from "../home-model";
+import { useImperialUnits } from "../use-imperial-units";
 
 export function EnvironmentPrintPageClient({
   generatedOn,
@@ -33,12 +34,13 @@ export function EnvironmentPrintPageClient({
     [client],
   );
   const scene = useMemo(() => resolveHabitatScene(values), [values]);
+  const imperial = useImperialUnits();
   const notes = useMemo(
     () =>
       scene.categories.map((category) =>
-        deriveCategoryNote(category, values, indicatorNotes)
+        deriveCategoryNote(category, values, indicatorNotes, imperial)
       ),
-    [indicatorNotes, scene, values],
+    [imperial, indicatorNotes, scene, values],
   );
   const grade = useMemo(() => overallGrade(notes, values), [notes, values]);
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);

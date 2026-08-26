@@ -14,9 +14,11 @@ import {
 
 import {
   createDeviceProviderRegistry,
+  createDeviceProviderSnapshotImportSession,
   createImporters,
   importDeviceProviderSnapshot,
   prepareDeviceProviderSnapshotImport,
+  type DeviceBatchImportExecutionOptions,
   type DeviceBatchImportPayload,
   type DeviceProviderAdapter,
   type DeviceProviderSnapshotImportPayload,
@@ -3143,8 +3145,20 @@ test("Junction daily aggregate alias repair remains atomic when a later event re
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
   const calls: DeviceBatchImportPayload[] = [];
+  const importSession = createDeviceProviderSnapshotImportSession();
+  const observedSessions: unknown[] = [];
 
-  const result = await importDeviceProviderSnapshot<{ ok: boolean; provider: string }>({
+  const result = await importDeviceProviderSnapshot<{
+    deviceProviderSnapshotImportTiming: {
+      canonicalCoreElapsedMs: number;
+      canonicalWriteElapsedMs: number;
+      eventIdentityIndexCacheHit: boolean;
+      eventIdentityIndexElapsedMs: number;
+      normalizationElapsedMs: number;
+    };
+    ok: boolean;
+    provider: string;
+  }>({
     provider: "whoop",
     snapshot: {
       accountId: "whoop-user-2",
@@ -3160,17 +3174,41 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
     },
   }, {
     corePort: {
-      async importDeviceBatch(payload: DeviceBatchImportPayload) {
+      async importDeviceBatch(
+        payload: DeviceBatchImportPayload,
+        options?: DeviceBatchImportExecutionOptions,
+      ) {
         calls.push(payload);
+        observedSessions.push(options?.session);
+        options?.onTiming?.({
+          canonicalWriteElapsedMs: 12,
+          eventIdentityIndexCacheHit: true,
+          eventIdentityIndexElapsedMs: 34,
+          totalElapsedMs: 56,
+        });
         return {
           ok: true,
           provider: payload.provider,
         };
       },
     },
+    importSession,
   });
 
-  assert.deepEqual(result, { ok: true, provider: "whoop" });
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "whoop");
+  assert.deepEqual(observedSessions, [importSession]);
+  assert.deepEqual(result.deviceProviderSnapshotImportTiming, {
+    canonicalCoreElapsedMs: 56,
+    canonicalWriteElapsedMs: 12,
+    eventIdentityIndexCacheHit: true,
+    eventIdentityIndexElapsedMs: 34,
+    normalizationElapsedMs: result.deviceProviderSnapshotImportTiming.normalizationElapsedMs,
+  });
+  assert.ok(
+    Number.isFinite(result.deviceProviderSnapshotImportTiming.normalizationElapsedMs)
+      && result.deviceProviderSnapshotImportTiming.normalizationElapsedMs >= 0,
+  );
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.provider, "whoop");
   assert.ok(calls[0]?.events?.some((event) => event.kind === "observation"));

@@ -781,6 +781,7 @@ export class DatabaseHealthMonitor {
 
     if (sample.status === "ok") {
       this.store.recordSuccessfulSample({
+        checkedAtMs: input.checkedAtMs,
         connectionErrorCounterBaseline:
           sample.connectionErrorCounterBaseline,
         connectionErrorDelta: sample.connectionErrorDelta,
@@ -790,6 +791,7 @@ export class DatabaseHealthMonitor {
       });
     } else {
       this.store.recordFailedSample({
+        checkedAtMs: input.checkedAtMs,
         connectionErrorCounterBaseline:
           sample.connectionErrorCounterBaseline,
         connectionErrorDelta: sample.connectionErrorDelta,
@@ -1224,7 +1226,7 @@ function formatDatabaseHealthCondition(
     case "client_wait":
       return `PgBouncer wait ${formatSeconds(condition.seconds)}`;
     case "server_pool_saturation":
-      return `local server pool ${formatPercent(condition.ratio)} (${formatCount(
+      return `PlanetScale PgBouncer server pool ${formatPercent(condition.ratio)} (${formatCount(
         condition.connections,
       )}/${formatCount(condition.limit)})`;
     case "postgres_connection_saturation":

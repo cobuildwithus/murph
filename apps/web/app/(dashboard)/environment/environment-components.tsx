@@ -91,7 +91,7 @@ export const gradeBadgeVariants = cva(
 function gradeTone(letter: CategoryGrade["letter"]): GradeTone {
   if (letter === "A" || letter === "B") return "olive";
   if (letter === "C") return "amber";
-  if (letter === "D" || letter === "E") return "terracotta";
+  if (letter === "D" || letter === "F") return "terracotta";
   return "muted";
 }
 
@@ -166,7 +166,7 @@ function GradeDialog({
                       grade.redFlags === 1
                         ? "An urgent issue caps"
                         : `${grade.redFlags} urgent issues cap`
-                    } this grade at E. ${grade.met} of ${
+                    } this grade at F. ${grade.met} of ${
                       grade.graded
                     } known conditions are within target.${
                       grade.capabilityBonus && grade.basePct !== undefined
@@ -539,8 +539,8 @@ export function EnvironmentHero({
               >
                 {grade.redFlags} urgent{" "}
                 {grade.redFlags === 1 ? "issue" : "issues"}{" "}
-                {grade.letter === "E"
-                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at E`
+                {grade.letter === "F"
+                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at F`
                   : `${grade.redFlags === 1 ? "needs" : "need"} attention now`}
               </button>
             ) : null}
@@ -1157,9 +1157,9 @@ export function NextChecksStrip({
     if (next) open(next);
   };
   return (
-    <section aria-label="What to check next">
+    <section aria-label="What to review next">
       <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-        What to check next
+        What to review next
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {shown.map((item) => (

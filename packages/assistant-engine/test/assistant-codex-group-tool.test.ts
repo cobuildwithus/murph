@@ -2427,13 +2427,13 @@ describe("murph.group dynamic tool", () => {
   it("parses one bounded context handoff without accepting model authority", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "handoff",
-      context: "  Sunny logged a 405 lb deadlift personal record today.  ",
+      context: "  The member set a personal record today.  ",
       groupLabel: "  Lifting Club  ",
     }))).toMatchObject({
       kind: "group",
       request: {
         action: "handoff",
-        context: "Sunny logged a 405 lb deadlift personal record today.",
+        context: "The member set a personal record today.",
         groupLabel: "Lifting Club",
       },
     });
@@ -2491,7 +2491,7 @@ describe("murph.group dynamic tool", () => {
   it("injects the latest fresh direct input as hidden handoff authority", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "handoff",
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "Lifting Club",
     }));
     if (!request || request.kind !== "group") {
@@ -2532,7 +2532,7 @@ describe("murph.group dynamic tool", () => {
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "handoff",
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "Lifting Club",
       originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
     });

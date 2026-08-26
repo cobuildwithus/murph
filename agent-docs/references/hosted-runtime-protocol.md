@@ -766,19 +766,19 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-If a `system_mailbox` invocation owns the active fence when foreground/default
-work arrives, the runner wakes that exact child and leaves its fence intact.
+If a `system_mailbox` invocation owns the active fence when authenticated Web
+direct foreground/default work arrives, the runner preempts that exact child,
+clears its fence by identity, and starts the foreground request. Preemption
+authority requires both the server-derived Web-direct marker and its valid
+direct-ingress attempt identity; a Temporal or scheduled default request still
+wakes the system child, leaves its fence intact, and retries cooperatively.
 System-mailbox mode may import and run one bounded model-free device-sync,
-operator-maintenance, or browser-vault refresh item;
-it checkpoints any successfully applied unit, then observes the wake. When that
-wake contains a conversation while immutable projection delivery remains
-owned, the same invocation reuses the conversation prefetch and enters the
-ordinary foreground path without waiting for publication. Other wakes return
-before assistant admission, and the foreground request retries through the
-ordinary controller path after the system child releases its fence. Other
-system items remain pending for their default owner. A system-mailbox request
-behind an active default runtime remains deferred and cannot broaden that
-child's admission authority.
+operator-maintenance, or browser-vault refresh item. Already committed web
+updates remain authoritative, while an interrupted or not-yet-checkpointed unit
+stays recoverable from the durable system mailbox and its existing continuation
+contract. Other system items remain pending for their default owner. A
+system-mailbox request behind an active default runtime remains deferred and
+cannot broaden that child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -795,13 +795,13 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, the
-existing workspace-invocation abort seam is the sole preemption authority.
-UserRunner sends that exact abort directly instead of spending foreground
-command budget on a non-authoritative liveness preflight. System-mailbox work
-uses the exact-child wake-and-checkpoint handoff above instead, because aborting
-a bounded unit after canonical web updates but before its checkpoint would
-discard committed progress. A local exact-pointer abort enters the same
+For foreground/default work behind an `inbox_media_retention` fence, and for
+authenticated Web-direct foreground/default work behind a `system_mailbox`
+fence, the existing workspace-invocation abort seam is the sole preemption
+authority. UserRunner sends that exact abort directly instead of spending
+foreground command budget on a non-authoritative liveness preflight. A
+non-direct default request behind system-mailbox work retains the exact-child
+wake-and-checkpoint handoff. A local exact-pointer abort enters the same
 inactive-fence replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
@@ -809,16 +809,21 @@ and an exact abort can cancel already-queued successors before runner dispatch.
 While that abort is in flight, its exact operation remains the visible queue
 head: liveness reports the same identity, wake fails closed, and no successor
 can dispatch. The abort owner releases that token only after both the child
-abort request and exact invocation cleanup settle. Runtime wake also fails
-closed until the active invocation has reached its runner endpoint, and a child
-`absent` response cannot override a still-registered local operation while child
-admission is in flight. A pointerless wake is also rejected if a destroy request
-or observed stop begins while its child RPC is pending, even when teardown
-settles before the wake response. Conversely, a verified accepted pointerless
-wake publishes its completion before returning so an already-running expiry
-preflight yields instead of destroying that child. Failed fail-closed cleanup
-returns `failed` and preserves the fence; the next exact wake re-enters the same
-abort-and-stop owner instead of leaving that operation permanently active.
+abort request and exact invocation cleanup settle. When the child reports
+`accepted` or `queued`, it owns cancellation and settlement: the container keeps
+the outer invocation transport alive so any already-admitted canonical write
+can finish or fail before the exact operation and fence are released. A stale,
+failed, or unavailable child abort instead cancels the outer transport and keeps
+the existing fail-closed cleanup path. Runtime wake also fails closed until the
+active invocation has reached its runner endpoint, and a child `absent` response
+cannot override a still-registered local operation while child admission is in
+flight. A pointerless wake is also rejected if a destroy request or observed
+stop begins while its child RPC is pending, even when teardown settles before
+the wake response. Conversely, a verified accepted pointerless wake publishes
+its completion before returning so an already-running expiry preflight yields
+instead of destroying that child. Failed fail-closed cleanup returns `failed`
+and preserves the fence; the next exact wake re-enters the same abort-and-stop
+owner instead of leaving that operation permanently active.
 Explicit container destroy aborts every invocation registered before the
 destroy call, including lifecycle-lock successors. New invocation admission
 resumes only after the stop settles and those exact tokens are released, on a
@@ -894,15 +899,17 @@ requester membership `participantId`; first-person references map only to the
 `read_shared` member with that exact id. Display name, handle, or member order
 cannot substitute, and the opaque id cannot appear in the answer.
 
-When a joined-group request or accepted-input completion reaches a dirty warm
-runtime, the mailbox prefetch may import it before the routine idle checkpoint
-only when the entire fetched prefix contains pre-checkpoint-safe system wakes.
+When a joined-group request, accepted-input completion, or closed
+`member.action.requested` reaches a dirty warm runtime, the mailbox prefetch may
+import it before the routine idle checkpoint only when the entire fetched
+prefix contains pre-checkpoint-safe system wakes.
 One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
 and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
-the existing foreground-causal delivery path. Neither starts or advances the
+the existing foreground-causal delivery path, and a member action uses its
+existing provider-free foreground-causal service path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
@@ -1887,7 +1894,11 @@ bounded delivery-effect reconciliation without continuing the assistant
 automation lane. Reconciliation uses an observation-only approval read that
 cannot create or refresh an approval cycle; only an explicit new action request
 may refresh a denied or expired cycle. The row is never authorization or outcome
-truth.
+truth. When an already-active invocation imports the control row, it runs that
+import's owned post-checkpoint effect immediately instead of waiting for a later
+conversation message. System-only reconciliation does not become conversation
+work, flip the foreground-yield signal, steer a provider turn, or start a
+companion model reply.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 When a pending vault-file action must surface an approval capability, the
@@ -1937,9 +1948,12 @@ quiescent cleanup. The generated-delivery pass runs independently before
 pending-input compaction and broad assistant-residue maintenance, so unrelated
 maintenance failures cannot block a successful terminal-file deletion while
 checkpoint publication continues. It evaluates the complete physical
-generated-delivery inventory against the complete trusted outbox, retains exact
-active obligations, and removes terminal, changed, or orphaned files before
-archive planning. Materialization must not run between that cleanup and archive
+generated-delivery direct-file inventory against the complete trusted outbox,
+retains exact active obligations, and removes terminal, changed, or orphaned
+direct files before archive planning. A legacy nested directory remains opaque
+and retained, is counted in metadata-only diagnostics, and does not block
+cleanup of trusted direct files; it never gains generated-delivery ownership.
+Materialization must not run between that cleanup and archive
 planning because it could reintroduce residue that was absent during
 validation.
 
@@ -2222,7 +2236,14 @@ blocked incoming-line state, current assignment, healthy backup sender capacity,
 and persisted delivery shape before creating the private Linq chat. The webhook
 recipient only identifies the candidate line; the existing `HostedLinqLine`
 projection grants new-route or recovery authority. Established thread routes
-remain authoritative independently of current line-pool eligibility.
+remain authoritative independently of current line-pool eligibility. Every new
+Linq or Telegram thread-container route also materializes its ordinary unnamed
+hosted group and route-owner membership through the canonical group-store
+primitive in that same database transaction. The structural write creates no
+join code, requested health or email sharing, or memberships for observed
+roster participants. Existing routed containers that predate this invariant
+are repaired once through the bounded operator backfill, which calls the same
+primitive in serial, short transactions and emits aggregate counts only.
 Recovery deliveries use a finite five-attempt sequence within the existing
 `HostedLinqDelivery` owner. A live or successful attempt converges every source
 event for that member, failed line, and group thread. Provider-correlated failed
@@ -2271,13 +2292,23 @@ payloads or become the device-sync queue. Active foreground wake handling stays
 conversation-focused; system-lane work runs through normal invocation and
 reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
-pass. A device-sync pass has its own 90-second budget, independent of the shared
+pass. A device-sync pass has its own 120-second budget, independent of the shared
 Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
 may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
 45-second admission cap, and any admitted canonical write finishes its existing
 atomic safety boundary before yielding. Do not add a separate system-lane
 active-wake import path unless measured latency or product behavior proves the
 simpler split is insufficient.
+
+The paired `device-sync.pass_finished` runtime-log marker includes a bounded
+sample of the 16 slowest claimed jobs in that pass. Each summary identifies only
+the provider, job kind, optional code-owned resource class, outcome, attempt/job
+counts, durable-progress presence, and timings for total execution, provider
+execution, unattributed provider work, connection-source reads, credential refreshes,
+and canonical imports. It omits member/account/job identifiers, payloads,
+cursors, provider responses, health values, and raw errors. The marker declares
+the total observed count, sample limit, and truncation state. The Web parser must
+accept the object-array field before a runner capable of emitting it is deployed.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
@@ -2738,8 +2769,10 @@ further steer, but retains the existing provider-turn correlation until the one
 steer already started under that exact key settles; a rejected steer is not
 acknowledged and its input remains pending. In the exception, request 0 pauses
 provider steering but keeps conversation admission registered until an atomic
-quiet cutoff or one reconsideration admission; request 1 closes at its first
-completed response. Missing input, a causal gap, a boundary change, capacity
+quiet cutoff or one reconsideration admission. A successfully committed live
+steer during request 0 also selects reconsideration and keeps registration open
+through request 1, which closes at its first completed response. Missing input,
+a causal gap, a boundary change, capacity
 overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and
