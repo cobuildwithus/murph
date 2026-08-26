@@ -1,6 +1,6 @@
 # Route explicitly named groups regardless of membership count
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -55,9 +55,8 @@ Updated: 2026-08-26
    Mitigation: use one slim membership query with no per-membership fanout only
    for an explicit label, preserving the exact JavaScript normalization
    contract and duplicate detection. Retain the existing 26-row query for
-   unnamed clarification. The current production maximum remains a 26-row
-   named read, while the deterministic regression proves selection at row 27;
-   query count and peak pooled connections remain one.
+   unnamed clarification. The named read can return every current membership,
+   while query count and peak pooled connections remain one.
 2. Risk: A case/Unicode mismatch changes which group is selected.
    Mitigation: prove persisted display-name normalization and add exact,
    whitespace, case, out-of-window, and duplicate-label regressions.
@@ -122,8 +121,19 @@ Updated: 2026-08-26
   tools so its exactly-one-handoff assertion forbids `list_memberships`. Its
   replay finding was superseded by deleting replay membership selection.
 - The corrected preliminary specialist finding is resolved by the successful
-  live journey. A final ReviewGPT correction round remains required for the
-  behavior-bearing prompt and journey-harness correction.
+  live journey.
+- Final ReviewGPT round 2 passed the replay correction. Round 3's retry found
+  one accepted purpose-drift disclosure gap: the assistant-contract
+  fingerprint change intentionally rotates eligible pre-existing direct and
+  group provider threads on their first post-deploy turn. The rotation starts
+  fresh with bounded committed history (24 messages, 4,000 bytes per message,
+  12,000 bytes total), and later turns resume the replacement thread. A
+  rollback can rotate once more. This is required so the corrected routing
+  contract replaces the stale provider-thread instructions.
+- The non-production remediation adds direct and group planning coverage for
+  that one-time rotation, bounded-history recovery, and subsequent native
+  resume. Both parameterized cases pass; no further production change was
+  required.
 
 ## Verification
 
@@ -131,6 +141,8 @@ Updated: 2026-08-26
   - Focused Vitest for `apps/web/test/hosted-group-assistant-ask.test.ts`.
   - `pnpm --filter @murphai/hosted-web typecheck`.
   - Focused `pnpm test:assistant:live -- --test "<unique journey name>"`.
+  - Focused Assistant Engine planning test for direct and group
+    assistant-contract rotation, followed by Assistant Engine typecheck.
   - `git diff --check`, targeted privacy/stale-string searches, and required
     exact-head PR review/CI gates.
 - Expected outcomes:
@@ -140,3 +152,4 @@ Updated: 2026-08-26
   - Duplicate exact labels remain unavailable as ambiguous.
   - The real assistant calls the named group handoff and truthfully reports a
     queued post rather than claiming it was sent.
+Completed: 2026-08-26
