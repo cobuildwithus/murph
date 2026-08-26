@@ -157,7 +157,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // workout graph. None of these changes alter startup topology.
 // Experiment and Murph Age recovery metadata add another 8,772 B to the lazy
 // CLI graph. Entry and static-startup limits remain unchanged.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_519_455;
+// Scheduled-log recovery adds 14,891 B to that same lazy CLI graph. Compose the
+// measured deltas; no change alters entry or static-startup topology.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_534_346;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
