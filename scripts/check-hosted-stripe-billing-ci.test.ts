@@ -68,8 +68,24 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects letting the live job start from pull request events", async () => {
     const source = (await readWorkflow()).replace(
-      "if: ${{ github.event_name == 'push' }}",
-      "if: ${{ always() }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && needs.billing-hermetic.result == 'success' }}",
+    );
+    expect(issueCodes(source)).toContain("missing-live-if");
+  });
+
+  it("rejects allowing the skipped pull-request classifier to suppress the main live job", async () => {
+    const source = (await readWorkflow()).replace(
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+    );
+    expect(issueCodes(source)).toContain("missing-live-if");
+  });
+
+  it("rejects admitting the live job without successful hermetic proof", async () => {
+    const source = (await readWorkflow()).replace(
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' }}",
     );
     expect(issueCodes(source)).toContain("missing-live-if");
   });
