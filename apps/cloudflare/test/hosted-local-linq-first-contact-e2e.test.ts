@@ -359,7 +359,13 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
         throw new Error("Expected instant first turn to activate one member.");
       }
       await requireScenario().waitForLatestPendingWake(memberState.memberId);
-      await requireScenario().waitForHostedCompletion(memberState.memberId);
+      const firstTurnIdleStatus = await requireScenario().waitForHostedIdle(
+        memberState.memberId,
+        { timeoutMs: 450_000 },
+      );
+      expect(firstTurnIdleStatus.lastErrorCode ?? null).toBeNull();
+      expect(firstTurnIdleStatus.mailboxLag.every((lane) => lane.lag === "0"))
+        .toBe(true);
       expect(countAssistantProviderResponsesApiRequests()).toBe(
         runtimeProviderBaseline,
       );
