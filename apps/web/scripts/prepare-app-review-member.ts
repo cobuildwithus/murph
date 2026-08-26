@@ -28,7 +28,8 @@ Options:
   --privy-user-id <id>     Resolve the Privy reviewer user by Privy user id.
   --create-privy-user      Authenticate the configured Privy test account first.
                            This is supported for --email and requires --apply.
-  --apply                  Perform production writes. Without this, only inspect.
+  --apply                  Apply writes to the configured local/test environment.
+                           Without this, only inspect.
   --help                   Print this message.
 `;
 

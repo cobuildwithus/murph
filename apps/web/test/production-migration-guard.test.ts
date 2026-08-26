@@ -51,6 +51,10 @@ import {
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
+const normalizeShellContinuations = (source: string): string =>
+  source.replace(/\\\r?\n[\t ]*/gu, " ");
+const productionVercelEnvRun =
+  /vercel env run[^\n]*(?:--environment(?:=|\s+)|-e(?:=|\s+))production/u;
 
 describe("hosted web production migration guard", () => {
   test("keeps production database maintenance on the protected workflow path", async () => {
@@ -63,13 +67,18 @@ describe("hosted web production migration guard", () => {
       path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
       ...scriptPaths,
     ];
-    const productionVercelEnvRun =
-      /vercel env run[^\n]*(?:--environment(?:=|\s+)|-e(?:=|\s+))production/u;
+
+    assert.match(
+      normalizeShellContinuations(String.raw`vercel env run \
+        --environment=production -- command`),
+      productionVercelEnvRun,
+      "the guard must detect production commands split across a shell continuation",
+    );
 
     for (const surfacePath of operatorSurfaces) {
       const surface = await readFile(surfacePath, "utf8");
       assert.doesNotMatch(
-        surface,
+        normalizeShellContinuations(surface),
         productionVercelEnvRun,
         `${path.relative(repoRoot, surfacePath)} must route production database maintenance through the protected workflow`,
       );
@@ -80,6 +89,57 @@ describe("hosted web production migration guard", () => {
     assert.match(webReadme, /Vercel\s+Sensitive values/u);
     assert.match(webReadme, /secrets\.HOSTED_WEB_DIRECT_DATABASE_URL/u);
     assert.match(webReadme, /Do not add a\ngeneric command input/u);
+  });
+
+  test("renders the intended maintenance owner in changed script help", () => {
+    const repoRoot = path.resolve(appRoot, "..", "..");
+    const helpExpectations = [
+      {
+        path: "apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
+        productionOwner: /protected\s+Hosted Web Contract Migrations workflow/u,
+      },
+      {
+        path: "apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
+        productionOwner: /protected\s+Hosted Web Contract Migrations workflow/u,
+      },
+      {
+        path: "apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts",
+        productionOwner: /protected\s+Hosted Web Contract Migrations workflow/u,
+      },
+      {
+        path: "apps/web/scripts/prepare-app-review-member.ts",
+        productionOwner: /authenticated same-origin hosted Ops route/u,
+      },
+    ];
+
+    for (const expectation of helpExpectations) {
+      const result = spawnSync(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          "--tsconfig",
+          "apps/web/tsconfig.json",
+          expectation.path,
+          "--help",
+        ],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: process.env,
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /Local\/test usage from the repository root/u);
+      assert.match(result.stdout, /approved non-production DATABASE_URL/u);
+      assert.match(result.stdout, expectation.productionOwner);
+      assert.doesNotMatch(result.stdout, /Perform production writes/u);
+      assert.doesNotMatch(
+        normalizeShellContinuations(result.stdout),
+        productionVercelEnvRun,
+      );
+    }
   });
 
   test("runs only for main-branch Vercel production deploys", () => {
