@@ -30,7 +30,7 @@ import {
   resolveJunctionTimeseriesResourcePolicy,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { test, vi } from "vitest";
+import { vi } from "vitest";
 
 import { JUNCTION_PRODUCTION_TIMESERIES_RESOURCES } from "../src/config/junction-config.ts";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
@@ -834,628 +834,109 @@ function createJunctionSvixWebhook(input: {
 
 
 
-for (const testCase of [
-  { label: "scheduled", notPulled: [] as string[], status: "scheduled" },
-  { label: "in progress", notPulled: [] as string[], status: "in_progress" },
-  {
-    label: "retrying even when malformed not_pulled contradicts it",
-    notPulled: ["activity"],
-    status: "retrying",
-  },
-  { label: "unknown future", notPulled: [] as string[], status: "paused_by_provider" },
-] as const) {
-  test(`Junction Garmin ${testCase.label} historical status stays on the saturated retry without a reset marker`, async () => {
-    const provider = createHistoricalActivityProvider(
-      "garmin",
-      createHistoricalPullFetch({
-        garmin: {
-          not_pulled: testCase.notPulled,
-          pulled: {
-            activity: {
-              days_with_data: 0,
-              status: testCase.status,
-            },
-          },
-        },
-      }),
-    );
-    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
 
-    const result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        account: createAccount({
-          metadata: {
-            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
-            junctionHistoricalBackfillEmptyAttempts: 4,
-            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
-            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-          },
-        }),
-        upsertConnectionSource: (input) => {
-          upserts.push(input);
-          return createConnectionSource(input);
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
 
-    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
-    assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
-    assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
-    assert.equal(
-      upserts.some((source) => source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"),
-      false,
-    );
-  });
-}
 
 
-
-
-
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-const usefulHistoricalSummaryRecordByResource = {
-  sleep: {
-    id: "sleep-1",
-    connectionId: "provider-garmin-1",
-    startAt: "2026-04-02T01:00:00.000Z",
-    endAt: "2026-04-02T08:00:00.000Z",
-  },
-  workouts: {
-    id: "workouts-1",
-    connectionId: "provider-garmin-1",
-    startAt: "2026-04-02T12:00:00.000Z",
-    durationMinutes: 45,
-  },
-  body: {
-    id: "body-1",
-    connectionId: "provider-garmin-1",
-    weightKg: 72,
-  },
-} satisfies Record<"sleep" | "workouts" | "body", Record<string, unknown>>;
-
-const usefulHistoricalSummaryCompletionCases = [
-  {
-    label: "activity floors",
-    resource: "activity",
-    record: {
-      id: "activity-floors-1",
-      connectionId: "provider-garmin-1",
-      floorsClimbed: 8,
-    },
-  },
-  {
-    label: "body lean mass",
-    resource: "body",
-    record: {
-      id: "body-lean-1",
-      connectionId: "provider-garmin-1",
-      leanBodyMassKg: 58.2,
-    },
-  },
-  {
-    label: "body waist circumference",
-    resource: "body",
-    record: {
-      id: "body-waist-1",
-      connectionId: "provider-garmin-1",
-      waistCircumferenceCm: 82,
-    },
-  },
-  {
-    label: "meal raw-only",
-    resource: "meal",
-    record: {
-      id: "meal-1",
-      sourceProviderSlug: "garmin",
-      mealType: "breakfast",
-    },
-  },
-  {
-    label: "menstrual cycle raw-only",
-    resource: "menstrual_cycle",
-    record: {
-      id: "cycle-1",
-      sourceProviderSlug: "garmin",
-      cycleDay: 3,
-    },
-  },
-] as const;
-
-for (const testCase of usefulHistoricalSummaryCompletionCases) {
-  test(`Junction ${testCase.label} summary historical backfill marks the historical window complete`, async () => {
-    const importedSnapshots: unknown[] = [];
-    const provider = createJunctionProvider(async (input) => {
-      const url = readUrl(input);
-
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              id: "provider-garmin-1",
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: {
-                [testCase.resource]: true,
-                heartrate: true,
-              },
-            },
-          ],
-        });
-      }
-
-      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${testCase.resource}/junction-user-1`)) {
-        return createJsonResponse({ data: [testCase.record] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }, {
-      summaryResources: [testCase.resource],
-    });
-
-    const result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
-
-    assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
-      junctionHistoricalBackfillEmptyAttempts: 0,
-      junctionHistoricalBackfillLastEmptyAt: null,
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    });
-    assert.equal(result.scheduledJobs, undefined);
-    assert.equal(importedSnapshots.length, 1);
-  });
-}
-
-
-
-for (const testCase of [
-  {
-    label: "meal identity/debug-only",
-    resource: "meal",
-    record: {
-      id: "meal-provenance-only",
-      clientId: "provider-client-1",
-      debug: true,
-      fullName: "Raw Member Name",
-      patientName: "Raw Patient Name",
-      sourceProviderSlug: "garmin",
-      status: "synced",
-      items: [
-        {
-          subjectId: "raw-meal-subject-id",
-          subject: {
-            id: "raw-meal-nested-subject-id",
-          },
-        },
-      ],
-    },
-  },
-  {
-    label: "menstrual cycle identity/contact-only",
-    resource: "menstrual_cycle",
-    record: {
-      addressLine1: "123 Private Street",
-      birthDate: "1980-01-01",
-      dateOfBirth: "1980-01-01",
-      dob: "1980-01-01",
-      id: "cycle-identity-only",
-      memberName: "Raw Member Name",
-      provider_connection_id: "provider-garmin-1",
-      sourceProviderSlug: "garmin",
-      user: {
-        id: "raw-cycle-user-id",
-      },
-      profile: {
-        patient_id: "raw-cycle-patient-id",
-      },
-      symptoms: [
-        {
-          subjectId: "raw-cycle-subject-id",
-          subjects: [
-            {
-              id: "raw-cycle-subjects-container-id",
-            },
-          ],
-        },
-      ],
-    },
-  },
-] as const) {
-  test(`Junction ${testCase.label} raw-only summary does not create a historical obligation`, async () => {
-    const importedSnapshots: unknown[] = [];
-    const provider = createJunctionProvider(async (input) => {
-      const url = readUrl(input);
-
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              id: "provider-garmin-1",
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: {
-                [testCase.resource]: true,
-                heartrate: true,
-              },
-            },
-          ],
-        });
-      }
-
-      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${testCase.resource}/junction-user-1`)) {
-        return createJsonResponse({ data: [testCase.record] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }, {
-      summaryResources: [testCase.resource],
-    });
-
-    const result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        now: "2026-04-04T00:00:00.000Z",
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
-
-    assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
-      junctionHistoricalBackfillEmptyAttempts: 0,
-      junctionHistoricalBackfillLastEmptyAt: null,
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    });
-    assert.equal(result.scheduledJobs, undefined);
-    assert.equal(importedSnapshots.length, 1);
-  });
-}
-
-for (const summaryResource of ["sleep", "workouts", "body"] as const) {
-  test(`Junction ${summaryResource} summary historical backfill marks the historical window complete`, async () => {
-    const importedSnapshots: unknown[] = [];
-    const provider = createJunctionProvider(async (input) => {
-      const url = readUrl(input);
-
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              id: "provider-garmin-1",
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: {
-                [summaryResource]: true,
-                heartrate: true,
-              },
-            },
-          ],
-        });
-      }
-
-      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${summaryResource}/junction-user-1`)) {
-        return createJsonResponse({ data: [usefulHistoricalSummaryRecordByResource[summaryResource]] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }, {
-      summaryResources: [summaryResource],
-    });
-
-    const result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
-
-    assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
-      junctionHistoricalBackfillEmptyAttempts: 0,
-      junctionHistoricalBackfillLastEmptyAt: null,
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    });
-    assert.equal(result.scheduledJobs, undefined);
-    assert.equal(importedSnapshots.length, 1);
-  });
-}
-
-
-
-for (const summaryResource of ["activity", "sleep"] as const) {
-  test(`Junction ${summaryResource} id-only historical backfill keeps the summary window retrying`, async () => {
-    const importedSnapshots: unknown[] = [];
-    const provider = createJunctionProvider(async (input) => {
-      const url = readUrl(input);
-
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              id: "provider-garmin-1",
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: {
-                [summaryResource]: true,
-                heartrate: true,
-              },
-            },
-          ],
-        });
-      }
-
-      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${summaryResource}/junction-user-1`)) {
-        return createJsonResponse({ data: [{ id: `${summaryResource}-1`, connectionId: "provider-garmin-1" }] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }, {
-      summaryResources: [summaryResource],
-    });
-
-    const result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        now: "2026-04-04T00:00:00.000Z",
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
-
-    assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
-      junctionHistoricalBackfillEmptyAttempts: 1,
-      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    });
-    assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
-    assert.equal(importedSnapshots.length, 1);
-  });
-}
-
-const floatingSessionOnlySummaryRecordByResource = {
-  sleep: {
-    id: "sleep-1",
-    connectionId: "provider-garmin-1",
-    startAt: "2026-04-02T01:00:00",
-    endAt: "2026-04-02T08:00:00",
-  },
-} satisfies Record<"sleep", Record<string, unknown>>;
-
-for (const summaryResource of ["sleep"] as const) {
-  test(`Junction ${summaryResource} floating session-only historical backfill keeps the summary window retrying`, async () => {
-    const importedSnapshots: unknown[] = [];
-    const provider = createJunctionProvider(async (input) => {
-      const url = readUrl(input);
-
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              id: "provider-garmin-1",
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: {
-                [summaryResource]: true,
-                heartrate: true,
-              },
-            },
-          ],
-        });
-      }
-
-      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${summaryResource}/junction-user-1`)) {
-        return createJsonResponse({ data: [floatingSessionOnlySummaryRecordByResource[summaryResource]] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }, {
-      summaryResources: [summaryResource],
-    });
-
-    const result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        now: "2026-04-04T00:00:00.000Z",
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
-
-    assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
-      junctionHistoricalBackfillEmptyAttempts: 1,
-      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    });
-    assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
-    assert.equal(importedSnapshots.length, 1);
-  });
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-for (const sourceProviderSlug of ["oura", "apple_health_kit"] as const) {
-  test(`Junction retrying coverage clears a stale ${sourceProviderSlug} reset marker`, async () => {
-    const provider = createHistoricalActivityProvider(
-      sourceProviderSlug,
-      createHistoricalPullFetch({
-        [sourceProviderSlug]: {
-          not_pulled: [],
-          pulled: {
-            activity: { days_with_data: 1, status: "success" },
-          },
-        },
-      }),
-    );
-    const sourceInstanceKey = requireValue(buildJunctionProviderSourceInstanceKey({
-      connectionId: "acct-junction-1",
-      sourceProviderSlug,
-    }));
-    const existingSource = createConnectionSource({
-      sourceInstanceKey,
-      sourceProviderSlug,
-      status: "error",
-      lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
-      lastErrorMessage: "Historical data remained incomplete.",
-    });
-    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
-
-    await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        account: createAccount({
-          metadata: {
-            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
-            junctionHistoricalBackfillEmptyAttempts: 4,
-            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
-            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-          },
-        }),
-        listConnectionSources: () => [existingSource],
-        upsertConnectionSource: (input) => {
-          upserts.push(input);
-          return createConnectionSource(input);
-        },
-      }),
-      createJob("backfill", {
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    );
-
-    const sourceUpdates = upserts.filter((source) =>
-      source.sourceProviderSlug === sourceProviderSlug
-    );
-    assert.ok(sourceUpdates.length > 0);
-    for (const source of sourceUpdates) {
-      assert.equal(source.status, "connected");
-      assert.equal(Object.hasOwn(source, "lastErrorCode"), false);
-      assert.equal(Object.hasOwn(source, "lastErrorMessage"), false);
-    }
-  });
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1530,7 +1011,6 @@ export {
   executeJunctionFullJob,
   executeJunctionJob,
   executeTemporalAuthorityChildren,
-  floatingSessionOnlySummaryRecordByResource,
   junctionWorkoutCandidateIdentity,
   readJunctionWorkoutProgressIdentities,
   readScheduledWorkoutStreamContinuation,
@@ -1538,6 +1018,4 @@ export {
   requireJunctionWebhookHandler,
   resolveJunctionTarget,
   sha256ForTest,
-  usefulHistoricalSummaryCompletionCases,
-  usefulHistoricalSummaryRecordByResource,
 };

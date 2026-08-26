@@ -10,10 +10,10 @@ It intentionally lists live architecture, product, verification, and package-bou
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
-Assistant Engine local-service runtime verification is partitioned into
-behavior-owned test modules backed by one adjacent shared harness. Root,
-diff-aware, package, and release coverage lanes run that owner on the ordinary
-Node heap without a package-specific invocation branch. The command contract
+Large hand-authored runtime and provider suites are partitioned into
+behavior-owned test modules backed by adjacent owner-specific harnesses. Root,
+diff-aware, package, and release coverage lanes run those owners on the ordinary
+Node heap without package-specific invocation branches. The command contract
 and proof map, including the general behavior-cohesion rule for hand-authored
 test modules and owner-specific harnesses, are specified by
 `agent-docs/operations/verification-and-runtime.md` and

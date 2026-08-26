@@ -2020,6 +2020,66 @@ test("Junction Apple Health not_pulled resources create no historical obligation
   assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
 });
 
+for (const testCase of [
+  { label: "scheduled", notPulled: [] as string[], status: "scheduled" },
+  { label: "in progress", notPulled: [] as string[], status: "in_progress" },
+  {
+    label: "retrying even when malformed not_pulled contradicts it",
+    notPulled: ["activity"],
+    status: "retrying",
+  },
+  { label: "unknown future", notPulled: [] as string[], status: "paused_by_provider" },
+] as const) {
+  test(`Junction Garmin ${testCase.label} historical status stays on the saturated retry without a reset marker`, async () => {
+    const provider = createHistoricalActivityProvider(
+      "garmin",
+      createHistoricalPullFetch({
+        garmin: {
+          not_pulled: testCase.notPulled,
+          pulled: {
+            activity: {
+              days_with_data: 0,
+              status: testCase.status,
+            },
+          },
+        },
+      }),
+    );
+    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+            junctionHistoricalBackfillEmptyAttempts: 4,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          },
+        }),
+        upsertConnectionSource: (input) => {
+          upserts.push(input);
+          return createConnectionSource(input);
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+    assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+    assert.equal(
+      upserts.some((source) => source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"),
+      false,
+    );
+  });
+}
+
 test("Junction Oura historical failure stays retrying and never asks for a shared reset", async () => {
   const provider = createHistoricalActivityProvider(
     "oura",

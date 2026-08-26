@@ -1,6 +1,6 @@
 # Split oversized test modules by behavior
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -102,8 +102,10 @@ Updated: 2026-08-25
   ordinary package settings; documentation remains internally consistent; no
   unresolved accepted review findings remain.
 - Direct preservation proof: 298 entrypoint suite statements, 236 Codex runtime
-  statements, 314 Junction statements, and 294 assistant-phase statements match
-  their original source hashes exactly once across the new behavior modules.
+  statements, 314 direct Junction statements plus seven parameterized
+  registration loops, and 294 assistant-phase statements match their original
+  source hashes exactly once across the new behavior modules.
 - Local results: affected package typechecks pass; focused Vitest passes 275
-  Codex runtime tests across 7 files, 474 Junction provider tests across 8 files,
+  Codex runtime tests across 7 files, 341 Junction provider tests across 8 files,
   and 657 assistant-runtime tests across 22 files.
+Completed: 2026-08-25

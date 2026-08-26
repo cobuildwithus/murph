@@ -869,6 +869,68 @@ test("Junction current coverage clears a stale Oura reset marker", async () => {
   assert.equal(Object.hasOwn(upserts.at(-1) ?? {}, "lastErrorCode"), false);
 });
 
+for (const sourceProviderSlug of ["oura", "apple_health_kit"] as const) {
+  test(`Junction retrying coverage clears a stale ${sourceProviderSlug} reset marker`, async () => {
+    const provider = createHistoricalActivityProvider(
+      sourceProviderSlug,
+      createHistoricalPullFetch({
+        [sourceProviderSlug]: {
+          not_pulled: [],
+          pulled: {
+            activity: { days_with_data: 1, status: "success" },
+          },
+        },
+      }),
+    );
+    const sourceInstanceKey = requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug,
+    }));
+    const existingSource = createConnectionSource({
+      sourceInstanceKey,
+      sourceProviderSlug,
+      status: "error",
+      lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+      lastErrorMessage: "Historical data remained incomplete.",
+    });
+    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+            junctionHistoricalBackfillEmptyAttempts: 4,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          },
+        }),
+        listConnectionSources: () => [existingSource],
+        upsertConnectionSource: (input) => {
+          upserts.push(input);
+          return createConnectionSource(input);
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    const sourceUpdates = upserts.filter((source) =>
+      source.sourceProviderSlug === sourceProviderSlug
+    );
+    assert.ok(sourceUpdates.length > 0);
+    for (const source of sourceUpdates) {
+      assert.equal(source.status, "connected");
+      assert.equal(Object.hasOwn(source, "lastErrorCode"), false);
+      assert.equal(Object.hasOwn(source, "lastErrorMessage"), false);
+    }
+  });
+}
+
 test("Junction queued jobs preserve an Oura reset marker owned by opaque future coverage", async () => {
   const provider = createHistoricalActivityProvider(
     "oura",
