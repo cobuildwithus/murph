@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ENVIRONMENT_INTERVIEW_TOPIC_GROUPS,
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
+  listEnvironmentInterviewFields,
 } from "@murphai/contracts";
 
 import {
@@ -34,7 +36,7 @@ describe("environment voice script", () => {
     expect(location?.label).toMatch(/not your address/i);
   });
 
-  it("asks about unknown high and medium context without mixing it into grade coverage", () => {
+  it("asks every gradeable condition plus unknown high and medium context", () => {
     const script = buildEnvironmentVoiceScript({
       "sleep-environment": {
         night_temp_c: 19,
@@ -49,10 +51,52 @@ describe("environment voice script", () => {
     expect(focus).toContain("How fresh air enters your home");
     expect(focus).toContain("Whether you work at home, an office, or both");
     expect(focus).toContain("Whether you use a laptop or external monitor");
+    expect(focus).toContain("Whether there is a TV in your bedroom");
+    expect(focus).toContain(
+      "Whether anyone smokes indoors or you often use a fireplace or candles",
+    );
     expect(focus).not.toContain("Where your phone stays at night");
     expect(focus).not.toContain("Whether your home has been tested for radon");
     expect(focus).not.toContain("Your drinking water source or filter");
     expect(script.topics[0]?.prompt).toBeUndefined();
+  });
+
+  it("includes every gradeable report condition in the main interview", () => {
+    const script = buildEnvironmentVoiceScript({});
+    const includedFields = new Set(
+      script.topics.flatMap((topic) =>
+        (topic.fields ?? []).map(
+          (field) => `${field.aspectId}.${field.indicatorId}`,
+        ),
+      ),
+    );
+    const gradeableFields = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap(
+      (group) => listEnvironmentInterviewFields(group.id),
+    )
+      .filter(({ indicator }) => indicator.informational !== true)
+      .map(({ aspectId, indicator }) => `${aspectId}.${indicator.id}`);
+
+    expect([...includedFields]).toEqual(
+      expect.arrayContaining(gradeableFields),
+    );
+  });
+
+  it("asks again when a report condition is stored without a value", () => {
+    const script = buildEnvironmentVoiceScript({
+      "sleep-environment": { night_temp_c: null },
+    });
+    const fields = script.topics.flatMap((topic) => topic.fields ?? []);
+
+    expect(script.flow).toBe("walkthrough");
+    expect(script.initialCoveredDetails).toBe(0);
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+        }),
+      ]),
+    );
   });
 
   it("omits declined gaps and switches to an open update only when collection gaps are resolved", () => {
@@ -85,7 +129,7 @@ function resolvedCollectionValues(): HabitatValues {
     }
     const indicators: Record<string, typeof HABITAT_DECLINED_VALUE> = {};
     for (const indicator of aspect.indicators) {
-      if (indicator.priority !== "low") {
+      if (indicator.priority !== "low" || indicator.informational !== true) {
         indicators[indicator.id] = HABITAT_DECLINED_VALUE;
       }
     }

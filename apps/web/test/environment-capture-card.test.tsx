@@ -17,7 +17,13 @@ const GAP_SCRIPT: EnvironmentVoiceScript = {
   topics: [
     {
       eyebrow: "Sleep",
-      focus: ["Night temperature"],
+      focus: [
+        "Night temperature",
+        "Bedroom darkness",
+        "Bedroom noise",
+        "Indoor smoke",
+        "Bedroom TV",
+      ],
       id: "sleep",
       prompt: "Cover only what is missing.",
       title: "Your sleep setup",
@@ -51,9 +57,9 @@ test("partial reports offer to fill only what is missing", async () => {
 
   try {
     const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Complete the picture/);
+    assert.match(bodyText, /Fill the remaining 5 gaps/);
     assert.match(bodyText, /Continue report/);
-    assert.match(bodyText, /1 detail missing · 1 short topic/);
+    assert.doesNotMatch(bodyText, /detail missing|short topic/);
     assert.doesNotMatch(bodyText, /Update by voice/);
   } finally {
     await rendered.cleanup();
