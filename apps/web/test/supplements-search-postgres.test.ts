@@ -874,21 +874,21 @@ describe.runIf(Boolean(testDatabaseUrl))(
           label
         )
         SELECT
-          CASE WHEN seed = 6000
+          CASE WHEN seed = 100
             THEN 'zz-food-boundary-fts-alias-priority'
             ELSE 'food-boundary-fts-alias-' || seed::text
           END,
           'food-boundary-fts-alias',
           'usda_branded',
           'food-boundary-fts-alias-' || seed::text,
-          CASE WHEN seed = 6000 THEN 1 ELSE 100 END,
+          CASE WHEN seed = 100 THEN 1 ELSE 100 END,
           'Boundaryfts Alias',
           NULL,
           NULL,
           false,
           'Boundaryfts Alias',
           '{"fixture":true}'::jsonb
-        FROM generate_series(1, 6000) AS aliases(seed)
+        FROM generate_series(1, 100) AS aliases(seed)
 
         UNION ALL
 
@@ -948,9 +948,6 @@ describe.runIf(Boolean(testDatabaseUrl))(
       await client.query(
         "CREATE INDEX foods_fixture_name_exact_rank_idx ON foods (lower(name), data_origin_priority, id)",
       );
-      await client.query(
-        "CREATE INDEX foods_fixture_canonical_rank_idx ON foods (canonical_key, data_origin_priority, id)",
-      );
       await client.query("ANALYZE foods");
     });
 
@@ -991,7 +988,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       20_000,
     );
 
-    it("keeps food ranking and canonical diversity beyond the match cap", async () => {
+    it("keeps exact ranking, admitted canonical dedupe, and stable results", async () => {
       const first = await foodQueries.searchFoods({
         includeOffMarket: false,
         limit: 50,
@@ -1041,6 +1038,206 @@ describe.runIf(Boolean(testDatabaseUrl))(
     it("intercepts every contaminant lookup instead of requiring product-test tables", () => {
       expect(contaminantQueryCount).toBeGreaterThan(0);
     });
+  },
+);
+
+type ExplainPlanNode = {
+  "Actual Rows"?: number;
+  "Index Name"?: string;
+  "Node Type"?: string;
+  Plans?: ExplainPlanNode[];
+};
+
+function flattenExplainPlan(node: ExplainPlanNode): ExplainPlanNode[] {
+  return [
+    node,
+    ...(node.Plans ?? []).flatMap((child) => flattenExplainPlan(child)),
+  ];
+}
+
+describe.runIf(Boolean(testDatabaseUrl))(
+  "large-catalog food PostgreSQL search bound",
+  () => {
+    it("finishes common-token search inside the production statement timeout", async () => {
+      const client = new pg.Client({
+        connectionString: testDatabaseUrl ?? undefined,
+      });
+      let transactionStarted = false;
+      const capturedSearch: {
+        current: { text: string; values: unknown[] } | null;
+      } = { current: null };
+      const queryClient = {
+        async query<T>(text: string, values: unknown[]) {
+          if (
+            text.includes("FROM product_tests") ||
+            text.includes("JOIN product_tests")
+          ) {
+            return { rows: [] as T[] };
+          }
+
+          if (text.includes("WITH query AS")) {
+            capturedSearch.current = { text, values };
+          }
+          const result = await client.query(text, values);
+          return { rows: result.rows };
+        },
+      };
+      const queries = createFoodsQueries(queryClient);
+
+      await client.connect();
+      try {
+        await client.query("BEGIN");
+        transactionStarted = true;
+        await client.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+        await client.query("SET LOCAL statement_timeout = 0");
+        await client.query(`
+          CREATE TEMP TABLE foods (
+            id TEXT PRIMARY KEY,
+            canonical_key TEXT NOT NULL,
+            data_origin TEXT NOT NULL,
+            data_origin_id TEXT NOT NULL,
+            data_origin_priority SMALLINT NOT NULL,
+            name TEXT NOT NULL,
+            brand TEXT,
+            upc TEXT,
+            off_market BOOLEAN NOT NULL,
+            search_text TEXT NOT NULL,
+            label JSONB NOT NULL,
+            serving_grams NUMERIC
+          ) ON COMMIT DROP
+        `);
+        await client.query(`
+          INSERT INTO foods (
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            data_origin_priority,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            label
+          )
+          SELECT
+            'food-perf-' || seed::text,
+            'food-perf-' || seed::text,
+            CASE WHEN seed = 3 THEN 'usda_foundation' ELSE 'usda_branded' END,
+            'food-perf-' || seed::text,
+            50,
+            CASE
+              WHEN seed = 1 THEN 'Exact Commonfood'
+              WHEN seed = 2 THEN 'Unrelated Product'
+              WHEN seed = 3 THEN 'Generic Marker Food'
+              ELSE 'Commonfood Item ' || seed::text
+            END,
+            CASE WHEN seed = 2 THEN 'Needlebrand' ELSE NULL END,
+            NULL,
+            false,
+            CASE
+              WHEN seed = 1 THEN 'Exact Commonfood'
+              WHEN seed = 2 THEN 'Unrelated Product Needlebrand'
+              WHEN seed = 3 THEN 'Generic Marker Food genericmarker'
+              ELSE 'Commonfood Item ' || seed::text
+            END,
+            '{"fixture":true}'::jsonb
+          FROM generate_series(1, 250000) AS rows(seed)
+        `);
+        await client.query(
+          "CREATE INDEX foods_perf_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
+        );
+        await client.query(
+          "CREATE INDEX foods_perf_search_english_idx ON foods USING GIN (to_tsvector('english', search_text))",
+        );
+        await client.query(
+          "CREATE INDEX foods_perf_name_rank_idx ON foods USING GIST (name gist_trgm_ops)",
+        );
+        await client.query(
+          "CREATE INDEX foods_perf_name_exact_rank_idx ON foods (lower(name), data_origin_priority, id)",
+        );
+        await client.query("ANALYZE foods");
+        await client.query("SET LOCAL lock_timeout = '500ms'");
+        await client.query("SET LOCAL statement_timeout = '8s'");
+
+        const broad = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 20,
+          q: "commonfood",
+        });
+        expect(broad).toHaveLength(20);
+        expect(capturedSearch.current).not.toBeNull();
+        const broadSearch = capturedSearch.current;
+        if (!broadSearch) {
+          throw new Error("broad food search SQL was not captured");
+        }
+        const broadExplain = await client.query<{ "QUERY PLAN": Array<{
+          Plan: ExplainPlanNode;
+        }> }>(
+          `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${broadSearch.text}`,
+          broadSearch.values,
+        );
+        const broadPlan = broadExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
+        expect(broadPlan).toBeDefined();
+        const broadNodes = flattenExplainPlan(broadPlan ?? {});
+        expect(broadNodes.some((node) =>
+          node["Index Name"] === "foods_perf_name_rank_idx"
+        )).toBe(true);
+        for (const sortNode of broadNodes.filter((node) =>
+          node["Node Type"] === "Sort"
+        )) {
+          expect(sortNode["Actual Rows"] ?? 0).toBeLessThanOrEqual(10_250);
+        }
+
+        const brandOnly = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q: "needlebrand",
+        });
+        expect(brandOnly.map((row) => row.id)).toContain("food-perf-2");
+        const brandSearch = capturedSearch.current;
+        if (!brandSearch) {
+          throw new Error("brand-only food search SQL was not captured");
+        }
+        const brandExplain = await client.query<{ "QUERY PLAN": Array<{
+          Plan: ExplainPlanNode;
+        }> }>(
+          `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${brandSearch.text}`,
+          brandSearch.values,
+        );
+        const brandPlan = brandExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
+        expect(brandPlan).toBeDefined();
+        expect(flattenExplainPlan(brandPlan ?? {}).some((node) =>
+          node["Index Name"] === "foods_perf_search_idx" ||
+          node["Index Name"] === "foods_perf_search_english_idx"
+        )).toBe(true);
+
+        const exact = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q: "Exact Commonfood",
+        });
+        expect(exact[0]?.id).toBe("food-perf-1");
+
+        const generic = await queries.searchFoods({
+          genericOnly: true,
+          includeOffMarket: false,
+          limit: 5,
+          q: "genericmarker",
+        });
+        expect(generic.map((row) => row.id)).toEqual(["food-perf-3"]);
+
+        const { rows: obsoleteIndexes } = await client.query<{ name: string | null }>(
+          "SELECT to_regclass('foods_perf_canonical_rank_idx')::text AS name",
+        );
+        expect(obsoleteIndexes[0]?.name).toBeNull();
+      } finally {
+        if (transactionStarted) {
+          await client.query("ROLLBACK");
+        }
+        await client.end();
+      }
+    }, 120_000);
   },
 );
 

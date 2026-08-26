@@ -28,7 +28,7 @@ function isProductTestsQuery(text: string): boolean {
 }
 
 describe("foods query helpers", () => {
-  it("keeps the indexes required by bounded ranked search", async () => {
+  it("keeps only the indexes consumed by bounded ranked search", async () => {
     const schemaSql = await readFile(
       new URL("../sql/foods/schema.sql", import.meta.url),
       "utf8",
@@ -44,28 +44,21 @@ describe("foods query helpers", () => {
     expect(schemaSql).toContain(
       "ON foods (lower(name), data_origin_priority, id)",
     );
-    expect(schemaSql).toContain(
-      "CREATE INDEX IF NOT EXISTS foods_canonical_rank_idx",
-    );
-    expect(schemaSql).toContain(
-      "ON foods (canonical_key, data_origin_priority, id)",
-    );
+    expect(schemaSql).not.toContain("foods_canonical_rank_idx");
 
     const liveRolloutSql = await readFile(
       new URL("../sql/foods/private-search-indexes.sql", import.meta.url),
       "utf8",
     );
     expect(liveRolloutSql.match(/CREATE INDEX CONCURRENTLY IF NOT EXISTS/gu))
-      .toHaveLength(3);
+      .toHaveLength(2);
     expect(liveRolloutSql).toMatch(
       /CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_rank_idx\s+ON foods\s+USING GIST \(name gist_trgm_ops\);/u,
     );
     expect(liveRolloutSql).toMatch(
       /CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_exact_rank_idx\s+ON foods \(lower\(name\), data_origin_priority, id\);/u,
     );
-    expect(liveRolloutSql).toMatch(
-      /CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_canonical_rank_idx\s+ON foods \(canonical_key, data_origin_priority, id\);/u,
-    );
+    expect(liveRolloutSql).not.toContain("foods_canonical_rank_idx");
   });
 
   it("projects meal nutrition and bounded contaminant evidence without unrelated payloads", () => {
@@ -354,18 +347,42 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain(
       "NOT EXISTS (SELECT 1 FROM fts_matches)",
     );
+    const searchSql = searchCall?.text ?? "";
+    const ftsIndexSql = searchSql.slice(
+      searchSql.indexOf("fts_index_matches AS MATERIALIZED"),
+      searchSql.indexOf("name_nearest_matches AS MATERIALIZED"),
+    );
+    const nameNearestSql = searchSql.slice(
+      searchSql.indexOf("name_nearest_matches AS MATERIALIZED"),
+      searchSql.indexOf("fts_nearest_matches AS MATERIALIZED"),
+    );
+    const ftsNearestSql = searchSql.slice(
+      searchSql.indexOf("fts_nearest_matches AS MATERIALIZED"),
+      searchSql.indexOf("fts_matches AS MATERIALIZED"),
+    );
+    expect(ftsIndexSql).toContain("to_tsvector");
+    expect(ftsIndexSql).not.toContain("ORDER BY");
+    expect(nameNearestSql).not.toContain("to_tsvector");
+    expect(nameNearestSql).toContain("ORDER BY name <->>> $1::text");
+    expect(ftsNearestSql).toContain("FROM name_nearest_matches");
+    expect(ftsNearestSql).not.toContain("FROM foods");
     expect(searchCall?.text).toMatch(
-      /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 5000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
-      /fts_canonical_matches AS MATERIALIZED \([\s\S]*?DISTINCT ON \(canonical_key\)[\s\S]*?ORDER BY\s*canonical_key ASC,\s*data_origin_priority ASC,\s*id ASC\s*LIMIT 5000/u,
+      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
     );
     expect(searchCall?.text).toMatch(
-      /trigram_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+      /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?to_tsvector/u,
     );
     expect(searchCall?.text).toMatch(
-      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_nearest_matches[\s\S]*?SELECT \* FROM fts_canonical_matches/u,
+      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_index_matches[\s\S]*?SELECT \* FROM fts_nearest_matches/u,
     );
+    expect(searchCall?.text).toMatch(
+      /trigram_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?name % \$1::text[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+    );
+    expect(searchCall?.text).not.toContain("fts_canonical_matches");
+    expect(searchCall?.text).not.toContain("trigram_canonical_matches");
     expect(searchCall?.text).toMatch(
       /fts_exact_name_matches AS MATERIALIZED \([\s\S]*?lower\(name\) = lower\(\$1::text\)[\s\S]*?LIMIT 250/u,
     );
@@ -498,6 +515,9 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain(
       "AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))",
     );
+    expect(searchCall?.text.match(
+      /\(\$4::text\[\] IS NULL OR data_origin = ANY\(\$4::text\[\]\)\)/gu,
+    )).toHaveLength(4);
     expect(searchCall?.values).toEqual([
       "chicken breast cooked skinless",
       false,
