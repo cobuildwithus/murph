@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 120,
+  "item": {
+    "id": "group-video-analysis-by-uploader",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Video analysis in group chats",
+    "summary": "In an authenticated group chat, the person who sent a video can now ask Murph to analyze it and share the answer with the group.",
+    "details": "Only the video's sender can authorize analysis. Another participant, group membership, or Family-plan access is not enough, and Murph reports when analysis did not run instead of claiming it reviewed the video.",
+    "relevanceTags": ["assistant", "groups", "messaging", "privacy", "video"],
+    "sourcePullRequests": [2371]
+  }
+}

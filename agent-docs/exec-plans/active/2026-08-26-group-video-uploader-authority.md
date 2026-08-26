@@ -82,8 +82,50 @@ Updated: 2026-08-26
 
 ## Product UX Walkthrough
 
-- Pending implementation.
+- Same-message uploader request: the authenticated group turn receives
+  `murph.analyze_video`, the model passes the same exact Message ref as video
+  and request authority, and one successful bounded Gemini result can be
+  reported to the group.
+- Current uploader follow-up: the tool accepts separate exact video and request
+  refs only after both resolve through participant-effect authorization to the
+  same provider source and normalized sender handle.
+- Different participant: dispatch rejects the request before attachment
+  materialization or provider egress, even when both people share a group or
+  Family plan.
+- Unverified external group: the planner omits the tool and mailbox import keeps
+  the existing ineligible early-notify behavior.
+- Private direct conversation: the existing video authority and one-call path
+  remain unchanged; the optional request ref is omitted.
 
 ## Local Evidence
 
-- Pending implementation.
+- Production metadata-only correlation proved that the affected authenticated
+  group turn received no video-analysis tool and made no video, shell, file,
+  MCP, or provider-video action. The reply's frame-review claim therefore did
+  not correspond to an executed capability.
+- Focused Assistant Engine proof passed 125 tests across video dispatch,
+  planning, local-service behavior, and the focused real-journey definition.
+  Focused Assistant Runtime video mailbox proof passed 6 tests with 64
+  unrelated cases skipped. Both affected package typechecks passed.
+- The focused real-Codex group-video journey uses the production base and group
+  instructions, production auto-reply prompt builder, actual dynamic tool, a
+  valid synthetic MP4 signature, and a synthetic Gemini response. Its live run
+  failed closed before a provider action with `ASSISTANT_CODEX_USAGE_LIMIT`;
+  no alternate subscription profile was authorized for retry.
+- Repeated normalized captures through the pinned real Codex App Server and a
+  local scripted Responses endpoint used identical synthetic direct/group video
+  turns, `gpt-5.6-terra`, low reasoning, production code mode, and
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`. Direct input changes from 25,670 tokens
+  / 117,400 UTF-8 bytes to 25,749 / 117,785 (+79, +0.3078%; +385 bytes). Group
+  input changes from 21,532 / 98,683 to 21,861 / 100,261 (+329, +1.5280%;
+  +1,578 bytes). Captures included `include`, `input`, `instructions`,
+  `parallel_tool_calls`, `text`, `tool_choice`, and `tools`; normalized temporary
+  paths and provider item ids; and excluded model selection, reasoning,
+  storage/streaming, service tier, cache/client metadata, and transport headers
+  identically. The direct delta is only the existing video-tool description and
+  schema; the group delta is the newly present tool. Assembled instructions and
+  all other provider-visible input are unchanged.
+- Assistant Engine and Runtime typechecks, Web typecheck, docs drift, docs
+  gardening, changelog registry tests, and `git diff --check` passed. The
+  changelog registry now includes the member-visible capability and its
+  privacy boundary.
