@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -45,6 +45,36 @@ generic projector, validation framework, or recovery state owner.
 - Exact corrected-head production assembly passes all eight parity probes. The
   Vault CLI is 9,509,571 / 9,519,180 bytes with an 805-byte entry and
   25,155-byte static closure; runner total is 11,346,915 / 11,393,617 bytes.
+
+## Round-four retrospective
+
+- The original bounded requirement was to reject invalid clinical-import and
+  explicit-health payloads before any canonical write, report only finite
+  schema-owned public fields, avoid echoing dynamic keys or values, and align
+  the immunization contract schema with the writable domain surface. It did
+  not require a new generic projector, reflection mechanism, shared sanitizer,
+  recovery service, state owner, or independently shippable subsystem.
+- The first-reviewed candidate was
+  `9245fba99877079e75b8c342aa6bbfea48444c51`; the round-four candidate is
+  `171f1f1f68cc3166f7d54b9a6b47164faf502ffc`. Comparable accounting moved
+  from source `449/29` to `456/44`, tests `560/20` to `1062/28`, docs `164/0`
+  to `292/0`, generated `503/13` to `609/13`, and total `1679/63` to
+  `2423/86` added/deleted lines. Production net size therefore decreased from
+  420 to 412 lines: eight fewer lines. Most gross growth is focused tests,
+  authored plans, and generated contract proof rather than production
+  architecture.
+- The retained concepts are the existing strict Zod schema owners, their
+  finite path segments and safe array indices, owner-local issue mapping, the
+  existing shared generic projector, and the existing canonical write paths.
+  The correction removed the duplicate generic repair builder and secondary
+  projection channel, four hand-maintained public-field catalogs, the unused
+  mapper-selection path, the broad path redactor, and the PR-local generic
+  projector.
+- Continue with the current smaller, Zod-derived, owner-local design. Do not
+  introduce reflection, a shared sanitizer, another state owner, or a split
+  that separates the health schemas from their validation and no-write proof.
+  The remaining work is integration and verification of this one cohesive
+  health-domain slice, not further architectural expansion.
 
 ## Design
 
