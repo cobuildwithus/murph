@@ -204,6 +204,9 @@ describe('assistant tracked workout table skill', () => {
       'read `vault-cli workout units show --format json` and use the saved strength unit',
     )
     expect(skill).toContain('when no preference exists, ask which unit they mean')
+    expect(skill).toContain(
+      'Never put a resistance-unit hint on an unloaded `bodyweight` exercise.',
+    )
     expect(skill).not.toContain('vault-cli workout replace')
     expect(skill).not.toContain('--confirm-delete')
     expect(skill).toContain('The start command must')

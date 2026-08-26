@@ -125,6 +125,11 @@ function parseInitialExercise(
       '--exercise field unitOverride is required for weight_reps when no targetWeightUnit is present.',
     )
   }
+  if (parsedMode.data === 'bodyweight' && parsedUnitOverride !== undefined) {
+    invalidInitialExercise(
+      '--exercise field unitOverride is not allowed for bodyweight mode.',
+    )
+  }
 
   return {
     name: requireCompactString(
@@ -318,6 +323,12 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         throw new VaultCliError(
           'invalid_option',
           '--unit-override is required when --mode is weight_reps.',
+        )
+      }
+      if (options.mode === 'bodyweight' && options.unitOverride !== undefined) {
+        throw new VaultCliError(
+          'invalid_option',
+          '--unit-override is not allowed when --mode is bodyweight.',
         )
       }
       return addLiveWorkoutExercise({
