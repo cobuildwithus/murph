@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     HostedDomainRootPreparationMismatchError,
-    activeRootKeyId: "control-root-a",
+    activeRootKeyId: "device-root-a",
     assertTransactionContext: () => undefined,
     currentScopeId: null as number | null,
     freshScopeCount: 0,
@@ -106,7 +106,7 @@ vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
       return null;
     }
     const parsed = parseSyntheticCiphertext(input.value);
-    return { domain: "control", rootKeyId: parsed.rootKeyId };
+    return { domain: "device", rootKeyId: parsed.rootKeyId };
   },
   sealHostedUserSecureBoxString: mocks.sealHostedUserSecureBoxString,
   sealHostedUserSecureBoxStringFromPreparedRoot:
@@ -161,7 +161,7 @@ const INSTALLATION_HASH = sha256(INSTALLATION_ID);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.activeRootKeyId = "control-root-a";
+  mocks.activeRootKeyId = "device-root-a";
   mocks.currentScopeId = null;
   mocks.freshScopeCount = 0;
   mocks.isProviderDisabled = false;
@@ -206,7 +206,7 @@ beforeEach(() => {
     },
   );
   mocks.prepareHostedDomainRootForWeb.mockImplementation(async (input: {
-    domain: "control";
+    domain: "device";
     userId: string;
   }) => {
     recordProviderEvent("prepare-new-root");
@@ -225,7 +225,7 @@ beforeEach(() => {
     return prepared;
   });
   mocks.readPreparedHostedDomainRootForWebLocal.mockImplementation((prepared: {
-    domain: "control";
+    domain: "device";
     rootKeyId: string;
     userId: string;
   }) => {
@@ -240,7 +240,7 @@ beforeEach(() => {
   });
   mocks.revalidatePreparedHostedDomainRootForWebTx.mockImplementation(
     async (input: {
-      prepared: { domain: "control"; rootKeyId: string; userId: string };
+      prepared: { domain: "device"; rootKeyId: string; userId: string };
     }) => {
       mocks.assertTransactionContext();
       if (!mocks.isProviderDisabled) {
@@ -260,7 +260,7 @@ beforeEach(() => {
   mocks.sealHostedUserSecureBoxStringFromPreparedRoot.mockImplementation(
     async (input: {
       preparedRoot: Promise<{
-        envelope: { domain: "control"; rootKeyId: string; userId: string };
+        envelope: { domain: "device"; rootKeyId: string; userId: string };
       }>;
       preparedRootKeyId: string;
       value: string;
@@ -435,7 +435,7 @@ describe("meal photo enrollment crypto preparation boundary", () => {
     const prisma = createEnrollmentPrismaHarness(null);
     prisma.setBeforeTransaction((transactionNumber) => {
       if (transactionNumber === 1) {
-        mocks.activeRootKeyId = "control-root-b";
+        mocks.activeRootKeyId = "device-root-b";
       }
     });
 
@@ -450,11 +450,11 @@ describe("meal photo enrollment crypto preparation boundary", () => {
     expect(prisma.transactionCount()).toBe(2);
     expect(mocks.freshScopeCount).toBe(1);
     expect(mocks.prepareRootEvents.map((event) => event.rootKeyId)).toEqual([
-      "control-root-a",
-      "control-root-b",
+      "device-root-a",
+      "device-root-b",
     ]);
     expect(prisma.getRecord()?.idempotencySecretEncrypted)
-      .toMatch(/^secure:control-root-b:/u);
+      .toMatch(/^secure:device-root-b:/u);
     expectProvidersOutsideCriticalSection();
   });
 

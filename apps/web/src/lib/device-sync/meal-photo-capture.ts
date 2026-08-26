@@ -427,7 +427,7 @@ async function prepareMealPhotoCaptureEnrollment(input: {
   }
 
   const preparedRoot = await prepareHostedDomainRootForWeb({
-    domain: "control",
+    domain: "device",
     prisma: input.prisma,
     reason: MEAL_PHOTO_CAPTURE_ENROLLMENT_CRYPTO_PREPARATION_REASON,
     userId: input.memberId,
