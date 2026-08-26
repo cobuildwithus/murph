@@ -1,6 +1,6 @@
 # Make real-Codex assistant verification one command
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -126,6 +126,14 @@ Updated: 2026-08-25
   did not print the final member-visible reply, preventing the required human
   `Ready`/`Hold` review. The leaf now emits one compact synthetic scenario and
   final-reply line through the existing live-harness stdout convention.
+- The corrected canonical Terra run visibly printed “13 plus 8 is 21, and 7
+  times 6 is 42.” and passed all model, resume, content, and internal-language
+  assertions; manual reply verdict: `Ready`. ReviewGPT round 6 completed a
+  full-snapshot audit of the resulting head with `PASS` and no material finding.
+- Exact-head PR evidence, both CLI host matrices, build/typecheck, assistant,
+  CLI, and platform coverage, app verification, fixture and bundle gates,
+  foreground cardinality, billing, artifacts, marketing overflow, Vercel, and
+  Temporal compatibility all passed.
 
 ## ReviewGPT round-3 retrospective
 
@@ -192,9 +200,12 @@ Updated: 2026-08-25
 
 ## Verification
 
-- Commands to run: focused repo-tool tests, focused live-harness unit tests,
-  Assistant Engine typecheck, skill `quick_validate.py`, doc/readback checks,
-  and `pnpm test:assistant:live -- --test <adaptive-wearable-pattern>`.
-- Expected outcomes: deterministic checks pass; the selected `gpt-5.6-terra`
-  subscription journey calls the expected Murph tools, avoids forbidden calls,
-  and produces replies that pass the documented UX review.
+- Completed outcomes: runner tests passed 8/8; the deterministic real-Codex
+  harness passed 8 with 82 opt-in leaves skipped; the focused local-service
+  live-input regression and Assistant Engine typecheck passed; docs drift and
+  diff/privacy checks passed.
+- Live outcomes: the adaptive-wearable Terra journey passed every effect
+  assertion with its accepted wording `Hold`; the child-model journey proved a
+  Sol parent and Luna child; the group reconsideration Terra journey passed
+  repeatedly and its final printed member reply received `Ready`.
+Completed: 2026-08-25
