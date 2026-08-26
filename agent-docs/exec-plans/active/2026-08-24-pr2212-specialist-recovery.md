@@ -57,5 +57,14 @@ without changing automation ownership or adding a second error framework.
   and daemon-client parsing boundaries.
 - Focused hosted-tool, assistantd HTTP, daemon-client, and run-loop suites pass;
   assistant-engine, assistantd, and assistant-cli typechecks pass.
+- Final ReviewGPT round 1 returned one accepted `Complexity Collapse`: nine
+  automation path mappers repeated the same finite owner vocabulary. They now
+  converge on one private `automationIssuePublicPath` and the existing
+  `publicValidationIssue` constructor. Production source deletes 91 net lines
+  without adding a public seam or changing command behavior.
+- The consolidated mapper rejects arbitrary validator paths while preserving
+  schedule-kind fields, route/target fields, bounded tag and context-reference
+  indices, and payload-root prefixes. The complete automation suite passes
+  32/32, CLI typecheck passes, and `git diff --check` is clean.
 - Final foundation composition, prepared/package/bundle proof, and exact-head
   review remain pending.
