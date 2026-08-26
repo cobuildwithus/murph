@@ -213,8 +213,9 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
   });
 
-  it("makes a delayed append recheck primary authority when deletion locks first", async () => {
+  it("blocks primary-authorized appends on the persisted fence when deletion locks first", async () => {
     const sql = requireDatabase(database);
+    const postgres = requirePool(pool);
     const userId = `member_runtime_log_delete_first_${randomToken()}`;
     const subjectKey = rememberSubject(subjectKeys, userId);
     const deletionLocked = deferred();
@@ -234,14 +235,14 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     });
     await deletionLocked.promise;
 
-    // This models the canonical primary suspension fence that commits before
-    // the receipt-owned isolated cleanup starts.
+    // Keep the primary authority callback positive so the isolated fence is
+    // the deciding check after this append acquires the released subject lock.
     const append = recordHostedRuntimeLogs({
       database: sql,
       entries: [runtimeEntry()],
       isUserActive: async () => {
         authorityChecks += 1;
-        return false;
+        return true;
       },
       userId,
     });
@@ -252,15 +253,65 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     await expect(deletion).resolves.toBe(0);
     await expect(append).resolves.toBe(0);
     expect(authorityChecks).toBe(1);
-    await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+    await expect(countRows(postgres, subjectKey)).resolves.toBe(0);
+    await expect(countDeletionFences(postgres, subjectKey)).resolves.toBe(1);
+
+    await expect(deleteHostedRuntimeLogDataForUsers({
+      database: sql,
+      timeoutMs: 5_000,
+      userIds: [userId],
+    })).resolves.toBe(0);
+    await expect(countDeletionFences(postgres, subjectKey)).resolves.toBe(1);
 
     await expect(recordHostedRuntimeLogs({
       database: sql,
       entries: [runtimeEntry()],
-      isUserActive: async () => false,
+      isUserActive: async () => true,
       userId,
     })).resolves.toBe(0);
-    await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+    await expect(countRows(postgres, subjectKey)).resolves.toBe(0);
+  });
+
+  it("rolls back the fence and diagnostics together before a cleanup retry", async () => {
+    const sql = requireDatabase(database);
+    const postgres = requirePool(pool);
+    const userId = `member_runtime_log_cleanup_rollback_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
+    let forcedRollback = false;
+
+    await expect(recordHostedRuntimeLogs({
+      database: sql,
+      entries: [runtimeEntry()],
+      isUserActive: async () => true,
+      userId,
+    })).resolves.toBe(1);
+
+    await expect(deleteHostedRuntimeLogDataForUsers({
+      database: afterQuery(sql, async (text) => {
+        if (
+          forcedRollback
+          || !text.includes("DELETE FROM hosted_runtime_log WHERE subject_key")
+        ) {
+          return;
+        }
+        forcedRollback = true;
+        throw new Error("forced cleanup rollback");
+      }),
+      timeoutMs: 5_000,
+      userIds: [userId],
+    })).rejects.toThrow("forced cleanup rollback");
+
+    expect(forcedRollback).toBe(true);
+    await expect(countRows(postgres, subjectKey)).resolves.toBe(1);
+    await expect(countDeletionFences(postgres, subjectKey)).resolves.toBe(0);
+
+    await expect(deleteHostedRuntimeLogDataForUsers({
+      database: sql,
+      timeoutMs: 5_000,
+      userIds: [userId],
+    })).resolves.toBe(1);
+    await expect(countRows(postgres, subjectKey)).resolves.toBe(0);
+    await expect(countDeletionFences(postgres, subjectKey)).resolves.toBe(1);
   });
 
   it("sorts overlapping multi-subject cleanup locks and avoids deadlock", async () => {
@@ -505,6 +556,21 @@ function poolDatabase(pool: Pool): HostedRuntimeLogSqlDatabase {
 async function countRows(pool: Pool, subjectKey: string): Promise<number> {
   const result = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM hosted_runtime_log WHERE subject_key = $1",
+    [subjectKey],
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
+
+async function countDeletionFences(
+  pool: Pool,
+  subjectKey: string,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `
+      SELECT count(*)::text AS count
+      FROM hosted_runtime_log_deletion_fence
+      WHERE subject_key = $1
+    `,
     [subjectKey],
   );
   return Number(result.rows[0]?.count ?? "0");

@@ -373,7 +373,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "postgres.hosted_runtime_log",
     label: "Isolated runtime logs",
     deletion: "best-effort-delete",
-    note: "The encrypted account-deletion cleanup receipt retries deleting isolated redacted runtime diagnostics until cleanup converges. Late writers recheck primary member authority after taking the same isolated advisory lock and cannot recreate rows after suspension or deletion.",
+    note: "The encrypted account-deletion cleanup receipt retries deleting isolated redacted runtime diagnostics until cleanup converges. It permanently retains one opaque digest-only deletion fence with no raw member identifier solely to prevent late diagnostic recreation.",
   },
   {
     slug: "prisma.hosted_user_crypto_envelope",

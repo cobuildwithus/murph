@@ -29,8 +29,7 @@ model HostedRuntimeLog {
 }
 
 model HostedRuntimeLogDeletionFence {
-  subjectKey String   @id @map("subject_key")
-  deletedAt  DateTime @default(now()) @map("deleted_at") @db.Timestamptz(3)
+  subjectKey String @id @map("subject_key")
 
   @@map("hosted_runtime_log_deletion_fence")
 }

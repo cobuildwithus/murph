@@ -261,9 +261,7 @@ describe("hosted runtime log database migration", () => {
       'CREATE TABLE "hosted_runtime_log_deletion_fence"',
     );
     expect(deletionFenceMigration).toContain('"subject_key" TEXT NOT NULL');
-    expect(deletionFenceMigration).toContain(
-      '"deleted_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
-    );
+    expect(deletionFenceMigration).not.toContain('"deleted_at"');
     expect(deletionFenceMigration).not.toContain('"user_id"');
     expect(deletionFenceMigration).not.toContain("REFERENCES");
     expect(deletionFenceMigration).not.toContain("DROP ");

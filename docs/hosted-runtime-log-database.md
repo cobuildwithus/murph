@@ -43,9 +43,9 @@ The isolated schema is intentionally small:
 
 The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. The deletion fence stores only the existing opaque
-digest plus its database insertion time. It is never cleared or retention-
-pruned. Attempt ids and other existing redacted operational correlation fields
-retain their current contract and limits.
+digest. It is never cleared or retention-pruned. Attempt ids and other existing
+redacted operational correlation fields retain their current contract and
+limits.
 
 ### Provider request diagnostics
 
@@ -107,14 +107,19 @@ messages, credentials, and paths remain excluded.
 
 ## Append and deletion serialization
 
-Append validates the complete batch and resolves primary member authority before
-any isolated pool checkout. A missing or suspended member returns
-`loggedCount: 0` without opening an isolated transaction. An active member then
-enters one short, isolated-database-only transaction:
+The compatibility append validates the complete batch, then enters one short
+isolated transaction:
 
 1. Take the subject's transaction-scoped advisory lock.
-2. Return `loggedCount: 0` when the subject deletion fence exists.
-3. Insert the validated batch with one SQL statement.
+2. Read primary member authority and return `loggedCount: 0` when the member is
+   missing or suspended.
+3. Return `loggedCount: 0` when the subject deletion fence exists.
+4. Insert the validated batch with one SQL statement.
+
+This compatibility ordering intentionally retains the prior primary-authority
+read under the isolated lock. The stacked final commit adds an early authority
+precheck before isolated checkout while retaining this final under-lock recheck
+for reversible billing suspension.
 
 Moving only the primary read would leave a privacy gap: append could read an
 active member, account deletion could commit its primary suspension and complete
@@ -317,31 +322,32 @@ into two Web commits in the applyable patch:
 2. Deploy the compatibility commit that makes cleanup write the fence and makes
    append honor it while retaining the prior primary-under-lock ordering.
 3. Let every pre-fence Web function drain.
-4. Deploy the final commit that resolves primary authority before isolated
-   checkout.
+4. Deploy the final commit that adds an early primary-authority precheck before
+   isolated checkout while retaining the final under-lock authority recheck.
 
 This order makes every mixed pair safe. Pre-change and compatibility appends
 still re-read primary authority under the isolated lock; compatibility and final
-cleanup both write the fence; final appends can therefore rely on the fence only
-after every live cleanup writer knows how to create it. No synchronized
-Cloudflare rollout is required because the signed callback request and response
-remain unchanged.
+cleanup both write the fence; final appends can therefore use both the final
+authority recheck and the fence after every live cleanup writer knows how to
+create it. No synchronized Cloudflare rollout is required because the signed
+callback request and response remain unchanged.
 
 The earlier primary-table cutover remains unchanged: deploy the Web build that
 no longer references the primary runtime-log table, let prior functions drain,
-then run the post-deploy contract migration that drops the legacy table. Verify
-the pool-max-two zero-checkout proof, both deletion race orderings, repeated and
-timed-out cleanup, dedicated append rate, callback failures, retention counts,
-status continuity, account deletion, and absence of the primary table after the
-contract lane.
+then run the post-deploy contract migration that drops the legacy table. On this
+compatibility commit, verify both deletion race orderings, repeated and rolled-
+back cleanup, dedicated append rate, callback failures, retention counts, status
+continuity, account deletion, and absence of the primary table after the contract
+lane. On the stacked final commit, additionally verify the pool-max-two zero-
+checkout proof and reversible-suspension race.
 
 ## Rollback
 
-The compatibility commit is the safe rollback waypoint for the final
-pre-authority-read commit. Roll back to that commit first and let final-version
-functions drain before moving farther back; its append path retains the old
-primary-under-lock protection while every cleanup it runs still records the
-additive fence. A later rollback to the pre-fence Web is then privacy-safe
+The compatibility commit is the safe rollback waypoint for the final early-
+precheck commit. Roll back to that commit first and let final-version functions
+drain before moving farther back; its append path retains the old primary-under-
+lock protection while every cleanup it runs still records the additive fence. A
+later rollback to the pre-fence Web is then privacy-safe
 because all remaining appends and cleanup use the former shared-lock protocol.
 Leave the additive fence table and its rows in place throughout rollback; older
 Web versions ignore them, and clearing them would destroy the final version's

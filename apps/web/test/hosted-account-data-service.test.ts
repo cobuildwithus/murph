@@ -732,6 +732,16 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
     expect(bySlug.get("backups")?.deletion).toBe("documented-retention");
   });
 
+  it("documents the retained opaque runtime-log deletion fence", () => {
+    const runtimeLogs = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
+      entry.slug === "postgres.hosted_runtime_log");
+
+    expect(runtimeLogs?.deletion).toBe("best-effort-delete");
+    expect(runtimeLogs?.note).toContain("one opaque digest-only deletion fence");
+    expect(runtimeLogs?.note).toContain("no raw member identifier");
+    expect(runtimeLogs?.note).toContain("prevent late diagnostic recreation");
+  });
+
   it("documents that deletion-time provider revocation does not enqueue new device sync work", () => {
     const deviceSyncSignal = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
       entry.slug === "prisma.device_sync_signal");
