@@ -193,6 +193,8 @@ const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
   'Additional group messages joined this turn.',
   'Replace the draft with one final result under the group turn rules.',
   'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
+  'If the latest accepted message gives another human the floor, finish without a reply.',
+  'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result. Response text is not a completed effect.',
   'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')
 

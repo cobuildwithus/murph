@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Murph Assistant"
+  short_description: "Run and review real Murph assistant journeys"
+  default_prompt: "Use $verify-murph-assistant to add and run a focused real-Codex journey for this assistant behavior change."

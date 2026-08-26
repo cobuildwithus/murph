@@ -55,6 +55,7 @@ Always read these before repo code/docs/test/config work:
 | Review-only inspection with no planned file edits | `agent-docs/operations/verification-and-runtime.md` | No repo-wide checks by default. Add runtime proof only when requested or when static inspection leaves a material gap. |
 | Docs or process only | `agent-docs/operations/verification-and-runtime.md` | Follow the docs/process task class in the workflow router. |
 | Repo code, tests, or config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the workflow router for task class, plan needs, audits, verification, and commit path. |
+| Murph assistant behavior, prompts, tools, routing, or replies | `.agents/skills/verify-murph-assistant/SKILL.md` | Add deterministic boundary proof and a focused real-Codex journey, run it locally, and review Murph's actual replies. |
 | User-facing frontend/UI work in `apps/web` | `agent-docs/FRONTEND.md` | Follow the normal task-class implementation route; the completion workflow still controls browser proof and required frontend review. |
 | Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher risk by default. |
 | Retries, queues, cron, concurrency, or failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
