@@ -40,8 +40,12 @@ Internal control routes:
   idle; the direct path does not hide that result behind Worker `waitUntil()`.
   The server-derived direct marker plus a valid direct-ingress attempt identity
   lets foreground/default work exact-abort and replace active system-mailbox
-  work; callback-signed Temporal/default work keeps the cooperative wake-and-
-  retry behavior.
+  work. Once the child acknowledges that abort, the runner keeps its outer
+  transport alive until the child settles its current atomic persistence
+  boundary; only then can the foreground replacement take the fence. A stale,
+  failed, or unavailable child abort keeps the existing fail-closed outer
+  cancellation. Callback-signed Temporal/default work retains the cooperative
+  wake-and-retry behavior.
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
   Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
   distinguishes those two existing callers; an empty legacy request remains

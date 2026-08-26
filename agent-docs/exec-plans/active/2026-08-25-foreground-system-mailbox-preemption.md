@@ -41,10 +41,12 @@ Updated: 2026-08-25
 - Product/process constraints: Product UX Patch. Outcome: typing and reply work
   begin promptly when a person messages during background connected-data work.
   Reaches: existing direct hosted conversations with active system maintenance.
-  Proof: the composed hosted-local scenario observes foreground delivery before
-  releasing the held background stage and then observes safe background
-  recovery. Use two independent ReviewGPT implementation lanes, inspect both as
-  untrusted patches, and integrate only the smallest verified candidate.
+  Proof: the composed hosted-local scenario persists foreground input while a
+  committed background checkpoint acknowledgement is held, proves no
+  replacement overlaps that boundary, releases it, and then observes foreground
+  delivery before safe background recovery. Use two independent ReviewGPT
+  implementation lanes, inspect both as untrusted patches, and integrate only
+  the smallest verified candidate.
 
 ## Risks and mitigations
 
@@ -87,9 +89,14 @@ Updated: 2026-08-25
   destroy fallback.
 - Require both the server-derived Web-direct marker and the validated
   `web-ingress-<uuid-v4>` attempt identity before granting priority.
-- Adopt the E2E ReviewGPT lane's abort-observable canonical barrier and durable
-  device-recovery proof. It is stronger than a test-owned manual release
-  because the baseline cannot reach provider start or the reply deadline.
+- Reuse the existing post-commit canonical ordering barrier for the composed
+  regression. It holds a real committed checkpoint response before runner
+  acknowledgement, proving the old owner and fence remain exclusive until that
+  atomic boundary settles.
+- Treat an `accepted` or `queued` child abort as ownership of cancellation and
+  settlement. Preserve the outer invocation transport until the child finishes;
+  retain outer cancellation and fail-closed cleanup for stale, failed, or
+  unavailable child abort delivery.
 - Keep unrelated macOS Docker compatibility corrections out of this patch;
   record the discovered hosted-local friction for a dedicated follow-up.
 
@@ -104,13 +111,21 @@ Updated: 2026-08-25
   trusted direct foreground request, waits for settlement, and reuses the
   existing compare-and-swap replacement path. Non-direct and malformed-direct
   default work remains cooperative.
-- The composed regression holds a real canonical publication request, observes
-  its actual abort at provider start, verifies the new default fence and durable
-  device mailbox row, delivers exactly one reply, and then requires natural
-  system continuation under a different attempt without a second pointer.
-- Local proof: Cloudflare typecheck passed; controller and test-control suites
-  passed 185 tests; the hosted-local harness suite passed 442 tests with one
-  existing skip; diff whitespace validation passed.
+- Final ReviewGPT found that the runner canceled the outer transport immediately
+  after an acknowledged child abort. An already-forwarded checkpoint could then
+  commit after replacement admission. The runner now waits for the acknowledged
+  child to settle its atomic boundary before releasing the old operation.
+- The composed regression holds the acknowledgement of a real committed
+  canonical checkpoint, persists a signed foreground message, proves the old
+  system owner and fence remain exclusive while the acknowledgement is held,
+  then verifies the new default fence, exactly one reply, and natural system
+  continuation under a different attempt without a second pointer.
+- Current local proof: Cloudflare typecheck passed; the runner-container status
+  matrix passed 216 tests; controller and test-control suites passed 184 tests;
+  hosted-local helper/control suites passed 117 tests; and focused changelog
+  generation/rendering passed 58 tests. A broad hosted-web pass completed
+  11,122 tests with only the changelog render loaded during a concurrent copy
+  edit failing; regeneration plus the exact 58-test changelog rerun passed.
 - The full composed command reached the real Worker and runner image build but
   could not execute its Vitest cases on the current macOS Colima host because
   the proxy container's required socket option is unavailable in that kernel.

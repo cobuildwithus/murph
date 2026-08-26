@@ -5,9 +5,9 @@
     "id": "replies-dont-wait-on-device-sync",
     "kind": "improvement",
     "priority": 3,
-    "title": "Replies no longer wait on device sync",
-    "summary": "When you message Murph during background connected-data work, your reply now starts first.",
-    "details": "Interrupted background work stays durable and resumes after the foreground reply.",
+    "title": "Faster iMessage replies during device sync",
+    "summary": "In an existing iMessage conversation, Murph now prioritizes your new message over background connected-data work.",
+    "details": "If background work is already saving, that save finishes safely first; anything left resumes after your reply.",
     "relevanceTags": ["assistant", "devices", "messaging", "reliability"],
     "sourcePullRequests": [2314]
   }
