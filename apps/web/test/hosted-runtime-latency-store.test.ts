@@ -1552,24 +1552,32 @@ describe("hosted runtime latency dashboard store", () => {
       "UPDATE hosted_ingress_latency_trace AS trace",
     );
     expect(prisma.readTransactionCallCount()).toBe(
-      transactionCountBeforeCheckpointPublication,
+      transactionCountBeforeCheckpointPublication + 3,
     );
   });
 
   it("caps checkpoint-publication collection writes with truncation evidence", async () => {
     const queryRaw = vi.fn(async (query: unknown) => {
-      void query;
+      const sql = (query as { strings: string[] }).strings.join("");
+      if (sql.includes(
+        "hosted_ingress_checkpoint_publication_expected_by_lock",
+      )) {
+        return [{ id: "trace_checkpoint_bounded_1" }];
+      }
       return [{
         matchedCount: 250n,
         truncated: true,
       }];
     });
+    const transaction = vi.fn(async (
+      callback: (tx: { $queryRaw: typeof queryRaw }) => Promise<unknown>,
+    ) => await callback({ $queryRaw: queryRaw }));
 
     await expect(recordHostedIngressRuntimeMilestone({
       at: instant("2026-06-02T19:50:00.000Z"),
       authenticatedUserId: "member_latency_1",
       milestone: "checkpoint_publication_expected_by",
-      prisma: { $queryRaw: queryRaw } as never,
+      prisma: { $transaction: transaction } as never,
       runtimeAttemptId: "attempt_checkpoint_bounded_1",
       runtimeLeaseGeneration: "1",
       source: "linq",
@@ -1580,14 +1588,31 @@ describe("hosted runtime latency dashboard store", () => {
       unmatchedCount: 0,
     });
 
-    const query = queryRaw.mock.calls[0]?.[0] as unknown as {
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: "ReadCommitted" },
+    );
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    const lockQuery = queryRaw.mock.calls[0]?.[0] as unknown as {
       strings: string[];
       values: unknown[];
     };
+    const query = queryRaw.mock.calls[1]?.[0] as unknown as {
+      strings: string[];
+      values: unknown[];
+    };
+    const lockSql = lockQuery.strings.join("");
     const sql = query.strings.join("");
+    expect(lockSql).toContain(
+      "hosted_ingress_checkpoint_publication_expected_by_lock",
+    );
+    expect(lockSql).toContain("ORDER BY trace.id");
+    expect(lockSql).toContain("FOR UPDATE OF trace");
     expect(sql).toContain("eligible_candidates AS MATERIALIZED");
     expect(sql).toContain("ORDER BY trace.accepted_at DESC");
+    expect(sql).toContain("trace.id IN (");
     expect(sql).toMatch(/LIMIT\s+/u);
+    expect(lockQuery.values).toContain(251);
     expect(query.values).toContain(251);
     expect(query.values).toContain(250);
   });
@@ -2672,6 +2697,9 @@ function createLatencyWritePrisma(input: {
           sql.includes("hosted_ingress_provider_started_set_based")
           || sql.includes("hosted_ingress_assistant_milestone_set_based")
           || sql.includes(
+            "hosted_ingress_checkpoint_publication_expected_by_lock",
+          )
+          || sql.includes(
             "hosted_ingress_checkpoint_publication_expected_by_set_based",
           )
         ) {
@@ -2691,6 +2719,11 @@ function createLatencyWritePrisma(input: {
               trace,
               query.values,
             );
+          }
+          if (sql.includes(
+            "hosted_ingress_checkpoint_publication_expected_by_lock",
+          )) {
+            return trace ? [{ id: trace.id }] : [];
           }
           return applyHostedIngressCheckpointPublicationSetBasedMutation(
             trace,
@@ -2821,7 +2854,10 @@ function createLatencyWritePrisma(input: {
   type LatencyPrismaFake = {
     $executeRaw: typeof executeRaw;
     $queryRaw: typeof queryRaw;
-    $transaction: <T>(callback: (tx: LatencyPrismaFake) => Promise<T>) => Promise<T>;
+    $transaction: <T>(
+      callback: (tx: LatencyPrismaFake) => Promise<T>,
+      options?: { isolationLevel?: string },
+    ) => Promise<T>;
     hostedIngressLatencyTrace: {
       findMany: typeof findMany;
       findUnique: typeof findUnique;
@@ -2838,7 +2874,11 @@ function createLatencyWritePrisma(input: {
     readDeliveryLinkSql: () => string;
   };
   const prisma: LatencyPrismaFake = {
-    $transaction: async <T>(callback: (tx: LatencyPrismaFake) => Promise<T>): Promise<T> => {
+    $transaction: async <T>(
+      callback: (tx: LatencyPrismaFake) => Promise<T>,
+      options?: { isolationLevel?: string },
+    ): Promise<T> => {
+      void options;
       transactionCallCount += 1;
       return await callback(prisma);
     },

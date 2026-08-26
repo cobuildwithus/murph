@@ -8,6 +8,7 @@ import {
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
+import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const FIXED_NOW = "2026-04-26T00:00:00.000Z";
@@ -2912,55 +2913,112 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("logs safe latency persistence diagnostics without trace identifiers", async () => {
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
-    const persistenceFailure = Object.assign(
-      new Error("private trace persistence failure"),
-      {
-        cause: { originalCode: "40P01" },
-        code: "P2010",
-      },
-    );
-    mocks.recordHostedIngressProviderStarted.mockRejectedValueOnce(
-      persistenceFailure,
-    );
-
-    const response = await runtimeLatencyRoute.POST(jsonRequest(
-      "/api/internal/hosted-runtime/latency",
-      {
-        event: {
-          assistantInputIds: ["input_private_1", "input_private_2"],
-          at: FIXED_NOW,
-          providerRequestOrdinal: 0,
-          runtimeAttemptId: "attempt_private_1",
-          source: "linq",
-          type: "provider_started",
+  it.each(["originalCode", "code"] as const)(
+    "logs safe latency persistence diagnostics from adapter-pg %s without trace identifiers",
+    async (codeField) => {
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      const persistenceFailure = new Prisma.PrismaClientKnownRequestError(
+        "Raw query failed with private trace persistence details.",
+        {
+          clientVersion: "7.8.0",
+          code: "P2010",
+          meta: {
+            driverAdapterError: {
+              cause: {
+                [codeField]: "40P01",
+                kind: "postgres",
+                originalMessage: "private trace persistence failure",
+                query: "SELECT private_trace_identifier",
+              },
+              name: "DriverAdapterError",
+            },
+          },
         },
-      },
-      {
-        ...runtimeWriteFenceHeaders(),
-        "x-hosted-runtime-attempt-id": "attempt_private_1",
-      },
-    ));
+      );
+      mocks.recordHostedIngressProviderStarted.mockRejectedValueOnce(
+        persistenceFailure,
+      );
 
-    expect(response.status).toBe(500);
-    expect(errorLog).toHaveBeenCalledWith(
-      "Hosted runtime latency trace persistence failed.",
-      {
-        eventType: "provider_started",
-        inputCardinality: 2,
-        prismaCode: "P2010",
-        queryTag: "hosted_ingress_provider_started_set_based",
-        source: "linq",
-        sqlState: "40P01",
-      },
-    );
-    const serializedLogs = JSON.stringify(errorLog.mock.calls);
-    expect(serializedLogs).not.toContain("attempt_private_1");
-    expect(serializedLogs).not.toContain("input_private_1");
-    expect(serializedLogs).not.toContain("private trace persistence failure");
-    errorLog.mockRestore();
-  });
+      const response = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_private_1", "input_private_2"],
+            at: FIXED_NOW,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_private_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+        {
+          ...runtimeWriteFenceHeaders(),
+          "x-hosted-runtime-attempt-id": "attempt_private_1",
+        },
+      ));
+
+      expect(response.status).toBe(500);
+      expect(errorLog).toHaveBeenCalledWith(
+        "Hosted runtime latency trace persistence failed.",
+        {
+          eventType: "provider_started",
+          inputCardinality: 2,
+          prismaCode: "P2010",
+          queryTag: "hosted_ingress_provider_started_set_based",
+          source: "linq",
+          sqlState: "40P01",
+        },
+      );
+      const serializedLogs = JSON.stringify(errorLog.mock.calls);
+      expect(serializedLogs).not.toContain("attempt_private_1");
+      expect(serializedLogs).not.toContain("input_private_1");
+      expect(serializedLogs).not.toContain(
+        "Raw query failed with private trace persistence details.",
+      );
+      expect(serializedLogs).not.toContain("private trace persistence failure");
+
+      mocks.recordHostedIngressRuntimeMilestone.mockRejectedValueOnce(
+        persistenceFailure,
+      );
+      const checkpointResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            at: FIXED_NOW,
+            milestone: "checkpoint_publication_expected_by",
+            runtimeAttemptId: "attempt_checkpoint_private_1",
+            source: "linq",
+            type: "runtime_milestone",
+          },
+        },
+        {
+          ...runtimeWriteFenceHeaders(),
+          "x-hosted-runtime-attempt-id": "attempt_checkpoint_private_1",
+        },
+      ));
+
+      expect(checkpointResponse.status).toBe(500);
+      expect(errorLog).toHaveBeenCalledWith(
+        "Hosted runtime latency trace persistence failed.",
+        {
+          eventType: "runtime_milestone",
+          inputCardinality: 1,
+          prismaCode: "P2010",
+          queryTag: "hosted_ingress_checkpoint_publication_expected_by_set_based",
+          source: "linq",
+          sqlState: "40P01",
+        },
+      );
+      const checkpointLogs = JSON.stringify(errorLog.mock.calls);
+      expect(checkpointLogs).not.toContain("attempt_checkpoint_private_1");
+      expect(checkpointLogs).not.toContain("private_trace_identifier");
+      expect(checkpointLogs).not.toContain(
+        "Raw query failed with private trace persistence details.",
+      );
+      expect(checkpointLogs).not.toContain("private trace persistence failure");
+      errorLog.mockRestore();
+    },
+  );
 
   it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);

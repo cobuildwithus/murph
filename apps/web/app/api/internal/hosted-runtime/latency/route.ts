@@ -5,9 +5,6 @@ import {
 import {
   HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  HostedRuntimeLatencyTraceEvent,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   requireHostedCloudflareCallbackJsonRequest,
@@ -23,6 +20,15 @@ import {
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { isRecord } from "@/src/lib/primitives";
+
+const LATENCY_EVENT_METADATA = {
+  assistant_input_staged: "hosted_ingress_assistant_input_staged",
+  assistant_milestone: "hosted_ingress_assistant_milestone_set_based",
+  provider_started: "hosted_ingress_provider_started_set_based",
+  runtime_milestone: "hosted_ingress_runtime_milestone",
+  checkpoint_publication_expected_by: "hosted_ingress_checkpoint_publication_expected_by_set_based",
+} as const;
 
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: authenticatedUserId } = await requireHostedCloudflareCallbackJsonRequest(request, {
@@ -112,11 +118,16 @@ export const POST = withJsonError(async (request: Request) => {
     return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
   } catch (error) {
     const codes = readLatencyPersistenceErrorCodes(error);
+    const eventMetadataKey = traceRequest.event.type === "runtime_milestone"
+      && traceRequest.event.milestone === "checkpoint_publication_expected_by"
+      ? "checkpoint_publication_expected_by"
+      : traceRequest.event.type;
     console.error("Hosted runtime latency trace persistence failed.", {
       eventType: traceRequest.event.type,
-      inputCardinality: readLatencyEventInputCardinality(traceRequest.event),
+      inputCardinality: "assistantInputIds" in traceRequest.event
+        ? traceRequest.event.assistantInputIds.length : 1,
       prismaCode: codes.prismaCode,
-      queryTag: readLatencyEventQueryTag(traceRequest.event.type),
+      queryTag: LATENCY_EVENT_METADATA[eventMetadataKey],
       source: traceRequest.event.source,
       sqlState: codes.sqlState,
     });
@@ -128,76 +139,25 @@ export const POST = withJsonError(async (request: Request) => {
   }
 });
 
-function readLatencyEventInputCardinality(
-  event: HostedRuntimeLatencyTraceEvent,
-): number {
-  switch (event.type) {
-    case "assistant_milestone":
-    case "provider_started":
-      return event.assistantInputIds.length;
-    case "assistant_input_staged":
-    case "runtime_milestone":
-      return 1;
-  }
-}
+function readLatencyPersistenceErrorCodes(error: unknown) {
+  if (!isRecord(error)) return { prismaCode: null, sqlState: null };
+  const cause = isRecord(error.meta)
+    && isRecord(error.meta.driverAdapterError)
+    && isRecord(error.meta.driverAdapterError.cause)
+    ? error.meta.driverAdapterError.cause
+    : null;
+  const postgresCode = typeof cause?.originalCode === "string"
+    ? cause.originalCode
+    : cause?.code;
 
-function readLatencyEventQueryTag(
-  eventType: "assistant_input_staged" | "assistant_milestone" | "provider_started" | "runtime_milestone",
-): string {
-  switch (eventType) {
-    case "assistant_input_staged":
-      return "hosted_ingress_assistant_input_staged";
-    case "assistant_milestone":
-      return "hosted_ingress_assistant_milestone_set_based";
-    case "provider_started":
-      return "hosted_ingress_provider_started_set_based";
-    case "runtime_milestone":
-      return "hosted_ingress_runtime_milestone";
-  }
-}
-
-function readLatencyPersistenceErrorCodes(error: unknown): {
-  prismaCode: string | null;
-  sqlState: string | null;
-} {
-  let current: unknown = error;
-  let prismaCode: string | null = null;
-  let sqlState: string | null = null;
-  const seen = new Set<unknown>();
-
-  for (let depth = 0; current !== null && current !== undefined && depth < 5; depth += 1) {
-    if (seen.has(current)) {
-      break;
-    }
-    seen.add(current);
-    for (const key of ["code", "originalCode"] as const) {
-      const value = readUnknownStringProperty(current, key);
-      if (value && /^P\d{4}$/u.test(value)) {
-        prismaCode ??= value;
-      } else if (value && /^[0-9A-Z]{5}$/u.test(value)) {
-        sqlState ??= value;
-      }
-    }
-    current = readUnknownProperty(current, "cause");
-  }
-
-  return { prismaCode, sqlState };
-}
-
-function readUnknownStringProperty(value: unknown, key: string): string | null {
-  const property = readUnknownProperty(value, key);
-  return typeof property === "string" ? property : null;
-}
-
-function readUnknownProperty(value: unknown, key: string): unknown {
-  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
-    return undefined;
-  }
-  try {
-    return Reflect.get(value, key);
-  } catch {
-    return undefined;
-  }
+  return {
+    prismaCode: typeof error.code === "string" && /^P\d{4}$/u.test(error.code)
+      ? error.code
+      : null,
+    sqlState: typeof postgresCode === "string" && /^[0-9A-Z]{5}$/u.test(postgresCode)
+      ? postgresCode
+      : null,
+  };
 }
 
 function requireMatchingRuntimeWriteFence(

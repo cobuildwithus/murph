@@ -2076,18 +2076,50 @@ async function updateHostedIngressLatencyRuntimeMilestone(
     userId: input.userId,
   };
   const field = readHostedIngressLatencyRuntimeMilestoneField(input.milestone);
-  const result = await prisma.hostedIngressLatencyTrace.updateMany({
-    data: {
-      [field]: input.at,
-    },
-    where: {
-      ...baseWhere,
-      AND: [
-        { OR: [{ [field]: null }, { [field]: { gt: input.at } }] },
-      ],
-    },
+  return await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      /* hosted_ingress_runtime_milestone_lock */
+      SELECT trace.id
+      FROM hosted_ingress_latency_trace AS trace
+      WHERE trace.runtime_attempt_id = ${input.runtimeAttemptId}
+        AND trace.source = ${input.source}
+        AND trace.user_id = ${input.userId}
+        AND CASE ${field}
+          WHEN 'runnerJobAcceptedAt' THEN
+            trace.runner_job_accepted_at IS NULL
+            OR trace.runner_job_accepted_at > ${input.at}
+          WHEN 'runtimePhaseStartedAt' THEN
+            trace.runtime_phase_started_at IS NULL
+            OR trace.runtime_phase_started_at > ${input.at}
+          WHEN 'workspaceRestoreDoneAt' THEN
+            trace.workspace_restore_done_at IS NULL
+            OR trace.workspace_restore_done_at > ${input.at}
+          WHEN 'mailboxImportDoneAt' THEN
+            trace.mailbox_import_done_at IS NULL
+            OR trace.mailbox_import_done_at > ${input.at}
+          ELSE FALSE
+        END
+      ORDER BY trace.id
+      FOR UPDATE OF trace
+    `;
+    if (locked.length === 0) {
+      return { matchedCount: 0, truncated: false };
+    }
+
+    const result = await tx.hostedIngressLatencyTrace.updateMany({
+      data: {
+        [field]: input.at,
+      },
+      where: {
+        ...baseWhere,
+        id: { in: locked.map((trace) => trace.id) },
+        AND: [
+          { OR: [{ [field]: null }, { [field]: { gt: input.at } }] },
+        ],
+      },
+    });
+    return { matchedCount: result.count, truncated: false };
   });
-  return { matchedCount: result.count, truncated: false };
 }
 
 async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
@@ -2114,124 +2146,157 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
   `;
   const hasTerminalNonReplyEvidence =
     buildHostedIngressLatencySafeJsonIntegerPredicateSql(terminalNonReplyLeaf);
+  const candidateStoredObject = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`candidate.phase_breakdown_json`,
+  );
+  const candidateStoredAssistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${candidateStoredObject} -> 'assistant'`,
+  );
+  const candidateStoredLeaseGeneration =
+    buildHostedIngressLatencyStoredLeaseGenerationSql(candidateStoredAssistant);
+  const candidateTerminalNonReplyLeaf = Prisma.sql`
+    ${candidateStoredAssistant} -> 'terminalNonReplyCommittedAtEpochMs'
+  `;
+  const candidateHasTerminalNonReplyEvidence =
+    buildHostedIngressLatencySafeJsonIntegerPredicateSql(
+      candidateTerminalNonReplyLeaf,
+    );
   const nextPhaseBreakdown =
     buildHostedIngressCheckpointPublicationPhaseBreakdownSql();
 
-  const rows = await prisma.$queryRaw<Array<{
-    matchedCount: bigint;
-    truncated: boolean;
-  }>>(Prisma.sql`
-    /* hosted_ingress_checkpoint_publication_expected_by_set_based */
-    WITH input AS (
-      SELECT
-        ${input.userId}::text AS user_id,
-        ${input.source}::text AS source,
-        ${input.runtimeAttemptId}::text AS runtime_attempt_id,
-        ${input.runtimeLeaseGeneration}::text AS runtime_lease_generation,
-        ${input.expectedBy.getTime()}::bigint AS expected_by_epoch_ms,
-        1::integer AS phase_schema_version,
-        ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
-    ),
-    eligible_candidate_ids AS MATERIALIZED (
-      SELECT
-        trace.accepted_at,
-        trace.id
+  const rows = await prisma.$transaction(async (tx) => {
+    const lockedCandidates = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      /* hosted_ingress_checkpoint_publication_expected_by_lock */
+      SELECT trace.id
       FROM hosted_ingress_latency_trace AS trace
-      JOIN hosted_mailbox_item AS mailbox_item
-        ON mailbox_item.id = trace.mailbox_item_id
-       AND mailbox_item.consumed_at IS NULL
-      CROSS JOIN input
-      WHERE trace.assistant_input_id IS NOT NULL
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          ${hasTerminalNonReplyEvidence}
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
-        AND (
-          ${storedLeaseGeneration} IS NULL
-          OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
-          OR (
-            ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
-            AND trace.runtime_attempt_id = input.runtime_attempt_id
+      WHERE trace.id = ANY(ARRAY(
+        SELECT candidate.id
+        FROM hosted_ingress_latency_trace AS candidate
+        JOIN hosted_mailbox_item AS mailbox_item
+          ON mailbox_item.id = candidate.mailbox_item_id
+         AND mailbox_item.consumed_at IS NULL
+        WHERE candidate.assistant_input_id IS NOT NULL
+          AND candidate.user_id = ${input.userId}
+          AND candidate.source = ${input.source}
+          AND (
+            ${candidateHasTerminalNonReplyEvidence}
+            OR candidate.runtime_attempt_id = ${input.runtimeAttemptId}
           )
-        )
-      ORDER BY trace.accepted_at DESC
-      LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
-    ),
-    eligible_candidates AS MATERIALIZED (
-      SELECT
-        trace.accepted_at,
-        trace.id,
-        trace.phase_breakdown_json,
-        trace.runtime_attempt_id,
-        ${storedLeaseGeneration} AS stored_lease_generation
-      FROM eligible_candidate_ids AS candidate
-      JOIN hosted_ingress_latency_trace AS trace
-        ON trace.id = candidate.id
-      JOIN hosted_mailbox_item AS mailbox_item
-        ON mailbox_item.id = trace.mailbox_item_id
-       AND mailbox_item.consumed_at IS NULL
-      CROSS JOIN input
-      WHERE trace.assistant_input_id IS NOT NULL
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          ${hasTerminalNonReplyEvidence}
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
-        AND (
-          ${storedLeaseGeneration} IS NULL
-          OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
-          OR (
-            ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
-            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          AND (
+            ${candidateStoredLeaseGeneration} IS NULL
+            OR ${candidateStoredLeaseGeneration}
+              < ${input.runtimeLeaseGeneration}::numeric
+            OR (
+              ${candidateStoredLeaseGeneration}
+                = ${input.runtimeLeaseGeneration}::numeric
+              AND candidate.runtime_attempt_id = ${input.runtimeAttemptId}
+            )
           )
-        )
+        ORDER BY candidate.accepted_at DESC
+        LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
+      ))
       ORDER BY trace.id
       FOR UPDATE OF trace
-    ),
-    eligible AS MATERIALIZED (
-      SELECT *
-      FROM eligible_candidates
-      ORDER BY accepted_at DESC
-      LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
-    ),
-    next_value AS MATERIALIZED (
+    `);
+    if (lockedCandidates.length === 0) {
+      return [];
+    }
+
+    const lockedTraceIds = lockedCandidates.map((candidate) => candidate.id);
+    return await tx.$queryRaw<Array<{
+      matchedCount: bigint;
+      truncated: boolean;
+    }>>(Prisma.sql`
+      /* hosted_ingress_checkpoint_publication_expected_by_set_based */
+      WITH input AS (
+        SELECT
+          ${input.userId}::text AS user_id,
+          ${input.source}::text AS source,
+          ${input.runtimeAttemptId}::text AS runtime_attempt_id,
+          ${input.runtimeLeaseGeneration}::text AS runtime_lease_generation,
+          ${input.expectedBy.getTime()}::bigint AS expected_by_epoch_ms,
+          1::integer AS phase_schema_version,
+          ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
+      ),
+      eligible_candidates AS MATERIALIZED (
+        SELECT
+          trace.accepted_at,
+          trace.id,
+          trace.phase_breakdown_json,
+          trace.runtime_attempt_id,
+          ${storedLeaseGeneration} AS stored_lease_generation
+        FROM hosted_ingress_latency_trace AS trace
+        JOIN hosted_mailbox_item AS mailbox_item
+          ON mailbox_item.id = trace.mailbox_item_id
+         AND mailbox_item.consumed_at IS NULL
+        CROSS JOIN input
+        WHERE trace.id IN (${Prisma.join(lockedTraceIds)})
+          AND trace.assistant_input_id IS NOT NULL
+          AND trace.user_id = input.user_id
+          AND trace.source = input.source
+          AND (
+            ${hasTerminalNonReplyEvidence}
+            OR trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+          AND (
+            ${storedLeaseGeneration} IS NULL
+            OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
+            OR (
+              ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
+              AND trace.runtime_attempt_id = input.runtime_attempt_id
+            )
+          )
+        ORDER BY trace.accepted_at DESC
+        LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
+      ),
+      eligible AS MATERIALIZED (
+        SELECT *
+        FROM eligible_candidates
+        ORDER BY accepted_at DESC
+        LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+      ),
+      next_value AS MATERIALIZED (
+        SELECT
+          trace.id,
+          CASE
+            WHEN trace.stored_lease_generation IS NULL
+              OR trace.stored_lease_generation
+                < input.runtime_lease_generation::numeric
+            THEN input.runtime_attempt_id
+            ELSE trace.runtime_attempt_id
+          END AS runtime_attempt_id,
+          ${nextPhaseBreakdown} AS phase_breakdown_json
+        FROM eligible AS trace
+        CROSS JOIN input
+      ),
+      updated AS (
+        UPDATE hosted_ingress_latency_trace AS trace
+        SET
+          runtime_attempt_id = next_value.runtime_attempt_id,
+          phase_breakdown_json = next_value.phase_breakdown_json,
+          updated_at = statement_timestamp() AT TIME ZONE 'UTC'
+        FROM next_value
+        WHERE trace.id = next_value.id
+          AND (
+            trace.runtime_attempt_id IS DISTINCT FROM next_value.runtime_attempt_id
+            OR trace.phase_breakdown_json IS DISTINCT FROM next_value.phase_breakdown_json
+          )
+        RETURNING trace.id
+      )
       SELECT
-        trace.id,
-        CASE
-          WHEN trace.stored_lease_generation IS NULL
-            OR trace.stored_lease_generation
-              < input.runtime_lease_generation::numeric
-          THEN input.runtime_attempt_id
-          ELSE trace.runtime_attempt_id
-        END AS runtime_attempt_id,
-        ${nextPhaseBreakdown} AS phase_breakdown_json
-      FROM eligible AS trace
-      CROSS JOIN input
-    ),
-    updated AS (
-      UPDATE hosted_ingress_latency_trace AS trace
-      SET
-        runtime_attempt_id = next_value.runtime_attempt_id,
-        phase_breakdown_json = next_value.phase_breakdown_json,
-        updated_at = statement_timestamp() AT TIME ZONE 'UTC'
-      FROM next_value
-      WHERE trace.id = next_value.id
-        AND (
-          trace.runtime_attempt_id IS DISTINCT FROM next_value.runtime_attempt_id
-          OR trace.phase_breakdown_json IS DISTINCT FROM next_value.phase_breakdown_json
-        )
-      RETURNING trace.id
-    )
-    SELECT
-      (SELECT COUNT(*)::bigint FROM eligible) AS "matchedCount",
-      (
-        SELECT COUNT(*) > ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
-        FROM eligible_candidate_ids
-      ) AS truncated
-  `);
+        (
+          SELECT LEAST(
+            COUNT(*),
+            ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+          )::bigint
+          FROM eligible_candidates
+        ) AS "matchedCount",
+        (
+          SELECT COUNT(*) > ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+          FROM eligible_candidates
+        ) AS truncated
+    `);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
   return {
     matchedCount: Number(rows[0]?.matchedCount ?? 0n),
