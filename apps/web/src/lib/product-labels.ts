@@ -21,7 +21,7 @@ const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
-const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 5_000;
+const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 10_000;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -2046,10 +2046,10 @@ async function searchGenericProductLabels(
     return await searchOriginalGenericProductLabels(client, tableSql, input);
   }
 
-  // Food-name results are ranked deterministically within an index-admitted
-  // nearest-name plus canonical-diversity set. This bounded retrieval contract
-  // trades exhaustive whole-catalog ranking for completion inside the labels
-  // database statement timeout; exact IDs and UPCs use separate direct paths.
+  // Food-name results are ranked deterministically within separately bounded
+  // GIN full-text and GiST nearest-name sets. This retrieval contract trades
+  // exhaustive whole-catalog ranking for completion inside the labels database
+  // statement timeout; exact IDs and UPCs use separate direct paths.
   const stemmed = input.stemmedSearch;
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
@@ -2091,7 +2091,7 @@ async function searchGenericProductLabels(
             id ASC
           LIMIT ${PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT}
         ),
-        fts_nearest_matches AS MATERIALIZED (
+        fts_index_matches AS MATERIALIZED (
           SELECT
             id,
             canonical_key,
@@ -2118,13 +2118,10 @@ async function searchGenericProductLabels(
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          -- The GiST trigram index admits the closest names without scoring
-          -- and sorting the entire FTS match set.
-          ORDER BY name <->>> $1::text
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
-        fts_canonical_matches AS MATERIALIZED (
-          SELECT DISTINCT ON (canonical_key)
+        name_nearest_matches AS MATERIALIZED (
+          SELECT
             id,
             canonical_key,
             data_origin,
@@ -2137,28 +2134,41 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM ${tableSql}
           WHERE
-            ${stemmed ? `(
-              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
-              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
-            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
-            AND ($2::boolean OR off_market = false)
+            ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          -- The canonical-rank btree keeps this diversity lane deterministic
-          -- and selects the highest-priority representative for each key.
-          ORDER BY
-            canonical_key ASC,
-            data_origin_priority ASC,
-            id ASC
+          -- This GiST KNN branch runs only when indexed FTS found rows. The
+          -- mutually exclusive typo branch below owns no-FTS searches.
+          ORDER BY name <->>> $1::text
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        fts_nearest_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM name_nearest_matches
+          WHERE
+            EXISTS (SELECT 1 FROM fts_index_matches)
+            AND ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
         ),
         fts_matches AS MATERIALIZED (
           SELECT * FROM fts_exact_name_matches
           UNION
-          SELECT * FROM fts_nearest_matches
+          SELECT * FROM fts_index_matches
           UNION
-          SELECT * FROM fts_canonical_matches
+          SELECT * FROM fts_nearest_matches
         ),
         fts_candidates AS MATERIALIZED (
           SELECT
@@ -2190,7 +2200,7 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM fts_matches, query
         ),
-        trigram_nearest_matches AS MATERIALIZED (
+        trigram_matches AS MATERIALIZED (
           SELECT
             id,
             canonical_key,
@@ -2201,46 +2211,31 @@ async function searchGenericProductLabels(
             upc,
             off_market,
             data_origin_priority
-          FROM ${tableSql}
-          WHERE
-            NOT EXISTS (SELECT 1 FROM fts_matches)
-            AND name % $1::text
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-          ORDER BY name <->>> $1::text
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
-        ),
-        trigram_canonical_matches AS MATERIALIZED (
-          SELECT DISTINCT ON (canonical_key)
-            id,
-            canonical_key,
-            data_origin,
-            data_origin_id,
-            name,
-            brand,
-            upc,
-            off_market,
-            data_origin_priority
-          FROM ${tableSql}
-          WHERE
-            NOT EXISTS (SELECT 1 FROM fts_matches)
-            AND name % $1::text
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-          ORDER BY
-            canonical_key ASC,
-            data_origin_priority ASC,
-            id ASC
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
-        ),
-        trigram_matches AS MATERIALIZED (
-          SELECT * FROM trigram_nearest_matches
-          UNION
-          SELECT * FROM trigram_canonical_matches
+          FROM (
+            SELECT
+              id,
+              canonical_key,
+              data_origin,
+              data_origin_id,
+              name,
+              brand,
+              upc,
+              off_market,
+              data_origin_priority
+            FROM ${tableSql}
+            WHERE
+              NOT EXISTS (SELECT 1 FROM fts_index_matches)
+              AND ($2::boolean OR off_market = false)
+              AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+              AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+              AND ${excludedDataOriginsSql}
+            -- Whole-name distance is exactly the ordering behind the trigram
+            -- threshold below, so eligible rows always precede ineligible
+            -- rows while the GiST KNN scan remains bounded.
+            ORDER BY name <-> $1::text
+            LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+          ) nearest_names
+          WHERE name % $1::text
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT

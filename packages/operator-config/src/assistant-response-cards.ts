@@ -45,6 +45,8 @@ import {
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
+  type WorkoutSessionEditorProjectionV1,
+  type WorkoutSessionPresentationV1,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -452,6 +454,35 @@ export function encodeWorkoutSessionAppCardUrl(
     )
   }
   return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed, true))
+}
+
+export function encodeWorkoutSessionSnapshotAppCardUrl(
+  presentation: WorkoutSessionPresentationV1 & {
+    editor?: WorkoutSessionEditorProjectionV1
+  },
+): string {
+  if (presentation.editor !== undefined) {
+    const editablePayload = encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV6({
+        editor: presentation.editor,
+        title: presentation.title,
+        subtitle: presentation.subtitle,
+        footer: presentation.footer,
+        workout: presentation.workout,
+      }),
+    )
+    if (
+      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
+      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
+    ) {
+      return encodeAppCardEnvelopeUrl(editablePayload)
+    }
+  }
+  return encodeAppCardEnvelopeUrl(
+    encodeAppCardEnvelopePayload(
+      buildWorkoutSessionAppCardEnvelopeV4(presentation),
+    ),
+  )
 }
 
 function encodeCompactTableAppCardPayload(

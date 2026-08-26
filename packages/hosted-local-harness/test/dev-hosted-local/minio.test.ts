@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_LOCAL_MINIO_MIRROR_IMAGE } from "../../src/dev-hosted-local/minio-image-contract.ts";
+import { buildHostedLocalMinioDockerUserArgs } from "../../src/dev-hosted-local/minio.ts";
 
 const runtimeMocks = vi.hoisted(() => ({
   spawnChildProcess: vi.fn(),
@@ -146,6 +147,19 @@ describe("hosted-local MinIO sidecar", () => {
     netMocks.listens = [];
   });
 
+  it("applies host UID/GID only to Linux containers", () => {
+    const identity = {
+      getgid: () => 501,
+      getuid: () => 502,
+    };
+
+    expect(buildHostedLocalMinioDockerUserArgs("linux", identity)).toEqual([
+      "--user",
+      "502:501",
+    ]);
+    expect(buildHostedLocalMinioDockerUserArgs("darwin", identity)).toEqual([]);
+  });
+
   it("starts a container-reachable S3-compatible endpoint for hosted-local E2E", async () => {
     const child = {
       child: new EventEmitter(),
@@ -219,11 +233,17 @@ describe("hosted-local MinIO sidecar", () => {
     expect(dockerArgs).toContain("MINIO_REGION_NAME");
     // GHCR first; the upstream ref is only the fallback when that is unreachable.
     expect(dockerArgs).toContain(HOSTED_LOCAL_MINIO_MIRROR_IMAGE);
-    if (typeof process.getuid === "function" && typeof process.getgid === "function") {
+    if (
+      process.platform === "linux"
+      && typeof process.getuid === "function"
+      && typeof process.getgid === "function"
+    ) {
       expect(dockerArgs).toEqual(expect.arrayContaining([
         "--user",
         `${process.getuid()}:${process.getgid()}`,
       ]));
+    } else {
+      expect(dockerArgs).not.toContain("--user");
     }
     expect(runtimeMocks.spawnChildProcess.mock.calls[0]?.[3]).toEqual(expect.objectContaining({
       MINIO_REGION_NAME: "auto",

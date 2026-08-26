@@ -71,6 +71,8 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+  HostedOperatorTaskControlRequest,
+  HostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
 import type {
   HostedVaultShareDeliverRequest,
@@ -444,6 +446,10 @@ type HostedRuntimeEffectsPortBase = {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
+  controlOperatorTask?(
+    request: HostedOperatorTaskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedOperatorTaskControlResponse>;
   assertAssistantAskPrivateCompletionAuthority?(
     authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
     context?: { signal?: AbortSignal | null },

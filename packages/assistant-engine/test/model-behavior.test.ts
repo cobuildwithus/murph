@@ -11,6 +11,7 @@ import {
 import {
   buildAssistantSystemPrompt,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -67,6 +68,20 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('externally controlled text')
     expect(prompt).toContain('Delivery adapter contract:')
     expect(prompt).not.toContain('Treat the user prompt as the execution instructions for this scheduled run')
+  })
+
+  it('gives operator messages one private direct JSON delivery contract', () => {
+    const prompt = buildAssistantOperatorMessagePromptWithCacheMetadata({
+      channel: 'linq',
+    }).prompt
+
+    expect(prompt).toContain('existing private direct Murph conversation')
+    expect(prompt).toContain('bounded committed private conversation history')
+    expect(prompt).toContain('The platform owns delivery')
+    expect(prompt).toContain('"kind":"send_message"')
+    expect(prompt).not.toContain('bound group')
+    expect(prompt).not.toContain('private-Murph handoff')
+    expect(prompt).not.toContain('Return only that final group message')
   })
 
   it('adds Murph-specific execution behavior without changing the calmer Murph voice', () => {

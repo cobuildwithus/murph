@@ -39,6 +39,10 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantRealCodexRunEnv,
+  parseAssistantRealCodexRunArgs,
+} from '../../../scripts/run-assistant-real-codex-e2e.ts'
+import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
@@ -51,7 +55,11 @@ import {
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -97,6 +105,9 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
+  sendAssistantMessageLocal,
+} from '../src/assistant/service.ts'
+import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -141,7 +152,10 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
-import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import {
+  extractCodexAssistantProviderUsage,
+  resolveAssistantProviderPrompt,
+} from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
@@ -317,6 +331,145 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
+
+describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+  it(
+    'answers from an early detail retained across sixty committed messages',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-cold-conversation-reconstruction-e2e-'),
+      )
+      const conversationHistoryMessages = Array.from(
+        { length: 30 },
+        (_, index) => index === 0
+          ? [
+              {
+                content:
+                  'For the synthetic packing checklist, put the train tickets in the cobalt folder.',
+                role: 'user' as const,
+              },
+              {
+                content:
+                  'Got it. The train tickets go in the cobalt folder.',
+                role: 'assistant' as const,
+              },
+            ]
+          : [
+              {
+                content:
+                  `Synthetic checklist item ${index + 1}: ${'routine packing note '.repeat(8)}`,
+                role: 'user' as const,
+              },
+              {
+                content:
+                  `Synthetic checklist response ${index + 1}: ${'routine confirmation '.repeat(8)}`,
+                role: 'assistant' as const,
+              },
+            ],
+      ).flat()
+      const userPrompt = 'Which folder did we pick for the train tickets?'
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'telegram',
+            conversationKey: 'telegram:direct:cold-reconstruction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-cold-reconstruction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-cold-reconstruction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'read-only',
+          },
+          turnCount: 30,
+          updatedAt: '2026-08-26T12:30:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          conversationHistoryMessages.map((message) => ({
+            kind: message.role,
+            text: message.content,
+          })),
+        )
+        const historyBytes = conversationHistoryMessages.reduce(
+          (total, message) =>
+            total + Buffer.byteLength(message.content, 'utf8'),
+          0,
+        )
+        expect(historyBytes).toBeLessThanOrEqual(12_000)
+
+        const result = await sendAssistantMessageLocal({
+          channel: 'telegram',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          persistUserPromptOnFailure: false,
+          prompt: userPrompt,
+          provider: 'codex-cli',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          sessionId: session.sessionId,
+          threadId: 'thread-cold-reconstruction',
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          vault: workingDirectory,
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyBytes,
+            historyMessages: conversationHistoryMessages.length,
+            reply: result.response.trim(),
+          })}\n`,
+        )
+        expect(result.response).toMatch(/cobalt/iu)
+        expect(result.response).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
@@ -8021,6 +8174,193 @@ describeRealCodex('real Codex support escalation e2e', () => {
   )
 })
 
+describeRealCodex('real Codex Kernel browser continuation e2e', () => {
+  it(
+    'opens an account portal, reports setup readiness, and does not enter private information',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-kernel-browser-inspection-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const requests: Array<{
+        body: Record<string, unknown>
+        url: string
+      }> = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'computer-use',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          fetchImpl: async (
+            request: string | URL | Request,
+            init?: RequestInit,
+          ): Promise<Response> => {
+            const url = request instanceof Request
+              ? request.url
+              : String(request)
+            const body = JSON.parse(String(init?.body)) as Record<
+              string,
+              unknown
+            >
+            requests.push({ body, url })
+
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs'
+            ) {
+              return new Response(JSON.stringify({
+                expiresAt: '2026-08-26T19:00:00.000Z',
+                reused: false,
+                runId: 'run_synthetic_portal',
+                status: 'running',
+                title: 'Account portal',
+                url: 'https://portal.example.test/setup',
+                visibleText: [
+                  'Account portal loaded.',
+                  'Setup is ready.',
+                  'A mailing address is required to continue.',
+                ].join('\n'),
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish'
+            ) {
+              return new Response(JSON.stringify({
+                ok: true,
+                runId: 'run_synthetic_portal',
+                status: 'completed',
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            throw new Error(`Unexpected hosted computer request: ${url}`)
+          },
+          hostedToolContext: createRealCodexComputerHostedToolContext(),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Open https://portal.example.test/setup and tell me whether account setup is ready.',
+            'Do not enter or submit personal or payment information.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const computerToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_FINISH_RUN_TOOL.name,
+          MURPH_COMPUTER_OPEN_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const prohibitedToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('computer-use/SKILL.md')
+          && action.output.includes('# Computer Use')
+        )
+        const computerCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && computerToolNames.has(action.tool)
+        )
+        const openCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_OPEN_TOOL.name
+        )
+        const finishCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_FINISH_RUN_TOOL.name
+        )
+        const prohibitedCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && prohibitedToolNames.has(action.tool)
+        )
+
+        expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(openCalls).toHaveLength(1)
+        expect(finishCalls).toHaveLength(1)
+        expect(prohibitedCalls).toHaveLength(0)
+        expect(openCalls[0]?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(openCalls[0]).toMatchObject({
+          argumentsValue: {
+            startUrl: 'https://portal.example.test/setup',
+          },
+        })
+        expect(finishCalls[0]).toMatchObject({
+          argumentsValue: {
+            outcome: 'completed',
+            runId: 'run_synthetic_portal',
+          },
+        })
+        expect(requests).toEqual([
+          {
+            body: {
+              goal: 'Hosted computer task.',
+              resumeAfterMailboxItemId: null,
+              resumeDeliveryContext: null,
+              startUrl: 'https://portal.example.test/setup',
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs',
+          },
+          {
+            body: {
+              outcome: 'completed',
+              summary: null,
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish',
+          },
+        ])
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/setup/iu)
+        expect(reply).toMatch(/ready/iu)
+        expect(reply).not.toMatch(
+          /setup (?:is )?complete|information (?:was|has been) submitted/iu,
+        )
+        expect(reply).not.toMatch(/HOSTED_COMPUTER|LIVE_VIEW_ORIGIN/iu)
+        process.stdout.write(
+          `[kernel-browser-continuation-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'account-setup-readiness',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -8915,6 +9255,42 @@ describe('real Codex app-server cache usage e2e harness', () => {
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
       temporaryPaths: [],
     })
+  })
+
+  it('composes one explicit runner Codex home only in subscription mode', async () => {
+    const sourceEnv = buildAssistantRealCodexRunEnv({
+      options: parseAssistantRealCodexRunArgs([
+        'focused journey',
+        '--codex-home',
+        '/alternate-codex-home',
+      ]),
+      sourceEnv: {
+        CODEX_HOME: '/ambient-codex-home',
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+    })
+    const config = await resolveRealCodexE2eConfig({ sourceEnv })
+
+    expect(config).toEqual({
+      codexHome: '/alternate-codex-home',
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+    await expect(resolveRealCodexE2eConfig({
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+      },
+    })).rejects.toThrow(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
+    )
   })
 
   it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
@@ -11183,6 +11559,27 @@ async function executeRealCodexProductFeedbackProbe(input: {
       workingDirectory,
       ...config.temporaryPaths,
     ])
+  }
+}
+
+function createRealCodexComputerHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_computer'],
+      conversationId: 'conversation-computer-direct',
+      conversationScope: 'direct',
+      inboundMailboxItemIds: ['mailbox-computer'],
+      originSessionId: 'session-computer-direct',
+      recipientKey: 'recipient-computer-direct',
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
   }
 }
 
@@ -13743,18 +14140,17 @@ async function resolveRealCodexE2eConfig(
   const model =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
-  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
-  if (configuredCodexHome) {
-    throw new Error(
-      'MURPH_REAL_CODEX_HOME is not supported; provider mode creates an isolated home and subscription mode uses the normal local Codex home.',
-    )
-  }
-
   const authMode =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_AUTH) ?? 'provider'
   if (authMode !== 'provider' && authMode !== 'subscription') {
     throw new Error(
       'MURPH_REAL_CODEX_AUTH must be provider or subscription.',
+    )
+  }
+  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
+  if (authMode === 'provider' && configuredCodexHome) {
+    throw new Error(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
     )
   }
   const explicitModelProvider =
@@ -13769,7 +14165,7 @@ async function resolveRealCodexE2eConfig(
       )
     }
     return {
-      codexHome: null,
+      codexHome: configuredCodexHome,
       env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
       model,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,

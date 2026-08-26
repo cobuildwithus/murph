@@ -2346,7 +2346,10 @@ function describeFields(fields: readonly EnvironmentVoiceField[]): string {
                 field.existingNote,
               )}.`
             : "";
-          return `- ${field.aspectId}.${field.indicatorId}: ${field.label}.${meaning} Allowed: ${allowed}.${existingNote}`;
+          const extractionGuidance = field.extractionGuidance
+            ? ` Extraction rule: ${field.extractionGuidance}`
+            : "";
+          return `- ${field.aspectId}.${field.indicatorId}: ${field.label}.${meaning} Allowed: ${allowed}.${existingNote}${extractionGuidance}`;
         })
         .join("\n");
 }
