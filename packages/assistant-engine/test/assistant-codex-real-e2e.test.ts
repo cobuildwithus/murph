@@ -97,6 +97,9 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
+  sendAssistantMessageLocal,
+} from '../src/assistant/service.ts'
+import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -360,46 +363,93 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
       const userPrompt = 'Which folder did we pick for the train tickets?'
 
       try {
-        const prompt = resolveAssistantProviderPrompt({
-          conversationHistoryMessages,
-          dynamicTools: resolveMurphDynamicTools({}),
-          providerConfig: normalizeAssistantProviderConfig({
-            provider: 'codex-cli',
-          }),
-          userPrompt,
-          workingDirectory,
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
         })
-        expect(conversationHistoryMessages).toHaveLength(60)
-        expect(Buffer.byteLength(prompt, 'utf8')).toBeGreaterThan(12_000)
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'telegram',
+            conversationKey: 'telegram:direct:cold-reconstruction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-cold-reconstruction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-cold-reconstruction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'read-only',
+          },
+          turnCount: 30,
+          updatedAt: '2026-08-26T12:30:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          conversationHistoryMessages.map((message) => ({
+            kind: message.role,
+            text: message.content,
+          })),
+        )
+        const historyBytes = conversationHistoryMessages.reduce(
+          (total, message) =>
+            total + Buffer.byteLength(message.content, 'utf8'),
+          0,
+        )
+        expect(historyBytes).toBeLessThanOrEqual(12_000)
 
-        const result = await executeRealCodexAppServerTurn({
-          approvalPolicy: 'never',
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        const result = await sendAssistantMessageLocal({
+          channel: 'telegram',
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions:
-            buildDirectConversationDeveloperInstructions(),
-          env: config.env,
-          excludeResumeTurns: true,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt,
+          persistUserPromptOnFailure: false,
+          prompt: userPrompt,
+          provider: 'codex-cli',
           reasoningEffort: 'low',
           sandbox: 'read-only',
+          sessionId: session.sessionId,
+          threadId: 'thread-cold-reconstruction',
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          vault: workingDirectory,
           workingDirectory,
         })
 
         process.stdout.write(
           `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyBytes,
             historyMessages: conversationHistoryMessages.length,
-            promptBytes: Buffer.byteLength(prompt, 'utf8'),
-            reply: result.finalMessage.trim(),
+            reply: result.response.trim(),
           })}\n`,
         )
-        expect(result.finalMessage).toMatch(/cobalt/iu)
-        expect(result.finalMessage).not.toMatch(
+        expect(result.response).toMatch(/cobalt/iu)
+        expect(result.response).not.toMatch(
           /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
         )
       } finally {

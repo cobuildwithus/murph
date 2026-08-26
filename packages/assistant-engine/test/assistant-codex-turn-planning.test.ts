@@ -5641,10 +5641,9 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.resume).toBeNull()
       expect(plan.conversationHistoryMessages).toEqual(expectedHistory)
-      expect(Buffer.byteLength(
-        JSON.stringify(plan.conversationHistoryMessages),
-        'utf8',
-      )).toBeGreaterThan(12_000)
+      expect(expectedHistory.reduce((total, message) =>
+        total + Buffer.byteLength(message.content, 'utf8'), 0))
+        .toBeLessThanOrEqual(12_000)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -6548,12 +6547,12 @@ describe('assistant Codex turn planning', () => {
       })
 
       const history = plan.conversationHistoryMessages ?? []
-      expect(history).toHaveLength(9)
+      expect(history).toHaveLength(3)
       expect(history[0]?.content).toBe(
         ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
       )
-      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-3:/u))
-      expect(history[8]?.content).toEqual(expect.stringMatching(/^message-10:/u))
+      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-9:/u))
+      expect(history[2]?.content).toEqual(expect.stringMatching(/^message-10:/u))
       let totalBytes = 0
       for (const message of history) {
         const content = message.content
@@ -6564,7 +6563,7 @@ describe('assistant Codex turn planning', () => {
         expect(byteLength).toBeLessThanOrEqual(4_000)
         totalBytes += byteLength
       }
-      expect(totalBytes).toBeLessThanOrEqual(36_000)
+      expect(totalBytes).toBeLessThanOrEqual(12_000)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
