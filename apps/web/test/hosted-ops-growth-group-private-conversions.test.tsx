@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { GroupPrivateConversions } from "../app/(dashboard)/ops/growth/group-private-conversions";
 
 describe("growth group-to-private conversions", () => {
-  it("renders the durable total and recent daily bars without identifiers", () => {
+  it("renders the tracked total and recent daily bars without identifiers", () => {
     const markup = renderToStaticMarkup(createElement(GroupPrivateConversions, {
       conversions: {
         dailySeries: [
@@ -21,9 +21,11 @@ describe("growth group-to-private conversions", () => {
     expect(markup).toContain("Tracked conversions");
     expect(markup).toContain(">7<");
     expect(markup).toContain(
-      "Counts a member once when their group message came before their first private activation",
+      "Counts a member once when Murph still has a group message from the prior 14 days",
     );
     expect(markup).toContain("sequence-based attribution, not proof");
+    expect(markup).toContain("outside that rolling evidence window are not counted");
+    expect(markup).toContain("Tracked total among retained members");
     expect(markup).toContain("Tracking date");
     expect(markup).toContain(
       "Daily conversions recorded over the last 30 UTC dates",
@@ -33,17 +35,18 @@ describe("growth group-to-private conversions", () => {
     expect(markup).not.toContain("container_private");
   });
 
-  it("renders a compact empty state instead of an empty chart", () => {
+  it("keeps the tracked total in the compact no-recent-conversions state", () => {
     const markup = renderToStaticMarkup(createElement(GroupPrivateConversions, {
       conversions: {
         dailySeries: [
           { conversions: 0, date: "2026-08-25" },
         ],
-        total: 0,
+        total: 7,
       },
     }));
 
     expect(markup).toContain("No tracked group-to-private conversions");
+    expect(markup).toContain(">7<");
     expect(markup).not.toContain("Tracking date");
     expect(markup).not.toContain('role="application"');
   });

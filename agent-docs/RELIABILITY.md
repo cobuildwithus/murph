@@ -2465,9 +2465,13 @@ Last verified: 2026-08-23
   member-owned tracking timestamp only when the group receipt came first. The
   marker stores no message, sender, or group identifier, follows the member's
   existing deletion lifecycle, and remains stable after message content
-  retires. This is sequence-based attribution with a retention-limited initial
-  backfill, not causal proof; failures do not block snapshot capture and retry
-  only while the source evidence remains retained.
+  retires. This is sequence-based attribution limited on every run to group
+  evidence still available inside the rolling 14-day window, not causal proof;
+  sequences whose group evidence retires before activation are never counted.
+  Attribution-only decode or identity failures cannot invalidate the established
+  prior-day and trailing-seven-day activity aggregates. Attribution failures do
+  not block snapshot capture and retry only while the source evidence remains
+  retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the

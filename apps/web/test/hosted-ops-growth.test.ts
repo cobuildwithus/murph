@@ -2760,6 +2760,106 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("isolates an attribution-only decode failure from existing activity aggregates", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const attributionOnlyRow = buildLinqGroupMailboxRow({
+      contact: registeredPhone,
+      containerMemberId: "thread_container_old",
+      occurredAt: new Date("2026-06-25T08:00:00.000Z"),
+    });
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      {
+        ...attributionOnlyRow,
+        payloadInlineCiphertext: "invalid-json",
+      },
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_current",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_active",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      const capture = await captureHostedGrowthDailySnapshot(now);
+
+      expect(capture.activityAvailable).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: 1,
+      activeUsersTrailing7Days: 1,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: 1,
+      activeUsersTrailing7Days: 1,
+    });
+  });
+
+  it("retries a retained conversion after a marker update failure", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const groupRow = buildLinqGroupMailboxRow({
+      contact: registeredPhone,
+      containerMemberId: "thread_container_one",
+      occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+    });
+    const activatedMember = {
+      hostedMailboxItems: [{
+        createdAt: new Date("2026-07-05T10:00:00.000Z"),
+      }],
+      id: "member_converted",
+    };
+    mocks.hostedMailboxItem.findMany.mockResolvedValue([groupRow]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValue([{
+      memberId: "member_converted",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedMember.updateMany
+      .mockRejectedValueOnce(new Error("write unavailable"))
+      .mockResolvedValueOnce({ count: 1 });
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValue(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      queueCurrentMetricMocks();
+      mocks.hostedMember.findMany.mockResolvedValueOnce([activatedMember]);
+      const firstCapture = await captureHostedGrowthDailySnapshot(now);
+
+      queueCurrentMetricMocks();
+      mocks.hostedMember.findMany.mockResolvedValueOnce([activatedMember]);
+      const retryCapture = await captureHostedGrowthDailySnapshot(now);
+
+      expect(firstCapture.activityAvailable).toBe(true);
+      expect(retryCapture.activityAvailable).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(2);
+    expect(mocks.hostedMember.updateMany).toHaveBeenCalledTimes(2);
+  });
+
   it("stores unknown activity when retired group evidence affects a window", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const retiredPhone = requireLinqContact("phone", "+15550000001");
@@ -2963,6 +3063,8 @@ describe("hosted ops growth metrics", () => {
   it("reports activity failure after preserving the legacy cron snapshot", async () => {
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T12:00:00.000Z"));
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
       buildLinqGroupMailboxRow({
@@ -2993,6 +3095,7 @@ describe("hosted ops growth metrics", () => {
       });
     } finally {
       errorSpy.mockRestore();
+      vi.useRealTimers();
     }
 
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];

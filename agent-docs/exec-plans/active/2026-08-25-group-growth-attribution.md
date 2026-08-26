@@ -6,11 +6,11 @@ Updated: 2026-08-25
 
 ## Goal
 
-- Give operators one durable total and a simple daily bar chart for members whose group activity preceded their first private activation, without overstating observational attribution as causation.
+- Give operators one durable marker-backed total and a simple daily bar chart for retained members whose group activity was still observable inside the rolling 14-day window before their first private activation, without overstating observational attribution as causation.
 
 ## Success criteria
 
-- `/ops/growth` shows one cumulative tracked-conversion total and a zero-filled 30-day daily bar chart.
+- `/ops/growth` shows one tracked total accumulated among retained members and a zero-filled 30-day daily bar chart.
 - The calculation excludes people whose private activation predates their first retained group message and records at most one conversion per member.
 - A single nullable member marker survives inbound-message content retirement and stores no sender handle, group identifier, or message content.
 - Snapshot capture reuses its bounded group-message decode and performs one set-based activation read plus one conditional batch update.
@@ -19,7 +19,7 @@ Updated: 2026-08-25
 
 ## Scope
 
-- In scope: one durable group-to-private conversion marker per member, cumulative count, 30-day daily series, growth-page bar chart, design study, and tests.
+- In scope: one durable group-to-private conversion marker per member, tracked count among retained members, 30-day daily series, growth-page bar chart, design study, and tests.
 - Out of scope: conversion-rate cohorts, participant lists, group/source breakdowns, claiming causal signup attribution, message-ingestion writes, or external analytics tooling.
 
 ## Constraints
@@ -30,7 +30,7 @@ Updated: 2026-08-25
 ## Risks and mitigations
 
 1. Risk: Retention-window truncation prevents a full historical backfill.
-   Mitigation: disclose the limited initial backfill and persist each newly observed conversion beyond message retirement.
+   Mitigation: disclose that the rolling 14-day evidence limit applies on every run and persist each observed conversion beyond message retirement.
 2. Risk: A person participates in several groups and is counted repeatedly.
    Mitigation: set one nullable marker on the canonical member row only when it is still null.
 3. Risk: Organic sequence is presented as causal attribution.

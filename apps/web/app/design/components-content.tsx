@@ -619,12 +619,12 @@ const DESIGN_GROUP_PRIVATE_CONVERSIONS = {
   total: 7,
 } satisfies HostedGrowthDashboard["groupPrivateConversions"];
 
-const DESIGN_EMPTY_GROUP_PRIVATE_CONVERSIONS = {
+const DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS = {
   dailySeries: DESIGN_GROUP_PRIVATE_CONVERSIONS.dailySeries.map(({ date }) => ({
     conversions: 0,
     date,
   })),
-  total: 0,
+  total: 7,
 } satisfies HostedGrowthDashboard["groupPrivateConversions"];
 
 export function ComponentsContent() {
@@ -709,7 +709,7 @@ export function ComponentsContent() {
               />
               <div id="growth-group-private-conversions-empty">
                 <GroupPrivateConversions
-                  conversions={DESIGN_EMPTY_GROUP_PRIVATE_CONVERSIONS}
+                  conversions={DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS}
                   titleId="design-growth-group-private-conversions-empty-title"
                 />
               </div>

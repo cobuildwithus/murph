@@ -45,10 +45,11 @@ export function GroupPrivateConversions(input: {
           Group to private
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Counts a member once when their group message came before their first
-          private activation. This is sequence-based attribution, not proof the
-          group caused activation. The marker persists after message content
-          retires; the initial backfill is limited to retained evidence.
+          Counts a member once when Murph still has a group message from the
+          prior 14 days and that message came before their first private
+          activation. This is sequence-based attribution, not proof the group
+          caused activation. The marker remains after message content retires,
+          but sequences outside that rolling evidence window are not counted.
         </p>
       </div>
 
@@ -61,7 +62,7 @@ export function GroupPrivateConversions(input: {
             {formatInteger(input.conversions.total)}
           </div>
           <div className="mt-2 text-xs leading-5 text-muted-foreground">
-            Cumulative · one per retained member
+            Tracked total among retained members
           </div>
         </div>
 

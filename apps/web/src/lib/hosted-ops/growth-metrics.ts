@@ -921,6 +921,31 @@ async function calculateHostedGrowthActiveUsers(input: {
   };
 }
 
+async function resolveHostedGrowthGroupPrivateMessages(input: {
+  groupRows: readonly HostedGrowthGroupMailboxRow[];
+  prisma: HostedGrowthPrisma;
+}): Promise<HostedGrowthResolvedGroupMessage[]> {
+  const decodedGroupMessages = await decodeHostedGrowthGroupMessages(
+    input.groupRows,
+    input.prisma,
+  );
+  const senderIdentities = await resolveHostedGrowthGroupSenderIdentities(
+    decodedGroupMessages.messages.map((message) => message.evidence),
+    input.prisma,
+  );
+
+  return decodedGroupMessages.messages.map((message) => {
+    const identity = senderIdentities.get(message.evidence.identityKey);
+    if (!identity) {
+      throw new Error("Hosted growth group sender identity was not resolved.");
+    }
+    return {
+      memberId: readHostedGrowthMemberIdFromIdentity(identity),
+      observedAt: message.createdAt,
+    };
+  });
+}
+
 async function decodeHostedGrowthGroupMessages(
   rows: readonly HostedGrowthGroupMailboxRow[],
   prisma: HostedGrowthPrisma,
@@ -1783,9 +1808,15 @@ export async function captureHostedGrowthDailySnapshot(
         },
       }),
     ]);
+    const activityGroupRows = activeUsersGroupRows.filter((row) =>
+      row.createdAt >= trailing7DayStart && row.createdAt < snapshotDate
+    );
+    const groupPrivateOnlyRows = activeUsersGroupRows.filter((row) =>
+      row.createdAt < trailing7DayStart || row.createdAt >= snapshotDate
+    );
     const activeUsers = await calculateHostedGrowthActiveUsers({
       currentDirectRows: activeUsersTrailing7DayDirectRows,
-      groupRows: activeUsersGroupRows,
+      groupRows: activityGroupRows,
       monthlyDirectRows: activeUsersTrailing7DayDirectRows,
       monthlyStart: trailing7DayStart,
       now: snapshotDate,
@@ -1796,6 +1827,15 @@ export async function captureHostedGrowthDailySnapshot(
       todayStart: priorDayStart,
       trailing7DayStart,
     });
+    const groupPrivateOnlyMessages = await resolveHostedGrowthGroupPrivateMessages({
+      groupRows: groupPrivateOnlyRows,
+      prisma,
+    }).catch(() => {
+      console.error(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+      return [];
+    });
     return {
       available: true as const,
       activeUsersPriorDay: activeUsers.todayComplete
@@ -1804,7 +1844,10 @@ export async function captureHostedGrowthDailySnapshot(
       activeUsersTrailing7Days: activeUsers.trailing7DaysComplete
         ? activeUsers.trailing7Days
         : null,
-      resolvedGroupMessages: activeUsers.resolvedGroupMessages,
+      resolvedGroupMessages: [
+        ...activeUsers.resolvedGroupMessages,
+        ...groupPrivateOnlyMessages,
+      ],
     };
   })().catch(() => {
     console.error(
