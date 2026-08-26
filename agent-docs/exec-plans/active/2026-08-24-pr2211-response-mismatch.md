@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-26
 
 ## Goal
 
@@ -23,8 +23,24 @@ caller cancellation cannot be mistaken for a retryable timeout.
 - Return stable code `device_response_mismatch` and a precise bounded message.
 - Keep `list_accounts` replay-safe. Keep `connect` and `reconcile` non-retryable
   until `list_accounts` establishes current state because completion is unknown.
+- Keep `configure_no_data_outreach` effect-once: any mismatch, unreadable
+  post-effect response, unclassified failure, or cancellation reports unknown
+  completion and requires fresh private member input. It never suggests
+  `list_accounts` or a same-message retry.
+- Delete the two PR-added global absolute-path replacements. Preserve each
+  existing diagnostic owner's established output instead of broadening a
+  shared sanitizer.
 - Add direct proof for every requested action; expose neither returned action nor
   response payload.
+
+## Product UX Patch
+
+- Outcome: Murph does not repeat a no-data outreach preference change when the
+  first attempt may already have taken effect.
+- Reaches: the current private-member device preference journey when the host
+  response is mismatched, unreadable, failed, or cancelled.
+- Proof: focused tests show one effect attempt, terminal recovery that requires
+  fresh private input, and no request, response, error, or path-value echo.
 
 ## Tasks
 
@@ -82,3 +98,18 @@ caller cancellation cannot be mistaken for a retryable timeout.
   is 9,521,301 / 9,527,848 bytes with an 805-byte entry and 25,155-byte static
   closure; the runner is 11,369,410 / 11,393,617 bytes with a 1,753,568-byte
   entry and 8,662,171-byte static closure.
+- Final ReviewGPT accepted two narrow corrections: remove the PR-added global
+  absolute-path scrubber branches, and preserve the effect-once
+  `configure_no_data_outreach` contract through mismatch and residual failure
+  projections. Remediation stays within the existing shared diagnostic owner
+  and device projector; it adds no sanitizer, retry owner, protocol, or state.
+- The effect-once correction is complete. Mismatch, oversized post-effect
+  response, pre-response failure, and cancellation each make one request,
+  expose no synthetic request/response/error values, omit `list_accounts`, and
+  require fresh private input before another preference change.
+- Focused proof passes: 49 assistant device/domain-tool cases, 28 route cases,
+  10 inbox diagnostic-owner cases, and five operator-config contract cases.
+  Assistant-engine, inbox-services, and operator-config typechecks pass.
+- Product UX walkthrough passes for the affected private-member failure paths;
+  existing list, connect, reconcile, and successful preference behavior is
+  unchanged. Diff whitespace and added-line privacy scans pass.

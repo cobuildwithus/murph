@@ -20,6 +20,8 @@ function readToolError(result: Awaited<ReturnType<typeof executeDeviceDynamicToo
 }
 
 const PRIVATE_HOSTED_DEVICE_SENTINEL = 'private-hosted-device-response'
+const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
+  'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
 
 function createHostedWebControlPlaneResponseError(input: {
   code: string
@@ -107,16 +109,44 @@ describe('hosted device dynamic tool recovery', () => {
         sourceProvider: null,
       },
     },
+    {
+      action: 'configure_no_data_outreach',
+      expectedHint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+      retryable: false,
+      response: {
+        accounts: [{
+          accountId: PRIVATE_HOSTED_DEVICE_SENTINEL,
+          displayName: PRIVATE_HOSTED_DEVICE_SENTINEL,
+          lastErrorCode: PRIVATE_HOSTED_DEVICE_SENTINEL,
+          lastSyncCompletedAt: null,
+          provider: PRIVATE_HOSTED_DEVICE_SENTINEL,
+          status: 'active' as const,
+        }],
+        action: 'list_accounts',
+        provider: PRIVATE_HOSTED_DEVICE_SENTINEL,
+        sourceProvider: PRIVATE_HOSTED_DEVICE_SENTINEL,
+      },
+    },
   ] as const) {
     it(`identifies a mismatched response to ${testCase.action}`, async () => {
       const request = testCase.action === 'connect'
         ? { action: 'connect' as const, provider: 'synthetic-provider' }
         : testCase.action === 'reconcile'
           ? { accountId: 'synthetic-account', action: 'reconcile' as const }
-          : { action: 'list_accounts' as const }
+          : testCase.action === 'configure_no_data_outreach'
+            ? {
+                action: 'configure_no_data_outreach' as const,
+                mode: 'off' as const,
+                sourceProvider: 'private-source-provider',
+              }
+            : { action: 'list_accounts' as const }
+      const deviceRequest = vi.fn(async () => testCase.response)
       const result = await executeDeviceDynamicTool({
+        acceptedInputAuthority: testCase.action === 'configure_no_data_outreach'
+          ? { assistantInputId: 'synthetic-private-input' }
+          : null,
         deviceTool: {
-          request: vi.fn(async () => testCase.response),
+          request: deviceRequest,
         },
         request: { kind: 'device', request },
       })
@@ -126,11 +156,69 @@ describe('hosted device dynamic tool recovery', () => {
       expect(parsed.error).toEqual({
         code: 'device_response_mismatch',
         hint: testCase.expectedHint,
-        message: 'The device response action did not match the requested action.',
+        message: testCase.action === 'configure_no_data_outreach'
+          ? 'The no-data outreach response was invalid, so completion could not be confirmed.'
+          : 'The device response action did not match the requested action.',
         retryable: testCase.retryable,
         stage: `device-${testCase.action.replace(/_/gu, '-')}`,
       })
+      expect(deviceRequest).toHaveBeenCalledTimes(1)
       expect(text).not.toContain(PRIVATE_HOSTED_DEVICE_SENTINEL)
+      expect(text).not.toContain('private-source-provider')
+    })
+  }
+
+  for (const testCase of [
+    { behavior: 'oversized-response', name: 'an unreadable post-effect response' },
+    { behavior: 'failure', name: 'a pre-response failure' },
+    { behavior: 'cancellation', name: 'cancellation with unknown completion' },
+  ] as const) {
+    it(`keeps ${testCase.name} terminal for no-data outreach`, async () => {
+      const abortController = new AbortController()
+      const deviceRequest = vi.fn(async () => {
+        if (testCase.behavior === 'oversized-response') {
+          return {
+            action: 'configure_no_data_outreach' as const,
+            effectiveAfterDays: null,
+            setting: 'off' as const,
+            sourceProvider: PRIVATE_HOSTED_DEVICE_SENTINEL.repeat(4_000),
+            status: 'saved' as const,
+          }
+        }
+        if (testCase.behavior === 'cancellation') {
+          abortController.abort(new DOMException(PRIVATE_HOSTED_DEVICE_SENTINEL, 'AbortError'))
+          throw abortController.signal.reason
+        }
+        throw new Error(`${PRIVATE_HOSTED_DEVICE_SENTINEL}: private-source-provider`)
+      })
+      const result = await executeDeviceDynamicTool({
+        abortSignal: testCase.behavior === 'cancellation'
+          ? abortController.signal
+          : null,
+        acceptedInputAuthority: { assistantInputId: 'synthetic-private-input' },
+        deviceTool: { request: deviceRequest },
+        request: {
+          kind: 'device',
+          request: {
+            action: 'configure_no_data_outreach',
+            mode: 'off',
+            sourceProvider: 'private-source-provider',
+          },
+        },
+      })
+
+      const { parsed, text } = readToolError(result)
+      expect(parsed.error).toEqual({
+        code: 'device_operation_outcome_unknown',
+        hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+        message: 'The no-data outreach change completion could not be confirmed.',
+        retryable: false,
+        stage: 'device-configure-no-data-outreach',
+      })
+      expect(deviceRequest).toHaveBeenCalledTimes(1)
+      expect(text).not.toContain(PRIVATE_HOSTED_DEVICE_SENTINEL)
+      expect(text).not.toContain('private-source-provider')
+      expect(text).not.toContain('list_accounts')
     })
   }
 

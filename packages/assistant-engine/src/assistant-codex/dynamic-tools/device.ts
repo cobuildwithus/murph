@@ -12,6 +12,8 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const DEVICE_TOOL_RESULT_MAX_BYTES = 60_000
+const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
+  'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
 const deviceProviderSchema = z
   .string()
   .trim()
@@ -136,15 +138,22 @@ export async function executeDeviceDynamicTool(input: {
       ? deviceTextResult(true, text)
       : deviceTextResult(
           false,
-          serializeDeviceToolError({
-            code: 'device_result_too_large',
-            message: 'The device result is too large.',
-            retryable: false,
-            stage: deviceToolStage(input.request.request.action),
-            hint: input.request.request.action === 'list_accounts'
-              ? 'Retry list_accounts with a provider or sourceProvider filter.'
-              : 'Narrow the device request before retrying.',
-          }),
+          serializeDeviceToolError(
+            input.request.request.action === 'configure_no_data_outreach'
+              ? projectUnclassifiedDeviceToolFailure(
+                  input.request.request.action,
+                  false,
+                )
+              : {
+                  code: 'device_result_too_large',
+                  message: 'The device result is too large.',
+                  retryable: false,
+                  stage: deviceToolStage(input.request.request.action),
+                  hint: input.request.request.action === 'list_accounts'
+                    ? 'Retry list_accounts with a provider or sourceProvider filter.'
+                    : 'Narrow the device request before retrying.',
+                },
+          ),
         )
   } catch (error) {
     return deviceTextResult(
@@ -171,6 +180,16 @@ interface DeviceToolErrorProjection {
 function projectDeviceResponseMismatch(
   action: AssistantHostedDeviceToolRequest['action'],
 ): DeviceToolErrorProjection {
+  if (action === 'configure_no_data_outreach') {
+    return {
+      code: 'device_response_mismatch',
+      message: 'The no-data outreach response was invalid, so completion could not be confirmed.',
+      retryable: false,
+      stage: deviceToolStage(action),
+      hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+    }
+  }
+
   return {
     code: 'device_response_mismatch',
     message: 'The device response action did not match the requested action.',
@@ -187,10 +206,11 @@ function projectDeviceToolError(
   action: AssistantHostedDeviceToolRequest['action'],
   callerSignalAborted: boolean,
 ): DeviceToolErrorProjection {
-  const stage = deviceToolStage(action)
   if (callerSignalAborted) {
     return projectUnclassifiedDeviceToolFailure(action, true)
   }
+
+  const stage = deviceToolStage(action)
 
   if (error instanceof VaultCliError) {
     switch (error.code) {
@@ -322,6 +342,15 @@ function projectUnclassifiedDeviceToolFailure(
   callerSignalAborted: boolean,
 ): DeviceToolErrorProjection {
   const stage = deviceToolStage(action)
+  if (action === 'configure_no_data_outreach') {
+    return {
+      code: 'device_operation_outcome_unknown',
+      message: 'The no-data outreach change completion could not be confirmed.',
+      retryable: false,
+      stage,
+      hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+    }
+  }
   if (callerSignalAborted) {
     return {
       code: 'device_operation_cancelled',
