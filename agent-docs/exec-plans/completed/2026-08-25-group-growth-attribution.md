@@ -1,6 +1,6 @@
 # Group-to-private growth attribution
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -15,7 +15,7 @@ Updated: 2026-08-25
 - A single nullable member marker survives inbound-message content retirement and stores no sender handle, group identifier, or message content.
 - Snapshot capture reuses its bounded group-message decode and performs one set-based activation read plus one conditional batch update.
 - Populated and empty states have focused data/component coverage and reviewer-openable `/design` representations.
-- Focused tests, typecheck, browser proof, PR review, and required CI complete on the candidate head.
+- Focused tests, typecheck, PR review, and required CI complete on the candidate head; the user explicitly waived live browser screenshots when the required browser service was unavailable.
 
 ## Scope
 
@@ -43,8 +43,8 @@ Updated: 2026-08-25
 1. Extract resolved retained group-message evidence so active-user and conversion recording share one decode/resolve pass.
 2. Add one nullable member marker and duplicate-safe snapshot reconciliation with focused data tests.
 3. Add the total/bar-chart growth section, populated/empty design states, and component tests.
-4. Run focused verification, Web typecheck, and browser proof for desktop/mobile states.
-5. Commit, open the PR, run preliminary Product UX/frontend/coverage review with CI, remediate accepted findings, and complete the handoff.
+4. Run focused verification and Web typecheck; retain static populated/no-recent component proof after the user waives unavailable live browser screenshots.
+5. Commit, open the PR, run the applicable review and CI gates, remediate accepted findings, and complete the handoff.
 
 ## Decisions
 
@@ -54,5 +54,7 @@ Updated: 2026-08-25
 
 ## Verification
 
-- Commands to run: Prisma validation, focused Vitest files for the projection/dashboard/component/design study, Web typecheck, authenticated browser checks of `/ops/growth` and `/design` at desktop and mobile widths, and repository diff/privacy inspection.
-- Expected outcomes: all checks pass; the total and populated/empty chart states render without identifiers or horizontal overflow; existing growth metrics remain unchanged outside the new attribution surface.
+- Passed: Prisma validation, 59 focused Vitest tests for the projection/dashboard/component surface, Web typecheck, touched-file ESLint, repository diff/privacy inspection, and static production-component renders for recent and no-recent states.
+- Review: final ReviewGPT rounds 1 and 2 passed with no findings. The preliminary pass was invalid without rendered artifacts; its two evidence-backed findings were accepted, corrected, and verified by the clean full-patch round 2. The user explicitly waived a screenshot-backed retry.
+- CI: all required checks passed on the reviewed implementation head before this plan-only closure commit; GitHub will gate the exact final head again before merge.
+Completed: 2026-08-25
