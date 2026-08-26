@@ -8,6 +8,7 @@ import {
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
   HABITAT_DOMAIN_IDS,
+  isStrictIsoDate,
   type HabitatCoverageCounts,
   type HabitatDomainCoverage,
   type HabitatIndicatorDefinition,
@@ -286,6 +287,21 @@ function unknownHabitatAspectError(): VaultCliError {
   )
 }
 
+function invalidRecordedAtError(): VaultCliError {
+  return new VaultCliError(
+    'contract_invalid',
+    'The recorded date must be a valid ISO calendar date in YYYY-MM-DD form.',
+    {
+      issues: [{
+        code: 'invalid_value',
+        publicPath: ['recordedAt'],
+      }],
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
 function mapHabitatCoreError(error: unknown): unknown {
   if (!isVaultError(error)) {
     return error
@@ -401,6 +417,9 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     async run({ args, options }) {
       if (!getHabitatAspectDefinition(args.aspect)) {
         throw unknownHabitatAspectError()
+      }
+      if (options.recordedAt !== undefined && !isStrictIsoDate(options.recordedAt)) {
+        throw invalidRecordedAtError()
       }
 
       const result = await runHabitatCore(() =>

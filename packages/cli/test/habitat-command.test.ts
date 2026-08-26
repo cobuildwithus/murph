@@ -113,6 +113,82 @@ test("habitat save reports catalog value errors before the core write boundary",
   }
 });
 
+test("habitat save validates calendar dates at the option owner without writing or echoing input", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-cli-habitat-");
+
+  try {
+    await initializeVault({ vaultRoot });
+    const cli = createHabitatCli();
+    const invalid = await runInProcessJsonCli(cli, [
+      "habitat",
+      "save",
+      "sleep-environment",
+      "--indicator",
+      "window_at_night=open",
+      "--recorded-at",
+      "2026-02-30",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(invalid.envelope.ok, false);
+    if (invalid.envelope.ok) {
+      assert.fail("expected the invalid calendar date to fail");
+    }
+    assert.equal(invalid.envelope.error.code, "contract_invalid");
+    assert.equal(invalid.envelope.error.stage, "validation");
+    assert.equal(invalid.envelope.error.retryable, false);
+    assert.equal(invalid.envelope.error.fieldErrors?.[0]?.path, "recordedAt");
+    assert.equal(invalid.envelope.error.hint, undefined);
+    assert.equal(JSON.stringify(invalid.envelope).includes("2026-02-30"), false);
+    assert.equal(JSON.stringify(invalid.envelope).includes(vaultRoot), false);
+    await assert.rejects(
+      () => readFile(path.join(vaultRoot, "bank", "habitat", "sleep-environment.md")),
+      (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "ENOENT",
+    );
+
+    const validLeapDate = await runInProcessJsonCli(cli, [
+      "habitat",
+      "save",
+      "sleep-environment",
+      "--indicator",
+      "window_at_night=open",
+      "--recorded-at",
+      "2024-02-29",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(validLeapDate.envelope.ok, true);
+
+    const invalidNonLeapDate = await runInProcessJsonCli(cli, [
+      "habitat",
+      "save",
+      "home-location",
+      "--indicator",
+      "location=Boston",
+      "--recorded-at",
+      "2026-02-29",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidNonLeapDate.envelope.ok, false);
+    if (invalidNonLeapDate.envelope.ok) {
+      assert.fail("expected the non-leap date to fail");
+    }
+    assert.equal(invalidNonLeapDate.envelope.error.stage, "validation");
+    assert.equal(invalidNonLeapDate.envelope.error.fieldErrors?.[0]?.path, "recordedAt");
+    assert.equal(JSON.stringify(invalidNonLeapDate.envelope).includes("2026-02-29"), false);
+    await assert.rejects(
+      () => readFile(path.join(vaultRoot, "bank", "habitat", "home-location.md")),
+      (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "ENOENT",
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
 test("habitat commands map unknown and missing aspects to bounded recovery fields", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-cli-habitat-");
   const privateAspect = "private-unknown-aspect";
