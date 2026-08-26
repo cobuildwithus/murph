@@ -141,6 +141,29 @@ const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
 const JUNCTION_WORKOUT_STREAM_CANDIDATE_DIAGNOSTIC_LIMIT =
   resolveJunctionTimeseriesResourcePolicy("workout_stream")?.maxRecordsPerWindow ?? 0;
+const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
+  (resolveJunctionTimeseriesResourcePolicy("electrocardiogram_voltage")?.maxSamplesPerWindow ?? 0) + 1;
+const JUNCTION_ECG_BINDING_REASONS = new Set([
+  "collection_source_ambiguous",
+  "feature_cardinality_mismatch",
+  "group_ambiguous",
+  "group_collection_invalid",
+  "group_envelope_invalid",
+  "group_identity_conflict",
+  "group_invalid",
+  "recording_limit_exceeded",
+  "sample_count_mismatch",
+  "sample_identity_conflict",
+  "sample_invalid",
+  "sample_limit_exceeded",
+  "sample_normalization_invalid",
+  "sample_outside_summary_window",
+  "summary_identity_conflict",
+  "summary_identity_incomplete",
+  "summary_source_inconsistent",
+  "summary_window_invalid",
+  "summary_windows_ambiguous",
+]);
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
 const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
@@ -2208,6 +2231,7 @@ function buildDeviceSyncErrorFailureDiagnostics(
     error,
     providerRequestEndpointKind,
   );
+  const junctionEcgContext = readSafeJunctionEcgFailureContext(error);
 
   return compactFailureDiagnostics({
     failureCauseCode: readSafeDiagnosticToken(cause?.code),
@@ -2220,6 +2244,7 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerRequestBodyFieldCount: readSafeDiagnosticNumber(error.details?.requestBodyFieldCount),
     providerRequestBodyFieldNames: readSafeDiagnosticToken(error.details?.requestBodyFieldNames),
     providerRequestBodyKind: readSafeDiagnosticToken(error.details?.requestBodyKind),
+    ...junctionEcgContext,
     ...workoutCandidateContext,
     providerRequestContentType: readSafeDiagnosticToken(error.details?.requestContentType),
     providerRequestCredentialPresent: readSafeDiagnosticBoolean(error.details?.requestCredentialPresent),
@@ -2359,6 +2384,57 @@ function readSafeWorkoutCandidateFailureContext(
     providerRequestCandidateCount: candidateCount,
     providerRequestCandidateOrdinal: candidateOrdinal,
   };
+}
+
+function readSafeJunctionEcgFailureContext(
+  error: DeviceSyncError,
+): Partial<Pick<
+  DeviceSyncJobFailureDiagnostic["details"],
+  | "junctionEcgActualRecordingCount"
+  | "junctionEcgActualSampleCount"
+  | "junctionEcgBindingReason"
+  | "junctionEcgExpectedRecordingCount"
+  | "junctionEcgExpectedSampleCount"
+  | "junctionEcgMaxRecordingCount"
+  | "junctionEcgMaxSampleCount"
+>> {
+  if (error.code !== "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE") {
+    return {};
+  }
+  const reason = readSafeDiagnosticToken(error.details?.reason);
+  if (!reason || !JUNCTION_ECG_BINDING_REASONS.has(reason)) {
+    return {};
+  }
+  return compactFailureDiagnostics({
+    junctionEcgActualRecordingCount: readSafeJunctionEcgDiagnosticCount(
+      error.details?.actualRecordingCount,
+    ),
+    junctionEcgActualSampleCount: readSafeJunctionEcgDiagnosticCount(
+      error.details?.actualSampleCount,
+    ),
+    junctionEcgBindingReason: reason,
+    junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
+      error.details?.expectedRecordingCount,
+    ),
+    junctionEcgExpectedSampleCount: readSafeJunctionEcgDiagnosticCount(
+      error.details?.expectedSampleCount,
+    ),
+    junctionEcgMaxRecordingCount: readSafeJunctionEcgDiagnosticCount(
+      error.details?.maxRecordingCount,
+    ),
+    junctionEcgMaxSampleCount: readSafeJunctionEcgDiagnosticCount(
+      error.details?.maxSampleCount,
+    ),
+  });
+}
+
+function readSafeJunctionEcgDiagnosticCount(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    && value <= JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT
+    ? value
+    : null;
 }
 
 function readSafeWorkoutCandidateAliasSource(

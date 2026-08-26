@@ -342,3 +342,49 @@ test("Junction ECG voltage preserves bound identity across pagination", async ()
     ["ecg-recording-1", "ecg-recording-1", "ecg-recording-1"],
   );
 });
+
+test("Junction ECG voltage rejects source changes across pages", async () => {
+  let page = 0;
+  const client = createClient(async () => {
+    page += 1;
+    return createJsonResponse({
+      groups: {
+        apple_health_kit: [{
+          source: {
+            provider: "apple_health_kit",
+            type: "watch",
+            device_id: `watch-${page}`,
+          },
+          data: [{
+            timestamp: `2026-01-15T12:00:0${page}.000Z`,
+            type: "lead_i",
+            unit: "mV",
+            value: page / 10,
+          }],
+        }],
+      },
+      ...(page === 1 ? { next_cursor: "page-2" } : {}),
+    });
+  });
+
+  await assert.rejects(
+    client.listElectrocardiogramVoltage({
+      ...WINDOW,
+      maxRecords: 3,
+      recordingId: "ecg-recording-1",
+      sourceProviderSlug: "apple_health_kit",
+    }),
+    (error) => {
+      assert.equal(
+        (error as { code?: unknown }).code,
+        "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+      );
+      assert.equal(
+        (error as { details?: { reason?: unknown } }).details?.reason,
+        "collection_source_ambiguous",
+      );
+      return true;
+    },
+  );
+  assert.equal(page, 2);
+});

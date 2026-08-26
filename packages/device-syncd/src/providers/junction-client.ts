@@ -593,7 +593,7 @@ export class JunctionClient {
       resource: "electrocardiogram_voltage",
       sourceProviderSlug,
     };
-    return this.fetchWindowedCollection(
+    const records = await this.fetchWindowedCollection(
       requestInput,
       (payload) => extractBoundElectrocardiogramVoltageRecords(payload, {
         recordingId,
@@ -605,6 +605,8 @@ export class JunctionClient {
       }),
       (cursor) => this.requestTimeseriesPage(requestInput, cursor),
     );
+    assertSingleElectrocardiogramCollectionSource(records);
+    return records;
   }
 
   async getWorkoutStream(input: JunctionWorkoutStreamInput): Promise<unknown> {
@@ -2070,6 +2072,27 @@ function extractBoundElectrocardiogramVoltageRecords(
   }
 
   return records;
+}
+
+function assertSingleElectrocardiogramCollectionSource(
+  records: readonly unknown[],
+): void {
+  let collectionSource: string | null = null;
+  for (const rawRecord of records) {
+    const record = readPlainObject(rawRecord);
+    if (!record) {
+      throw junctionElectrocardiogramBindingError("sample_invalid");
+    }
+    const source = JSON.stringify([
+      normalizeString(record.sourceProviderSlug),
+      normalizeString(record.sourceType),
+      normalizeString(record.sourceInstanceId),
+    ]);
+    collectionSource ??= source;
+    if (source !== collectionSource) {
+      throw junctionElectrocardiogramBindingError("collection_source_ambiguous");
+    }
+  }
 }
 
 function extractStructurallyCompleteTimeseriesRecords(
