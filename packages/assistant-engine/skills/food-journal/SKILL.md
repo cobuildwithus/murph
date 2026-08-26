@@ -91,6 +91,12 @@ or target-resolution mechanics.
 
 ### Complete an interactive day before attaching its card
 
+Use this all-meal recovery only when the member explicitly requests a daily
+nutrition card or daily summary in the current interactive turn. Default
+attachment intent after a meal mutation does not authorize reading, editing,
+or asking about another meal. If fresh totals remain incomplete on that default
+path, use the short truthful meal-log fallback with no card.
+
 After the fresh selected-date `vault-cli meal totals` read, compare every
 metric's `mealCount` with the top-level `mealCount`. When any metric has lower
 coverage, do not treat the normal interactive card workflow as finished with a

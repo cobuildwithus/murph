@@ -1025,7 +1025,7 @@ describe('murph.attach_response_card', () => {
       'Do not re-ask or recite established categories.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or explain it.',
+      'Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or merely restate it.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'If suitability is clear, proceed and state only the request-relevant outcome.',
@@ -1069,7 +1069,10 @@ describe('murph.attach_response_card', () => {
       /condition list|regimen list|measurement entry list|event list --kind (?:procedure|encounter|test)/u,
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before attaching a card',
+      'Only on a member-explicit interactive daily-card or daily-summary request, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before attaching a card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Default attachment intent after a meal mutation does not authorize reading, editing, or asking about another meal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone.',

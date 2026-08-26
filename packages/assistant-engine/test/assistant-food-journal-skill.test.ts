@@ -202,6 +202,12 @@ describe('assistant food journal skill', () => {
       'Use `--nutrition-source inherited` for\ncopied prior-meal totals',
     )
     expect(skill).toContain(
+      'Use this all-meal recovery only when the member explicitly requests a daily\nnutrition card or daily summary',
+    )
+    expect(skill).toContain(
+      'Default\nattachment intent after a meal mutation does not authorize reading, editing,\nor asking about another meal.',
+    )
+    expect(skill).toContain(
       'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',
     )
     expect(skill).toContain(

@@ -9304,6 +9304,114 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
   )
 
   it(
+    'grounds a known suitability rationale in one Health Commons search',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealNumericContextJourney({
+          config,
+          scenario: 'health-rationale',
+        })
+        const commands = expandRecordedVaultCommands(result.commands)
+        expect(commands.filter((command) => command === 'memory show')).toHaveLength(1)
+        expect(commands.filter((command) =>
+          /^(?:commons )?knowledge search\b/u.test(command)
+        )).toHaveLength(1)
+        expect(commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(/^goal (?:save|import-json)\b/u),
+        ]))
+        expect(result.card).toBeNull()
+        expect(result.message).toMatch(/kidney|renal/iu)
+        expect(result.message).toMatch(/protein/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'changes a numeric nutrition target from saved suitability context without repeated screening',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealNumericContextJourney({
+          config,
+          scenario: 'target-change',
+        })
+        const commands = expandRecordedVaultCommands(result.commands)
+        const memoryIndex = commands.findIndex((command) => command === 'memory show')
+        const writeIndexes = commands.flatMap((command, index) =>
+          command.startsWith('goal import-json ')
+            ? [index]
+            : [],
+        )
+        expect(writeIndexes).toHaveLength(1)
+        const writeIndex = writeIndexes[0] ?? -1
+        const readbackIndex = commands.findIndex(
+          (command, index) =>
+            index > writeIndex
+            && command === `goal show ${result.goalId}`,
+        )
+        expect(memoryIndex).toBeGreaterThanOrEqual(0)
+        expect(writeIndex).toBeGreaterThan(memoryIndex)
+        expect(readbackIndex).toBeGreaterThan(writeIndex)
+        expect(commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(
+            /^(?:condition|regimen|measurement|event) (?:list|entry list)\b/u,
+          ),
+          expect.stringMatching(/^(?:commons )?knowledge search\b/u),
+        ]))
+        expect(result.savedProteinTarget).toBe(145)
+        expect(result.savedStatus).toBe('paused')
+        expect(result.card).toBeNull()
+        expect(result.message).toMatch(/145/iu)
+        expect(result.message).toMatch(/protein/iu)
+        expect(result.message).not.toMatch(
+          /pregnan|breastfeed|eating disorder|kidney|liver|bariatric/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'keeps default meal-log attachment intent out of unrelated-meal recovery',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealDefaultMealAttachmentBoundary({ config })
+        const commands = expandRecordedVaultCommands(result.commands)
+        expect(commands.filter((command) =>
+          command.startsWith('meal add ')
+          && !command.endsWith(' --help')
+        )).toHaveLength(1)
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'totals'],
+        )).toBe(true)
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'edit', result.incompleteMealId],
+        )).toBe(false)
+        expect(result.savedIncompleteCalories).toBeNull()
+        expect(result.card).toBeNull()
+        expect(result.message).not.toMatch(/\?/u)
+        expect(result.message).not.toMatch(/breakfast|toast/iu)
+        expect(result.message).toMatch(/lunch|logged|saved/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
     'repairs an incomplete manual meal from an explicitly equivalent prior meal',
     { timeout: 1_800_000 },
     async () => {
@@ -9350,6 +9458,9 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         )).toHaveLength(1)
         expect(editIndex).toBeGreaterThanOrEqual(0)
         expect(editCommand).toContain('--nutrition-source inherited')
+        expect(editCommand).toMatch(
+          /saved package labels and measured serving\./iu,
+        )
         expect(readbackIndex).toBeGreaterThan(editIndex)
         expect(totalsIndex).toBeGreaterThan(readbackIndex)
         expect(recordedVaultCommandStartsWith(
@@ -9357,6 +9468,10 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
           ['meal', 'add'],
         )).toBe(false)
         expect(result.savedCalories).toBe(430)
+        expect(result.savedNutritionSource).toBe('inherited')
+        expect(result.savedNutritionSourceDetail).toMatch(
+          /saved package labels and measured serving\./iu,
+        )
         expect(result.card).toMatchObject({
           kind: 'daily_nutrition',
           localDate: '2026-08-21',
@@ -9466,7 +9581,7 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
 
 describeRealCodex('real Codex automatic meal clarification e2e', () => {
   it(
-    'asks only for a genuinely unidentifiable capture and enriches that same meal after the reply',
+    'keeps an unrelated incomplete meal out of scheduled capture recovery',
     { timeout: 1_800_000 },
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -9490,6 +9605,7 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
         )
         const removeIndex = eligible.firstCommands.findIndex((command) =>
           command === removePhotoCommand
+          || command.startsWith(`${removePhotoCommand} `)
         )
         expect(firstShowIndex).toBeGreaterThanOrEqual(0)
         expect(removeIndex).toBeGreaterThan(firstShowIndex)
@@ -9507,6 +9623,11 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
         )
         expect(eligible.firstCard).toBeNull()
         expect(eligible.savedAttachmentCount).toBe(0)
+        expect(recordedVaultCommandStartsWith(
+          eligible.firstCommands,
+          ['meal', 'edit', eligible.unrelatedMealId],
+        )).toBe(false)
+        expect(eligible.firstMessage).not.toMatch(/breakfast|toast/iu)
 
         const editIndex = eligible.followupCommands.findIndex((command) =>
           command.startsWith(`meal edit ${eligible.mealId} `)
@@ -9556,12 +9677,23 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
             config,
             protectedContext: true,
           })
-        expect(protectedResult.firstCommands).toContain(
-          `meal remove-photo ${protectedResult.mealId}`,
+        expect(recordedVaultCommandStartsWith(
+          protectedResult.firstCommands,
+          ['meal', 'remove-photo', protectedResult.mealId],
+        )).toBe(true)
+        const protectedCommands = expandRecordedVaultCommands(
+          protectedResult.firstCommands,
         )
-        expect(protectedResult.firstCommands).not.toEqual(
+        const protectedMealEdits = protectedCommands.filter((command) =>
+          command.startsWith(`meal edit ${protectedResult.mealId} `)
+        )
+        expect(protectedMealEdits.length).toBeGreaterThan(0)
+        for (const command of protectedMealEdits) {
+          expect(command).not.toMatch(/--nutrition-/u)
+        }
+        expect(protectedCommands).not.toEqual(
           expect.arrayContaining([
-            expect.stringMatching(/^(?:goal|meal edit|meal totals)\b/u),
+            expect.stringMatching(/^(?:goal|meal totals)\b/u),
           ]),
         )
         expect(protectedResult.firstMessage).not.toMatch(/\?/u)
@@ -9571,6 +9703,11 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
         expect(protectedResult.firstCard).toBeNull()
         expect(protectedResult.savedAttachmentCount).toBe(0)
         expect(protectedResult.savedCalories).toBeNull()
+        expect(protectedResult.savedNote).toMatch(/reviewed|could not be identified/iu)
+        expect(recordedVaultCommandStartsWith(
+          protectedResult.firstCommands,
+          ['meal', 'edit', protectedResult.unrelatedMealId],
+        )).toBe(false)
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
@@ -9883,6 +10020,385 @@ async function materializeNumericSuitabilityVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+type NumericContextJourneyScenario = 'health-rationale' | 'target-change'
+
+async function runRealNumericContextJourney(input: {
+  config: RealCodexE2eConfig
+  scenario: NumericContextJourneyScenario
+}): Promise<{
+  card: unknown
+  commands: string[]
+  goalId: string | null
+  message: string
+  providerActionCount: number
+  savedProteinTarget: number | null
+  savedStatus: string | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), `murph-numeric-context-${input.scenario}-e2e-`),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+
+    let goalId: string | null = null
+    if (input.scenario === 'target-change') {
+      const pointTarget = (
+        targetId: string,
+        metricKey: string,
+        unit: string,
+        value: number,
+      ) => goalMetricTargetSchema.parse({
+        comparator: 'between',
+        evaluation: { kind: 'selected-value' },
+        highValue: value,
+        kind: 'metric',
+        metricKey,
+        targetId,
+        unit,
+        value,
+      })
+      const goal = await upsertGoal({
+        domains: ['nutrition'],
+        horizon: 'ongoing',
+        metricTargets: [
+          pointTarget(
+            'murph-default-dietary-calories',
+            'dietary-calories',
+            'kcal',
+            2_100,
+          ),
+          pointTarget(
+            'murph-default-protein-grams',
+            'protein-grams',
+            'g',
+            135,
+          ),
+          pointTarget(
+            'murph-default-carbs-grams',
+            'carbs-grams',
+            'g',
+            250,
+          ),
+          pointTarget(
+            'murph-default-fat-grams',
+            'fat-grams',
+            'g',
+            70,
+          ),
+          pointTarget(
+            'murph-default-fiber-grams',
+            'fiber-grams',
+            'g',
+            30,
+          ),
+        ],
+        slug: 'murph-daily-nutrition-starting-targets',
+        status: 'paused',
+        title: 'Daily nutrition targets',
+        vaultRoot,
+        window: { startAt: '2026-08-21' },
+      })
+      goalId = goal.record.entity.goalId
+    }
+
+    await materializeNumericContextVaultCli({
+      binDirectory,
+      commandLog,
+      scenario: input.scenario,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: input.scenario === 'target-change'
+        ? [
+            'Change my existing provisional daily protein target from 135 grams to 145 grams.',
+            'Keep the other proposed targets and their effective date unchanged.',
+            'Use my saved suitability context, keep the revised bundle provisional, and do not attach a card.',
+          ].join(' ')
+        : [
+            'My saved context says kidney disease makes self-directed protein targets unsuitable for me.',
+            'Why does kidney disease change whether a protein target is appropriate?',
+            'Explain the medical rationale, but do not change any goal or attach a card.',
+          ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const state = await readNumericTargetState({ goalId, vaultRoot })
+
+    return {
+      card: result.responseCard,
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      goalId,
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
+      ...state,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function materializeNumericContextVaultCli(input: {
+  binDirectory: string
+  commandLog: string
+  scenario: NumericContextJourneyScenario
+  vaultRoot: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const tsxLoaderPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+    '../tsx/dist/loader.mjs',
+  )
+  const memory = {
+    document: {
+      records: input.scenario === 'target-change'
+        ? [{
+            id: 'memory_numeric_suitability',
+            section: 'Context',
+            text: 'Current nutrition suitability review is complete. Numeric self-directed nutrition targets are suitable, and no relevant safety category applies.',
+            updatedAt: '2026-08-20T15:00:00.000Z',
+          }]
+        : [{
+            id: 'memory_kidney_suitability',
+            section: 'Context',
+            text: 'Kidney disease is documented. Self-directed numeric protein targets are not suitable without clinician guidance.',
+            updatedAt: '2026-08-20T15:00:00.000Z',
+          }],
+    },
+    memory: null,
+    vault: 'synthetic-vault',
+  }
+  const commonsEvidence = {
+    items: [{
+      excerpt: 'Protein intake in chronic kidney disease may need individualization based on kidney function, nutrition status, and the treatment plan. A clinician or renal dietitian should guide the target.',
+      sources: [{
+        title: 'Nutrition and Chronic Kidney Disease',
+        url: 'https://www.niddk.nih.gov/health-information/kidney-disease/chronic-kidney-disease-ckd/eating-nutrition',
+      }],
+      title: 'Protein targets in chronic kidney disease',
+    }],
+    query: 'why kidney disease changes protein target suitability',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  const commonsBranch = input.scenario === 'health-rationale'
+    ? `    ${emit(commonsEvidence)}`
+    : [
+        '    printf \'%s\\n\' \'Health Commons is forbidden for workflow eligibility in this fixture.\' >&2',
+        '    exit 18',
+      ].join('\n')
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      'case "$*" in',
+      `  *"memory show"*) ${emit(memory)} ;;`,
+      '  *"commons knowledge search"*|*"knowledge search"*)',
+      commonsBranch,
+      '    ;;',
+      '  *)',
+      `    exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function readNumericTargetState(input: {
+  goalId: string | null
+  vaultRoot: string
+}): Promise<{
+  savedProteinTarget: number | null
+  savedStatus: string | null
+}> {
+  if (!input.goalId) {
+    return { savedProteinTarget: null, savedStatus: null }
+  }
+
+  const vault = await readVaultRawTolerant(input.vaultRoot)
+  const goal = vault.goals.find((candidate) =>
+    candidate.entityId === input.goalId
+  )
+  const metricTargets = Array.isArray(goal?.attributes.metricTargets)
+    ? goal.attributes.metricTargets
+    : []
+  const proteinTarget = metricTargets
+    .map((target) => readRecord(target))
+    .find((target) => target?.metricKey === 'protein-grams')
+
+  return {
+    savedProteinTarget: typeof proteinTarget?.value === 'number'
+      ? proteinTarget.value
+      : null,
+    savedStatus: typeof goal?.attributes.status === 'string'
+      ? goal.attributes.status
+      : null,
+  }
+}
+
+async function runRealDefaultMealAttachmentBoundary(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  card: unknown
+  commands: string[]
+  incompleteMealId: string
+  message: string
+  providerActionCount: number
+  savedIncompleteCalories: number | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-default-meal-attachment-boundary-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+    const incompleteMeal = await addMeal({
+      ingredients: ['toast'],
+      note: 'Unresolved toast plate from breakfast.',
+      occurredAt: '2026-08-21T12:10:00.000Z',
+      source: 'manual',
+      vaultRoot,
+    })
+    const pointTarget = (
+      targetId: string,
+      metricKey: string,
+      unit: string,
+      value: number,
+    ) => goalMetricTargetSchema.parse({
+      comparator: 'between',
+      evaluation: { kind: 'selected-value' },
+      highValue: value,
+      kind: 'metric',
+      metricKey,
+      targetId,
+      unit,
+      value,
+    })
+    await upsertGoal({
+      domains: ['nutrition'],
+      metricTargets: [
+        pointTarget('synthetic-calories', 'dietary-calories', 'kcal', 2_100),
+        pointTarget('synthetic-protein', 'protein-grams', 'g', 135),
+        pointTarget('synthetic-carbs', 'carbs-grams', 'g', 250),
+        pointTarget('synthetic-fat', 'fat-grams', 'g', 70),
+        pointTarget('synthetic-fiber', 'fiber-grams', 'g', 30),
+      ],
+      status: 'active',
+      title: 'Daily nutrition targets',
+      vaultRoot,
+      window: { startAt: '2026-08-01' },
+    })
+    await materializeAutomaticMealClarificationVaultCli({
+      binDirectory,
+      commandLog,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'Log lunch for August 21: grilled chicken, rice, and green beans.',
+        'The label totals are 620 calories, 45 grams protein, 70 grams carbs, 18 grams fat, and 9 grams fiber.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const incompleteState = await readAutomaticMealClarificationState({
+      mealId: incompleteMeal.mealId,
+      vaultRoot,
+    })
+
+    return {
+      card: result.responseCard,
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      incompleteMealId: incompleteMeal.mealId,
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
+      savedIncompleteCalories: incompleteState.savedCalories,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
 async function runRealPriorMealNutritionRecovery(input: {
   config: RealCodexE2eConfig
 }): Promise<{
@@ -9893,6 +10409,8 @@ async function runRealPriorMealNutritionRecovery(input: {
   priorMealId: string
   providerActionCount: number
   savedCalories: number | null
+  savedNutritionSource: string | null
+  savedNutritionSourceDetail: string | null
 }> {
   const workingRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-prior-meal-nutrition-recovery-e2e-'),
@@ -10022,6 +10540,8 @@ async function runRealPriorMealNutritionRecovery(input: {
       priorMealId: priorMeal.mealId,
       providerActionCount: result.providerActionCount,
       savedCalories: state.savedCalories,
+      savedNutritionSource: state.savedNutritionSource,
+      savedNutritionSourceDetail: state.savedNutritionSourceDetail,
     }
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)
@@ -10103,6 +10623,8 @@ async function runRealAutomaticMealClarificationScenario(input: {
   mealId: string
   savedAttachmentCount: number | null
   savedCalories: number | null
+  savedNote: string | null
+  unrelatedMealId: string
 }> {
   const workingRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-automatic-meal-clarification-e2e-'),
@@ -10135,6 +10657,13 @@ async function runRealAutomaticMealClarificationScenario(input: {
       occurredAt: '2026-08-24T23:37:00.000Z',
       photoPath,
       source: 'device',
+      vaultRoot,
+    })
+    const unrelatedMeal = await addMeal({
+      ingredients: ['toast'],
+      note: 'Unresolved toast plate from breakfast.',
+      occurredAt: '2026-08-24T12:15:00.000Z',
+      source: 'manual',
       vaultRoot,
     })
     await materializeAutomaticMealClarificationVaultCli({
@@ -10177,6 +10706,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
         'Controlled scenario evidence:',
         '- The canonical fixture has one device-captured meal at 7:37pm and no nearby manual duplicate.',
+        '- A separate earlier manual breakfast remains incomplete and is not the selected device capture.',
         '- Inspect the retained attachment through the canonical meal before deciding whether it supports an estimate.',
         '- Complete the normal closeout and return its terminal delivery decision.',
       ].join('\n\n'),
@@ -10205,6 +10735,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
         followupCommands: [],
         followupMessage: '',
         mealId: meal.mealId,
+        unrelatedMealId: unrelatedMeal.mealId,
         ...afterFirst,
       }
     }
@@ -10238,6 +10769,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
       followupCommands: commands.slice(firstCommands.length),
       followupMessage: followup.finalMessage,
       mealId: meal.mealId,
+      unrelatedMealId: unrelatedMeal.mealId,
       ...afterFollowup,
     }
   } finally {
@@ -10314,6 +10846,9 @@ async function readAutomaticMealClarificationState(input: {
 }): Promise<{
   savedAttachmentCount: number | null
   savedCalories: number | null
+  savedNote: string | null
+  savedNutritionSource: string | null
+  savedNutritionSourceDetail: string | null
 }> {
   const vault = await readVaultRawTolerant(input.vaultRoot)
   const event = [...vault.events]
@@ -10323,14 +10858,24 @@ async function readAutomaticMealClarificationState(input: {
     )
   const meal = event?.attributes
   const nutrition = readRecord(meal?.nutrition)
+  const provenance = readRecord(nutrition?.provenance)
   const totals = readRecord(nutrition?.totals)
 
   return {
-    savedAttachmentCount: Array.isArray(meal?.attachments)
-      ? meal.attachments.length
+    savedAttachmentCount: event
+      ? Array.isArray(meal?.attachments)
+        ? meal.attachments.length
+        : 0
       : null,
     savedCalories: typeof totals?.calories === 'number'
       ? totals.calories
+      : null,
+    savedNote: typeof meal?.note === 'string' ? meal.note : null,
+    savedNutritionSource: typeof provenance?.source === 'string'
+      ? provenance.source
+      : null,
+    savedNutritionSourceDetail: typeof provenance?.sourceDetail === 'string'
+      ? provenance.sourceDetail
       : null,
   }
 }
