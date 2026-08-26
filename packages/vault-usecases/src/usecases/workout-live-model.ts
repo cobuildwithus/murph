@@ -243,9 +243,7 @@ export function buildLiveWorkoutCardEditor(input: {
       if (target === undefined) {
         return null
       }
-      editorSets.push(targetResult === null
-        ? { logged, result }
-        : { logged, result, targetResult })
+      editorSets.push({ logged, result })
       presentationSets.push({
         status: logged ? 'completed' : 'pending',
         target,

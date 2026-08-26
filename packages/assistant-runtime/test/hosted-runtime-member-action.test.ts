@@ -147,6 +147,7 @@ describe("hosted member action runtime", () => {
               setPosition: 1,
             }],
             version: 1,
+            weightUnitPreference: "kg",
           },
           actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
           requestedAt: "2026-08-12T15:00:00.000Z",
@@ -163,6 +164,7 @@ describe("hosted member action runtime", () => {
         status: "rejected",
       },
     });
+    expect(mocks.setWorkoutUnitPreferences).not.toHaveBeenCalled();
   });
 
   it.each(["applied", "unchanged"] as const)(
@@ -194,6 +196,7 @@ describe("hosted member action runtime", () => {
           setPosition: 1,
         }],
         version: 1 as const,
+        weightUnitPreference: "kg" as const,
       };
 
       const outcome = await executeHostedMemberActionWake({
@@ -224,6 +227,11 @@ describe("hosted member action runtime", () => {
         action,
         actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
         vault: "/vault",
+      });
+      expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledWith({
+        recordedAt: "2026-08-12T15:00:00.000Z",
+        vault: "/vault",
+        weight: "kg",
       });
     },
   );

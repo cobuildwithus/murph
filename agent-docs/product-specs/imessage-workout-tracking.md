@@ -62,10 +62,9 @@ leaves the card as the existing readable V4 snapshot.
 
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
-installed native editor uses schema version 7. Its required `card` is the
-complete readable V4-shaped presentation; its independently validated optional
-editor adds the compact typed projection and opaque 64-character bindings while
-staying under the existing 2,048-character URL ceiling. The revision binds the
+installed native editor keeps schema version 6, whose compact typed projection
+and opaque 64-character bindings stay under the existing 2,048-character URL
+ceiling. The revision binds the
 canonical workout identity to its ordered hidden exercise/set-slot identity and
 last applied member-action generation without exposing any of those values.
 Mutable set results and annotations are intentionally excluded so their closed
@@ -80,17 +79,16 @@ admits realistic higher-cardinality snapshots, including eleven-exercise,
 three-set late-active sessions, without adding another projection owner; a
 specific snapshot that exceeds the existing URL ceiling still uses complete
 semantic text recovery instead of truncating or changing canonical workout
-data. Historical V6 uses `[name, exerciseUnit, sets]`; a
+data. V6 uses `[name, exerciseUnit, sets]`; a
 completed set replaces the actual display string with a closed compact
 note/reps/weight-reps tuple, while a pending set carries `null`. Native derives
 display and optimistic preconditions from that typed tuple. Removing repeated
 wire keys keeps realistic six-exercise, four-set initial and late-active
 snapshots below the same URL ceiling without adding another projection owner;
-completed cards remain V4/read-only. V7 instead keeps the readable V4 tuples in
-`card` and carries units, completed typed results, exact pending planned
-defaults, and both bindings only in its optional editor. A malformed,
-mismatched, unsupported, or unknown editor is ignored as a whole without
-changing the readable card.
+completed cards remain V4/read-only. Exact canonical pending plans remain in
+the bounded V6 target string, while completed actuals retain their typed tuple.
+The native form recognizes only the producer's exact numeric weight/reps or
+reps target grammar and keeps every other target display-only.
 
 ## Static fallback
 
@@ -309,7 +307,7 @@ reinterpreted as a new-routine completion.
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V7 workout snapshot and emits only closed `exercise.append`, `set.put`,
+V6 workout snapshot and emits only closed `exercise.append`, `set.put`,
 `set.append`, and `set.remove` mutations. `set.put` addresses an original or
 in-batch exercise-placeholder coordinate. `set.append` addresses the contiguous
 final positions after all original-coordinate edits and descending removals,
@@ -447,131 +445,25 @@ final balloon, image-failure behavior, accessibility behavior, and App Store
 affordance. Provider acceptance, direct route renders, and delivery receipts do
 not prove those device behaviors.
 
-## Schema-7 workout-card contract
+## Backward-compatible exact-plan rollout
 
-Schema 7 is the current native editor contract. Its reader must ship before the
-backend producer is enabled. V1–V6 remain permanent historical readers, and the
-reader-first deployment gate below remains operative.
+Workout cards continue to emit the permanent V6 editor wire. Exact ad-hoc
+planned weight and repetitions are canonical fields on the workout exercise and
+render deterministically into each pending V6 target as `<weight> <unit> ×
+<reps>`. Current native readers recognize only that exact bounded grammar as an
+incomplete default; ranges, qualitative instructions, AMRAP, and unknown target
+text remain display-only. Completed results still use the existing typed V6
+tuple, and V4 remains the complete read-only/static fallback.
 
-### Permanent envelope
+This preserves every installed V6 reader without device-version negotiation,
+rollout flags, or a second protocol. Deploy all current server readers and the
+optional unit-preference action consumer before releasing the new iOS behavior.
+Old clients then continue sending the historical V6 action shape, while the new
+client may add `weightUnitPreference`. The producer never emits a new schema.
 
-Schema 7 introduces one permanent outer envelope for native workout cards:
-
-```json
-{
-  "schemaVersion": 7,
-  "card": { "...complete readable workout presentation...": "..." },
-  "editor": { "...optional typed editing capability...": "..." }
-}
-```
-
-- `schemaVersion: 7` is frozen permanently. Future compatible capabilities do
-  not increment the outer version.
-- `card` is required, strict, and self-sufficient. It carries the complete
-  readable V4-style workout presentation, so rendering never depends on
-  `editor` or another capability.
-- `editor` is optional and independently versioned. A reader validates it
-  separately from `card`; an absent, malformed, unsupported, or unfamiliar
-  editor is ignored in full and the unchanged card renders read-only.
-- A schema-7 reader validates the known base while ignoring unrecognized
-  optional top-level capability fields. Add a future capability as one direct
-  optional field only when the product needs it. Introduce no generic module or
-  capability registry until multiple implemented capabilities demonstrate a
-  shared abstraction.
-- V1–V6 decoders remain permanent historical readers. Schema 7 does not
-  reinterpret, migrate, or delete already-sent envelopes.
-
-The editor remains only a typed projection for actions against one immutable
-card. In addition to its own version and the existing opaque stale-action
-bindings, its presentation delta contains the unit for each exercise, typed
-results for completed sets, and typed defaults only for exact canonical planned
-weight/reps values. Those pending defaults prefill the form but remain planned
-until the member explicitly marks a set complete. Opaque, ranged, qualitative,
-AMRAP, and missing targets remain readable strings only. The editor does not
-become canonical workout state, an authorization source, or a duplicate
-readable presentation.
-
-Authorization, access checks, stale-card rejection, action delivery, and the
-canonical workout mutation remain with their existing owners. This foundation
-adds no client-version negotiation, device registry, server handshake,
-per-member rollout state, dynamic UI protocol, compression scheme, queue,
-cache, or service.
-
-### Encoding and bounded fallback
-
-The producer uses one deterministic sequence:
-
-1. Build and validate the complete readable `card`.
-2. When editing is eligible, encode schema 7 with the whole `editor`.
-3. If that URL exceeds the existing 2,048-character ceiling, remove the entire
-   `editor` and encode the exact same schema-7 `card` read-only. Do not truncate
-   either projection or emit a partial editor.
-4. If the readable base still does not fit, use the existing complete
-   semantic-text recovery path.
-
-The representative six-exercise, four-set measurements are:
-
-| Snapshot | Encoded length | Result |
-| --- | ---: | --- |
-| Initial active card with editor | 1,403 characters | Fits editable |
-| Late active card with editor | 1,612 characters | Fits editable |
-| Completed readable card | 1,624 characters | Fits read-only |
-
-A focused ten-exercise, four-set boundary fixture separately proves that an
-oversized editor is removed as one capability while its complete readable V7
-card still fits. These measurements establish the algorithm, not a second
-capacity limit. Validation of the final encoded URL remains authoritative.
-
-### Deliberately narrow scope
-
-Schema 7 applies only to native workout cards. The static workout-image route
-continues using its authority-free V4 envelope. Generic compact tables,
-nutrition cards, standings, and other card families keep their current
-protocols. Their implementations may reuse parsing mechanics where useful, but
-uniformity alone is not a reason to migrate them.
-
-### Reader-first rollout and compatibility boundary
-
-Rollout is global and reader-first:
-
-1. Release an iOS Messages-extension reader that renders the schema-7 `card`
-   independently and preserves every V1–V6 decoder.
-2. Update every existing server, outbox, renderer, and recovery reader that can
-   encounter the envelope. Prove that each accepts schema 7 without requiring
-   `editor` and ignores an invalid or unknown editor without changing the card.
-3. Only after those readers are live, enable the workout-card producer globally.
-   Do not add negotiation or per-member rollout machinery for the transition.
-
-Previously released pre-foundation extensions cannot understand schema 7 and
-are the one explicit compatibility exception to the permanent rule above.
-Reader-first deployment narrows but cannot eliminate that installed-build
-window because the provider does not negotiate decoder versions. This exception
-must be acknowledged in the release decision and is not precedent for later
-breaks. Once schema 7 ships, every later optional capability degrades in the
-original schema-7 client to the same complete read-only `card`.
-
-The server persisted-state rollback floor still applies: all strict readers
-must be live before the first schema-7 envelope is persisted or emitted. After
-that point, recovery is a forward fix or a compatible bundle, never rollback to
-a reader that rejects schema 7.
-
-### Required implementation proof
-
-Implementation is complete only when focused fixtures and end-to-end proof
-cover all of the following:
-
-- the same card renders from a valid editor, no editor, a malformed editor, and
-  an unknown editor version;
-- unknown optional schema-7 capability fields do not prevent base-card
-  rendering;
-- every V1–V6 historical fixture still decodes through its original path;
-- editor projection contains completed-set typed results, exact pending planned
-  defaults, and per-exercise units without a second readable presentation;
-- boundary tests prove the editor-first, whole-editor-drop, and semantic-text
-  branches at the actual URL ceiling;
-- the static image remains V4 and non-workout card families retain their
-  existing envelopes;
-- persisted outbox and hosted-delivery round trips accept both editable and
-  read-only schema-7 workout cards; and
-- physical Messages-extension proof covers editable schema 7, read-only
-  fallback, malformed or unsupported editor fallback, and legacy V1–V6 cards.
+The canonical workout-event rollback floor still applies. All strict event
+readers must understand the optional planned-load fields before the first such
+event is written; after that write, recovery requires a compatible reader or a
+forward fix. Focused proof must pin the exact V6 TypeScript/Swift fixture,
+exercise-reorder continuity, incompatible-unit rejection, planned defaults as
+incomplete until explicit completion, and preference-only/mixed action outcomes.

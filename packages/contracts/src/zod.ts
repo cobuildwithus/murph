@@ -671,7 +671,7 @@ export const workoutExerciseSchema = z
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
     memberRepsPerSet: integerSchema(1, 999).optional(),
-    targetWeightPerSet: numberSchema(0).optional(),
+    targetWeightPerSet: numberSchema(0.01, 9999).multipleOf(0.01).optional(),
     targetWeightUnit: workoutLoadUnitSchema.optional(),
     setPlanIsFinite: z.boolean().optional(),
     sets: z.array(workoutSetSchema).min(1).max(150),

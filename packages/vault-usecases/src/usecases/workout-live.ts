@@ -567,12 +567,17 @@ function buildInitialLiveWorkoutExercises(
       !== (exercise.targetWeightUnit === undefined)
       || (
         exercise.targetWeight !== undefined
-        && (!Number.isFinite(exercise.targetWeight) || exercise.targetWeight < 0)
+        && (
+          !Number.isFinite(exercise.targetWeight)
+          || exercise.targetWeight < 0.01
+          || exercise.targetWeight > 9999
+          || !Number.isInteger(exercise.targetWeight * 100)
+        )
       )
     ) {
       throw new VaultCliError(
         'invalid_option',
-        'Exercise target weight must be a non-negative number with an lb or kg unit.',
+        'Exercise target weight must be between 0.01 and 9999 with at most two decimal places and an lb or kg unit.',
       )
     }
     if (

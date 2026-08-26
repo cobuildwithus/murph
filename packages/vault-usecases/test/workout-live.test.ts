@@ -75,12 +75,6 @@ describe('live workout model', () => {
       Array.from({ length: 3 }, () => ({
         logged: false,
         result: null,
-        targetResult: {
-          kind: 'weight_reps',
-          reps: 8,
-          weight: 135,
-          weightUnit: null,
-        },
       })),
     )
   })

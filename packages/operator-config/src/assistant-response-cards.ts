@@ -11,7 +11,7 @@ import {
   assistantResponseCardSchema,
   assistantResponseCardMatchesConversationAudience,
   buildWorkoutSessionAppCardEnvelopeV4,
-  buildWorkoutSessionAppCardEnvelopeV7,
+  buildWorkoutSessionAppCardEnvelopeV6,
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
   compactTableResponseCardAuthoringV1Schema,
@@ -523,38 +523,22 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
-  if (includeActionBinding && card.editor !== undefined) {
-    const editablePayload = encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV7({
-        editor: card.editor,
-        title: card.title,
-        subtitle: card.subtitle,
-        footer: card.footer,
-        workout: card.workout,
-      }),
-    )
-    if (
-      IMESSAGE_APP_CARD_URL_PREFIX.length + editablePayload.length
-      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
-    ) {
-      return editablePayload
-    }
-    return encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV7({
-        title: card.title,
-        subtitle: card.subtitle,
-        footer: card.footer,
-        workout: card.workout,
-      }),
-    )
-  }
   return encodeAppCardEnvelopePayload(
-    buildWorkoutSessionAppCardEnvelopeV4({
-      title: card.title,
-      subtitle: card.subtitle,
-      footer: card.footer,
-      workout: card.workout,
-    }),
+    includeActionBinding
+      && card.editor !== undefined
+      ? buildWorkoutSessionAppCardEnvelopeV6({
+          editor: card.editor,
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        })
+      : buildWorkoutSessionAppCardEnvelopeV4({
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        }),
   )
 }
 
@@ -565,7 +549,7 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
-    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV7>,
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')

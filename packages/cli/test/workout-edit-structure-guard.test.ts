@@ -26,10 +26,16 @@ interface WorkoutShowResult {
           name: string
           order: number
           sets?: Array<{ order: number; reps?: number }>
+          targetWeightPerSet?: number
+          targetWeightUnit?: string
         }>
       } | null
     }
   }
+}
+
+interface WorkoutStartResult {
+  eventId: string
 }
 
 function createWorkoutCli() {
@@ -308,5 +314,107 @@ test('workout edit allows exercises to be reordered without losing their sets', 
       { name: 'Push-up', order: 1, sets: [1] },
       { name: 'Pull-up', order: 2, sets: [1, 2] },
     ],
+  )
+})
+
+test('workout edit preserves an exact planned load and rejects an incompatible unit', async () => {
+  const cli = createWorkoutCli()
+  const { vaultRoot } = await createTempVaultContext('murph-workout-edit-target-')
+  await initializeVault({ vaultRoot, title: 'Workout edit target vault' })
+
+  const started = await runInProcessJsonCli<WorkoutStartResult>(cli, [
+    'workout',
+    'start',
+    'Press session',
+    '--exercise',
+    'name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
+    '--vault',
+    vaultRoot,
+  ])
+  const workoutId = requireData(started.envelope).eventId
+
+  const edited = await runInProcessJsonCli<WorkoutShowResult>(cli, [
+    'workout',
+    'edit',
+    workoutId,
+    '--workout-exercise',
+    'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
+    '--workout-set',
+    'exercise=1;order=1;type=normal',
+    '--workout-set',
+    'exercise=1;order=2;type=normal',
+    '--workout-set',
+    'exercise=1;order=3;type=normal',
+    '--workout-exercise',
+    'order=2;name=Push-up;mode=bodyweight',
+    '--workout-set',
+    'exercise=2;order=1;type=normal;reps=10',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(edited.exitCode, null)
+  assert.deepEqual(
+    requireData(edited.envelope).entity.data.workout?.exercises?.[0],
+    {
+      memberRepsPerSet: 8,
+      mode: 'weight_reps',
+      name: 'Bench press',
+      order: 1,
+      setPlanIsFinite: true,
+      sets: [
+        { order: 1, type: 'normal' },
+        { order: 2, type: 'normal' },
+        { order: 3, type: 'normal' },
+      ],
+      targetWeightPerSet: 135,
+      targetWeightUnit: 'lb',
+      unitOverride: 'lb',
+    },
+  )
+
+  const incompatible = await runInProcessJsonCli(cli, [
+    'workout',
+    'edit',
+    workoutId,
+    '--workout-exercise',
+    'order=1;name=Bench press;mode=weight_reps;unitOverride=kg',
+    '--workout-set',
+    'exercise=1;order=1;type=normal',
+    '--workout-set',
+    'exercise=1;order=2;type=normal',
+    '--workout-set',
+    'exercise=1;order=3;type=normal',
+    '--workout-exercise',
+    'order=2;name=Push-up;mode=bodyweight',
+    '--workout-set',
+    'exercise=2;order=1;type=normal;reps=10',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(incompatible.exitCode, 1)
+  if (incompatible.envelope.ok) {
+    assert.fail('Expected an incompatible planned-load unit to be rejected.')
+  }
+  assert.match(
+    incompatible.envelope.error.message ?? '',
+    /cannot change the weight unit/u,
+  )
+
+  const unchanged = await runInProcessJsonCli<WorkoutShowResult>(cli, [
+    'workout',
+    'show',
+    workoutId,
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(
+    requireData(unchanged.envelope).entity.data.workout?.exercises?.[0]
+      ?.targetWeightPerSet,
+    135,
+  )
+  assert.equal(
+    requireData(unchanged.envelope).entity.data.workout?.exercises?.[0]
+      ?.targetWeightUnit,
+    'lb',
   )
 })
