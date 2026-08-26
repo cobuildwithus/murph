@@ -55,3 +55,16 @@ caller cancellation cannot be mistaken for a retryable timeout.
   alignment. Vault CLI total is 9,465,037 / 9,476,041 bytes with 805-byte entry
   and 25,155-byte static closure. Runner totals remain 11,279,228 / 11,393,617
   bytes with 1,740,666-byte entry and 8,604,433-byte static closure.
+- Integrated current `main` in merge candidate `12b08e32e8`, retaining the
+  main-owned shared projector and composing only the device, wearable, route,
+  and retry-aware elevation allowance. The resulting PR domain diff is 26 files
+  with no duplicate foundation implementation.
+- Current-main focused proof passes: 335 assistant-engine/runtime device tests,
+  77 CLI route/wearable tests, 89 health-metrics/operator/inbox wrapper tests,
+  and 14 runner bundle-guard tests. Affected assistant-engine,
+  assistant-runtime, CLI, health-metrics, and query typechecks pass.
+- Prepared runtime, CLI package shape, documentation drift/gardening, and the
+  canonical production runner assembly pass. The assembled Vault CLI is
+  9,520,965 / 9,527,848 bytes with an 805-byte entry and 25,155-byte static
+  closure; the runner is 11,352,549 / 11,393,617 bytes with a 1,751,100-byte
+  entry and 8,659,263-byte static closure. All eight parity probes pass.
