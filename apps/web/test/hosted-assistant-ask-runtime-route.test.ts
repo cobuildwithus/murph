@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   handleHostedRuntimeAssistantAskControl: vi.fn(),
   handoffHostedMailboxWake: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  tryHandleHostedOperatorDiagnosticControl: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -13,6 +14,10 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   handleHostedRuntimeAssistantAskControl:
     mocks.handleHostedRuntimeAssistantAskControl,
+}));
+vi.mock("@/src/lib/hosted-ops/operator-task", () => ({
+  tryHandleHostedOperatorDiagnosticControl:
+    mocks.tryHandleHostedOperatorDiagnosticControl,
 }));
 vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
   handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
@@ -44,6 +49,7 @@ describe("Hosted Assistant Ask runtime route", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(
       "member-group-runtime",
     );
+    mocks.tryHandleHostedOperatorDiagnosticControl.mockResolvedValue(null);
   });
 
   it("requires the active runtime write fence before signature verification", async () => {
@@ -95,6 +101,32 @@ describe("Hosted Assistant Ask runtime route", () => {
       boundRuntimeMemberId: "member-group-runtime",
       request: { action: "prepare", requestId: "aask_req_one" },
     });
+  });
+
+  it("routes an operator diagnostic through its private result owner", async () => {
+    mocks.tryHandleHostedOperatorDiagnosticControl.mockResolvedValue({
+      mailboxWake: null,
+      response: {
+        action: "prepare",
+        disclosure: { permissionText: "Read only." },
+        question: "Inspect the selected automation.",
+        status: "ready",
+        targetLabel: null,
+      },
+    });
+
+    const response = await POST(runtimeRequest({
+      action: "prepare",
+      requestId: `aask_req_${"a".repeat(64)}`,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      action: "prepare",
+      question: "Inspect the selected automation.",
+      status: "ready",
+    });
+    expect(mocks.handleHostedRuntimeAssistantAskControl).not.toHaveBeenCalled();
   });
 
   it("wakes only the committed private completion before responding", async () => {

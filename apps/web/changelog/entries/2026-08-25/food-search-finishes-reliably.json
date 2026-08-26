@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "food-search-finishes-reliably",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Broad food searches finish more reliably",
+    "summary": "Food search now bounds catalog work before ranking results, reducing timeouts for broad terms.",
+    "details": "Exact names, brand-only terms, generic foods, and typo recovery keep their existing paths while ranking remains intentionally bounded across the catalog.",
+    "relevanceTags": ["food", "search", "reliability"],
+    "sourcePullRequests": [2318]
+  }
+}

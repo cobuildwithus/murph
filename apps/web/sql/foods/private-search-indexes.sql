@@ -13,6 +13,3 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_rank_idx
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_name_exact_rank_idx
   ON foods (lower(name), data_origin_priority, id);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS foods_canonical_rank_idx
-  ON foods (canonical_key, data_origin_priority, id);

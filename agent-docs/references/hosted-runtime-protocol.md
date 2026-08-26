@@ -779,6 +779,37 @@ stays recoverable from the durable system mailbox and its existing continuation
 contract. Other system items remain pending for their default owner. A
 system-mailbox request behind an active default runtime remains deferred and
 cannot broaden that child's admission authority.
+An `environment_interview` request behind an active default runtime is the
+narrow exception: UserRunner wakes the exact default child but returns
+`retry_later`, because that child accepted only a wake, not Environment-mode
+ownership. The dirty default runtime preserves fresh conversation priority,
+classifies the durable mailbox prefix, and, when it sees an Environment item,
+shortens its existing idle checkpoint window to zero. It skips optional
+compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
+leaves the Environment row pending for the dedicated model-free invocation.
+This handoff never aborts a foreground turn and adds no queue, scheduler, or
+persisted mode state.
+The handoff is bidirectional. When fresh foreground/default work arrives behind
+an active `environment_interview` invocation, UserRunner wakes that exact
+child and returns `retry_later` without clearing or replacing its fence. The
+Environment child completes or checkpoints its current model-free unit, sees
+the wake, and releases; ordinary reconciliation then admits the pending
+foreground pass before re-admitting background Environment work. This preserves
+foreground authority without aborting canonical publication midway or creating
+a competing queue.
+
+Web projects `environmentInterviewPending` only when the signed Temporal facts
+request uses the exact `?includeEnvironmentInterviewPending=1` compatibility
+search. The legacy no-search response keeps omitting that key because a still-
+routable immutable reader rejects unknown reconciliation keys. The new private
+worker opts in and selects `environment_interview` only when the fact is true
+and no runnable foreground/default work is due; older workflow histories retain
+their former `system_mailbox` command shape behind the private worker's Temporal
+patch marker. The public
+`@murphai/hosted-execution` package version containing both the fact and mode
+must be released before the private worker adopts them. Source links across the
+public/private repository boundary are development proof only and are never a
+deployment contract.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
