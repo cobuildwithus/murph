@@ -2407,7 +2407,15 @@ export async function executeMurphDynamicToolRequest(input: {
           'device management is unavailable for this turn',
         )
       }
+      const invocationScope =
+        input.hostedToolContext?.currentInvocationScope?.() ?? null
+      const acceptedInputAuthority =
+        invocationScope?.conversationScope === 'direct'
+        && invocationScope.origin.kind === 'accepted_input'
+          ? { assistantInputId: invocationScope.origin.assistantInputId }
+          : null
       return await executeDeviceDynamicTool({
+        acceptedInputAuthority,
         abortSignal: input.abortSignal ?? null,
         deviceTool,
         request: input.request,

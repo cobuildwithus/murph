@@ -5,7 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
-import { writeRunnerBundleManifest } from "./deploy-artifacts.js";
+import {
+  resolvePublicRunnerReleaseSha,
+  writeRunnerBundleManifest,
+} from "./deploy-artifacts.js";
 import {
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerRuntimePackageName,
@@ -104,6 +107,7 @@ async function assembleRunnerBundle(): Promise<void> {
     includeBundleOnlyDependencies,
   });
   const packedWorkspacePackageNames = [...hostedRunnerWorkspacePackageNames].sort();
+  const releaseSha = resolvePublicRunnerReleaseSha(repoRoot);
 
   try {
     if (!shouldSkipBuild) {
@@ -157,6 +161,7 @@ async function assembleRunnerBundle(): Promise<void> {
       appDir,
       buildSkipped: shouldSkipBuild,
       includeBundleOnlyDependencies,
+      releaseSha,
       repoRoot,
     });
 

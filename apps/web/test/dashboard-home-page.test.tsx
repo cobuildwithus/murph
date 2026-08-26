@@ -13,7 +13,9 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  getHostedDashboardLayoutAuthSnapshot: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  readHostedConsentStatus: vi.fn(),
   resolveConnectedAppCompletionDialogModel: vi.fn(),
   resolveDeviceSyncCompletionDialogModel: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
@@ -152,18 +154,27 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/connect-completion", () => ({
+  DEVICE_SYNC_COMPLETION_HOME_MARKER: "deviceSyncCompletion",
   resolveDeviceSyncCompletionDialogModel:
     mocks.resolveDeviceSyncCompletionDialogModel,
 }));
 
 vi.mock("@/src/lib/connected-apps/connect-completion", () => ({
+  CONNECTED_APP_COMPLETION_HOME_MARKER: "connectedAppCompletion",
   resolveConnectedAppCompletionDialogModel:
     mocks.resolveConnectedAppCompletionDialogModel,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedDashboardLayoutAuthSnapshot:
+    mocks.getHostedDashboardLayoutAuthSnapshot,
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  hasHostedHistoricalLaunchConsent: () => false,
+  readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -199,6 +210,16 @@ beforeEach(() => {
     authenticatedMember: MEMBER,
     session: null,
   });
+  mocks.getHostedDashboardLayoutAuthSnapshot.mockResolvedValue({
+    pageAuth: {
+      authenticated: true,
+      authenticatedMember: MEMBER,
+      session: null,
+    },
+    sidebarAuth: { authenticated: true, label: null },
+    status: "ready",
+  });
+  mocks.readHostedConsentStatus.mockResolvedValue({ launchGranted: true });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.resolveDeviceSyncCompletionDialogModel.mockImplementation(
     ({ searchParams }: { searchParams: Record<string, string | undefined> }) => {
@@ -315,6 +336,185 @@ test("HomePage keeps its core content when an independent projection fails", asy
   assert.match(markup, /Sync labs/);
   assert.match(markup, /Start an experiment/);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
+});
+
+test("HomePage bounds composed dashboard owners and preserves advisory siblings", async () => {
+  type InitialState = {
+    preferences: { persona: null; tone: null; voice: null };
+    status: "pending";
+  };
+  const activeOwners = new Set<string>();
+  let peakOwners = new Set<string>();
+
+  function createOwner<T>(label: string) {
+    let rejectPromise: ((reason?: unknown) => void) | null = null;
+    let resolvePromise: ((value: T) => void) | null = null;
+    let signalStarted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+
+    const settle = (settler: () => void) => {
+      assert.ok(activeOwners.delete(label), `${label} must be active before settling`);
+      settler();
+    };
+
+    return {
+      reject(reason: unknown) {
+        assert.ok(rejectPromise, `${label} must start before rejection`);
+        settle(() => rejectPromise?.(reason));
+      },
+      resolve(value: T) {
+        assert.ok(resolvePromise, `${label} must start before resolution`);
+        settle(() => resolvePromise?.(value));
+      },
+      run() {
+        assert.equal(activeOwners.has(label), false, `${label} must start once`);
+        activeOwners.add(label);
+        if (activeOwners.size > peakOwners.size) {
+          peakOwners = new Set(activeOwners);
+        }
+        signalStarted?.();
+        return new Promise<T>((resolve, reject) => {
+          resolvePromise = resolve;
+          rejectPromise = reject;
+        });
+      },
+      started,
+    };
+  }
+
+  const consentOwner = createOwner<{ launchGranted: boolean }>("layout consent");
+  const deviceOwner = createOwner<boolean>("device onboarding");
+  const usageOwner = createOwner<null>("usage allowance");
+  const initialOwner = createOwner<InitialState>("initial onboarding");
+  const contactOwner = createOwner<{
+    href: string;
+    kind: string;
+    label: string;
+    rel: undefined;
+    target: undefined;
+  }>("contact projection");
+  const messagingOwner = createOwner<{
+    identity: { phoneLookupKey: string };
+    routing: null;
+  }>("messaging setup");
+
+  mocks.readHostedConsentStatus.mockImplementationOnce(consentOwner.run);
+  mocks.shouldShowHomeDeviceSyncStep.mockImplementationOnce(deviceOwner.run);
+  mocks.readHostedAiUsageGate.mockImplementationOnce(usageOwner.run);
+  mocks.readHostedInitialOnboardingState.mockImplementationOnce(initialOwner.run);
+  mocks.resolveHostedMurphContactOption.mockImplementationOnce(contactOwner.run);
+  mocks.readHostedMemberMessagingSetupState.mockImplementationOnce(
+    messagingOwner.run,
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const { default: DashboardLayout } = await import("../app/(dashboard)/layout");
+  const page = HomePage({ searchParams: Promise.resolve({}) });
+  const layout = DashboardLayout({ children: null });
+
+  await Promise.all([
+    consentOwner.started,
+    deviceOwner.started,
+    usageOwner.started,
+    initialOwner.started,
+  ]);
+  assert.deepEqual(
+    [...peakOwners].sort(),
+    ["device onboarding", "initial onboarding", "layout consent", "usage allowance"],
+  );
+  assert.ok(peakOwners.size < 5);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 0);
+
+  initialOwner.resolve({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
+  await contactOwner.started;
+  assert.equal(activeOwners.has("contact projection"), true);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 0);
+  assert.ok(peakOwners.size < 5);
+
+  contactOwner.resolve({
+    href: "sms:+15555550123",
+    kind: "text",
+    label: "Text Murph",
+    rel: undefined,
+    target: undefined,
+  });
+  await messagingOwner.started;
+
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+  assert.ok(peakOwners.size < 5);
+
+  consentOwner.resolve({ launchGranted: true });
+  deviceOwner.resolve(true);
+  usageOwner.resolve(null);
+  messagingOwner.resolve({
+    identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+    routing: null,
+  });
+  const [pageElement] = await Promise.all([page, layout]);
+  const markup = renderToStaticMarkup(pageElement);
+
+  assert.equal(activeOwners.size, 0);
+  assert.equal(peakOwners.size, 4);
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+
+  mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
+    new Error("initial onboarding unavailable"),
+  );
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValueOnce({
+    identity: { phoneLookupKey: null },
+    routing: {
+      linqChatId: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    },
+  });
+  const initialRejectedMarkup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+
+  assert.match(initialRejectedMarkup, /Some dashboard details are unavailable/);
+  assert.match(initialRejectedMarkup, /Message Murph/);
+  assert.doesNotMatch(initialRejectedMarkup, /data-home-initial-visit-persona-picker/);
+
+  mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
+  mocks.readHostedMemberMessagingSetupState.mockRejectedValueOnce(
+    new Error("messaging setup unavailable"),
+  );
+  const messagingRejectedMarkup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+
+  assert.match(messagingRejectedMarkup, /Some dashboard details are unavailable/);
+  assert.match(
+    messagingRejectedMarkup,
+    /data-home-initial-visit-persona-picker="shown"/,
+  );
+  assert.match(messagingRejectedMarkup, /data-contact-action-href="sms:\+15555550123"/);
+});
+
+test("HomePage still reads messaging when the earlier advisory projection fails", async () => {
+  mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
+    new Error("initial onboarding unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
 });
 
 test("HomePage degrades a failed read-only usage projection without mutating allowance state", async () => {
@@ -866,6 +1066,104 @@ test("HomePage presents connection results before canonical onboarding", async (
     plainHomeMarkup,
     /data-home-initial-visit-persona-picker="shown"/,
   );
+});
+
+test("HomePage starts callback messaging alongside canonical onboarding", async () => {
+  type InitialState = {
+    preferences: { persona: null; tone: null; voice: null };
+    status: "pending";
+  };
+  type MessagingState = {
+    identity: { phoneLookupKey: string };
+    routing: null;
+  };
+  const resolveInitialState = vi.fn<(value: InitialState) => void>();
+  const resolveMessagingState = vi.fn<(value: MessagingState) => void>();
+  const signalInitialStarted = vi.fn<() => void>();
+  const signalMessagingStarted = vi.fn<() => void>();
+  const initialStarted = new Promise<void>((resolve) => {
+    signalInitialStarted.mockImplementation(resolve);
+  });
+  const messagingStarted = new Promise<void>((resolve) => {
+    signalMessagingStarted.mockImplementation(resolve);
+  });
+  mocks.readHostedInitialOnboardingState.mockImplementationOnce(() => {
+    signalInitialStarted();
+    return new Promise<InitialState>((resolve) => {
+      resolveInitialState.mockImplementation(resolve);
+    });
+  });
+  mocks.readHostedMemberMessagingSetupState.mockImplementationOnce(() => {
+    signalMessagingStarted();
+    return new Promise<MessagingState>((resolve) => {
+      resolveMessagingState.mockImplementation(resolve);
+    });
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const page = HomePage({
+    searchParams: Promise.resolve({ deviceSyncCompletion: "1" }),
+  });
+
+  await Promise.all([initialStarted, messagingStarted]);
+  assert.equal(mocks.readHostedInitialOnboardingState.mock.calls.length, 1);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+
+  resolveMessagingState({
+    identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+    routing: null,
+  });
+  resolveInitialState({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
+  const markup = renderToStaticMarkup(await page);
+
+  assert.match(markup, /Device connection complete/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+});
+
+test("HomePage retains callback completion when canonical onboarding fails", async () => {
+  mocks.readHostedInitialOnboardingState.mockRejectedValueOnce(
+    new Error("initial onboarding unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        connectedAppCompletion: "1",
+        connectedAppStatus: "success",
+        toolkit: "gmail",
+      }),
+    }),
+  );
+
+  assert.match(markup, /Gmail is connected/);
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.readHostedMemberMessagingSetupState.mock.calls.length, 1);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+});
+
+test("HomePage skips the losing connected-app resolver after device completion", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        connectedAppCompletion: "1",
+        connectedAppStatus: "success",
+        deviceSyncCompletion: "1",
+        toolkit: "gmail",
+      }),
+    }),
+  );
+
+  assert.match(markup, /Device connection complete/);
+  assert.equal(mocks.resolveConnectedAppCompletionDialogModel.mock.calls.length, 0);
 });
 
 test("HomePage opens pending persona onboarding on plain home", async () => {

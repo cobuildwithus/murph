@@ -61,7 +61,7 @@ const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy>
       companionAppName: "Garmin Connect",
       deviceDisplayName: "Garmin device",
       providerDisplayName: "Garmin",
-      silentHours: 72,
+      silentHours: 5 * 24,
     },
   }],
 ]);
@@ -109,6 +109,7 @@ export function readPushPrimarySourceRecoveryNoticePolicy(
 export function isPushPrimarySourceRecoveryNoticeEligible(input: {
   lastDataAt: string | null;
   now: string;
+  silentHours?: number;
   sourceProviderSlug: string;
   status: string;
 }): boolean {
@@ -121,7 +122,7 @@ export function isPushPrimarySourceRecoveryNoticeEligible(input: {
   return policy !== null
     && now !== null
     && lastDataAt !== null
-    && now - lastDataAt >= policy.silentHours * HOUR_MS;
+    && now - lastDataAt >= (input.silentHours ?? policy.silentHours) * HOUR_MS;
 }
 
 function parseTimestamp(value: string): number | null {

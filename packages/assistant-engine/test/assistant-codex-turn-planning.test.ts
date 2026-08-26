@@ -3855,8 +3855,8 @@ describe('assistant Codex turn planning', () => {
     expect(attendedPlan.systemPrompt).toContain(
       '`murph.select_reply_target` annotates the one eventual group response',
     )
-    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 8`')
-    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 8')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 6')
     expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
@@ -4016,7 +4016,10 @@ describe('assistant Codex turn planning', () => {
       'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(plan.developerInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(plan.developerInstructions).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -6173,6 +6176,138 @@ describe('assistant Codex turn planning', () => {
           role: 'assistant',
         },
       ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('rebuilds reconsidered group history without the provisional provider thread', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-group-reconsideration-',
+    ))
+    const routeFingerprint = 'route-group-reconsideration'
+    const route = createRoute({ routeFingerprint })
+    const initialSession = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'a'.repeat(64),
+        routeFingerprint,
+        threadId: 'provider-thread-provisional',
+      },
+    })
+    const session = await saveAssistantSession(vault, initialSession)
+    const firstRequest = 'List the morning hours.'
+    const secondRequest = 'Also list the afternoon hours.'
+    const selectedFinal = 'Morning: 9–11. Afternoon: 2–4.'
+    const provisionalDraft = 'INTERNAL_PROVISIONAL_DRAFT'
+    const reconsiderationMarker = 'INTERNAL_RECONSIDERATION_INSTRUCTION'
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: firstRequest },
+        { kind: 'user', text: secondRequest },
+      ])
+      const providerResult: ExecutedAssistantProviderTurnResult = {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint: 'b'.repeat(64),
+        attemptCount: 1,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexRolloutRelativePath: null,
+        codexThreadId: 'provider-thread-reconsidered',
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          media: [],
+          response: provisionalDraft,
+          transcriptResponse: provisionalDraft,
+        }],
+        provider: 'codex-cli',
+        providerOptions: route.providerOptions,
+        rawEvents: [],
+        response: selectedFinal,
+        responseCard: null,
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [],
+        route,
+        session,
+        stderr: '',
+        stdout: '',
+        transcriptResponse: selectedFinal,
+        usage: null,
+        workingDirectory: '/work',
+      }
+      const saved = await persistAssistantTurnAndSession({
+        assistantTranscriptText: selectedFinal,
+        input: {
+          ...createMessageInput(),
+          prompt: `${firstRequest}\n\n${secondRequest}`,
+          turnContext: reconsiderationMarker,
+          vault,
+        },
+        persistUserPromptToTranscript: false,
+        plan: createPrivateSharedPlan(),
+        precedingAssistantTranscriptTexts: [],
+        providerResult,
+        providerResumeStateAction: 'clear',
+        session,
+        turnCreatedAt: '2026-08-25T16:40:00.000Z',
+        turnId: 'turn-group-reconsideration',
+      })
+
+      expect(saved.resumeState).toBeNull()
+      expect(saved.codexResume).toBeNull()
+      const transcript = await listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )
+      expect(transcript.map(({ kind, text }) => ({ kind, text }))).toEqual([
+        { kind: 'user', text: firstRequest },
+        { kind: 'user', text: secondRequest },
+        { kind: 'assistant', text: selectedFinal },
+      ])
+      expect(JSON.stringify(transcript)).not.toContain(provisionalDraft)
+      expect(JSON.stringify(transcript)).not.toContain(reconsiderationMarker)
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Summarize the visible conversation.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-25',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        session: saved,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: firstRequest, role: 'user' },
+        { content: secondRequest, role: 'user' },
+        { content: selectedFinal, role: 'assistant' },
+      ])
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        provisionalDraft,
+      )
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        reconsiderationMarker,
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

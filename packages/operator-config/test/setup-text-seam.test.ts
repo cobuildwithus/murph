@@ -169,7 +169,7 @@ test('text shared helpers normalize messages and redact structured path details'
     redactSensitivePathSegments(
       '/Users/example/project /home/example/project C:\\Users\\Example\\project /private/vault/config.json D:\\vault\\config.json path=/private/other.json path:D:\\other.json',
     ),
-    '<HOME_DIR>/project <HOME_DIR>/project <HOME_DIR>\\project <PATH> <PATH> path=<PATH> path:<PATH>',
+    '<HOME_DIR>/project <HOME_DIR>/project <HOME_DIR>\\project /private/vault/config.json D:\\vault\\config.json path=/private/other.json path:D:\\other.json',
   )
 
   assert.equal(

@@ -113,6 +113,7 @@ const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>>
 const nativeFetch = globalThis.fetch;
 const hostedContainerRunRequestBodyLimitBytes = 8 * 1024 * 1024;
 const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
+const TEST_PUBLIC_RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -1217,7 +1218,8 @@ describe("startHostedContainerEntrypoint", () => {
         buildSkipped: false,
         bundleFingerprint: "bundle-fingerprint",
         generatedAt: "2026-04-24T00:00:00.000Z",
-        schemaVersion: 2,
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
+        schemaVersion: 3,
         sourceFingerprint: "source-fingerprint",
       });
     });
@@ -1248,7 +1250,8 @@ describe("startHostedContainerEntrypoint", () => {
         buildSkipped: false,
         bundleFingerprint: "bundle-fingerprint",
         generatedAt: "2026-04-24T00:00:00.000Z",
-        schemaVersion: 2,
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
+        schemaVersion: 3,
         sourceFingerprint: "source-fingerprint",
       },
       service: "cloudflare-hosted-runner-node",
@@ -1945,6 +1948,13 @@ describe("startHostedContainerEntrypoint", () => {
       runtime: {
         runWorkspaceInvocation,
         loadRuntimeContracts,
+        processApi: {
+          async readFile() {
+            return JSON.stringify({
+              releaseSha: TEST_PUBLIC_RELEASE_SHA,
+            });
+          },
+        },
       },
     });
     servers.push(server);
@@ -1976,6 +1986,7 @@ describe("startHostedContainerEntrypoint", () => {
         kind: "workspace-invocation",
       },
       expect.objectContaining({
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
         supervisorEnv: expect.any(Object),
       }),
     );

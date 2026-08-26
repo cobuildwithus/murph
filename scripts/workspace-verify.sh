@@ -647,8 +647,12 @@ run_dependency_policy_check() {
 }
 
 run_workspace_boundary_check() {
-  node "scripts/verify-workspace-boundaries.mjs"
-  node "scripts/check-workspace-package-cycles.mjs"
+  local status=0
+
+  node "scripts/verify-workspace-boundaries.mjs" || status=$?
+  node "scripts/check-workspace-package-cycles.mjs" || status=$?
+
+  return "$status"
 }
 
 run_typecheck_packages() {
@@ -947,14 +951,7 @@ run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  pnpm exec vitest run --config "vitest.config.ts" \
-    --project="!assistant-engine" "$@" || return $?
-
-  # The curated Assistant Engine project has a proven 6 GiB requirement. Keep
-  # that ceiling at this owner instead of lifting every repo test and build.
-  NODE_OPTIONS=--max-old-space-size=6144 \
-    pnpm exec vitest run --config "vitest.config.ts" \
-      --project="assistant-engine" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
 run_workspace_package_coverage() {
@@ -974,15 +971,6 @@ run_workspace_package_coverage() {
       "$label" \
       env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
         pnpm --dir packages/contracts test:coverage:prepared
-    return $?
-  fi
-
-  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-    run_timed_step \
-      "$label" \
-      env NODE_OPTIONS=--max-old-space-size=6144 \
-        MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
-        pnpm --dir "$package_dir" test:coverage
     return $?
   fi
 
@@ -1340,7 +1328,6 @@ run_test_diff_package_tests() {
   local filter_args=()
   local package_test_env=(env)
   local package_dir
-  local assistant_engine_selected=0
   local cli_selected=0
   local contracts_selected=0
 
@@ -1348,10 +1335,6 @@ run_test_diff_package_tests() {
     [[ -n "$package_dir" ]] || continue
     if [[ "$package_dir" == "packages/contracts" ]]; then
       contracts_selected=1
-      continue
-    fi
-    if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-      assistant_engine_selected=1
       continue
     fi
     if [[ "$package_dir" == "packages/cli" ]]; then
@@ -1376,17 +1359,6 @@ run_test_diff_package_tests() {
   # the artifact lock before source-first dependents start importing them.
   if [[ "$contracts_selected" == "1" ]]; then
     run_diff_contracts_test_with_workspace_artifact_lock || return $?
-  fi
-
-  # Keep the affected-owner lane aligned with the full coverage lane: the
-  # Assistant Engine suite can exceed Node's default 4 GiB heap even with one
-  # Vitest worker, so run that owner separately with its proven heap ceiling.
-  if [[ "$assistant_engine_selected" == "1" ]]; then
-    run_command_with_retry \
-      "Affected package test for packages/assistant-engine" \
-      env NODE_OPTIONS=--max-old-space-size=6144 \
-        MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" \
-        pnpm --dir "packages/assistant-engine" test || return $?
   fi
 
   if [[ "${#filter_args[@]}" -gt 0 ]]; then
@@ -1507,13 +1479,13 @@ run_typecheck_overlapped() {
   pids+=("$package_typecheck_pid")
   register_background_pid "$package_typecheck_pid"
 
-  wait_for_background_jobs "${pids[@]}"
+  wait_for_background_jobs_allow_failures "${pids[@]}"
 }
 
 run_typecheck() {
   if [[ "$typecheck_preflight_parallel" == "1" ]]; then
     run_typecheck_overlapped
-    return 0
+    return $?
   fi
 
   run_typecheck_preflight

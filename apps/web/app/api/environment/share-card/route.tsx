@@ -86,7 +86,7 @@ function isEnvironmentGrade(
     value === "B" ||
     value === "C" ||
     value === "D" ||
-    value === "E"
+    value === "F"
   );
 }
 

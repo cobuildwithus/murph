@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +30,7 @@ vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
 
 import ChangelogPage, { generateMetadata } from "../app/changelog/page";
 import { ChangelogArchiveStudy } from "../app/design/changelog-archive-study";
+import { loadChangelogFragmentEditions } from "../src/lib/changelog-fragments";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
@@ -88,6 +90,71 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
+  });
+
+  it("server-renders every authored fragment through the production archive", async () => {
+    const fragmentEditions = loadChangelogFragmentEditions(
+      fileURLToPath(new URL("../changelog/", import.meta.url)),
+    );
+    const pageMarkupByNumber = new Map<number, string>();
+
+    for (const edition of fragmentEditions) {
+      const pageNumber = resolveChangelogEditionPage(edition.id);
+      expect(pageNumber).not.toBeNull();
+      if (pageNumber === null) {
+        throw new TypeError(`Missing changelog archive page for ${edition.id}`);
+      }
+
+      let markup = pageMarkupByNumber.get(pageNumber);
+      if (!markup) {
+        markup = renderToStaticMarkup(
+          await ChangelogPage({
+            searchParams: Promise.resolve({ edition: edition.id }),
+          }),
+        );
+        pageMarkupByNumber.set(pageNumber, markup);
+      }
+
+      expect(markup).toContain(`id="edition-${edition.id}"`);
+      expect(markup).toContain(renderToStaticMarkup(<>{edition.title}</>));
+      expect(markup).toContain(renderToStaticMarkup(<>{edition.summary}</>));
+
+      for (const item of edition.items) {
+        const itemMarkup = extractChangelogItemMarkup(markup, item.id);
+        expect(itemMarkup).toContain(
+          item.kind === "feature" ? "Feature" : "Improvement",
+        );
+        expect(itemMarkup).toContain(renderToStaticMarkup(<>{item.title}</>));
+        expect(itemMarkup).toContain(renderToStaticMarkup(<>{item.summary}</>));
+        if (item.details) {
+          expect(itemMarkup).toContain(
+            renderToStaticMarkup(<>{item.details}</>),
+          );
+        }
+        if (item.tryIt) {
+          expect(itemMarkup).toContain(
+            renderToStaticMarkup(<>{item.tryIt.label}</>),
+          );
+          if (item.tryIt.href) {
+            expect(itemMarkup).toContain(`href="${item.tryIt.href}"`);
+          }
+        }
+      }
+    }
+
+    const promptRequests = mocks.resolveHostedMurphContactOptions.mock.calls.map(
+      ([input]) => input.message,
+    );
+    const expectedPromptRequests = fragmentEditions.flatMap((edition) =>
+      edition.items.flatMap((item) =>
+        item.tryIt?.prompt
+          ? [{ body: item.tryIt.prompt, subject: `Try it: ${item.title}` }]
+          : [],
+      ),
+    );
+    expect(promptRequests).toEqual(
+      expect.arrayContaining(expectedPromptRequests),
+    );
   });
 
   it("renders the new try-it controls with their exact prompts", async () => {

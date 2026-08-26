@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "be6e8eac029b183056b7e4402879f15d2c85f61b",
+  upstreamCommit: "ff29a44391deccde0aba0f8390337d7f3c319ea4",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "194e2411ddbd71f839df530635d10dc103559d85",
-  upstreamTag: "rust-v0.147.0",
-  version: "0.147.0",
+  upstreamSourceTree: "9613761a816ff43cad33708250829f4e34a61115",
+  upstreamTag: "rust-v0.149.1",
+  version: "0.149.1",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "images/edits",
@@ -186,10 +186,22 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "Agent identity registration targets the configured auth service, not api.openai.com.",
     },
     {
+      candidate: "/v1/analytics/codex/turn-costsopenai-organizationopenai-projectskipping",
+      disposition: "different_origin",
+      owner: "codex-analytics",
+      reason: "The scanner joins the turn-cost route to adjacent header and log literals; Codex rewrites supported ChatGPT hosts to the separate api.chatgpt.com analytics origin.",
+    },
+    {
       candidate: "/v1/files",
       disposition: "chatgpt_auth_only",
       owner: "codex-apps",
       reason: "Codex Apps file upload requires ChatGPT auth and the ChatGPT backend base URL.",
+    },
+    {
+      candidate: "/v1/liveend_turn",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux printable token joins the reviewed /v1/live route to an adjacent end_turn protocol label and is not an HTTP route.",
     },
     {
       candidate: "/v1/logs",
@@ -208,6 +220,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "binary_false_positive",
       owner: "dependency",
       reason: "This exact Linux printable token terminates before an uppercase binary byte and is not an HTTP route.",
+    },
+    {
+      candidate: "/v1/rtc_avasraterowscols",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token joins unrelated dependency symbols and is not an HTTP route.",
     },
     {
       candidate: "/v1/scrypt",
@@ -238,6 +256,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "different_origin",
       owner: "codex-auth",
       reason: "Personal-access-token validation targets the configured auth service.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamiauthentication",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "This exact printable token joins the whoami route to an adjacent authentication label and is not an HTTP route.",
     },
   ],
 } as const;

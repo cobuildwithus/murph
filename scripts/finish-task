@@ -40,6 +40,10 @@ resolved_commit_paths=()
 append_unique_path() {
   local candidate="$1"
   local existing
+
+  if [[ "$candidate" == "$plan_path" ]]; then
+    return
+  fi
   if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
     resolved_commit_paths+=("$candidate")
     return
@@ -54,6 +58,19 @@ append_unique_path() {
 
 path_is_tracked() {
   git ls-files --error-unmatch -- "$1" >/dev/null 2>&1
+}
+
+path_is_task_branch_deletion() {
+  local target="$1"
+  local default_ref="refs/remotes/origin/main"
+  local deleted_path
+
+  git show-ref --verify --quiet "$default_ref" || return 1
+  if ! deleted_path="$(git diff --name-only --diff-filter=D "$default_ref...HEAD" -- "$target" 2>/dev/null)"; then
+    return 1
+  fi
+
+  [[ "$deleted_path" == "$target" ]]
 }
 
 expand_commit_target() {
@@ -102,6 +119,10 @@ expand_commit_target() {
     return
   fi
 
+  if path_is_task_branch_deletion "$target"; then
+    return
+  fi
+
   echo "Commit path not found: $target" >&2
   exit 1
 }
@@ -109,11 +130,6 @@ expand_commit_target() {
 for target in "$@"; do
   expand_commit_target "$target"
 done
-
-if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
-  echo "No commit paths were resolved." >&2
-  exit 1
-fi
 
 bash scripts/close-exec-plan.sh "$plan_path"
 
@@ -124,4 +140,8 @@ fi
 
 echo "finish-task: commit includes closed plan plus ${#resolved_commit_paths[@]} resolved task path(s)"
 
-bash scripts/committer "$commit_message" "${commit_paths[@]}" "${resolved_commit_paths[@]}"
+if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
+  bash scripts/committer "$commit_message" "${commit_paths[@]}"
+else
+  bash scripts/committer "$commit_message" "${commit_paths[@]}" "${resolved_commit_paths[@]}"
+fi

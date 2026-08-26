@@ -1672,6 +1672,7 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedWorkspaceReadResponse(await response.json());
 
     expect(response.status).toBe(200);
+    expect(payload.hostedAssistantSubagentModelOverridesAllowed).toBe(false);
     expect(payload.platformAiUsageAllowed).toBe(false);
     expect(payload.hostedAssistantCustomInferenceOverride).toBeUndefined();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
@@ -1696,7 +1697,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.147.0-portable-responses-v1",
+          "murph-codex-0.149.1-portable-responses-v1",
       },
       hostedAssistantModelOverride: "gpt-5.6-sol",
       hostedAssistantProviderOverride: "venice",
@@ -1722,6 +1723,7 @@ describe("hosted runtime internal web routes", () => {
         protocol: "responses",
         revision: 3,
       },
+      hostedAssistantSubagentModelOverridesAllowed: false,
       platformAiUsageAllowed: false,
     });
     expect(payload.hostedAssistantModelOverride).toBeUndefined();
@@ -1741,7 +1743,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.147.0-portable-responses-v1",
+          "murph-codex-0.149.1-portable-responses-v1",
       },
       model: "gpt-5.6-terra",
       solAvailable: false,
@@ -1772,7 +1774,7 @@ describe("hosted runtime internal web routes", () => {
         revision: 3,
         supportsImages: false,
         verificationProfile:
-          "murph-codex-0.147.0-portable-responses-v1",
+          "murph-codex-0.149.1-portable-responses-v1",
       },
       model: "gpt-5.6-terra",
       solAvailable: false,
@@ -1831,6 +1833,7 @@ describe("hosted runtime internal web routes", () => {
     ));
     expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
+        hostedAssistantSubagentModelOverridesAllowed: true,
         hostedAssistantModelOverride: "gpt-5.6-sol",
         hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",

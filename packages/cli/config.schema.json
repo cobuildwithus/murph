@@ -5374,8 +5374,7 @@
                         "timeZone": {
                           "description": "Replace the explicit IANA time zone, such as America/New_York.",
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 80
+                          "minLength": 3
                         },
                         "dayKey": {
                           "description": "Set the explicit local day key in YYYY-MM-DD form.",

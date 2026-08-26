@@ -3,6 +3,8 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const MAX_VALIDATION_FIELDS = 12
 const MAX_VALIDATION_PATH_LENGTH = 160
+const MAX_ERROR_MESSAGE_LENGTH = 640
+const MAX_ERROR_HINT_LENGTH = 320
 const UNKNOWN_ERROR_MESSAGE =
   'The command failed without a safe recoverable detail.'
 export interface VaultCliProjectedFieldError {
@@ -25,9 +27,9 @@ export interface VaultCliErrorProjection {
 }
 
 /**
- * Projects domain and unexpected failures into the privacy-safe CLI envelope.
- * VaultCliError context is the sole metadata source. Only an owner's explicit
- * publicPath can become value-free field guidance.
+ * Projects domain and unexpected failures into the bounded CLI envelope.
+ * VaultCliError context is the sole structured metadata source. An owner's
+ * explicit publicPath takes precedence over an ordinary schema issue path.
  */
 export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
   if (error instanceof VaultCliError) {
@@ -61,13 +63,19 @@ function projectKnownVaultCliError(
       : undefined
   const fieldErrors = createValidationFieldErrors(error.context)
   const stage = readKnownErrorStage(error.context?.stage)
+    ?? (fieldErrors ? 'validation' : undefined)
+  const hint = readBoundedDiagnosticString(
+    error.context?.hint,
+    MAX_ERROR_HINT_LENGTH,
+  )
 
   return {
     code: error.code,
-    message: redactSensitivePathSegments(error.message),
+    message: boundedDiagnosticMessage(error),
     retryable,
     ...(exitCode === undefined ? {} : { exitCode }),
     ...(fieldErrors ? { fieldErrors } : {}),
+    ...(hint === undefined ? {} : { hint }),
     ...(stage === undefined ? {} : { stage }),
   }
 }
@@ -84,10 +92,13 @@ function createValidationFieldErrors(
       if (
         !isUnknownRecord(issue) ||
         typeof issue.code !== 'string' ||
-        !/^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(issue.code) ||
-        !Array.isArray(issue.publicPath) ||
-        !issue.publicPath.every(isPublicPathSegment)
+        !/^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(issue.code)
       ) {
+        return []
+      }
+
+      const path = resolveValidationPath(issue)
+      if (path === null) {
         return []
       }
 
@@ -98,7 +109,7 @@ function createValidationFieldErrors(
           : undefined
       return [{
         code: issue.code,
-        path: normalizeValidationPath(issue.publicPath),
+        path: normalizeValidationPath(path),
         expected: expected ?? '',
         received: 'invalid',
         message: 'This field is invalid.',
@@ -123,6 +134,21 @@ function createValidationFieldErrors(
   }
 
   return boundedFields
+}
+
+function resolveValidationPath(
+  issue: Record<PropertyKey, unknown>,
+): readonly (string | number)[] | null {
+  if (issue.publicPath !== undefined) {
+    return Array.isArray(issue.publicPath) &&
+      issue.publicPath.every(isPublicPathSegment)
+      ? issue.publicPath
+      : null
+  }
+
+  return Array.isArray(issue.path) && issue.path.every(isPublicPathSegment)
+    ? issue.path
+    : null
 }
 
 function isPublicPathSegment(value: unknown): value is string | number {
@@ -153,11 +179,12 @@ function readKnownErrorStage(value: unknown): string | undefined {
 
 function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
   const nodeCode = readErrorCode(error)
+  const message = boundedDiagnosticMessage(error)
 
   if (nodeCode === 'ENOENT') {
     return {
       code: 'not_found',
-      message: 'A required file or directory was not found.',
+      message,
       retryable: false,
       stage: 'filesystem',
       hint: 'Check the input path and retry the command.',
@@ -167,7 +194,7 @@ function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
   if (nodeCode === 'EACCES' || nodeCode === 'EPERM') {
     return {
       code: 'permission_denied',
-      message: 'The command could not access a required file or directory.',
+      message,
       retryable: false,
       stage: 'filesystem',
       hint: 'Check the file permissions before retrying.',
@@ -177,7 +204,7 @@ function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
   if (nodeCode === 'EISDIR' || nodeCode === 'ENOTDIR') {
     return {
       code: 'invalid_path',
-      message: 'The command received the wrong kind of filesystem path.',
+      message,
       retryable: false,
       stage: 'filesystem',
       hint: 'Check whether the option expects a file or a directory.',
@@ -187,19 +214,77 @@ function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
   if (nodeCode === 'ENOSPC') {
     return {
       code: 'storage_unavailable',
-      message: 'The command could not write because storage is unavailable.',
+      message,
       retryable: false,
       stage: 'filesystem',
       hint: 'Free storage space before retrying.',
     }
   }
 
+  if (nodeCode === 'VAULT_INVALID_INPUT') {
+    return {
+      code: nodeCode,
+      message,
+      retryable: false,
+      stage: 'validation',
+    }
+  }
+
   return {
-    code: 'UNKNOWN',
-    message: UNKNOWN_ERROR_MESSAGE,
+    code: readBoundedErrorCode(nodeCode) ?? 'UNKNOWN',
+    message,
     retryable: false,
     stage: 'command',
   }
+}
+
+function boundedDiagnosticMessage(error: unknown): string {
+  const message = error instanceof Error
+    ? error.message
+    : isUnknownRecord(error) && typeof error.message === 'string'
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : null
+
+  return readBoundedDiagnosticString(message, MAX_ERROR_MESSAGE_LENGTH)
+    ?? UNKNOWN_ERROR_MESSAGE
+}
+
+function readBoundedDiagnosticString(
+  value: unknown,
+  maximumLength: number,
+): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const normalized = redactCredentialShapes(
+    redactSensitivePathSegments(value.trim()),
+  )
+  if (normalized.length === 0) {
+    return undefined
+  }
+
+  const codePoints = Array.from(normalized)
+  return codePoints.length <= maximumLength
+    ? normalized
+    : `${codePoints.slice(0, maximumLength - 1).join('')}…`
+}
+
+function redactCredentialShapes(value: string): string {
+  return value
+    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/giu, '$1 <REDACTED_CREDENTIAL>')
+    .replace(
+      /\b((?:api[-_ ]?key|access[-_ ]?token|authorization|password|secret)\s*[:=]\s*)[^\s,;]+/giu,
+      '$1<REDACTED_CREDENTIAL>',
+    )
+}
+
+function readBoundedErrorCode(value: string | null): string | undefined {
+  return value !== null && /^[A-Za-z0-9_.:-]{1,96}$/u.test(value)
+    ? value
+    : undefined
 }
 
 function readErrorCode(error: unknown): string | null {

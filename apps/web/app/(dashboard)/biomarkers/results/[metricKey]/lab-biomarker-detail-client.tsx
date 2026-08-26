@@ -19,7 +19,6 @@ import {
 } from "@/src/components/biomarkers/lab-biomarker-detail-view";
 import { BiomarkerDetailSkeleton } from "@/src/components/biomarkers/lab-biomarker-detail-skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
 import {
   useBrowserVault,
   useBrowserVaultLabsSelector,
@@ -76,12 +75,7 @@ export function LabBiomarkerDetailClient({
       <Alert variant="destructive">
         <AlertTitle>Could not load this biomarker</AlertTitle>
         <AlertDescription>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span>Your saved lab results are not available right now.</span>
-            <Button size="sm" variant="outline" onClick={() => void refresh()}>
-              Retry
-            </Button>
-          </div>
+          Your saved lab results are not available right now.
         </AlertDescription>
       </Alert>
     );

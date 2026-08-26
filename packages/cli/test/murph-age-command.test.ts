@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -55,6 +55,7 @@ import type { CliEnvelope } from './cli-test-helpers.js'
 import {
   createTempVaultContext,
   requireData,
+  runCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 
@@ -138,7 +139,10 @@ interface MurphAgeModelCardStatusReport {
   productReadyCardIds: string[]
   researchReadyCardIds: string[]
   schemaVersion: string
-  warnings: Array<{ code: string }>
+  warnings: Array<{
+    artifactIssue: string
+    code: string
+  }>
 }
 
 interface MurphAgeAggregateEvidenceStatusReport {
@@ -938,6 +942,294 @@ test('age evidence reports malformed JSON without echoing receipt text', async (
     }
   } finally {
     await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age evidence rejects invalid top-level and wrapper shapes with factual fields', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-shape-'))
+  const scalarPath = path.join(payloadRoot, 'scalar.json')
+  const wrapperPath = path.join(payloadRoot, 'wrapper.json')
+  const privateMarker = 'private-evidence-marker'
+  try {
+    await writeFile(scalarPath, '42')
+    await writeFile(wrapperPath, JSON.stringify({
+      cards: { privateMarker },
+    }))
+
+    const scalar = await runSliceCliResult<unknown>([
+      'age',
+      'evidence',
+      '--input',
+      `@${scalarPath}`,
+    ])
+    const wrapper = await runSliceCliResult<unknown>([
+      'age',
+      'evidence',
+      '--input',
+      `@${wrapperPath}`,
+    ])
+
+    for (const result of [scalar, wrapper]) {
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) {
+        assert.fail('expected invalid evidence shape to return an error envelope')
+      }
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(result.envelope.error.retryable, false)
+      assert.equal(result.envelope.error.hint, undefined)
+      assert.equal((result.envelope.error.fieldErrors?.length ?? 0) > 0, true)
+      const encoded = JSON.stringify(result.envelope)
+      for (const forbidden of [privateMarker, payloadRoot, scalarPath, wrapperPath]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden)
+      }
+    }
+    if (!wrapper.envelope.ok) {
+      assert.equal(wrapper.envelope.error.fieldErrors?.[0]?.path, 'cards')
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age submitted-data commands use shared bounded validation projection without echoing values', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-input-repair-'))
+  const payloadPath = path.join(payloadRoot, 'payload.json')
+  const privateMarker = 'private-as-of-marker'
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      asOf: privateMarker,
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [{ metricKey: 'HbA1c', value: 5.4 }],
+    }))
+
+    for (const command of ['preview', 'preview-view', 'calculate', 'calculate-bundle']) {
+      const result = await runSliceCliResult<unknown>([
+        'age',
+        command,
+        '--input',
+        `@${payloadPath}`,
+      ])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) {
+        assert.fail(`expected age ${command} to return an error envelope`)
+      }
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(result.envelope.error.message, 'Input failed validation.')
+      assert.equal(result.envelope.error.retryable, false)
+      assert.equal(result.envelope.error.hint, undefined)
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.find(
+          (field) => field.path === 'asOf' && field.code === 'invalid_format',
+        ),
+        {
+          code: 'invalid_format',
+          expected: '',
+          message: 'This field is invalid.',
+          path: 'asOf',
+          received: 'invalid',
+        },
+      )
+      for (const field of result.envelope.error.fieldErrors ?? []) {
+        assert.equal(field.expected.length <= 160, true)
+        assert.equal(field.message.length <= 240, true)
+      }
+      const encoded = JSON.stringify(result.envelope)
+      for (const forbidden of [privateMarker, payloadRoot, payloadPath]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden)
+      }
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age submitted-data commands classify unsupported fields without echoing values', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-unsupported-field-'))
+  const payloadPath = path.join(payloadRoot, 'payload.json')
+  const privateMarker = 'private-unsupported-field-value'
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      asOf: '2026-05-10T00:00:00.000Z',
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [{ metricKey: 'HbA1c', value: 5.4 }],
+      unsupportedField: privateMarker,
+    }))
+
+    for (const command of ['preview', 'preview-view', 'calculate', 'calculate-bundle']) {
+      const result = await runSliceCliResult<unknown>([
+        'age',
+        command,
+        '--input',
+        `@${payloadPath}`,
+      ])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) {
+        assert.fail(`expected age ${command} to reject an unsupported field`)
+      }
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(result.envelope.error.message, 'Input failed validation.')
+      assert.equal(result.envelope.error.hint, undefined)
+      assert.deepEqual(result.envelope.error.fieldErrors, [
+        {
+          code: 'unrecognized_keys',
+          expected: '',
+          message: 'This field is invalid.',
+          path: '$',
+          received: 'invalid',
+        },
+      ])
+      const encoded = JSON.stringify(result.envelope)
+      for (const forbidden of [privateMarker, payloadRoot, payloadPath]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden)
+      }
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('built age calculate-bundle collapses private qualifier paths without writing', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-age-cli-private-qualifier-',
+  )
+  const payloadPath = path.join(parentRoot, 'payload.json')
+  const artifactRoot = path.join(vaultRoot, 'private-artifacts')
+  const privateQualifierKey = 'privateQualifierKey'
+  const privateQualifierValue = 'privateQualifierValue'
+  const payload = {
+    asOf: '2026-05-10T00:00:00.000Z',
+    chronologicalAgeYears: 45,
+    modelCardArtifactRoot: artifactRoot,
+    sex: 'female',
+    submittedMetrics: [{
+      context: {
+        qualifiers: {
+          [privateQualifierKey]: [privateQualifierValue],
+        },
+      },
+      metricKey: 'HbA1c',
+      value: 5.4,
+    }],
+  }
+  try {
+    const rawSchemaResult = murphAgeSubmittedPreviewPayloadSchema.safeParse(payload)
+    assert.equal(rawSchemaResult.success, false)
+    if (rawSchemaResult.success) {
+      assert.fail('expected the private qualifier fixture to fail schema validation')
+    }
+    assert.equal(
+      rawSchemaResult.error.issues.some(
+        (issue) => issue.path.includes(privateQualifierKey),
+      ),
+      true,
+    )
+    await writeFile(payloadPath, JSON.stringify(payload))
+
+    const result = await runCli<unknown>([
+      'age',
+      'calculate-bundle',
+      '--input',
+      `@${payloadPath}`,
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        VAULT: vaultRoot,
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (result.ok) {
+      assert.fail('expected invalid submitted qualifier data to fail')
+    }
+    assert.equal(result.error.code, 'invalid_payload')
+    assert.equal(result.error.message, 'Input failed validation.')
+    assert.equal(result.error.stage, 'validation')
+    assert.equal(result.error.retryable, false)
+    assert.deepEqual(result.error.fieldErrors, [{
+      code: 'invalid_union',
+      expected: '',
+      message: 'This field is invalid.',
+      path: 'submittedMetrics.0.context.qualifiers',
+      received: 'invalid',
+    }])
+    const encoded = JSON.stringify(result)
+    for (const forbidden of [
+      privateQualifierKey,
+      privateQualifierValue,
+      parentRoot,
+      payloadPath,
+      artifactRoot,
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+    assert.deepEqual(await readdir(vaultRoot), [])
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
+})
+
+test('age model-cards classifies artifact warnings without exposing artifact data', async () => {
+  const vaultRoot = await createProjectionVault()
+  const artifactRoot = defaultMurphAgeModelCardArtifactRoot(vaultRoot)
+  const notDirectoryPath = path.join(vaultRoot, 'private-model-card-root.json')
+  const privateMarker = 'private-model-card-marker'
+  try {
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(path.join(artifactRoot, 'invalid-json.json'), `{${privateMarker}`)
+    await writeFile(path.join(artifactRoot, 'invalid-schema.json'), JSON.stringify({
+      privateMarker,
+      schemaVersion: 'unsupported',
+    }))
+    await writeLocalModelCardArtifact(vaultRoot, 'valid-a.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+    await writeLocalModelCardArtifact(vaultRoot, 'valid-b.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+    await writeFile(notDirectoryPath, privateMarker)
+
+    const status = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+    ]))
+
+    assert.deepEqual(status.warnings, [
+      { artifactIssue: 'invalid_json', code: 'INVALID_INPUT' },
+      { artifactIssue: 'invalid_schema', code: 'INVALID_INPUT' },
+      { artifactIssue: 'duplicate_card_id', code: 'INVALID_INPUT' },
+    ])
+    const directoryFailure = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+      '--model-card-artifact-root',
+      notDirectoryPath,
+    ]))
+    assert.deepEqual(directoryFailure.warnings, [
+      { artifactIssue: 'directory_unreadable', code: 'INVALID_INPUT' },
+    ])
+
+    const encoded = JSON.stringify([status, directoryFailure])
+    for (const forbidden of [privateMarker, artifactRoot, notDirectoryPath, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
   }
 })
 
