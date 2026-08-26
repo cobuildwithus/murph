@@ -50,6 +50,21 @@ truthful stages, and no duplicate projector, repair transport, or state owner.
   walkthrough: malformed `id` and `eventId` inputs both return the canonical
   `id` field without echo or any ledger/audit mutation, and correcting either
   spelling revises the existing event with `created: false`; Ready.
+- ReviewGPT round five found that Core collapsed explicitly supplied unusable
+  `id` / `eventId` values to absence before the event contract ran, allowing a
+  rejected edit-shaped request to mint a new event. The accepted owner-local
+  correction keeps canonical `id` precedence over the legacy alias, treats
+  only actual absence as permission to mint, and routes null, blank, or
+  non-string identity through the existing canonical `id` contract recovery
+  before any write. The unused `EVENT_ID_NOT_ALLOWED` CLI mapping is deleted:
+  its sole Core producer is confined to bulk import, where per-row failures are
+  always wrapped as `EVENT_BATCH_INVALID` before reaching the single-event
+  projector. Focused Core and built-CLI proof covers both aliases, every invalid
+  value class, canonical-alias precedence, bounded non-echo recovery, zero
+  rejected writes, and corrected retries that revise the existing record. The
+  two focused Core cases, all 11 event/document built-CLI recovery cases, and
+  all 8 Vault-usecase helper seam cases pass; Core, Vault-usecases, and CLI
+  typechecks plus `git diff --check` and the scoped identifier scan pass.
 
 ## Design
 

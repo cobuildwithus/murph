@@ -182,54 +182,98 @@ test.sequential('built CLI maps event identity aliases to canonical id without r
     assert.equal(requireData(created).created, true)
     const eventId = requireData(created).eventId
 
+    const invalidIdentityCases = [
+      { label: 'null', value: null, privateValue: null },
+      { label: 'blank', value: '   ', privateValue: null },
+      {
+        label: 'non-string',
+        value: { submitted: 'private-invalid-event-id-value' },
+        privateValue: 'private-invalid-event-id-value',
+      },
+      {
+        label: 'malformed',
+        value: 'private-malformed-event-id-value',
+        privateValue: 'private-malformed-event-id-value',
+      },
+    ] as const
+
     for (const identityField of ['id', 'eventId'] as const) {
-      const privateInvalidId = `private-invalid-${identityField}-value`
-      await writeFile(
-        payloadPath,
-        JSON.stringify({
-          ...basePayload,
-          [identityField]: privateInvalidId,
-        }),
-        'utf8',
-      )
-      const filesBeforeRejectedImport = await snapshotVaultFiles(vaultRoot)
-      const importArgs = [
-        'event',
-        'import-json',
-        '--input',
-        `@${payloadPath}`,
-        '--vault',
-        vaultRoot,
-      ]
+      for (const invalidIdentity of invalidIdentityCases) {
+        await writeFile(
+          payloadPath,
+          JSON.stringify({
+            ...basePayload,
+            [identityField]: invalidIdentity.value,
+          }),
+          'utf8',
+        )
+        const filesBeforeRejectedImport = await snapshotVaultFiles(vaultRoot)
+        const importArgs = [
+          'event',
+          'import-json',
+          '--input',
+          `@${payloadPath}`,
+          '--vault',
+          vaultRoot,
+        ]
 
-      const rejected = await runCli(importArgs)
-      const rejectedError = requireError(rejected)
+        const rejected = await runCli(importArgs)
+        const rejectedError = requireError(rejected)
 
-      assert.equal(rejectedError.code, 'contract_invalid')
-      assert.equal(rejectedError.retryable, false)
-      assert.equal(rejectedError.stage, 'validation')
-      assert.deepEqual(rejectedError.fieldErrors?.map((field) => field.path), ['id'])
-      assertDoesNotEcho(rejected, [privateInvalidId, payloadPath, vaultRoot])
+        assert.equal(rejectedError.code, 'contract_invalid')
+        assert.equal(rejectedError.retryable, false)
+        assert.equal(rejectedError.stage, 'validation')
+        assert.deepEqual(rejectedError.fieldErrors?.map((field) => field.path), ['id'])
+        assertDoesNotEcho(rejected, [
+          ...(invalidIdentity.privateValue ? [invalidIdentity.privateValue] : []),
+          payloadPath,
+          vaultRoot,
+        ])
 
-      const rawRejected = await runRawCli(importArgs)
-      assert.doesNotMatch(rawRejected, new RegExp(privateInvalidId, 'u'))
-      assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeRejectedImport)
+        const rawRejected = await runRawCli(importArgs)
+        if (invalidIdentity.privateValue) {
+          assert.doesNotMatch(rawRejected, new RegExp(invalidIdentity.privateValue, 'u'))
+        }
+        assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeRejectedImport)
 
-      await writeFile(
-        payloadPath,
-        JSON.stringify({
-          ...basePayload,
-          [identityField]: eventId,
-          title: `Identity recovery through ${identityField}`,
-        }),
-        'utf8',
-      )
-      const retried = await runCli<{ created: boolean, eventId: string }>(importArgs)
+        await writeFile(
+          payloadPath,
+          JSON.stringify({
+            ...basePayload,
+            [identityField]: eventId,
+            title: `Identity recovery through ${identityField} after ${invalidIdentity.label}`,
+          }),
+          'utf8',
+        )
+        const retried = await runCli<{ created: boolean, eventId: string }>(importArgs)
 
-      assert.equal(retried.ok, true, JSON.stringify(retried))
-      assert.equal(requireData(retried).created, false)
-      assert.equal(requireData(retried).eventId, eventId)
+        assert.equal(retried.ok, true, JSON.stringify(retried))
+        assert.equal(requireData(retried).created, false)
+        assert.equal(requireData(retried).eventId, eventId)
+      }
     }
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        ...basePayload,
+        id: null,
+        eventId,
+      }),
+      'utf8',
+    )
+    const invalidCanonicalIdentity = await runCli([
+      'event',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.deepEqual(
+      requireError(invalidCanonicalIdentity).fieldErrors?.map((field) => field.path),
+      ['id'],
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

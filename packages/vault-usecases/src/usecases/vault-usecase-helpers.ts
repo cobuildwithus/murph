@@ -365,13 +365,6 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
     details: contractValidationDetails,
     preserveDetails: false,
   },
-  EVENT_ID_NOT_ALLOWED: {
-    code: 'invalid_option',
-    details: {
-      stage: 'validation',
-      issues: [{ code: 'unrecognized_keys', publicPath: ['eventId'] }],
-    },
-  },
   EVENT_MISSING: {
     code: 'not_found',
     details: { stage: 'read' },
