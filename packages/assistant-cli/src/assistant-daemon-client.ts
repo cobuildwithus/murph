@@ -47,6 +47,8 @@ export interface AssistantDaemonOpenConversationResult {
   session: AssistantSession
 }
 
+type AssistantDaemonHttpMethod = 'GET' | 'POST'
+
 type AssistantSessionOptionsPatch = Pick<
   AssistantSession['providerOptions'],
   'provider'
@@ -58,11 +60,28 @@ export type AssistantDaemonAutomationInput = Omit<
   'inboxServices' | 'inputSource' | 'onEvent' | 'onInboxEvent' | 'signal' | 'vaultServices'
 >
 
+function resolveAssistantDaemonClientConfigOrThrow(
+  env: NodeJS.ProcessEnv,
+): AssistantDaemonClientConfig | null {
+  try {
+    return resolveAssistantDaemonClientConfig(env)
+  } catch {
+    throw new VaultCliError(
+      'assistant_daemon_config_invalid',
+      'Assistant daemon client configuration is invalid. Configure a loopback-only HTTP origin and matching local control token.',
+      {
+        retryable: false,
+        stage: 'configuration',
+      },
+    )
+  }
+}
+
 export function canUseAssistantDaemonForMessage(
   input: AssistantMessageInput,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return false
   }
 
@@ -85,7 +104,7 @@ export async function maybeSendAssistantMessageViaDaemon(
     method: 'POST',
     body: serializeAssistantMessageInput(input),
   })
-  return parseAssistantDaemonSchema(assistantAskResultSchema, payload)
+  return parseAssistantDaemonSchema(assistantAskResultSchema, payload, 'POST')
 }
 
 export async function maybeOpenAssistantConversationViaDaemon(
@@ -93,7 +112,7 @@ export async function maybeOpenAssistantConversationViaDaemon(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantDaemonOpenConversationResult | null> {
   if (
-    !resolveAssistantDaemonClientConfig(env) ||
+    !resolveAssistantDaemonClientConfigOrThrow(env) ||
     !hasOnlyAssistantDaemonWireFields(
       input,
       assistantDaemonSessionResolutionWireFields,
@@ -118,7 +137,7 @@ export async function maybeUpdateAssistantSessionOptionsViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantSession | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -127,14 +146,14 @@ export async function maybeUpdateAssistantSessionOptionsViaDaemon(
     method: 'POST',
     body: input,
   })
-  return parseAssistantSessionOutputPayload(payload)
+  return parseAssistantSessionOutputPayload(payload, 'POST')
 }
 
 export async function maybeListAssistantOutboxIntentsViaDaemon(
   input: { vault: string },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantOutboxIntent[] | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -157,7 +176,7 @@ export async function maybeGetAssistantOutboxIntentViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantOutboxIntent | null | undefined> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return undefined
   }
 
@@ -184,7 +203,7 @@ export async function maybeGetAssistantStatusViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantStatusResult | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -202,14 +221,14 @@ export async function maybeGetAssistantStatusViaDaemon(
       method: 'GET',
     },
   )
-  return parseAssistantDaemonSchema(assistantStatusResultSchema, payload)
+  return parseAssistantDaemonSchema(assistantStatusResultSchema, payload, 'GET')
 }
 
 export async function maybeListAssistantSessionsViaDaemon(
   input: { vault: string },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantSession[] | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -232,7 +251,7 @@ export async function maybeGetAssistantSessionViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantSession | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -248,14 +267,14 @@ export async function maybeGetAssistantSessionViaDaemon(
       method: 'GET',
     },
   )
-  return parseAssistantSessionOutputPayload(payload)
+  return parseAssistantSessionOutputPayload(payload, 'GET')
 }
 
 export async function maybeGetAssistantCronStatusViaDaemon(
   input: { vault: string },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantCronStatusSnapshot | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -275,7 +294,7 @@ export async function maybeListAssistantCronJobsViaDaemon(
   input: { vault: string },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantCronJob[] | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -298,7 +317,7 @@ export async function maybeGetAssistantCronJobViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantCronJob | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -314,7 +333,7 @@ export async function maybeGetAssistantCronJobViaDaemon(
       method: 'GET',
     },
   )
-  return parseAssistantDaemonSchema(assistantCronJobSchema, payload)
+  return parseAssistantDaemonSchema(assistantCronJobSchema, payload, 'GET')
 }
 
 export async function maybeGetAssistantCronTargetViaDaemon(
@@ -324,7 +343,7 @@ export async function maybeGetAssistantCronTargetViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantCronTargetSnapshot | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -340,14 +359,14 @@ export async function maybeGetAssistantCronTargetViaDaemon(
       method: 'GET',
     },
   )
-  return parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, payload)
+  return parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, payload, 'GET')
 }
 
 export async function maybeSetAssistantCronTargetViaDaemon(
   input: SetAssistantCronJobTargetInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantCronTargetMutationResult | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -397,7 +416,7 @@ export async function maybeListAssistantCronRunsViaDaemon(
   },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ jobId: string; runs: AssistantCronRunRecord[] } | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -439,7 +458,7 @@ export async function maybeDrainAssistantOutboxViaDaemon(
   if (input.dependencies !== undefined || input.dispatchHooks !== undefined) {
     return null
   }
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -462,7 +481,7 @@ export async function maybeRunAssistantAutomationViaDaemon(
   input: AssistantDaemonAutomationInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantRunResult | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -482,7 +501,7 @@ export async function maybeRunAssistantAutomationViaDaemon(
       vault: input.vault,
     },
   })
-  return parseAssistantDaemonSchema(assistantRunResultSchema, payload)
+  return parseAssistantDaemonSchema(assistantRunResultSchema, payload, 'POST')
 }
 
 export async function maybeProcessDueAssistantCronViaDaemon(
@@ -497,7 +516,7 @@ export async function maybeProcessDueAssistantCronViaDaemon(
   if (input.signal !== undefined) {
     return null
   }
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (!resolveAssistantDaemonClientConfigOrThrow(env)) {
     return null
   }
 
@@ -521,10 +540,12 @@ async function assistantDaemonFetchJson(
   input: {
     body?: unknown
     env?: NodeJS.ProcessEnv
-    method: 'GET' | 'POST'
+    method: AssistantDaemonHttpMethod
   },
 ): Promise<unknown> {
-  const config = resolveAssistantDaemonClientConfig(input.env ?? process.env)
+  const config = resolveAssistantDaemonClientConfigOrThrow(
+    input.env ?? process.env,
+  )
   if (!config) {
     throw new VaultCliError(
       'assistant_daemon_unavailable',
@@ -570,7 +591,7 @@ async function assistantDaemonFetchJson(
 
   const parsedPayload = parseAssistantDaemonJsonPayload(text)
   if (!parsedPayload.ok) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError(input.method)
   }
 
   return parsedPayload.value
@@ -578,7 +599,7 @@ async function assistantDaemonFetchJson(
 
 function buildAssistantDaemonTransportError(
   routePath: string,
-  method: 'GET' | 'POST',
+  method: AssistantDaemonHttpMethod,
 ): VaultCliError {
   const retryable = method === 'GET'
   return new VaultCliError(
@@ -625,7 +646,7 @@ const ASSISTANT_DAEMON_OWNER_FAILURES = {
 function buildAssistantDaemonHttpError(
   status: number,
   ownerCode: string | null,
-  method: 'GET' | 'POST',
+  method: AssistantDaemonHttpMethod,
 ): VaultCliError {
   if (status === 401 || status === 403) {
     return new VaultCliError(
@@ -671,11 +692,11 @@ function buildAssistantDaemonHttpError(
 
   if (status === 404) {
     return new VaultCliError(
-      'assistant_daemon_resource_not_found',
-      'Assistant daemon could not find the requested resource. List current resources and retry with an existing identifier.',
+      'assistant_daemon_http_failed',
+      'Assistant daemon did not recognize the requested route. Restart or update the local assistant daemon so its version matches the client.',
       {
         retryable: false,
-        stage: 'read',
+        stage: 'response',
       },
     )
   }
@@ -727,10 +748,17 @@ function readAssistantDaemonErrorCode(value: string): string | null {
     : null
 }
 
-function buildAssistantDaemonResponseError(): VaultCliError {
+function buildAssistantDaemonResponseError(
+  method: AssistantDaemonHttpMethod,
+): VaultCliError {
+  const completionUnknown = method === 'POST'
   return new VaultCliError(
-    'assistant_daemon_response_invalid',
-    'Assistant daemon returned an invalid response. Restart or update the local assistant daemon before retrying.',
+    completionUnknown
+      ? 'assistant_daemon_completion_unknown'
+      : 'assistant_daemon_response_invalid',
+    completionUnknown
+      ? 'Assistant daemon may have completed the effectful request, but returned an invalid response. Inspect daemon state before retrying.'
+      : 'Assistant daemon returned an invalid response. Restart or update the local assistant daemon before retrying.',
     {
       retryable: false,
       stage: 'response',
@@ -745,10 +773,11 @@ interface AssistantDaemonSchema<T> {
 function parseAssistantDaemonSchema<T>(
   schema: AssistantDaemonSchema<T>,
   payload: unknown,
+  method: AssistantDaemonHttpMethod,
 ): T {
   const parsed = schema.safeParse(payload)
   if (!parsed.success) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError(method)
   }
   return parsed.data
 }
@@ -804,34 +833,39 @@ function parseAssistantDaemonOpenConversationPayload(
   payload: unknown,
 ): AssistantDaemonOpenConversationResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('POST')
   }
 
   const record = payload as Record<string, unknown>
   if (typeof record.created !== 'boolean') {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('POST')
   }
 
   return {
     created: record.created,
-    session: parseAssistantSessionOutputPayload(record.session),
+    session: parseAssistantSessionOutputPayload(record.session, 'POST'),
   }
 }
 
 function parseAssistantSessionListPayload(payload: unknown): AssistantSession[] {
   if (!Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
   return parseAssistantDaemonSchema(
     assistantSessionShowResultSchema.shape.session.array(),
     payload,
+    'GET',
   )
 }
 
-function parseAssistantSessionOutputPayload(payload: unknown): AssistantSession {
+function parseAssistantSessionOutputPayload(
+  payload: unknown,
+  method: AssistantDaemonHttpMethod,
+): AssistantSession {
   return parseAssistantDaemonSchema(
     assistantSessionShowResultSchema.shape.session,
     payload,
+    method,
   )
 }
 
@@ -839,9 +873,13 @@ function parseAssistantOutboxIntentListPayload(
   payload: unknown,
 ): AssistantOutboxIntent[] {
   if (!Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
-  return parseAssistantDaemonSchema(assistantOutboxIntentSchema.array(), payload)
+  return parseAssistantDaemonSchema(
+    assistantOutboxIntentSchema.array(),
+    payload,
+    'GET',
+  )
 }
 
 function parseAssistantNullableOutboxIntentPayload(
@@ -850,7 +888,7 @@ function parseAssistantNullableOutboxIntentPayload(
   if (payload === null) {
     return null
   }
-  return parseAssistantDaemonSchema(assistantOutboxIntentSchema, payload)
+  return parseAssistantDaemonSchema(assistantOutboxIntentSchema, payload, 'GET')
 }
 
 function parseAssistantOutboxDrainPayload(payload: unknown): {
@@ -860,15 +898,15 @@ function parseAssistantOutboxDrainPayload(payload: unknown): {
   sent: number
 } {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('POST')
   }
 
   const record = payload as Record<string, unknown>
   return {
-    attempted: parseAssistantCountField(record.attempted, 'attempted'),
-    failed: parseAssistantCountField(record.failed, 'failed'),
-    queued: parseAssistantCountField(record.queued, 'queued'),
-    sent: parseAssistantCountField(record.sent, 'sent'),
+    attempted: parseAssistantCountField(record.attempted, 'POST'),
+    failed: parseAssistantCountField(record.failed, 'POST'),
+    queued: parseAssistantCountField(record.queued, 'POST'),
+    sent: parseAssistantCountField(record.sent, 'POST'),
   }
 }
 
@@ -876,21 +914,21 @@ function parseAssistantCronStatusPayload(
   payload: unknown,
 ): AssistantCronStatusSnapshot {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
 
   const record = payload as Record<string, unknown>
   const nextRunAt = record.nextRunAt
   if (nextRunAt !== null && nextRunAt !== undefined && typeof nextRunAt !== 'string') {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
 
   return {
-    dueJobs: parseAssistantCountField(record.dueJobs, 'dueJobs'),
-    enabledJobs: parseAssistantCountField(record.enabledJobs, 'enabledJobs'),
+    dueJobs: parseAssistantCountField(record.dueJobs, 'GET'),
+    enabledJobs: parseAssistantCountField(record.enabledJobs, 'GET'),
     nextRunAt: nextRunAt ?? null,
-    runningJobs: parseAssistantCountField(record.runningJobs, 'runningJobs'),
-    totalJobs: parseAssistantCountField(record.totalJobs, 'totalJobs'),
+    runningJobs: parseAssistantCountField(record.runningJobs, 'GET'),
+    totalJobs: parseAssistantCountField(record.totalJobs, 'GET'),
   }
 }
 
@@ -898,29 +936,33 @@ function parseAssistantCronJobListPayload(
   payload: unknown,
 ): AssistantCronJob[] {
   if (!Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
-  return parseAssistantDaemonSchema(assistantCronJobSchema.array(), payload)
+  return parseAssistantDaemonSchema(assistantCronJobSchema.array(), payload, 'GET')
 }
 
 function parseAssistantCronRunsPayload(
   payload: unknown,
 ): { jobId: string; runs: AssistantCronRunRecord[] } {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
 
   const record = payload as Record<string, unknown>
   if (typeof record.jobId !== 'string' || record.jobId.length === 0) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
   if (!Array.isArray(record.runs)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('GET')
   }
 
   return {
     jobId: record.jobId,
-    runs: parseAssistantDaemonSchema(assistantCronRunRecordSchema.array(), record.runs),
+    runs: parseAssistantDaemonSchema(
+      assistantCronRunRecordSchema.array(),
+      record.runs,
+      'GET',
+    ),
   }
 }
 
@@ -928,20 +970,28 @@ function parseAssistantCronTargetMutationPayload(
   payload: unknown,
 ): AssistantCronTargetMutationResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('POST')
   }
 
   const record = payload as Record<string, unknown>
   return {
-    job: parseAssistantDaemonSchema(assistantCronJobSchema, record.job),
-    beforeTarget: parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, record.beforeTarget),
-    afterTarget: parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, record.afterTarget),
-    changed: parseAssistantBooleanField(record.changed, 'changed'),
+    job: parseAssistantDaemonSchema(assistantCronJobSchema, record.job, 'POST'),
+    beforeTarget: parseAssistantDaemonSchema(
+      assistantCronTargetSnapshotSchema,
+      record.beforeTarget,
+      'POST',
+    ),
+    afterTarget: parseAssistantDaemonSchema(
+      assistantCronTargetSnapshotSchema,
+      record.afterTarget,
+      'POST',
+    ),
+    changed: parseAssistantBooleanField(record.changed, 'POST'),
     continuityReset: parseAssistantBooleanField(
       record.continuityReset,
-      'continuityReset',
+      'POST',
     ),
-    dryRun: parseAssistantBooleanField(record.dryRun, 'dryRun'),
+    dryRun: parseAssistantBooleanField(record.dryRun, 'POST'),
   }
 }
 
@@ -949,29 +999,33 @@ function parseAssistantCronProcessDuePayload(
   payload: unknown,
 ): AssistantCronProcessDueResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError('POST')
   }
 
   const record = payload as Record<string, unknown>
   return {
-    failed: parseAssistantCountField(record.failed, 'failed'),
-    processed: parseAssistantCountField(record.processed, 'processed'),
-    succeeded: parseAssistantCountField(record.succeeded, 'succeeded'),
+    failed: parseAssistantCountField(record.failed, 'POST'),
+    processed: parseAssistantCountField(record.processed, 'POST'),
+    succeeded: parseAssistantCountField(record.succeeded, 'POST'),
   }
 }
 
-function parseAssistantCountField(value: unknown, field: string): number {
+function parseAssistantCountField(
+  value: unknown,
+  method: AssistantDaemonHttpMethod,
+): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    void field
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError(method)
   }
   return value
 }
 
-function parseAssistantBooleanField(value: unknown, field: string): boolean {
+function parseAssistantBooleanField(
+  value: unknown,
+  method: AssistantDaemonHttpMethod,
+): boolean {
   if (typeof value !== 'boolean') {
-    void field
-    throw buildAssistantDaemonResponseError()
+    throw buildAssistantDaemonResponseError(method)
   }
   return value
 }

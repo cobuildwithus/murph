@@ -210,6 +210,85 @@ test('malformed operator config fails model and self-target mutations without ov
     assertMalformedConfigError,
   )
   assert.equal(await readFile(configPath, 'utf8'), malformed)
+
+  const malformedNestedConfigs = [
+    {
+      assistant: {
+        account: null,
+        backend: null,
+        identityId: 42,
+        selfDeliveryTargets: null,
+      },
+      defaultVault: null,
+      hostedAssistant: null,
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    },
+    {
+      assistant: null,
+      defaultVault: null,
+      hostedAssistant: {
+        profiles: 'invalid',
+      },
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    },
+  ]
+
+  for (const malformedNestedConfig of malformedNestedConfigs) {
+    const rawNestedConfig = JSON.stringify(malformedNestedConfig)
+    await writeFile(configPath, rawNestedConfig, 'utf8')
+
+    await assert.rejects(
+      () => saveAssistantOperatorDefaultsPatch({ identityId: 'new-identity' }, homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
+
+    await assert.rejects(
+      () => saveAssistantSelfDeliveryTarget({
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'new-target',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      }, homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
+
+    await assert.rejects(
+      () => saveDefaultVaultConfig(path.join(homeDirectory, 'replacement-vault'), homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
+  }
+
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      assistant: {
+        account: null,
+        backend: {
+          adapter: 'unsupported-provider',
+        },
+        identityId: null,
+        selfDeliveryTargets: null,
+      },
+      defaultVault: null,
+      hostedAssistant: null,
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    }),
+    'utf8',
+  )
+  const migrated = await saveAssistantOperatorDefaultsPatch(
+    { identityId: 'new-identity' },
+    homeDirectory,
+  )
+  assert.equal(migrated.assistant?.backend, null)
+  assert.equal(migrated.assistant?.identityId, 'new-identity')
 })
 
 test('operator config resolves default vaults without owning command argv mutation', async () => {

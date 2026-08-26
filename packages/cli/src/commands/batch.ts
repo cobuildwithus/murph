@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 
-import { Cli, z } from 'incur'
+import { Cli, Formatter, z } from 'incur'
 import {
   emptyArgsSchema,
   resolveVaultCliCommandPath,
@@ -23,6 +23,7 @@ export const batchRunResultSchema = vaultCliBatchResultEnvelopeSchema
 type BatchCommandResult = z.output<
   typeof vaultCliBatchCommandResultEnvelopeSchema
 >
+type BatchChildRenderedFormat = 'md' | 'toon' | 'yaml'
 
 export function registerBatchCommands(cli: Cli.Cli) {
   cli.command('batch', {
@@ -149,12 +150,17 @@ async function runBatchCommand(input: {
   const stdout: string[] = []
   const previousExitCode = process.exitCode
   let argv: string[] = []
+  let renderedFormat: BatchChildRenderedFormat | null = null
 
   try {
     argv = prepareBatchCommandArgv(parseBatchCommandOption(input.command), input.vault)
+    renderedFormat = resolveBatchChildRenderedFormat(argv)
+    const executionArgv = renderedFormat
+      ? forceBatchChildJsonOutput(argv)
+      : argv
     process.exitCode = undefined
     const { runMurphCliAction } = await import('../cli-entry.js')
-    await runMurphCliAction(argv, {
+    await runMurphCliAction(executionArgv, {
       argv0: 'vault-cli',
       exit(code) {
         if (code && code !== 0) {
@@ -170,7 +176,11 @@ async function runBatchCommand(input: {
       throw new Error(`Command exited with status ${process.exitCode}.`)
     }
 
-    const output = stdout.join('')
+    const internalOutput = stdout.join('')
+    const parsedInternalOutput = parseJsonOutput(internalOutput)
+    const output = renderedFormat && parsedInternalOutput.ok
+      ? formatBatchChildOutput(parsedInternalOutput.data, renderedFormat)
+      : internalOutput
     const parsedOutput = parseJsonOutput(output)
     return {
       index: input.index,
@@ -183,8 +193,12 @@ async function runBatchCommand(input: {
       ...(parsedOutput.ok ? { data: parsedOutput.data } : {}),
     }
   } catch (error) {
-    const output = stdout.join('')
-    const childError = parseChildCommandError(output) ?? projectBatchCommandError(error)
+    const internalOutput = stdout.join('')
+    const parsedInternalOutput = parseJsonOutput(internalOutput)
+    const output = renderedFormat && parsedInternalOutput.ok
+      ? formatBatchChildOutput(parsedInternalOutput.data, renderedFormat)
+      : internalOutput
+    const childError = parseChildCommandError(internalOutput) ?? projectBatchCommandError(error)
     return {
       index: input.index,
       argv,
@@ -198,6 +212,87 @@ async function runBatchCommand(input: {
   } finally {
     process.exitCode = previousExitCode
   }
+}
+
+function resolveBatchChildRenderedFormat(
+  argv: readonly string[],
+): BatchChildRenderedFormat | null {
+  if (hasBatchChildPresentationMode(argv)) {
+    return null
+  }
+
+  let format: BatchChildRenderedFormat | null = null
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      break
+    }
+    if (token === '--json') {
+      format = null
+      continue
+    }
+    if (token === '--format') {
+      format = batchChildRenderedFormat(argv[index + 1])
+      index += 1
+      continue
+    }
+    if (token?.startsWith('--format=')) {
+      format = batchChildRenderedFormat(token.slice('--format='.length))
+    }
+  }
+
+  return format
+}
+
+function batchChildRenderedFormat(
+  value: string | undefined,
+): BatchChildRenderedFormat | null {
+  return value === 'md' || value === 'toon' || value === 'yaml'
+    ? value
+    : null
+}
+
+function hasBatchChildPresentationMode(argv: readonly string[]): boolean {
+  return (
+    hasToken(argv, '--help') ||
+    hasToken(argv, '-h') ||
+    hasToken(argv, '--llms') ||
+    hasToken(argv, '--llms-full') ||
+    hasToken(argv, '--schema')
+  )
+}
+
+function forceBatchChildJsonOutput(argv: readonly string[]): string[] {
+  const normalizedArgv: string[] = []
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      normalizedArgv.push(...argv.slice(index))
+      break
+    }
+    if (token === '--json' || token?.startsWith('--format=')) {
+      continue
+    }
+    if (token === '--format') {
+      index += 1
+      continue
+    }
+    if (token !== undefined) {
+      normalizedArgv.push(token)
+    }
+  }
+
+  insertDefaultOption(normalizedArgv, ['--format', 'json'])
+  return normalizedArgv
+}
+
+function formatBatchChildOutput(
+  output: unknown,
+  format: BatchChildRenderedFormat,
+): string {
+  const rendered = Formatter.format(output, format)
+  return rendered.endsWith('\n') ? rendered : `${rendered}\n`
 }
 
 function parseChildCommandError(

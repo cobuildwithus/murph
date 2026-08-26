@@ -117,3 +117,21 @@ without changing automation ownership or adding a second error framework.
 - Exact corrected-head production assembly passes all eight parity probes. The
   Vault CLI is 9,534,609 / 9,534,735 bytes with an 805-byte entry and
   25,155-byte static closure; runner total is 11,365,094 / 11,393,617 bytes.
+- Parent review invalidated the corrected-head candidate before its next review
+  completed. Accepted findings stay inside three existing owners: operator
+  config must reject malformed nested sections before patching; the daemon
+  client must classify invalid configuration, uncoded route 404s, and POST 2xx
+  parse/schema uncertainty accurately; and batch must retain typed child errors
+  even when the requested display format is not JSON.
+- The shared absolute-path rewrite is also accepted for deletion because it
+  breaks existing actionable filesystem projections and still cannot be a
+  complete privacy boundary. No replacement global redactor will be added.
+- Provider failure prose and legacy `lastError` suppression were rejected as
+  privacy-only expansion without a demonstrated correctness failure. Useful
+  diagnostics remain available under the existing bounded contracts rather
+  than adding another sanitization layer.
+- The accepted corrections reuse one strict patch-read gate, the existing
+  batch result envelope plus Incur formatter, and the daemon client's existing
+  method boundary. The broad shared path rewrite was deleted with no
+  replacement. Focused daemon 15/15, batch 12/12, operator-config 6/6, and inbox
+  seam 10/10 tests pass; all four affected package typechecks pass.

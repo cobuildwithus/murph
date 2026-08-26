@@ -256,7 +256,7 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
   }
 })
 
-test('batch compact mode preserves successful non-JSON output as stdout', async () => {
+test('batch compact mode preserves successful help and schema output as stdout', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-text-'))
   const vault = path.join(parent, 'vault')
 
@@ -269,7 +269,9 @@ test('batch compact mode preserves successful non-JSON output as stdout', async 
       '--vault',
       vault,
       '--command',
-      '["memory","show","--help"]',
+      '["memory","show","--help","--format","yaml"]',
+      '--command',
+      '["memory","show","--schema","--format","yaml"]',
       '--format',
       'json',
     ])
@@ -281,10 +283,15 @@ test('batch compact mode preserves successful non-JSON output as stdout', async 
       }>
     }
 
-    assert.equal(result.commands[0]?.ok, true)
-    assert.equal(typeof result.commands[0]?.stdout, 'string')
-    assert.ok((result.commands[0]?.stdout?.length ?? 0) > 0)
-    assert.equal(Object.hasOwn(result.commands[0] ?? {}, 'data'), false)
+    assert.deepEqual(result.commands.map((command) => command.ok), [true, true])
+    assert.equal(
+      result.commands.every((command) => command.stdout.length > 0),
+      true,
+    )
+    assert.equal(
+      result.commands.every((command) => !Object.hasOwn(command, 'data')),
+      true,
+    )
   } finally {
     await rm(parent, {
       recursive: true,
@@ -399,6 +406,60 @@ test('batch captures executed child command failures and continues by default', 
       false,
     )
     assert.equal(typeof result.commands[0]?.stdout, 'string')
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch lifts typed child failures through explicit non-JSON formats', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-formatted-failure-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+
+    for (const format of ['md', 'toon', 'yaml']) {
+      const raw = await runCli([
+        'batch',
+        '--vault',
+        vault,
+        '--command',
+        JSON.stringify(['init', '--format', format]),
+        '--format',
+        'json',
+      ])
+      const result = JSON.parse(raw) as {
+        commands: Array<{
+          argv: string[]
+          error?: {
+            code?: string
+            fieldErrors?: Array<{ path: string }>
+            message: string
+            retryable?: boolean
+            stage?: string
+          }
+          ok: boolean
+          stdout: string
+        }>
+      }
+      const command = result.commands[0]
+
+      assert.equal(command?.ok, false)
+      assert.equal(command?.error?.code, 'already_exists')
+      assert.equal(command?.error?.retryable, false)
+      assert.equal(command?.error?.stage, 'conflict')
+      assert.deepEqual(
+        command?.error?.fieldErrors?.map((fieldError) => fieldError.path),
+        ['vault'],
+      )
+      assert.equal(command?.error?.message.includes('exited with status'), false)
+      assert.deepEqual(command?.argv.slice(0, 3), ['init', '--format', format])
+      assert.match(command?.stdout ?? '', /already_exists/u)
+      assert.throws(() => JSON.parse(command?.stdout ?? ''))
+    }
   } finally {
     await rm(parent, {
       recursive: true,

@@ -357,6 +357,31 @@ test('canUseAssistantDaemonForMessage rejects local-only hooks and missing daemo
   assert.equal(canUseAssistantDaemonForMessage(TEST_MESSAGE_INPUT, TEST_ENV), true)
 })
 
+test('daemon helpers project invalid client configuration as a typed configuration error', () => {
+  assistantdClientMocks.resolveAssistantDaemonClientConfig.mockImplementationOnce(
+    () => {
+      throw new Error('PRIVATE_INVALID_DAEMON_CONFIG_MARKER')
+    },
+  )
+
+  assert.throws(
+    () => canUseAssistantDaemonForMessage(TEST_MESSAGE_INPUT, TEST_ENV),
+    (error: unknown) => {
+      assertDaemonClientError(error, {
+        code: 'assistant_daemon_config_invalid',
+        retryable: false,
+        stage: 'configuration',
+      })
+      assert.equal(
+        JSON.stringify(error).includes('PRIVATE_INVALID_DAEMON_CONFIG_MARKER'),
+        false,
+      )
+      assert.equal(fetchMock.mock.calls.length, 0)
+      return true
+    },
+  )
+})
+
 test('message, conversation, session, and status helpers serialize remote-safe payloads', async () => {
   fetchMock
     .mockResolvedValueOnce(
@@ -910,10 +935,11 @@ test('daemon helpers surface invalid JSON, invalid payload fields, and plain-tex
     () => maybeProcessDueAssistantCronViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
     (error: unknown) => {
       assertDaemonClientError(error, {
-        code: 'assistant_daemon_response_invalid',
+        code: 'assistant_daemon_completion_unknown',
         retryable: false,
         stage: 'response',
       })
+      assert.match(error.message, /Inspect daemon state before retrying\.$/u)
       return true
     },
   )
@@ -1041,10 +1067,11 @@ test('daemon helpers surface structured HTTP errors, request transport failures,
       ),
     (error: unknown) => {
       assertDaemonClientError(error, {
-        code: 'assistant_daemon_response_invalid',
+        code: 'assistant_daemon_completion_unknown',
         retryable: false,
         stage: 'response',
       })
+      assert.match(error.message, /Inspect daemon state before retrying\.$/u)
       return true
     },
   )
@@ -1061,7 +1088,7 @@ test('daemon helpers surface structured HTTP errors, request transport failures,
   )
 })
 
-test('daemon client preserves bounded owner codes for correctable 400 and 404 responses', async () => {
+test('daemon client preserves bounded owner codes and treats unknown 404s as route mismatches', async () => {
   fetchMock
     .mockResolvedValueOnce(
       new Response(JSON.stringify({
@@ -1073,6 +1100,17 @@ test('daemon client preserves bounded owner codes for correctable 400 and 404 re
       new Response(JSON.stringify({
         code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
         error: 'PRIVATE_MISSING_CRON_MARKER',
+      }), { status: 404 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: 'PRIVATE_UNKNOWN_ROUTE_MARKER',
+      }), { status: 404 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        code: 'ASSISTANT_UNKNOWN_ROUTE',
+        error: 'PRIVATE_UNKNOWN_CODE_MARKER',
       }), { status: 404 }),
     )
 
@@ -1112,6 +1150,46 @@ test('daemon client preserves bounded owner codes for correctable 400 and 404 re
         /List current cron jobs and retry with an existing job id\.$/u,
       )
       assert.equal(JSON.stringify(error).includes('PRIVATE_MISSING_CRON_MARKER'), false)
+      return true
+    },
+  )
+
+  await assert.rejects(
+    () => maybeGetAssistantCronJobViaDaemon(
+      { job: 'route-not-recognized', vault: '/tmp/vault' },
+      TEST_ENV,
+    ),
+    (error: unknown) => {
+      assertDaemonClientError(error, {
+        code: 'assistant_daemon_http_failed',
+        retryable: false,
+        stage: 'response',
+      })
+      assert.match(error.message, /Restart or update the local assistant daemon/u)
+      assert.equal(
+        JSON.stringify(error).includes('PRIVATE_UNKNOWN_ROUTE_MARKER'),
+        false,
+      )
+      return true
+    },
+  )
+
+  await assert.rejects(
+    () => maybeGetAssistantCronJobViaDaemon(
+      { job: 'unknown-owner-code', vault: '/tmp/vault' },
+      TEST_ENV,
+    ),
+    (error: unknown) => {
+      assertDaemonClientError(error, {
+        code: 'assistant_daemon_http_failed',
+        retryable: false,
+        stage: 'response',
+      })
+      assert.match(error.message, /Restart or update the local assistant daemon/u)
+      assert.equal(
+        JSON.stringify(error).includes('PRIVATE_UNKNOWN_CODE_MARKER'),
+        false,
+      )
       return true
     },
   )
@@ -1202,6 +1280,45 @@ test('daemon message response-body failures are terminal completion-unknown and 
   )
 })
 
+test('daemon POST invalid 2xx responses are terminal completion-unknown without replaying effects', async () => {
+  let completedEffects = 0
+  fetchMock
+    .mockImplementationOnce(async (_request, init) => {
+      assert.equal(init?.method, 'POST')
+      completedEffects += 1
+      return new Response('not-json', { status: 200 })
+    })
+    .mockImplementationOnce(async (_request, init) => {
+      assert.equal(init?.method, 'POST')
+      completedEffects += 1
+      return new Response(JSON.stringify({ status: 'completed' }), {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        status: 200,
+      })
+    })
+
+  await assert.rejects(
+    () => maybeSendAssistantMessageViaDaemon(TEST_MESSAGE_INPUT, TEST_ENV),
+    (error: unknown) => {
+      assertAssistantDaemonCompletionUnknown(error)
+      assert.equal(completedEffects, 1)
+      assert.equal(fetchMock.mock.calls.length, 1)
+      return true
+    },
+  )
+  await assert.rejects(
+    () => maybeSendAssistantMessageViaDaemon(TEST_MESSAGE_INPUT, TEST_ENV),
+    (error: unknown) => {
+      assertAssistantDaemonCompletionUnknown(error)
+      assert.equal(completedEffects, 2)
+      assert.equal(fetchMock.mock.calls.length, 2)
+      return true
+    },
+  )
+})
+
 test('daemon helpers reject malformed cron list and mutation payload shapes', async () => {
   fetchMock
     .mockResolvedValueOnce(
@@ -1273,11 +1390,11 @@ test('daemon helpers reject malformed cron list and mutation payload shapes', as
         },
         TEST_ENV,
       ),
-    (error: unknown) => assertAssistantDaemonResponseInvalid(error),
+    (error: unknown) => assertAssistantDaemonCompletionUnknown(error),
   )
   await assert.rejects(
     () => maybeProcessDueAssistantCronViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
-    (error: unknown) => assertAssistantDaemonResponseInvalid(error),
+    (error: unknown) => assertAssistantDaemonCompletionUnknown(error),
   )
   await assert.rejects(
     () =>
@@ -1288,7 +1405,7 @@ test('daemon helpers reject malformed cron list and mutation payload shapes', as
         },
         TEST_ENV,
       ),
-    (error: unknown) => assertAssistantDaemonResponseInvalid(error),
+    (error: unknown) => assertAssistantDaemonCompletionUnknown(error),
   )
 })
 
@@ -1298,6 +1415,16 @@ function assertAssistantDaemonResponseInvalid(error: unknown): true {
     retryable: false,
     stage: 'response',
   })
+  return true
+}
+
+function assertAssistantDaemonCompletionUnknown(error: unknown): true {
+  assertDaemonClientError(error, {
+    code: 'assistant_daemon_completion_unknown',
+    retryable: false,
+    stage: 'response',
+  })
+  assert.match(error.message, /Inspect daemon state before retrying\.$/u)
   return true
 }
 

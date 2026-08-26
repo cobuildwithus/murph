@@ -209,18 +209,57 @@ async function readOperatorConfigForPatch(
     throw error
   }
 
-  try {
-    return normalizeParsedOperatorConfig(parsed)
-  } catch (error) {
-    if (!hasErrorCode(error, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')) {
-      throw error
+  const assistant = normalizeAssistantOperatorDefaultsForPatch(parsed.assistant)
+  let hostedAssistant: HostedAssistantConfig | null = null
+  if (parsed.hostedAssistant !== undefined && parsed.hostedAssistant !== null) {
+    try {
+      hostedAssistant = parseHostedAssistantConfig(parsed.hostedAssistant)
+    } catch {
+      throw invalidOperatorConfigError()
     }
   }
 
   return normalizeParsedOperatorConfig({
     ...parsed,
-    assistant: stripUnsupportedAssistantBackend(parsed.assistant),
+    assistant,
+    hostedAssistant,
   })
+}
+
+function normalizeAssistantOperatorDefaultsForPatch(
+  defaults: unknown,
+): AssistantOperatorDefaults | null {
+  if (defaults === undefined || defaults === null) {
+    return null
+  }
+
+  const current = assistantOperatorDefaultsSchema.safeParse(defaults)
+  if (current.success) {
+    return current.data
+  }
+
+  if (typeof defaults !== 'object' || Array.isArray(defaults)) {
+    throw invalidOperatorConfigError()
+  }
+
+  try {
+    normalizeAssistantBackendTargetForPersistence(
+      (defaults as Record<string, unknown>).backend,
+    )
+  } catch (error) {
+    if (!hasErrorCode(error, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')) {
+      throw error
+    }
+
+    const migrated = assistantOperatorDefaultsSchema.safeParse(
+      stripUnsupportedAssistantBackend(defaults),
+    )
+    if (migrated.success) {
+      return migrated.data
+    }
+  }
+
+  throw invalidOperatorConfigError()
 }
 
 function invalidOperatorConfigError(): VaultCliError {
