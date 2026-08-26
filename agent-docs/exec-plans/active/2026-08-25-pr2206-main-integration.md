@@ -169,6 +169,16 @@ shared error projector and no partial writes or submitted-value echo.
   timed out only in the unrelated top-level audit-registration test at its fixed
   60-second ceiling. The exact three-journey rerun passed without that unrelated
   registration path.
+- Final prepared-runtime generation, CLI config-schema generation, and CLI
+  package-shape verification pass. The commit hook's earlier schema-generation
+  warning was reproduced as the CLI seeing the pre-change Vault Usecases build;
+  the canonical prepared-runtime build refreshed that dependency, after which
+  the same generator passed without a source change or compatibility shim.
+- The dedicated runner-bundle suite passes 14/14, and canonical hosted-runner
+  assembly passes all eight bundled-versus-unbundled parity probes. The Vault
+  CLI is 9,541,771 / 9,588,702 bytes with an 805-byte entry and 25,155-byte
+  static closure; runner total is 11,383,913 / 11,393,617 bytes. Docs drift and
+  gardening pass with zero issues.
 
 ## Tasks
 
