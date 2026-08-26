@@ -2,6 +2,7 @@ import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
   projectHostedRuntimeReconciliationFactsWireResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
@@ -45,9 +46,11 @@ export const GET = withJsonError(async (
     factsRequest,
   );
 
-  // Keep the wire response compatible with the deployed Temporal worker.
-  // Additive facts must reach that consumer before Web begins emitting them.
-  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(facts));
+  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(
+    facts,
+    new URL(request.url).search
+      === HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
+  ));
 });
 
 function assertHostedOrchestrationUserMatches(input: {

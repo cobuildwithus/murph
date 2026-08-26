@@ -363,7 +363,7 @@ describe("Lob physical-note runtime", () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       expect(request.url).toBe(
-        "https://api.lob.com/v1/letters?limit=2&metadata%5Bmurph_physical_note_id%5D=hpn_lookup",
+        "https://api.lob.com/v1/letters?limit=2&metadata=%7B%22murph_physical_note_id%22%3A%22hpn_lookup%22%7D",
       );
       expect(request.method).toBe("GET");
       expect(request.headers.get("authorization")).toMatch(/^Basic /u);

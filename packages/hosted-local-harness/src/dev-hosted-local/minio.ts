@@ -293,13 +293,23 @@ function resolveHostedLocalMinioCredentials(env: NodeJS.ProcessEnv): HostedLocal
   };
 }
 
-function buildHostedLocalMinioDockerUserArgs(): string[] {
-  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+export function buildHostedLocalMinioDockerUserArgs(
+  platform: NodeJS.Platform = process.platform,
+  identity: {
+    getgid?: () => number;
+    getuid?: () => number;
+  } = process,
+): string[] {
+  if (
+    platform !== "linux"
+    || typeof identity.getuid !== "function"
+    || typeof identity.getgid !== "function"
+  ) {
     return [];
   }
 
-  const uid = process.getuid();
-  const gid = process.getgid();
+  const uid = identity.getuid();
+  const gid = identity.getgid();
   if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) {
     return [];
   }

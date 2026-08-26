@@ -153,10 +153,12 @@ blander preference.
 For an ordinary interactive Linq/iMessage or Telegram group reply, the runtime
 holds the first completed provider response in memory for four seconds before
 the existing commit boundary. Input accepted before that first response still
-uses live provider steering. Input accepted during the held-draft window causes
-exactly one same-thread continuation that is told the prior response was not
-sent and may keep, replace, or suppress it. There is never a third provider
-request for the turn.
+uses live provider steering. Any input live-steered into request 0, or accepted
+during the held-draft window, makes that response provisional and causes exactly
+one same-thread continuation that is told the prior response was not sent and
+may keep, replace, or suppress it. When request 0 accepted live-steered input,
+the quiet end of the four-second window keeps admission open for request 1.
+There is never a third provider request for the turn.
 
 The held response is not transcript, terminal no-reply evidence, or outbox
 state. Until selection, source events and the accepted-input journal also own

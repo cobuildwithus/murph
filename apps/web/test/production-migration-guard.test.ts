@@ -2152,7 +2152,6 @@ describe("hosted web production migration guard", () => {
         < workflow.indexOf("release:production:contract-migrate"),
       "contract migrations must expose the database secret only after the alias proof output is set",
     );
-
     const productionProofRun = extractWorkflowRunScript(productionProofStep);
     const contractMigrationRun = extractWorkflowRunScript(contractMigrationStep);
     const shellFixture = await mkdtemp(
@@ -2275,6 +2274,7 @@ fi
       });
       assert.equal(exactMatch.status, 0, exactMatch.stderr);
       assert.equal(await readFile(callsFile, "utf8"), "verify\nmigrate\n");
+      await rm(callsFile, { force: true });
     } finally {
       await rm(shellFixture, { force: true, recursive: true });
     }

@@ -43,6 +43,7 @@ import { GrowthScorecard } from "../app/(dashboard)/ops/growth/growth-scorecard"
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  executeRaw: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   getHostedDashboardPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
@@ -141,6 +142,7 @@ let growthCronRoute: GrowthCronRouteModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
+  $executeRaw: mocks.executeRaw,
   hostedAccountGroup: mocks.hostedAccountGroup,
   hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
@@ -180,6 +182,7 @@ describe("hosted ops growth metrics", () => {
       member: { id: "member_ops" },
     });
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.executeRaw.mockResolvedValue(0);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValue(0);
@@ -2535,6 +2538,9 @@ describe("hosted ops growth metrics", () => {
 
     await captureHostedGrowthDailySnapshot(now);
 
+    expect(mocks.executeRaw).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining("hosted_group_participant_observation"),
+    }));
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       familyMrrUsdCents: 1_400,
@@ -2546,6 +2552,26 @@ describe("hosted ops growth metrics", () => {
       individualMrrUsdCents: 7_800,
       mrrUsdCents: 9_200,
     });
+  });
+
+  it("keeps the daily snapshot retryable when roster attribution fails", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.executeRaw.mockRejectedValueOnce(new Error("temporary attribution failure"));
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-08-07", 2_900),
+    );
+
+    try {
+      await expect(captureHostedGrowthDailySnapshot(now)).resolves.toBeDefined();
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth roster-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+      expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("upserts one daily snapshot per UTC date", async () => {

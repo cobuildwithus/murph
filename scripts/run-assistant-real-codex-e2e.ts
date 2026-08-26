@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process'
+import { isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export type AssistantRealCodexAuthMode = 'provider' | 'subscription'
 
 export interface AssistantRealCodexRunOptions {
   authMode: AssistantRealCodexAuthMode
+  codexHome: string | null
   help: boolean
   model: string | null
   testPattern: string | null
@@ -34,6 +36,7 @@ export interface AssistantRealCodexRunDependencies {
 
 const DEFAULT_OPTIONS: AssistantRealCodexRunOptions = {
   authMode: 'subscription',
+  codexHome: null,
   help: false,
   model: null,
   testPattern: null,
@@ -45,6 +48,7 @@ const USAGE = [
   '',
   'Options:',
   '  --auth subscription|provider  Use local ChatGPT auth (default) or provider env.',
+  '  --codex-home <absolute-path>   Use an explicit local Codex home for subscription auth.',
   '  --model <model>               Override the default gpt-5.6-terra model.',
   '  -h, --help                    Show this help.',
 ].join('\n')
@@ -73,6 +77,15 @@ export function parseAssistantRealCodexRunArgs(
       index += 1
       continue
     }
+    if (argument === '--codex-home') {
+      const codexHome = readRequiredValue(argv, index, argument)
+      if (!isAbsolute(codexHome)) {
+        throw new Error('--codex-home requires an absolute path.')
+      }
+      options.codexHome = codexHome
+      index += 1
+      continue
+    }
     if (argument === '--auth') {
       const authMode = readRequiredValue(argv, index, argument)
       if (authMode !== 'provider' && authMode !== 'subscription') {
@@ -94,6 +107,9 @@ export function parseAssistantRealCodexRunArgs(
   if (!options.help && !options.testPattern) {
     throw new Error('A focused --test name pattern is required.')
   }
+  if (options.authMode === 'provider' && options.codexHome) {
+    throw new Error('--codex-home is available only with subscription auth.')
+  }
 
   return options
 }
@@ -104,7 +120,7 @@ export function buildAssistantRealCodexRunEnv(input: {
 }): NodeJS.ProcessEnv {
   const sourceEnv = input.sourceEnv ?? process.env
   const env = input.options.authMode === 'subscription'
-    ? buildNormalCodexHomeEnv(sourceEnv)
+    ? buildSubscriptionRunEnv(sourceEnv, input.options.codexHome)
     : { ...sourceEnv }
   env.MURPH_RUN_REAL_CODEX_E2E = '1'
 
@@ -115,6 +131,7 @@ export function buildAssistantRealCodexRunEnv(input: {
     delete env.MURPH_REAL_CODEX_PROVIDER_ENV_KEY
   } else {
     delete env.MURPH_REAL_CODEX_AUTH
+    delete env.MURPH_REAL_CODEX_HOME
   }
 
   if (input.options.model) {
@@ -126,8 +143,16 @@ export function buildAssistantRealCodexRunEnv(input: {
 
 export function buildAssistantRealCodexLoginEnv(
   sourceEnv: NodeJS.ProcessEnv,
+  codexHome: string | null = null,
 ): NodeJS.ProcessEnv {
-  return buildNormalCodexHomeEnv(sourceEnv)
+  const env = { ...sourceEnv }
+  delete env.MURPH_REAL_CODEX_HOME
+  if (codexHome) {
+    env.CODEX_HOME = codexHome
+  } else {
+    delete env.CODEX_HOME
+  }
+  return env
 }
 
 export function buildAssistantRealCodexListArgs(
@@ -244,7 +269,10 @@ export function executeAssistantRealCodexRun(
     const loginStatus = dependencies.runCommand({
       args: ['login', 'status'],
       command: 'codex',
-      env: buildAssistantRealCodexLoginEnv(dependencies.sourceEnv),
+      env: buildAssistantRealCodexLoginEnv(
+        dependencies.sourceEnv,
+        options.codexHome,
+      ),
       stdio: 'ignore',
     })
     if (loginStatus.status !== 0) {
@@ -293,11 +321,17 @@ function readRequiredValue(
   return value
 }
 
-function buildNormalCodexHomeEnv(
+function buildSubscriptionRunEnv(
   sourceEnv: NodeJS.ProcessEnv,
+  codexHome: string | null,
 ): NodeJS.ProcessEnv {
   const env = { ...sourceEnv }
   delete env.CODEX_HOME
+  if (codexHome) {
+    env.MURPH_REAL_CODEX_HOME = codexHome
+  } else {
+    delete env.MURPH_REAL_CODEX_HOME
+  }
   return env
 }
 

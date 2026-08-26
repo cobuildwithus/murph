@@ -917,7 +917,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "handoff",
-        context: "Sunny logged a 405 lb deadlift personal record today.",
+        context: "The member set a personal record today.",
         groupLabel: "100 Club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
       },
@@ -928,7 +928,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "100 Club",
       memberId: "member_self",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
@@ -4879,7 +4879,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     const reconcileQuery = readParticipantReconcileQuery();
     expect(reconcileQuery.sql).toContain(
-      "WITH input_participant(participant_member_id, handle_lookup_key)",
+      "WITH input_observation(contact_lookup_key)",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "INSERT INTO hosted_group_participant_observation",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "ORDER BY input_observation.contact_lookup_key",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "input_participant(participant_member_id, handle_lookup_key)",
     );
     expect(reconcileQuery.sql).toContain(
       "ON CONFLICT (container_member_id, participant_member_id)",
@@ -4895,6 +4904,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(reconcileQuery.values.some((value) =>
       typeof value === "string" && /^hbidx:phone:/u.test(value)
     )).toBe(true);
+    const silentEmailLookupKey = createHostedLinqParticipantContactLookupKey({
+      kind: "email",
+      value: "person@example.com",
+    });
+    expect(silentEmailLookupKey).not.toBeNull();
+    expect(reconcileQuery.values).toContain(silentEmailLookupKey);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5266,7 +5281,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
   });
 
-  it("dedupes same-member handles by first provider order in one statement", async () => {
+  it("dedupes member authority while observing every current handle in one statement", async () => {
     const firstHandle = "+15550000001";
     const laterHandle = "+15550000002";
     const firstLookupKey = createHostedLinqParticipantContactLookupKey({
@@ -5298,7 +5313,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
     const reconcileQuery = readParticipantReconcileQuery();
     expect(reconcileQuery.values).toContain(firstLookupKey);
-    expect(reconcileQuery.values).not.toContain(laterLookupKey);
+    expect(reconcileQuery.values).toContain(laterLookupKey);
     expect(reconcileQuery.values.filter((value) => value === "member_participant"))
       .toHaveLength(1);
   });

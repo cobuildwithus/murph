@@ -1068,10 +1068,16 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerWorkspaceInvocationAbortStatus> {
     const retryingCleanupFailure =
       active.requiresFailClosedStopReason === "cleanup_failed";
-    if (active.abortEndpointReady) {
-      await this.postWorkspaceInvocationAbort(input);
-    }
-    if (!active.abortController.signal.aborted) {
+    const childAbortStatus = active.abortEndpointReady
+      ? await this.postWorkspaceInvocationAbort(input)
+      : "failed";
+    const childOwnsSettlement =
+      childAbortStatus === "accepted"
+      || childAbortStatus === "queued";
+    if (
+      !childOwnsSettlement
+      && !active.abortController.signal.aborted
+    ) {
       active.abortController.abort(
         new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE),
       );

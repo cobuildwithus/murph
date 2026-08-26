@@ -39,6 +39,10 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantRealCodexRunEnv,
+  parseAssistantRealCodexRunArgs,
+} from '../../../scripts/run-assistant-real-codex-e2e.ts'
+import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
@@ -51,7 +55,11 @@ import {
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -70,6 +78,7 @@ import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+  MURPH_GROUP_CONSULT_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -95,6 +104,9 @@ import {
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
+import {
+  sendAssistantMessageLocal,
+} from '../src/assistant/service.ts'
 import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
@@ -140,7 +152,10 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
-import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import {
+  extractCodexAssistantProviderUsage,
+  resolveAssistantProviderPrompt,
+} from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
@@ -316,6 +331,145 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
+
+describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+  it(
+    'answers from an early detail retained across sixty committed messages',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-cold-conversation-reconstruction-e2e-'),
+      )
+      const conversationHistoryMessages = Array.from(
+        { length: 30 },
+        (_, index) => index === 0
+          ? [
+              {
+                content:
+                  'For the synthetic packing checklist, put the train tickets in the cobalt folder.',
+                role: 'user' as const,
+              },
+              {
+                content:
+                  'Got it. The train tickets go in the cobalt folder.',
+                role: 'assistant' as const,
+              },
+            ]
+          : [
+              {
+                content:
+                  `Synthetic checklist item ${index + 1}: ${'routine packing note '.repeat(8)}`,
+                role: 'user' as const,
+              },
+              {
+                content:
+                  `Synthetic checklist response ${index + 1}: ${'routine confirmation '.repeat(8)}`,
+                role: 'assistant' as const,
+              },
+            ],
+      ).flat()
+      const userPrompt = 'Which folder did we pick for the train tickets?'
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'telegram',
+            conversationKey: 'telegram:direct:cold-reconstruction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-cold-reconstruction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-cold-reconstruction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'read-only',
+          },
+          turnCount: 30,
+          updatedAt: '2026-08-26T12:30:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          conversationHistoryMessages.map((message) => ({
+            kind: message.role,
+            text: message.content,
+          })),
+        )
+        const historyBytes = conversationHistoryMessages.reduce(
+          (total, message) =>
+            total + Buffer.byteLength(message.content, 'utf8'),
+          0,
+        )
+        expect(historyBytes).toBeLessThanOrEqual(12_000)
+
+        const result = await sendAssistantMessageLocal({
+          channel: 'telegram',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          persistUserPromptOnFailure: false,
+          prompt: userPrompt,
+          provider: 'codex-cli',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          sessionId: session.sessionId,
+          threadId: 'thread-cold-reconstruction',
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          vault: workingDirectory,
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyBytes,
+            historyMessages: conversationHistoryMessages.length,
+            reply: result.response.trim(),
+          })}\n`,
+        )
+        expect(result.response).toMatch(/cobalt/iu)
+        expect(result.response).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
@@ -3548,6 +3702,168 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /detect(?:ed|s|ing)? who|who (?:tapped|performed) add/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'uses the saved preferred name in a private-to-group handoff',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-handoff-name-e2e-'),
+      )
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const vaultCliPath = path.join(workingDirectory, 'vault-cli')
+        const memoryPayload = JSON.stringify({
+          document: {
+            records: [{
+              id: 'memory_preferred_name',
+              section: 'Identity',
+              text: 'Preferred display name: Member Delta',
+              updatedAt: '2026-07-29T12:00:00.000Z',
+            }],
+          },
+          memory: null,
+          vault: 'synthetic-vault',
+        })
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'group-chat',
+          }),
+          writeFile(commandLogPath, '', 'utf8'),
+          writeFile(
+            vaultCliPath,
+            [
+              '#!/bin/sh',
+              'set -eu',
+              'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
+              'printf \'%s\\n\' "$*" >> "$script_dir/vault-commands.log"',
+              'case "$*" in',
+              `  memory\\ show*) printf '%s\\n' '${memoryPayload}' ;;`,
+              '  *) printf \'unsupported synthetic vault command: %s\\n\' "$*" >&2; exit 64 ;;',
+              'esac',
+              '',
+            ].join('\n'),
+            { encoding: 'utf8', mode: 0o700 },
+          ),
+        ])
+        await chmod(vaultCliPath, 0o700)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_handoff_name',
+              recipientKey: 'recipient_private_group_handoff_name',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_handoff_name'],
+              conversationId: 'conversation_private_group_handoff_name',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_handoff_name'],
+              originSessionId: 'session_private_group_handoff_name',
+              recipientKey: 'recipient_private_group_handoff_name',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'handoff',
+                  result: {
+                    status: 'accepted',
+                    targetLabel: 'Training Circle',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Tell Training Circle that I completed the planned session.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const memoryCommands = (await readFile(commandLogPath, 'utf8'))
+          .split('\n')
+          .map((command) => command.trim())
+          .filter(Boolean)
+        const observedContext = groupRequests.find((request) =>
+          request !== null
+          && typeof request === 'object'
+          && 'context' in request
+          && typeof request.context === 'string'
+        )
+        process.stdout.write(
+          `[group-handoff-name-e2e] ${JSON.stringify({
+            context:
+              observedContext
+                && typeof observedContext === 'object'
+                && 'context' in observedContext
+                ? observedContext.context
+                : null,
+            memoryCommands,
+            reply: result.finalMessage.trim(),
+            toolCallCount: groupRequests.length,
+          })}\n`,
+        )
+
+        expect(groupRequests).toHaveLength(1)
+        const handoffRequest = groupRequests[0]
+        expect(handoffRequest).toMatchObject({
+          action: 'handoff',
+          groupLabel: 'Training Circle',
+        })
+        if (
+          !handoffRequest
+          || typeof handoffRequest !== 'object'
+          || !('context' in handoffRequest)
+          || typeof handoffRequest.context !== 'string'
+        ) {
+          throw new Error('Expected one named group handoff context.')
+        }
+        expect(handoffRequest.context).toContain('Member Delta')
+        expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
+        expect(
+          memoryCommands.filter((command) => command.startsWith('memory show')),
+        ).toHaveLength(1)
+        expect(result.finalMessage).toMatch(/queu/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -7685,6 +8001,193 @@ describeRealCodex('real Codex support escalation e2e', () => {
   )
 })
 
+describeRealCodex('real Codex Kernel browser continuation e2e', () => {
+  it(
+    'opens an account portal, reports setup readiness, and does not enter private information',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-kernel-browser-inspection-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const requests: Array<{
+        body: Record<string, unknown>
+        url: string
+      }> = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'computer-use',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          fetchImpl: async (
+            request: string | URL | Request,
+            init?: RequestInit,
+          ): Promise<Response> => {
+            const url = request instanceof Request
+              ? request.url
+              : String(request)
+            const body = JSON.parse(String(init?.body)) as Record<
+              string,
+              unknown
+            >
+            requests.push({ body, url })
+
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs'
+            ) {
+              return new Response(JSON.stringify({
+                expiresAt: '2026-08-26T19:00:00.000Z',
+                reused: false,
+                runId: 'run_synthetic_portal',
+                status: 'running',
+                title: 'Account portal',
+                url: 'https://portal.example.test/setup',
+                visibleText: [
+                  'Account portal loaded.',
+                  'Setup is ready.',
+                  'A mailing address is required to continue.',
+                ].join('\n'),
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish'
+            ) {
+              return new Response(JSON.stringify({
+                ok: true,
+                runId: 'run_synthetic_portal',
+                status: 'completed',
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            throw new Error(`Unexpected hosted computer request: ${url}`)
+          },
+          hostedToolContext: createRealCodexComputerHostedToolContext(),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Open https://portal.example.test/setup and tell me whether account setup is ready.',
+            'Do not enter or submit personal or payment information.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const computerToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_FINISH_RUN_TOOL.name,
+          MURPH_COMPUTER_OPEN_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const prohibitedToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('computer-use/SKILL.md')
+          && action.output.includes('# Computer Use')
+        )
+        const computerCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && computerToolNames.has(action.tool)
+        )
+        const openCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_OPEN_TOOL.name
+        )
+        const finishCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_FINISH_RUN_TOOL.name
+        )
+        const prohibitedCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && prohibitedToolNames.has(action.tool)
+        )
+
+        expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(openCalls).toHaveLength(1)
+        expect(finishCalls).toHaveLength(1)
+        expect(prohibitedCalls).toHaveLength(0)
+        expect(openCalls[0]?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(openCalls[0]).toMatchObject({
+          argumentsValue: {
+            startUrl: 'https://portal.example.test/setup',
+          },
+        })
+        expect(finishCalls[0]).toMatchObject({
+          argumentsValue: {
+            outcome: 'completed',
+            runId: 'run_synthetic_portal',
+          },
+        })
+        expect(requests).toEqual([
+          {
+            body: {
+              goal: 'Hosted computer task.',
+              resumeAfterMailboxItemId: null,
+              resumeDeliveryContext: null,
+              startUrl: 'https://portal.example.test/setup',
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs',
+          },
+          {
+            body: {
+              outcome: 'completed',
+              summary: null,
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish',
+          },
+        ])
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/setup/iu)
+        expect(reply).toMatch(/ready/iu)
+        expect(reply).not.toMatch(
+          /setup (?:is )?complete|information (?:was|has been) submitted/iu,
+        )
+        expect(reply).not.toMatch(/HOSTED_COMPUTER|LIVE_VIEW_ORIGIN/iu)
+        process.stdout.write(
+          `[kernel-browser-continuation-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'account-setup-readiness',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -8579,6 +9082,42 @@ describe('real Codex app-server cache usage e2e harness', () => {
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
       temporaryPaths: [],
     })
+  })
+
+  it('composes one explicit runner Codex home only in subscription mode', async () => {
+    const sourceEnv = buildAssistantRealCodexRunEnv({
+      options: parseAssistantRealCodexRunArgs([
+        'focused journey',
+        '--codex-home',
+        '/alternate-codex-home',
+      ]),
+      sourceEnv: {
+        CODEX_HOME: '/ambient-codex-home',
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+    })
+    const config = await resolveRealCodexE2eConfig({ sourceEnv })
+
+    expect(config).toEqual({
+      codexHome: '/alternate-codex-home',
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+    await expect(resolveRealCodexE2eConfig({
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+      },
+    })).rejects.toThrow(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
+    )
   })
 
   it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
@@ -10799,6 +11338,27 @@ function createRealCodexSupportHostedToolContext(
       inboundMailboxItemIds: ['mailbox-support'],
       originSessionId: `session-support-${conversationScope}`,
       recipientKey: `recipient-support-${conversationScope}`,
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
+  }
+}
+
+function createRealCodexComputerHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_computer'],
+      conversationId: 'conversation-computer-direct',
+      conversationScope: 'direct',
+      inboundMailboxItemIds: ['mailbox-computer'],
+      originSessionId: 'session-computer-direct',
+      recipientKey: 'recipient-computer-direct',
     }),
     sendVaultFile: async () => ({
       filename: 'unused',
@@ -13365,18 +13925,17 @@ async function resolveRealCodexE2eConfig(
   const model =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
-  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
-  if (configuredCodexHome) {
-    throw new Error(
-      'MURPH_REAL_CODEX_HOME is not supported; provider mode creates an isolated home and subscription mode uses the normal local Codex home.',
-    )
-  }
-
   const authMode =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_AUTH) ?? 'provider'
   if (authMode !== 'provider' && authMode !== 'subscription') {
     throw new Error(
       'MURPH_REAL_CODEX_AUTH must be provider or subscription.',
+    )
+  }
+  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
+  if (authMode === 'provider' && configuredCodexHome) {
+    throw new Error(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
     )
   }
   const explicitModelProvider =
@@ -13391,7 +13950,7 @@ async function resolveRealCodexE2eConfig(
       )
     }
     return {
-      codexHome: null,
+      codexHome: configuredCodexHome,
       env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
       model,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
