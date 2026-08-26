@@ -571,6 +571,7 @@ describe("hosted local dev stack", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.mocked(cp).mockImplementation(async () => {});
     vi.mocked(readFile).mockImplementation(async () => {
       const error = new Error("File not found") as Error & { code: string };
       error.code = "ENOENT";
@@ -1680,7 +1681,7 @@ describe("hosted local dev stack", () => {
     }));
   });
 
-  it("falls back to host Docker CLI plugins when inherited Docker config is already isolated", async () => {
+  it("falls back to host Docker context and CLI plugins when inherited Docker config is already isolated", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
@@ -1696,6 +1697,28 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
     vi.mocked(access).mockResolvedValueOnce(undefined);
+    const dockerContext = "desktop-linux";
+    const dockerContextId = createHash("sha256").update(dockerContext).digest("hex");
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith(`${path.sep}.docker${path.sep}config.json`)) {
+        return JSON.stringify({
+          auths: { "registry.example.invalid": {} },
+          credsStore: "desktop",
+          currentContext: dockerContext,
+        });
+      }
+
+      const error = new Error("File not found") as Error & { code: string };
+      error.code = "ENOENT";
+      throw error;
+    });
+    vi.mocked(cp).mockImplementation(async (sourcePath) => {
+      if (String(sourcePath).endsWith(path.join("contexts", "tls", dockerContextId))) {
+        const error = new Error("File not found") as Error & { code: string };
+        error.code = "ENOENT";
+        throw error;
+      }
+    });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
@@ -1703,6 +1726,7 @@ describe("hosted local dev stack", () => {
       env: {
         ...process.env,
         DOCKER_CONFIG: "/tmp/murph-dev-env-test/docker-config",
+        DOCKER_CONTEXT: "",
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
@@ -1716,6 +1740,24 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
+    expect(writeFile).toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/docker-config/config.json",
+      '{"auths":{},"currentContext":"desktop-linux"}\n',
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+    expect(cp).toHaveBeenCalledWith(
+      expect.stringContaining(path.join(".docker", "contexts", "meta", dockerContextId)),
+      `/tmp/murph-dev-env-test/docker-config/contexts/meta/${dockerContextId}`,
+      { recursive: true },
+    );
+    expect(cp).toHaveBeenCalledWith(
+      expect.stringContaining(path.join(".docker", "contexts", "tls", dockerContextId)),
+      `/tmp/murph-dev-env-test/docker-config/contexts/tls/${dockerContextId}`,
+      { recursive: true },
+    );
     expect(access).toHaveBeenCalledWith(expect.stringContaining(".docker/cli-plugins"));
     expect(rm).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/docker-config/cli-plugins",
