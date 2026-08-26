@@ -3697,6 +3697,55 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("reports completed rows before a later bounded drain failure", async () => {
+    const close = vi.fn();
+    const observedProgress: number[] = [];
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async (
+      _limit: number,
+      _accountId?: string,
+      options?: { onProcessedJobRows?: (processedJobRows: number) => void },
+    ) => {
+      options?.onProcessedJobRows?.(1);
+      throw new Error("synthetic bounded drain failure");
+    });
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce,
+    });
+
+    await expect(runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_partial_progress_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        onProcessedJobs: (processedJobs) => observedProgress.push(processedJobs),
+      },
+    )).rejects.toThrow("synthetic bounded drain failure");
+
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
+    expect(observedProgress).toEqual([1]);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("caps the yield-aware device-sync drain path in one bounded service call", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);

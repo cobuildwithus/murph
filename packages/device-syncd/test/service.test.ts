@@ -6413,6 +6413,73 @@ test("device sync drain shares one bounded import session and reports cumulative
   }
 });
 
+test("device sync drain stops before the next job when foreground work arrives", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-between-job-yield");
+  const progress: number[] = [];
+  let executionCount = 0;
+  let yieldRequested = false;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      shouldYieldJobExecution: () => yieldRequested,
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider({
+      async executeJob() {
+        executionCount += 1;
+        return {};
+      },
+    })],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-between-job-yield",
+    displayName: "Demo Between Job Yield",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "between-job-yield-access",
+      accessTokenEncrypted: encryptStoredAccessToken(
+        "demo",
+        "demo-between-job-yield",
+        "between-job-yield-access",
+      ),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { resource: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { resource: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+
+  try {
+    assert.equal(await service.drainWorker(2, account.id, {
+      onProcessedJobRows(count) {
+        progress.push(count);
+        yieldRequested = true;
+      },
+    }), 1);
+    assert.equal(executionCount, 1);
+    assert.deepEqual(progress, [1]);
+    assert.equal(store.getJobById(first.id)?.status, "succeeded");
+    assert.equal(store.getJobById(second.id)?.status, "queued");
+    assert.equal(store.getJobById(second.id)?.attempts, 0);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service reclaims expired running batch candidates in due order", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-expired-running");
   const batchCalls: string[][] = [];
