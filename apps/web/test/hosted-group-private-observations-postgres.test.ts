@@ -1,9 +1,14 @@
+import { randomUUID } from "node:crypto";
+
 import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
   recordHostedGrowthGroupPrivateRosterConversions,
 } from "@/src/lib/hosted-ops/growth-group-private-observations";
+import {
+  deleteHostedGroupParticipantObservationsForAccountDeletionTx,
+} from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -118,6 +123,80 @@ describe.skipIf(!runPostgresProof)(
           ]);
         });
       } finally {
+        await prisma.$disconnect();
+      }
+    });
+
+    it("deletes the account's contact-derived observations and keeps unrelated evidence", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `member_group_observation_delete_${fixtureId}`;
+      const phoneLookupKey = `phone_group_observation_delete_${fixtureId}`;
+      const emailLookupKey = `email_group_observation_delete_${fixtureId}`;
+      const unrelatedLookupKey = `unrelated_group_observation_${fixtureId}`;
+      const now = new Date("2026-08-26T12:00:00.000Z");
+      const expiresAt = new Date("2026-09-09T12:00:00.000Z");
+
+      try {
+        await prisma.$executeRaw(Prisma.sql`
+          INSERT INTO hosted_member (id, updated_at)
+          VALUES (${memberId}, ${now})
+        `);
+        await prisma.$executeRaw(Prisma.sql`
+          INSERT INTO hosted_member_identity (
+            member_id,
+            phone_lookup_key,
+            updated_at
+          )
+          VALUES (${memberId}, ${phoneLookupKey}, ${now})
+        `);
+        await prisma.$executeRaw(Prisma.sql`
+          INSERT INTO hosted_member_email_authorization (
+            member_id,
+            verified_email_lookup_key,
+            verified_email_verified_at,
+            updated_at
+          )
+          VALUES (${memberId}, ${emailLookupKey}, ${now}, ${now})
+        `);
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_group_participant_observation (
+              contact_lookup_key TEXT PRIMARY KEY,
+              first_observed_at TIMESTAMP(3) NOT NULL,
+              expires_at TIMESTAMP(3) NOT NULL
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_group_participant_observation (
+              contact_lookup_key,
+              first_observed_at,
+              expires_at
+            )
+            VALUES
+              (${phoneLookupKey}, ${now}, ${expiresAt}),
+              (${emailLookupKey}, ${now}, ${expiresAt}),
+              (${unrelatedLookupKey}, ${now}, ${expiresAt})
+          `);
+
+          const deletedCount =
+            await deleteHostedGroupParticipantObservationsForAccountDeletionTx({
+              memberIds: [memberId],
+              prisma: tx,
+            });
+
+          expect(deletedCount).toBe(2);
+          await expect(tx.$queryRaw<Array<{ contactLookupKey: string }>>(Prisma.sql`
+            SELECT contact_lookup_key AS "contactLookupKey"
+            FROM hosted_group_participant_observation
+            ORDER BY contact_lookup_key
+          `)).resolves.toEqual([{ contactLookupKey: unrelatedLookupKey }]);
+        });
+      } finally {
+        await prisma.$executeRaw(Prisma.sql`
+          DELETE FROM hosted_member
+          WHERE id = ${memberId}
+        `);
         await prisma.$disconnect();
       }
     });

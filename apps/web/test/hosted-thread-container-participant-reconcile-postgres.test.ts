@@ -7,6 +7,9 @@ import {
 import {
   createHostedLinqParticipantContactLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  recordHostedGrowthGroupPrivateRosterConversions,
+} from "@/src/lib/hosted-ops/growth-group-private-observations";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -218,6 +221,55 @@ describe.skipIf(!runPostgresProof)(
               - refreshedObservation.firstObservedAt.getTime(),
           ).toBe(14 * 24 * 60 * 60 * 1000);
 
+          await createAttributionProofTables(tx);
+          const activationAt = new Date(
+            refreshedObservation.firstObservedAt.getTime() + 60_000,
+          );
+          const trackedAt = new Date(activationAt.getTime() + 60_000);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_member (
+              id,
+              group_private_conversion_tracked_at,
+              updated_at
+            )
+            VALUES ('member_silent_conversion', NULL, ${activationAt})
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_member_email_authorization (
+              member_id,
+              verified_email_lookup_key,
+              verified_email_verified_at
+            )
+            VALUES (
+              'member_silent_conversion',
+              ${silentLookupKey},
+              ${activationAt}
+            )
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_mailbox_item (id, user_id, kind, created_at)
+            VALUES (
+              'activation_silent_conversion',
+              'member_silent_conversion',
+              'member.activated',
+              ${activationAt}
+            )
+          `);
+
+          await expect(recordHostedGrowthGroupPrivateRosterConversions({
+            prisma: tx,
+            trackedAt,
+          })).resolves.toBe(1);
+          await expect(recordHostedGrowthGroupPrivateRosterConversions({
+            prisma: tx,
+            trackedAt: new Date(trackedAt.getTime() + 60_000),
+          })).resolves.toBe(0);
+          await expect(tx.$queryRaw<Array<{ trackedAt: Date | null }>>(Prisma.sql`
+            SELECT group_private_conversion_tracked_at AS "trackedAt"
+            FROM hosted_member
+            WHERE id = 'member_silent_conversion'
+          `)).resolves.toEqual([{ trackedAt }]);
+
           await tx.$executeRaw(Prisma.sql`
             UPDATE hosted_thread_container_participant
             SET removed_at = NULL
@@ -269,6 +321,49 @@ type ParticipantRow = {
   removedAt: Date | null;
   updatedAt: Date;
 };
+
+async function createAttributionProofTables(
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
+): Promise<void> {
+  await tx.$executeRaw(Prisma.sql`
+    CREATE TEMP TABLE hosted_member (
+      id TEXT PRIMARY KEY,
+      group_private_conversion_tracked_at TIMESTAMP(3),
+      updated_at TIMESTAMP(3) NOT NULL
+    ) ON COMMIT DROP
+  `);
+  await tx.$executeRaw(Prisma.sql`
+    CREATE TEMP TABLE hosted_member_identity (
+      member_id TEXT PRIMARY KEY,
+      phone_lookup_key TEXT
+    ) ON COMMIT DROP
+  `);
+  await tx.$executeRaw(Prisma.sql`
+    CREATE TEMP TABLE hosted_member_email_authorization (
+      member_id TEXT PRIMARY KEY,
+      verified_email_lookup_key TEXT,
+      verified_email_verified_at TIMESTAMP(3)
+    ) ON COMMIT DROP
+  `);
+  await tx.$executeRaw(Prisma.sql`
+    CREATE TEMP TABLE hosted_mailbox_item (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      created_at TIMESTAMP(3) NOT NULL
+    ) ON COMMIT DROP
+  `);
+  await tx.$executeRaw(Prisma.sql`
+    CREATE TEMP TABLE hosted_group (
+      runtime_member_id TEXT
+    ) ON COMMIT DROP
+  `);
+  await tx.$executeRaw(Prisma.sql`
+    CREATE TEMP TABLE hosted_thread_container (
+      member_id TEXT PRIMARY KEY
+    ) ON COMMIT DROP
+  `);
+}
 
 async function readRows(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,

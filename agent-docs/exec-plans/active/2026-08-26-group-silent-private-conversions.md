@@ -45,7 +45,8 @@ Updated: 2026-08-26
 - Product/process constraints: the metric means “observed in a Murph group
   before private activation.” Roster presence is exposure evidence, not
   engagement, identity authority, membership authority, or proof of a network
-  effect.
+  effect. The internal Ops explanation must state both roster and retained
+  message evidence so operators do not mistake exposure for engagement.
 
 ## Risks and mitigations
 
@@ -64,6 +65,11 @@ Updated: 2026-08-26
    Mitigation: Use the canonical current lookup key and retain the existing
    message-based attribution fallback; do not add raw or separately keyed
    identity storage merely for an analytics edge case.
+5. Risk: Account deletion leaves contact-derived evidence that can rejoin after
+   account recreation.
+   Mitigation: Materialize the member's phone and verified-email lookup keys in
+   one bounded statement inside the existing deletion transaction, then delete
+   matching observations before either identity owner is removed.
 
 ## Tasks
 
@@ -84,21 +90,28 @@ Updated: 2026-08-26
 - Do not add a participant-event side path: the existing roster reconciliation
   observes the complete current room after group activity and already owns the
   provider cap, filtering, scheduling, and failure behavior.
-- Product UX, prompt, and frontend lenses are not applicable because no
-  member-visible journey, copy, or UI changes. Coverage is applicable.
+- Product UX applies to the internal Ops operator: the metric definition must
+  name both evidence sources and describe sequence-based exposure attribution.
+  Prompt and member-facing frontend lenses are not applicable. Coverage is
+  applicable.
 - Final ReviewGPT is applicable because the change adds persisted state and
   composes provider evidence, retention, and analytics owners.
 
 ## Verification
 
-- Passed: 243 focused deterministic Vitest tests covering observation SQL,
-  group reconciliation, growth attribution, retention, migration, and hosted
-  privacy schema guards.
-- Passed: both opt-in local PostgreSQL proofs for set-based silent roster
-  observation and roster-to-private activation attribution, including expired
-  observation reset.
+- Passed: 344 focused deterministic Vitest tests covering observation SQL,
+  group reconciliation, growth attribution, account deletion, retention,
+  migration, and hosted privacy schema guards.
+- Passed: three opt-in local PostgreSQL tests for set-based silent roster
+  observation, production writer-to-attributor composition, idempotent marking,
+  and exact contact-derived account deletion with unrelated-row preservation.
 - Passed: Web typecheck, focused ESLint, and `git diff --check`.
+- Accepted and remediated the preliminary specialist findings for Ops copy,
+  deletion coverage, and composed proof, plus the final round-one account
+  deletion finding. No new service, relation, queue, or lifecycle was added.
 - Expected outcomes: silent roster evidence attributes exactly once only after
   activation, invalid/self/removed inputs do not observe, message and roster
   evidence dedupe at the existing marker, expired evidence is boundedly
-  removed, and no existing group authority behavior changes.
+  removed, account deletion erases matching contact-derived observations, the
+  Ops definition matches both evidence sources, and no existing group authority
+  behavior changes.

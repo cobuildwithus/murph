@@ -2538,6 +2538,9 @@ describe("hosted ops growth metrics", () => {
 
     await captureHostedGrowthDailySnapshot(now);
 
+    expect(mocks.executeRaw).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining("hosted_group_participant_observation"),
+    }));
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       familyMrrUsdCents: 1_400,
@@ -2549,6 +2552,26 @@ describe("hosted ops growth metrics", () => {
       individualMrrUsdCents: 7_800,
       mrrUsdCents: 9_200,
     });
+  });
+
+  it("keeps the daily snapshot retryable when roster attribution fails", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.executeRaw.mockRejectedValueOnce(new Error("temporary attribution failure"));
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-08-07", 2_900),
+    );
+
+    try {
+      await expect(captureHostedGrowthDailySnapshot(now)).resolves.toBeDefined();
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth roster-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+      expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("upserts one daily snapshot per UTC date", async () => {
