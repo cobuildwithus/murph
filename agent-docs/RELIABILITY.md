@@ -2456,9 +2456,10 @@ Last verified: 2026-08-23
   overwriting a newer one, without a broad transaction retry.
   Persistence failures emit only event type, source, input cardinality, query
   tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
-  stay out of failure logs. It must not select trace ids into the application,
-  lock an unbounded collection,
-  or open one transaction per trace.
+  stay out of failure logs. The bounded transaction-local trace-id list passes
+  only from the lock statement to the fresh update statement; it must not
+  escape that callback or appear in logs. The writer must not lock an unbounded
+  collection or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event
