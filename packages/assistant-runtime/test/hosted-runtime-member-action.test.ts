@@ -31,44 +31,53 @@ describe("hosted member action runtime", () => {
     });
   });
 
-  it("persists a preference-only unit selection without mutating the workout", async () => {
-    const action = {
-      expectedWorkout: {
-        actionBinding: "a".repeat(64),
-        exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
-      },
-      kind: "workout.live.apply" as const,
-      mutations: [],
-      version: 1 as const,
-      weightUnitPreference: "kg" as const,
-    };
-
-    const outcome = await executeHostedMemberActionWake({
-      vaultRoot: "/vault",
-      wake: {
-        eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-        kind: "member.action.requested",
-        occurredAt: "2026-08-26T05:45:00.000Z",
-        request: {
-          action,
-          actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-          requestedAt: "2026-08-26T05:45:00.000Z",
-          schemaVersion: 1,
+  it.each(["applied", "unchanged"] as const)(
+    "persists a preference-only unit selection after canonical %s validation",
+    async (status) => {
+      mocks.applyLiveWorkoutMemberAction.mockResolvedValueOnce({ status });
+      const action = {
+        expectedWorkout: {
+          actionBinding: "a".repeat(64),
+          exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
         },
-        userId: "member-1",
-      },
-    });
+        kind: "workout.live.apply" as const,
+        mutations: [],
+        version: 1 as const,
+        weightUnitPreference: "kg" as const,
+      };
 
-    expect(mocks.applyLiveWorkoutMemberAction).not.toHaveBeenCalled();
-    expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledWith({
-      recordedAt: "2026-08-26T05:45:00.000Z",
-      vault: "/vault",
-      weight: "kg",
-    });
-    expect(outcome.postCheckpointRecord).toMatchObject({
-      outcome: { status: "applied" },
-    });
-  });
+      const outcome = await executeHostedMemberActionWake({
+        vaultRoot: "/vault",
+        wake: {
+          eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+          kind: "member.action.requested",
+          occurredAt: "2026-08-26T05:45:00.000Z",
+          request: {
+            action,
+            actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+            requestedAt: "2026-08-26T05:45:00.000Z",
+            schemaVersion: 1,
+          },
+          userId: "member-1",
+        },
+      });
+
+      expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledWith({
+        acceptedAt: "2026-08-26T05:45:00.000Z",
+        action,
+        actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        vault: "/vault",
+      });
+      expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledWith({
+        recordedAt: "2026-08-26T05:45:00.000Z",
+        vault: "/vault",
+        weight: "kg",
+      });
+      expect(outcome.postCheckpointRecord).toMatchObject({
+        outcome: { status },
+      });
+    },
+  );
 
   it("applies the typed action directly without an assistant turn", async () => {
     const action = {
@@ -145,17 +154,10 @@ describe("hosted member action runtime", () => {
           action: {
             expectedWorkout: {
               actionBinding: "a".repeat(64),
-              exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+              exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
             },
             kind: "workout.live.apply",
-            mutations: [{
-              exerciseName: "Leg press",
-              exercisePosition: 1,
-              expectedResult: null,
-              kind: "set.put",
-              result: { kind: "reps", reps: 8 },
-              setPosition: 1,
-            }],
+            mutations: [],
             version: 1,
             weightUnitPreference: "kg",
           },

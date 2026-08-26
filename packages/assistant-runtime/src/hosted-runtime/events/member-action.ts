@@ -19,14 +19,12 @@ export async function executeHostedMemberActionWake(input: {
   switch (input.wake.request.action.kind) {
     case "workout.live.apply": {
       const action = input.wake.request.action;
-      const result = action.mutations.length === 0
-        ? { status: "applied" as const }
-        : await applyLiveWorkoutMemberAction({
-            acceptedAt: input.wake.occurredAt,
-            action,
-            actionId: input.wake.request.actionId,
-            vault: input.vaultRoot,
-          });
+      const result = await applyLiveWorkoutMemberAction({
+        acceptedAt: input.wake.occurredAt,
+        action,
+        actionId: input.wake.request.actionId,
+        vault: input.vaultRoot,
+      });
       if (
         result.status !== "rejected"
         && action.weightUnitPreference !== undefined
