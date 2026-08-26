@@ -804,7 +804,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 
   it(
-    'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
+    'requires typed modes and units while keeping live and reminder sets canonical across fresh threads',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -870,7 +870,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout format show <format-id> --format json',
               'vault-cli workout show <event-id> --format json',
-              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
+              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> --mode <mode> [--unit-override <lb|kg>] [--sets <n>]',
               'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
               'vault-cli experiment show <id> --format json',
@@ -916,6 +916,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           prompt: [
             'Start a live workout named Durable repetition proof.',
             'Add Seated cable curl with exactly eight finite sets.',
+            'Use pounds for this resistance exercise.',
             'Every set of that exercise is exactly 9 reps; persist that exercise-wide member count.',
             'Do not log a set yet and do not turn any target or suggestion into an actual result.',
           ].join(' '),
@@ -958,8 +959,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         }])
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
+          mode: 'weight_reps',
           name: 'Seated cable curl',
           setPlanIsFinite: true,
+          unitOverride: 'lb',
         })
         expect(finiteWorkout.workout.exercises[0]?.sets).toHaveLength(8)
         expect(
@@ -1092,6 +1095,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(completed.endedAt).toEqual(expect.any(String))
         const workoutCommands = await readFile(commandLogPath, 'utf8')
         expect(workoutCommands).toContain('workout set log')
+        expect(workoutCommands).toMatch(
+          /workout start[\s\S]*mode=weight_reps[\s\S]*unitOverride=lb/u,
+        )
         expect(workoutCommands).not.toMatch(/(?:experiment|regimen) /u)
 
         const commandCountBeforeReminder = workoutCommands.trim().split('\n').length
@@ -1213,6 +1219,11 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(nextWorkouts[0]?.workout.exercises[0]?.sets).toEqual([
           { order: 1, reps: 12 },
         ])
+        expect(nextWorkouts[0]?.workout.exercises[0]).toMatchObject({
+          mode: 'bodyweight',
+          name: 'Push-up',
+        })
+        expect(nextWorkouts[0]?.workout.exercises[0]?.unitOverride).toBeUndefined()
         expect(nextWorkouts[0]?.workout.endedAt).toEqual(expect.any(String))
         expect(olderStored.endedAt).toBeUndefined()
       } finally {

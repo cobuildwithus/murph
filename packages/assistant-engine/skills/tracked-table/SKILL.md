@@ -23,16 +23,20 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 
 ## Live workout command surface
 
-- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise. `targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load; use the unit-selection rule in the required start flow below. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
+- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;mode=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise. `targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load; use the unit-selection rule in the required start flow below. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
 - Read one workout: `vault-cli workout show <evt_id> --format json`.
 - Delete one exact workout: `vault-cli workout delete <evt_id> --expected-revision <n>`. The expected revision must come from the exact approved workout read.
-- Add an exercise: `vault-cli workout exercise add <name> --workout-id <evt_id> --order <n> [--sets <n>]`. An explicit `--sets` count is a finite plan; omitting it creates one targetless log slot.
+- Add an exercise: `vault-cli workout exercise add <name> --workout-id <evt_id> --order <n> --mode <mode> [--unit-override <lb|kg>] [--sets <n>]`. An explicit `--sets` count is a finite plan; omitting it creates one targetless log slot.
 - Store a fixed repetition prescription: `vault-cli workout exercise set-reps [exercise] --workout-id <evt_id> --reps <n>`.
 - Log or correct a set: `vault-cli workout set log [exercise] --workout-id <evt_id> --set-order <n>`.
 - Undo one set without shifting later set numbers: `vault-cli workout set clear [exercise] --workout-id <evt_id> --set-order <n>`.
 - Finish an early or targetless session: `vault-cli workout finish --workout-id <evt_id>`.
 
 Saved target values remain in the workout format. A newly started session contains unlogged set coordinates, but no planned target value is copied into an actual set field. A target is not a completed set. Read the referenced routine with `vault-cli workout format show <routineId> --format json` when a card needs target labels; never copy those labels into canonical actuals.
+
+Every ad-hoc exercise must have one explicit editor mode. Use `weight_reps` for cable, machine, dumbbell, barbell, kettlebell, or other resistance movements even when the member has not supplied the load yet; the missing load stays an empty weight field. Use `bodyweight` for unloaded repetition work, and use the existing assisted-bodyweight, weighted-bodyweight, duration, or cardio mode only when that result family is actually intended. Never omit mode to represent an unknown actual. If the exercise's result family is genuinely ambiguous, ask one narrow question before writing it.
+
+Every `weight_reps` exercise also needs an exact unit hint so the native editor can render separate weight and repetition fields before any load is logged. Use an explicit lb/kg unit from the current request when present. Otherwise read `vault-cli workout units show --format json` once and use the saved strength unit. If neither exists, ask whether the member means lb or kg; never invent a unit or a load. Put the hint in `unitOverride` for an initial exercise or `--unit-override` for a later addition. An exact `targetWeightUnit` already supplies the same hint for an initial exercise.
 
 ## Required write flow
 
@@ -137,7 +141,7 @@ The legacy `workout edit` full-structure replacement remains available only for 
 2. Run one `vault-cli workout start`, passing `--routine` for a saved format or one repeated `--exercise` specification per ad-hoc exercise. Never combine those inputs, and never create an empty workout followed by initial exercise mutations. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
 3. Put each stated set count in that exercise's initial specification; the count is finite. When no count is stated, omit `sets` so creation supplies one targetless unlogged slot, not a claimed plan or completed set.
 4. Put `reps=<n>` in the initial specification only when the member assigns one exact integer repetition count to every set of that exercise. Use `workout exercise set-reps` only for a later change to that exercise-owned fact.
-5. For an ad-hoc exact load, include `targetWeight` and `targetWeightUnit` in the matching `--exercise` value; never leave a member-stated load only in the workout title or response prose. An explicit unit in the current request wins. If the member gives a load without a unit, read `vault-cli workout units show --format json` and use the saved strength unit; when no preference exists, ask which unit they mean. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification. Read the format separately before presenting saved-format targets.
+5. For an ad-hoc exact load, include `targetWeight` and `targetWeightUnit` in the matching `--exercise` value; never leave a member-stated load only in the workout title or response prose. Follow the unit-hint rule above for every `weight_reps` exercise, including one whose actual or target load is still unknown. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification. Read the format separately before presenting saved-format targets.
 
 Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session keeps targets in the format and actual performance in the event.
 

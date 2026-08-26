@@ -87,10 +87,13 @@ function parseInitialExercise(
     invalidInitialExercise,
   )
   const mode = fields.get('mode')
-  const parsedMode = mode === undefined
-    ? undefined
-    : exerciseModeSchema.safeParse(mode)
-  if (parsedMode !== undefined && !parsedMode.success) {
+  if (mode === undefined) {
+    invalidInitialExercise(
+      '--exercise field mode is required so the workout editor can use the correct result fields.',
+    )
+  }
+  const parsedMode = exerciseModeSchema.safeParse(mode)
+  if (!parsedMode.success) {
     invalidInitialExercise('--exercise field mode is invalid.')
   }
   const unitOverride = fields.get('unitOverride')
@@ -113,6 +116,15 @@ function parseInitialExercise(
       '--exercise fields targetWeight and targetWeightUnit must be provided together.',
     )
   }
+  if (
+    parsedMode.data === 'weight_reps'
+    && parsedUnitOverride === undefined
+    && targetWeightUnit === undefined
+  ) {
+    invalidInitialExercise(
+      '--exercise field unitOverride is required for weight_reps when no targetWeightUnit is present.',
+    )
+  }
 
   return {
     name: requireCompactString(
@@ -133,7 +145,7 @@ function parseInitialExercise(
       ? { sourceExerciseId: fields.get('sourceExerciseId') }
       : {}),
     ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
-    ...(parsedMode?.success ? { mode: parsedMode.data } : {}),
+    mode: parsedMode.data,
     ...(parsedUnitOverride ? { unitOverride: parsedUnitOverride } : {}),
     ...(fields.has('note') ? { note: fields.get('note') } : {}),
   }
@@ -194,7 +206,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         options: {
           exercise: [
             "'name=Goblet squat;sets=3;reps=10;mode=weight_reps;unitOverride=lb'",
-            "'name=Row, neutral grip;sets=3;reps=12;mode=weight_reps'",
+            "'name=Row, neutral grip;sets=3;reps=12;mode=weight_reps;unitOverride=lb'",
           ],
           vault: './vault',
         },
@@ -213,7 +225,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(100)
         .optional()
         .describe(
-          'Initial exercise grammar: name=... with optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/mode/unitOverride/note. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
+          'Initial exercise grammar: name=...;mode=... with required mode and optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/unitOverride/note. weight_reps also requires unitOverride unless targetWeightUnit is present. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
         ),
       type: z
         .string()
@@ -285,7 +297,9 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(80)
         .optional()
         .describe('Optional superset or circuit group id.'),
-      mode: exerciseModeSchema.optional(),
+      mode: exerciseModeSchema.describe(
+        'Required result family for the native workout editor.',
+      ),
       unitOverride: z.enum(['lb', 'kg']).optional(),
       note: z.string().min(1).max(4000).optional(),
       sets: z
@@ -300,6 +314,12 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     }),
     output: showResultSchema,
     async run({ args, options }) {
+      if (options.mode === 'weight_reps' && options.unitOverride === undefined) {
+        throw new VaultCliError(
+          'invalid_option',
+          '--unit-override is required when --mode is weight_reps.',
+        )
+      }
       return addLiveWorkoutExercise({
         vault: options.vault,
         workoutId: options.workoutId,
