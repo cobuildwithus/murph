@@ -1,6 +1,8 @@
 import * as z from "./zod-runtime.ts";
 
-import { workoutMemberActionExpectedSetResultV1Schema } from "./member-action.ts";
+import {
+  workoutMemberActionExpectedSetResultV1Schema,
+} from "./workout-member-action-result.ts";
 
 export const workoutSessionCardV1Bounds = {
   title: 60,
@@ -138,6 +140,19 @@ export type WorkoutSessionDetailV1 = z.infer<
   typeof workoutSessionDetailV1Schema
 >;
 
+export const workoutSessionPresentationV1Schema = z
+  .object({
+    title: singleLineText(workoutSessionCardV1Bounds.title),
+    subtitle: singleLineText(workoutSessionCardV1Bounds.subtitle).nullable(),
+    footer: singleLineText(workoutSessionCardV1Bounds.footer).nullable(),
+    workout: workoutSessionDetailV1Schema,
+  })
+  .strict();
+
+export type WorkoutSessionPresentationV1 = z.infer<
+  typeof workoutSessionPresentationV1Schema
+>;
+
 const workoutSessionEditorResultV1Schema = workoutMemberActionExpectedSetResultV1Schema
   .superRefine((result, context) => {
     if (
@@ -264,12 +279,7 @@ export type WorkoutSessionAppCardEnvelopeV6 = {
   };
 };
 
-export type WorkoutSessionAppCardPresentationV4 = {
-  title: string;
-  subtitle: string | null;
-  footer: string | null;
-  workout: WorkoutSessionDetailV1;
-};
+export type WorkoutSessionAppCardPresentationV4 = WorkoutSessionPresentationV1;
 
 export function buildWorkoutSessionAppCardEnvelopeV4(input: {
   title: string;

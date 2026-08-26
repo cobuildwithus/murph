@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   applyLiveWorkoutMemberAction: vi.fn(),
+  readLiveWorkoutCardSnapshot: vi.fn(),
 }));
 
 vi.mock("@murphai/vault-usecases/workouts", () => ({
   applyLiveWorkoutMemberAction: mocks.applyLiveWorkoutMemberAction,
+  readLiveWorkoutCardSnapshot: mocks.readLiveWorkoutCardSnapshot,
 }));
 
 import {
@@ -16,6 +18,14 @@ describe("hosted member action runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.applyLiveWorkoutMemberAction.mockResolvedValue({ status: "applied" });
+    mocks.readLiveWorkoutCardSnapshot.mockResolvedValue({
+      result: {
+        cardUrl: "https://www.withmurph.ai/#murph-card=card",
+        kind: "workout.live.snapshot",
+        version: 1,
+      },
+      status: "unchanged",
+    });
   });
 
   it("applies the typed action directly without an assistant turn", async () => {
@@ -120,6 +130,58 @@ describe("hosted member action runtime", () => {
         reason: "workout_changed",
         status: "rejected",
       },
+    });
+  });
+
+  it("records the authenticated read-only workout snapshot result", async () => {
+    const action = {
+      kind: "workout.live.snapshot" as const,
+      presentation: {
+        title: "Strength",
+        subtitle: null,
+        footer: null,
+        workout: {
+          exercises: [{
+            name: "Bench press",
+            sets: [{ actual: null, status: "pending" as const, target: null }],
+          }],
+          state: "active" as const,
+          version: 1 as const,
+        },
+      },
+      version: 1 as const,
+      workoutBinding: "c".repeat(64),
+    };
+    const outcome = await executeHostedMemberActionWake({
+      vaultRoot: "/vault",
+      wake: {
+        eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        kind: "member.action.requested",
+        occurredAt: "2026-08-12T15:00:00.000Z",
+        request: {
+          action,
+          actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+          requestedAt: "2026-08-12T15:00:00.000Z",
+          schemaVersion: 1,
+        },
+        userId: "member-1",
+      },
+    });
+
+    expect(outcome.postCheckpointRecord).toMatchObject({
+      kind: "member-action.outcome-recorded",
+      outcome: {
+        reason: null,
+        result: {
+          cardUrl: "https://www.withmurph.ai/#murph-card=card",
+          kind: "workout.live.snapshot",
+        },
+        status: "unchanged",
+      },
+    });
+    expect(mocks.readLiveWorkoutCardSnapshot).toHaveBeenCalledWith({
+      action,
+      vault: "/vault",
     });
   });
 

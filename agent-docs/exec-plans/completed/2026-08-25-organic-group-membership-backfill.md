@@ -1,8 +1,8 @@
 # Materialize product groups for every routed group runtime
 
-Status: active
+Status: completed
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -102,6 +102,24 @@ Updated: 2026-08-25
    production reports zero missing groups, then remove the temporary backfill
    command and its operator-only documentation in a cleanup PR.
 
+## Rollout note
+
+- PR #2303 merged and its replacement Web build passed the exact production
+  alias proof and prior-function drain.
+- The documented local Vercel operator path exposed protected production
+  database variable names with empty values, so it could not execute even the
+  dry-run. The repair now reuses the existing protected contract-migration
+  workflow and production environment for one bounded dispatch; that temporary
+  input is removed with the backfill command after convergence.
+- PR #2324 merged the protected repair bridge. Its bounded production run
+  selected and materialized 30 missing routed groups, reported no failed rows,
+  and completed with zero remaining rows.
+- A separate aggregate-only read of production then found 44 routed group
+  containers, zero missing groups, zero missing owner memberships, and 44
+  complete group-owner pairs. The cleanup change removes the temporary command,
+  workflow input, operator documentation, and repair-only tests while retaining
+  canonical route-time materialization and its focused coverage.
+
 ## Verification
 
 - Focused route-creation persistence test proving one ordinary unnamed group,
@@ -121,3 +139,4 @@ Updated: 2026-08-25
   Cloudflare compatibility dependency.
 - Backfill begins in dry-run mode, applies one small batch per invocation, and
   can stop safely between batches.
+Completed: 2026-08-26

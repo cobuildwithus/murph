@@ -275,6 +275,7 @@ const IMAGE: AssistantResponseMedia = {
 function executeCardTool(input: {
   currentResponseCard?: AssistantResponseCard | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  env?: NodeJS.ProcessEnv
   groupChallengeResponseCardAllowed?: boolean | null
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   knowledgePageReadTextFile?: (filePath: string) => Promise<string>
@@ -286,7 +287,7 @@ function executeCardTool(input: {
   return executeMurphDynamicToolRequest({
     currentResponseCard: input.currentResponseCard ?? null,
     currentResponseMedia: input.currentResponseMedia ?? [],
-    env: {},
+    env: input.env ?? {},
     fetchImpl: fetch,
     groupChallengeResponseCardAllowed:
       input.groupChallengeResponseCardAllowed ?? false,

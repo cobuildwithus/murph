@@ -285,6 +285,107 @@ test('active-turn controller keeps admission open for one held-draft review', as
   }
 })
 
+test('active-turn controller keeps request one open after request-zero live steering', async () => {
+  vi.useFakeTimers()
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const requestZeroSteer = vi.fn(async () => undefined)
+  const requestOneSteer = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseRequestZero = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    codexThreadId: 'provider-session',
+    providerTurnId: 'provider-turn-0',
+    sessionId: 'session-test',
+    steer: requestZeroSteer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    const requestZeroInput = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Input steered into request zero',
+      vault: '/vaults/test',
+    })
+    assert.ok(requestZeroInput)
+    requestZeroInput.catch(() => undefined)
+    await vi.waitFor(() => {
+      expect(requestZeroSteer).toHaveBeenCalledOnce()
+    })
+    const acceptedRequestZeroInput = await controller.admitLiveSteered()
+    assert.equal(acceptedRequestZeroInput?.kind, 'accepted')
+    if (acceptedRequestZeroInput?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(acceptedRequestZeroInput)
+    }
+
+    controller.pauseProviderSteering()
+    const outcomePromise = controller.finishDraftWindow()
+    await vi.advanceTimersByTimeAsync(4_000)
+    await expect(outcomePromise).resolves.toEqual({
+      acceptedInput: null,
+      kind: 'review',
+    })
+
+    const releaseRequestOne = controller.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-session',
+      providerTurnId: 'provider-turn-1',
+      sessionId: 'session-test',
+      steer: requestOneSteer,
+      turnId: 'turn-active',
+    })
+    const requestOneInput = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Input steered into request one',
+      vault: '/vaults/test',
+    })
+    assert.ok(requestOneInput)
+    requestOneInput.catch(() => undefined)
+    await vi.waitFor(() => {
+      expect(requestOneSteer).toHaveBeenCalledOnce()
+    })
+    const acceptedRequestOneInput = await controller.admitLiveSteered()
+    assert.equal(acceptedRequestOneInput?.kind, 'accepted')
+    if (acceptedRequestOneInput?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(acceptedRequestOneInput)
+    }
+
+    controller.closeTurnAdmission()
+    expect(steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Input after request one cutoff',
+      vault: '/vaults/test',
+    })).toBeNull()
+    releaseRequestOne()
+  } finally {
+    releaseRequestZero()
+    controller.fail(new Error('live-steered held-draft review test complete'))
+    controller.close()
+  }
+})
+
 test('active-turn controller closes a quiet held-draft cutoff atomically', async () => {
   vi.useFakeTimers()
   const {

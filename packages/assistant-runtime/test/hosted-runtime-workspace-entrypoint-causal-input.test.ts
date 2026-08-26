@@ -50,11 +50,23 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import type {
+  MemberActionRequestV1,
+  WorkoutLiveApplyMemberActionV1,
+  WorkoutLiveSnapshotMemberActionV1,
+} from "@murphai/contracts";
+import {
+  addLiveWorkoutExercise,
+  logLiveWorkoutSet,
+  readLiveWorkoutCardEditor,
+  startLiveWorkout,
+} from "@murphai/vault-usecases/workouts";
 import {
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
@@ -650,6 +662,353 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     }
   });
 
+  for (const actionKind of [
+    "workout.live.apply",
+    "workout.live.snapshot",
+  ] as const) {
+    test(`executes a ${actionKind} member action before the dirty idle checkpoint`, async () => {
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-"),
+      );
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
+      const recordedOutcomes: Array<
+        Parameters<
+          NonNullable<HostedRuntimeMailboxPort["recordMemberActionOutcome"]>
+        >[0]
+      > = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const actionId = actionKind === "workout.live.apply"
+        ? "2f1c1fdc-c7b0-4d90-b902-8e6295959243"
+        : "8676b264-9b91-4b50-8c73-184d7a63b901";
+      const mailboxItem = createMailboxItem({
+        dedupeKey: `member.action.requested:${actionId}`,
+        id: `mailbox_item_entrypoint_${actionKind.replaceAll(".", "_")}`,
+        kind: "member.action.requested",
+        lane: "system",
+        laneSeq: "1",
+      });
+      let assistantPhaseCalls = 0;
+      let activeVaultRoot = vaultRoot;
+      let memberActionWake: ReturnType<
+        typeof buildHostedExecutionMemberActionRequestedWake
+      > | null = null;
+      let workoutId: string | null = null;
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+        const embeddedWorkout = {
+          exercises: [{
+            name: "Push-up",
+            sets: [{ actual: "8 reps", status: "completed" as const, target: null }],
+          }],
+          state: "active" as const,
+          version: 1 as const,
+        };
+        const baseMailboxPort = createMailboxPort({
+          events,
+          items: mailboxItems,
+        });
+        const mailboxPort: HostedRuntimeMailboxPort = {
+          ...baseMailboxPort,
+          async recordMemberActionOutcome(outcome) {
+            events.push("member-action:outcome-recorded");
+            recordedOutcomes.push(outcome);
+          },
+        };
+        const providerPassCallsBefore =
+          mocks.runAssistantAutomationPass.mock.calls.length;
+
+        const result = await withRealTimeout(
+          runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput({
+              request: {
+                attemptId: `attempt_pre_checkpoint_${actionKind.replaceAll(".", "_")}`,
+                idleCheckpointDelayMs: 200,
+                leaseGeneration: "7",
+                userId: TEST_USER_ID,
+                workspaceVersion: "0",
+              },
+            }),
+            {
+              async createCheckpointSnapshot(snapshotInput) {
+                events.push(`snapshot:${snapshotInput.reason}`);
+                return {
+                  snapshotRef: createBundleRef({
+                    hash: actionKind === "workout.live.apply"
+                      ? "1".repeat(64)
+                      : "2".repeat(64),
+                    key:
+                      "users/bundles/member-synthetic/"
+                      + `${actionKind.replaceAll(".", "-")}.bundle.json`,
+                    size: 512,
+                  }),
+                };
+              },
+              async importItem(item) {
+                events.push(`mailbox.importItem:${item.item.id}`);
+                assert.ok(memberActionWake);
+                return await enqueueHostedSystemMailboxItem({
+                  item,
+                  vaultRoot: activeVaultRoot,
+                  wake: memberActionWake,
+                });
+              },
+              platform: createPlatform({
+                mailboxPort,
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({ version: "0" }),
+                }),
+              }),
+              runtimeWakeSignal,
+              async runAssistantPhase(input) {
+                assistantPhaseCalls += 1;
+                events.push(`assistant.phase:${assistantPhaseCalls}`);
+                if (assistantPhaseCalls === 1) {
+                  activeVaultRoot = input.restored.vaultRoot;
+                  await prepareHostedWakeContext(
+                    activeVaultRoot,
+                    buildHostedExecutionMemberActivatedWake({
+                      eventId: "member.activated:workout-card-pre-checkpoint",
+                      memberChannels: {
+                        email: false,
+                        linq: true,
+                        telegram: false,
+                      },
+                      memberId: TEST_USER_ID,
+                      occurredAt: TEST_NOW,
+                      timeZone: "UTC",
+                    }),
+                    input.runtimeEnv,
+                    input.runtime.resolvedConfig,
+                    { operatorHomeRoot: input.restored.operatorHomeRoot },
+                  );
+                  const started = await startLiveWorkout({
+                    name: "Workout",
+                    startedAt: TEST_NOW,
+                    vault: activeVaultRoot,
+                  });
+                  workoutId = started.eventId;
+                  await addLiveWorkoutExercise({
+                    mode: "bodyweight",
+                    name: "Push-up",
+                    order: 1,
+                    vault: activeVaultRoot,
+                    workoutId,
+                  });
+                  await logLiveWorkoutSet({
+                    exerciseOrder: 1,
+                    reps: 8,
+                    requireExistingSet: true,
+                    setOrder: 1,
+                    vault: activeVaultRoot,
+                    workoutId,
+                  });
+                  const initialCard = await readLiveWorkoutCardEditor({
+                    presentation: embeddedWorkout,
+                    vault: activeVaultRoot,
+                    workoutId,
+                  });
+                  assert.ok(initialCard);
+                  const initialSetResult =
+                    initialCard.editor.exercises[0]?.sets[0]?.result;
+                  assert.deepEqual(
+                    initialSetResult,
+                    { kind: "reps", reps: 8 },
+                  );
+                  const action:
+                    | WorkoutLiveApplyMemberActionV1
+                    | WorkoutLiveSnapshotMemberActionV1 =
+                    actionKind === "workout.live.apply"
+                      ? {
+                          expectedWorkout: {
+                            actionBinding: initialCard.editor.actionBinding,
+                            exercises: [{
+                              name: "Push-up",
+                              sets: [{ logged: true }],
+                            }],
+                          },
+                          kind: "workout.live.apply",
+                          mutations: [{
+                            exerciseName: "Push-up",
+                            exercisePosition: 1,
+                            expectedResult: initialSetResult,
+                            kind: "set.put",
+                            result: { kind: "reps", reps: 9 },
+                            setPosition: 1,
+                          }],
+                          version: 1,
+                        }
+                      : {
+                          kind: "workout.live.snapshot",
+                          presentation: {
+                            footer: null,
+                            subtitle: null,
+                            title: "Workout",
+                            workout: initialCard.workout,
+                          },
+                          version: 1,
+                          workoutBinding: initialCard.editor.actionBinding,
+                        };
+                  const requestedAt = new Date().toISOString();
+                  const request = {
+                    action,
+                    actionId,
+                    requestedAt,
+                    schemaVersion: 1,
+                  } satisfies MemberActionRequestV1;
+                  memberActionWake =
+                    buildHostedExecutionMemberActionRequestedWake({
+                      eventId: `member.action.requested:${actionId}`,
+                      memberId: TEST_USER_ID,
+                      occurredAt: requestedAt,
+                      request,
+                    });
+                  setTimeout(() => {
+                    mailboxItems.push(mailboxItem);
+                    runtimeWakeSignal.notify();
+                  }, 0);
+                  return {
+                    checkpointReason: "assistant_runtime_commit",
+                    progressed: true,
+                  };
+                }
+                if (input.foregroundCausalOnly !== true) {
+                  return { progressed: false };
+                }
+                const pendingBeforePhase = (
+                  await readHostedSystemMailboxState(activeVaultRoot)
+                ).pending;
+                if (!pendingBeforePhase.some((item) =>
+                  item.itemId === mailboxItem.id
+                )) {
+                  return await runHostedWorkspaceAssistantPhase(input);
+                }
+                assert.deepEqual(
+                  pendingBeforePhase.map((item) => ({
+                    itemId: item.itemId,
+                    routeAction: item.routeAction,
+                    status: item.status,
+                    wakeKind: item.wake.kind,
+                  })),
+                  [{
+                    itemId: mailboxItem.id,
+                    routeAction: "apply-member-action",
+                    status: "pending",
+                    wakeKind: "member.action.requested",
+                  }],
+                  events.join(","),
+                );
+                const phaseResult = await runHostedWorkspaceAssistantPhase(input);
+                const pendingAfterPhase = (
+                  await readHostedSystemMailboxState(activeVaultRoot)
+                ).pending;
+                assert.deepEqual(
+                  pendingAfterPhase.map((item) => ({
+                    attemptCount: item.attemptCount,
+                    lastErrorCode: item.lastErrorCode,
+                    lastErrorMessage: item.lastErrorMessage,
+                    postCheckpointKind: item.postCheckpointRecord?.kind ?? null,
+                    status: item.status,
+                  })),
+                  [{
+                    attemptCount: 1,
+                    lastErrorCode: null,
+                    lastErrorMessage: null,
+                    postCheckpointKind: "member-action.outcome-recorded",
+                    status: "recording",
+                  }],
+                  events.join(","),
+                );
+                events.push("member-action:canonical-result-prepared");
+                events.push(
+                  `assistant.phase-result:${phaseResult.progressed}:`
+                    + `${phaseResult.checkpointReason}:`
+                    + `${typeof phaseResult.afterCheckpoint}`,
+                );
+                return phaseResult;
+              },
+              vaultRoot,
+            },
+          ),
+          5_000,
+          () => events.join(","),
+        );
+
+        const importEvent = `mailbox.importItem:${mailboxItem.id}`;
+        const canonicalResultPreparedIndex = events.indexOf(
+          "member-action:canonical-result-prepared",
+        );
+        assert.notEqual(
+          canonicalResultPreparedIndex,
+          -1,
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, importEvent)
+            < canonicalResultPreparedIndex,
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, "member-action:canonical-result-prepared")
+            < requireEventIndex(
+              events,
+              "assistant.phase-result:true:system_mailbox_receipt:function",
+            ),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(
+            events,
+            "assistant.phase-result:true:system_mailbox_receipt:function",
+          )
+            < requireEventIndex(events, "member-action:outcome-recorded"),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, "member-action:outcome-recorded")
+            < requireEventIndex(events, "snapshot:idle_shutdown"),
+          events.join(","),
+        );
+        assert.equal(
+          mocks.runAssistantAutomationPass.mock.calls.length,
+          providerPassCallsBefore,
+        );
+        assert.equal(recordedOutcomes.length, 1);
+        assert.ok(
+          result.status === "idle" || result.status === "scheduled",
+          result.status,
+        );
+
+        if (actionKind === "workout.live.apply") {
+          assert.equal(recordedOutcomes[0]?.status, "applied");
+          assert.ok(workoutId);
+          const refreshedCard = await readLiveWorkoutCardEditor({
+            presentation: embeddedWorkout,
+            vault: activeVaultRoot,
+            workoutId,
+          });
+          assert.deepEqual(
+            refreshedCard?.editor.exercises[0]?.sets[0]?.result,
+            { kind: "reps", reps: 9 },
+          );
+        } else {
+          assert.equal(recordedOutcomes[0]?.status, "unchanged");
+          assert.equal(
+            recordedOutcomes[0]?.result?.kind,
+            "workout.live.snapshot",
+          );
+        }
+      } finally {
+        await removeTempRoot(vaultRoot);
+      }
+    });
+  }
+
   test("admits a full visible safe-system prefix before checkpoint despite a later lane high-water", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -851,6 +1210,19 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       preCheckpointSafe: true,
     },
     {
+      dedupeKey: "member.action.requested:workout-card-synthetic",
+      kind: "member.action.requested",
+      label: "workout-card member action",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey: "member.action.requested:workout-card-before-unsafe-synthetic",
+      followedByUnsafeSystemItem: true,
+      kind: "member.action.requested",
+      label: "workout-card member action with a later unsafe system item",
+      preCheckpointSafe: false,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_synthetic",
       kind: "assistant.notification.requested",
@@ -1045,6 +1417,22 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                     lane: "system",
                     laneSeq: "1",
                   }));
+                  if (
+                    "followedByUnsafeSystemItem" in completion
+                    && completion.followedByUnsafeSystemItem === true
+                  ) {
+                    mailboxItems.push(createMailboxItem({
+                      dedupeKey:
+                        "assistant.notification.requested:generic:"
+                        + "member_action_later_unsafe",
+                      id:
+                        "mailbox_item_entrypoint_external_completion_"
+                        + "later_unsafe",
+                      kind: "assistant.notification.requested",
+                      lane: "system",
+                      laneSeq: "2",
+                    }));
+                  }
                   runtimeWakeSignal.notify();
                 }, 0);
                 return {
