@@ -195,6 +195,80 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal rejects a superseded provider result before transcript or outbox commit', async () => {
+  const authorityError = Object.assign(
+    new Error('Web already answered the exact inbound'),
+    {
+      code: 'HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED',
+      retryable: false,
+    },
+  )
+  let webAccepted = false
+  const assertTurnCommitAuthority = vi.fn(async () => {
+    expect(webAccepted).toBe(true)
+    throw authorityError
+  })
+  const providerStarted = createDeferred<void>()
+  const releaseProviderResult = createDeferred<void>()
+  const { mocks, sendAssistantMessageLocal, session } =
+    await loadLocalServiceModule()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => {
+    providerStarted.resolve()
+    await releaseProviderResult.promise
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'runtime answer the member must not see',
+        responseDeliveryContextOrdinal: 0,
+        route: {
+          routeId: 'route-web-first-turn-race',
+        },
+        session,
+        transcriptResponse: 'runtime answer the member must not see',
+      },
+    }
+  })
+
+  const result = sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        assertTurnCommitAuthority,
+        memberId: 'member-web-first-turn-race',
+        userEnvKeys: [],
+      },
+    },
+    persistUserPromptOnFailure: false,
+    prompt: 'Hey Murph',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  webAccepted = true
+  releaseProviderResult.resolve()
+  await expect(result).rejects.toBe(authorityError)
+
+  expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledOnce()
+  expect(assertTurnCommitAuthority).toHaveBeenCalledWith({
+    acceptedInputs: expect.arrayContaining([
+      expect.objectContaining({ source: 'manual' }),
+    ]),
+    turnId: 'turn-1',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalledWith(expect.objectContaining({
+    admissionState: 'commit-started',
+  }))
+})
+
 test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
   const session = createAssistantSession()
   const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {

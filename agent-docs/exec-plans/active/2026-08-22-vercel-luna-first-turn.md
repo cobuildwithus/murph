@@ -140,14 +140,37 @@ Web sent.
   provider. It proves one canonical Web welcome, zero runtime model calls for
   that first inbound, exactly one runtime model call for the next inbound, both
   sides of the Web exchange in that request, and exactly two total Linq replies.
+- The round-13 race proof holds the runtime provider result while Web wins,
+  then proves usage is recorded but neither transcript artifacts nor an outbox
+  reply can commit. Runtime and Web boundary suites also prove authority-only
+  checks distinguish unresolved, accepted, and released exact-event rows.
 
 ## State
 
-Active. Standard-tier Luna generation and the full local-stack continuity proof
-are implemented. The runtime reuses its mailbox importer, pending-input
-terminal evidence, prepared assistant target, and transcript owner; no new
-handoff store or process exists. Focused proof passes. Exact-head CI, the next
+Active. Standard-tier Luna generation, pre-commit runtime authority, and the
+full local-stack continuity proof are implemented. The runtime reuses its
+mailbox importer, pending-input terminal evidence, prepared assistant target,
+transcript owner, and Web-owned exact delivery disposition; no new handoff
+store or process exists. Focused proof passes. Exact-head CI, the next
 ReviewGPT round, and completion remain.
+
+## ReviewGPT round 13 disposition
+
+The finding was accepted. A runtime model call already in flight could finish
+after Web had accepted the exact first reply. Provider-entry authority stopped
+that runtime answer from sending, but the engine had already committed the
+unseen runtime answer to the transcript, so the next turn could inherit text
+the member never received.
+
+The engine now exposes one hosted pre-commit authority assertion after usage
+recording and before any transcript, session, or outbox commit. The hosted
+runtime resolves the assertion from the provider request's exact persisted
+assistant inputs and reuses the existing Web engagement route and instant-turn
+delivery disposition. An unresolved Web row retries before commit; an accepted
+Web row rejects the speculative runtime result; a released or absent row
+continues normally. The existing provider-entry assertion remains unchanged.
+This adds no field, enum, queue, timer, service, lease, state machine, recovery
+process, or dependency.
 
 ## ReviewGPT round 12 disposition
 

@@ -762,7 +762,11 @@ describe("hosted Linq egress authority", () => {
         status: "accepted",
       },
     },
-  ])("blocks runtime provider entry for $label", async ({
+  ].flatMap((testCase) => [true, false].map((authorityCheckOnly) => ({
+    ...testCase,
+    authorityCheckOnly,
+  }))))("blocks runtime authority for $label when authorityCheckOnly=$authorityCheckOnly", async ({
+    authorityCheckOnly,
     expectedCode,
     expectedRetryable,
     expectedStatus,
@@ -787,8 +791,10 @@ describe("hosted Linq egress authority", () => {
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           answeredMailboxItemIds: ["mailbox-owned"],
-          authorityCheckOnly: false,
-          idempotencyKey: "assistant-outbox:owned-first-turn",
+          authorityCheckOnly,
+          ...(authorityCheckOnly
+            ? {}
+            : { idempotencyKey: "assistant-outbox:owned-first-turn" }),
           replyToMessageId: "linq-message-owned",
           target: "chat-inbound",
           targetKind: "thread",

@@ -1552,6 +1552,12 @@ export async function sendAssistantMessageLocal(
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
+          if (recoverableNoReplyDeliveryContextOrdinal !== null) {
+            await executionContext?.hosted?.assertTurnCommitAuthority?.({
+              acceptedInputs: providerRequestAcceptedInputItems,
+              turnId: currentUserTurn.turnId,
+            })
+          }
           const failedProviderResumeStateAction =
             resolveAssistantProviderResumeStateAction({
               codexThreadId: providerOutcome.codexThreadId ?? null,
@@ -1790,6 +1796,10 @@ export async function sendAssistantMessageLocal(
           executionContext,
           providerRequestAcceptedInputIds,
           providerResult,
+          turnId: currentUserTurn.turnId,
+        })
+        await executionContext?.hosted?.assertTurnCommitAuthority?.({
+          acceptedInputs: providerRequestAcceptedInputItems,
           turnId: currentUserTurn.turnId,
         })
 
