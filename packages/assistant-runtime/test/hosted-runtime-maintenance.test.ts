@@ -2576,7 +2576,11 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(100, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledWith(
+      100,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -3683,16 +3687,20 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("caps the yield-aware device-sync drain path at 100 single-job checks", async () => {
+  it("caps the yield-aware device-sync drain path in one bounded service call", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
-    const drainWorker = vi.fn(async () => 1);
+    const drainWorker = vi.fn(async () => HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
     const shouldYield = vi.fn(() => false);
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
@@ -3729,8 +3737,12 @@ describe("runHostedDeviceSyncPass", () => {
       skipped: false,
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledTimes(100);
-    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
@@ -4287,6 +4299,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(drainWorker).toHaveBeenCalledWith(
       HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
       "local_scheduled_account",
+      expect.any(Object),
     );
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -6332,10 +6345,19 @@ describe("runHostedDeviceSyncWakeLane", () => {
         outcome: "yielded",
         provider: "junction",
         providerExecutionElapsedMs: 44_900,
-        providerUnattributedElapsedMs: 44_650,
+        providerInventoryRequestCount: 1,
+        providerInventoryRequestElapsedMs: 34_000,
+        providerResourceRequestCount: 1,
+        providerResourceRequestElapsedMs: 6_000,
+        providerUnattributedElapsedMs: 4_650,
         resource: "sleep",
         snapshotImportCount: 0,
         snapshotImportElapsedMs: 0,
+        snapshotCanonicalCoreElapsedMs: 0,
+        snapshotCanonicalWriteElapsedMs: 0,
+        snapshotEventIdentityIndexCacheHitCount: 0,
+        snapshotEventIdentityIndexElapsedMs: 0,
+        snapshotNormalizationElapsedMs: 0,
       }]),
       runSchedulerOnce: vi.fn(async () => undefined),
     });
@@ -6392,7 +6414,11 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
-    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(listPendingJobsForAccount).toHaveBeenNthCalledWith(
       1,
       "local_scheduled_account",
@@ -6445,10 +6471,19 @@ describe("runHostedDeviceSyncWakeLane", () => {
             outcome: "yielded",
             provider: "junction",
             providerExecutionElapsedMs: 44_900,
-            providerUnattributedElapsedMs: 44_650,
+            providerInventoryRequestCount: 1,
+            providerInventoryRequestElapsedMs: 34_000,
+            providerResourceRequestCount: 1,
+            providerResourceRequestElapsedMs: 6_000,
+            providerUnattributedElapsedMs: 4_650,
             resource: "sleep",
             snapshotImportCount: 0,
             snapshotImportElapsedMs: 0,
+            snapshotCanonicalCoreElapsedMs: 0,
+            snapshotCanonicalWriteElapsedMs: 0,
+            snapshotEventIdentityIndexCacheHitCount: 0,
+            snapshotEventIdentityIndexElapsedMs: 0,
+            snapshotNormalizationElapsedMs: 0,
           }],
           deviceSyncJobTimingTruncated: false,
           pendingJobCountAfter: 1,
@@ -6531,10 +6566,19 @@ describe("runHostedDeviceSyncWakeLane", () => {
         outcome: "completed",
         provider: "junction",
         providerExecutionElapsedMs: elapsedMs,
+        providerInventoryRequestCount: 0,
+        providerInventoryRequestElapsedMs: 0,
+        providerResourceRequestCount: 0,
+        providerResourceRequestElapsedMs: 0,
         providerUnattributedElapsedMs: elapsedMs,
         resource: "sleep",
         snapshotImportCount: 0,
         snapshotImportElapsedMs: 0,
+        snapshotCanonicalCoreElapsedMs: 0,
+        snapshotCanonicalWriteElapsedMs: 0,
+        snapshotEventIdentityIndexCacheHitCount: 0,
+        snapshotEventIdentityIndexElapsedMs: 0,
+        snapshotNormalizationElapsedMs: 0,
       }))),
       runSchedulerOnce: vi.fn(async () => undefined),
     });

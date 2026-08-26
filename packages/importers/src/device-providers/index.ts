@@ -4,6 +4,7 @@ export {
   resolveDeviceProviderSnapshotDefaultTimeZone,
   type DeviceProviderImporterExecutionOptions,
   type DeviceProviderSnapshotImportInput,
+  type DeviceProviderSnapshotImportTiming,
 } from "./import-device-provider-snapshot.ts";
 export {
   createDeviceProviderRegistry,

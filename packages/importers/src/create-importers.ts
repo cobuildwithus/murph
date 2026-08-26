@@ -21,6 +21,10 @@ export interface CreateImportersOptions {
   deviceProviderRegistry?: DeviceProviderRegistry;
 }
 
+export function createDeviceProviderSnapshotImportSession() {
+  return coreRuntime.createDeviceBatchImportSession();
+}
+
 export function createImporters({
   corePort,
   presetRegistry,
@@ -53,9 +57,18 @@ export function createImporters({
         presetRegistry: registry,
       });
     },
-    importDeviceProviderSnapshot(input: unknown) {
+    createDeviceProviderSnapshotImportSession() {
+      return createDeviceProviderSnapshotImportSession();
+    },
+    importDeviceProviderSnapshot(
+      input: unknown,
+      options: {
+        importSession?: ReturnType<typeof coreRuntime.createDeviceBatchImportSession>;
+      } = {},
+    ) {
       return importDeviceProviderSnapshot(input, {
         corePort: writer,
+        ...options,
         providerRegistry: providers,
       });
     },
