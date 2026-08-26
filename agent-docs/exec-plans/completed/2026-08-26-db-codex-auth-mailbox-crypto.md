@@ -1,6 +1,6 @@
 # Prepare Codex auth mailbox crypto before its transaction
 
-Status: active - local proof complete, PR gates pending
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -18,7 +18,8 @@ Updated: 2026-08-26
 - Attempt, event, and dedupe identity remain stable across the supported single
   prepared-root retry.
 - Focused tests and the hosted Web typecheck pass.
-- A separate draft PR is opened and exact-head ReviewGPT gates are started.
+- A separate draft PR is opened and exact-head ReviewGPT gates pass after
+  accepted remediation.
 
 ## Scope
 
@@ -50,6 +51,8 @@ Updated: 2026-08-26
 4. Commit and push the exact candidate, then open a separate draft PR.
 5. Start preliminary specialist and final ReviewGPT against the exact PR head
    concurrently with required CI.
+6. Apply accepted preliminary remediation and complete the final ReviewGPT
+   follow-up round.
 
 ## Decisions
 
@@ -93,3 +96,8 @@ Updated: 2026-08-26
   outcomes. Accepted. Remediation keeps those paths provider-independent,
   prepares crypto only for a new wake commit, and revalidates under the member
   lock before appending.
+- Final PR ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` on the initial
+  candidate head.
+- Final PR ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` on the remediated
+  head and confirmed the accepted preliminary finding was resolved.
+Completed: 2026-08-26
