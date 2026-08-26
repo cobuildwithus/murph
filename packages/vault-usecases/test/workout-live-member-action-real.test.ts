@@ -704,28 +704,27 @@ test("a stale snapshot cannot re-arm a card after a hidden same-name reorder", a
   }
 });
 
-test("a stale snapshot refreshes after a direct result save", async () => {
+test("a direct result save returns its canonical card without a second action", async () => {
   const fixture = await createLoggedWorkout([10, 10]);
   try {
-    const action = snapshotAction(fixture);
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: putFirstSetAction({
-        actionBinding: action.workoutBinding,
+    const snapshot = snapshotAction(fixture);
+    const action = {
+      ...putFirstSetAction({
+        actionBinding: snapshot.workoutBinding,
         reps: 12,
       }),
-      vault: fixture.vault,
-    })).resolves.toEqual({ status: "applied" });
-
-    const refreshed = await readLiveWorkoutCardSnapshot({
+      presentation: snapshot.presentation,
+    };
+    const applied = await applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
       action,
       vault: fixture.vault,
     });
-    expect(refreshed.status).toBe("unchanged");
-    if (refreshed.status !== "unchanged") {
-      throw new TypeError("Expected a fresh snapshot after a direct save.");
+    expect(applied.status).toBe("applied");
+    if (applied.status !== "applied" || applied.result === undefined) {
+      throw new TypeError("Expected the direct-save card result.");
     }
-    const encoded = new URL(refreshed.result.cardUrl).hash
+    const encoded = new URL(applied.result.cardUrl).hash
       .replace(/^#murph-card=/u, "");
     const envelope = JSON.parse(
       Buffer.from(encoded, "base64url").toString("utf8"),
@@ -735,6 +734,16 @@ test("a stale snapshot refreshes after a direct result save", async () => {
       parseWorkoutSessionAppCardEnvelopeV4(envelope)
         ?.workout.exercises[0]?.sets[0]?.actual,
     ).toBe("12 reps");
+
+    const replayed = await applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    });
+    expect(replayed).toEqual({
+      result: applied.result,
+      status: "unchanged",
+    });
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }
