@@ -86,7 +86,7 @@ export async function getHostedDashboardLayoutAuthSnapshot(): Promise<HostedDash
       status: "ready",
     };
   } catch (error) {
-    if (!isHostedDashboardSessionStoreUnavailableError(error)) {
+    if (!isHostedSessionStoreUnavailableError(error)) {
       throw error;
     }
 
@@ -178,10 +178,6 @@ async function getHostedAppSessionForPublicPageAuth(): Promise<HostedAppSession 
 function isHostedSessionStoreUnavailableError(error: unknown): boolean {
   const code = getErrorStringField(error, "code");
 
-  if (code === "P2024") {
-    return false;
-  }
-
   if (code && HOSTED_SESSION_STORE_UNAVAILABLE_PRISMA_CODES.has(code)) {
     return true;
   }
@@ -196,11 +192,6 @@ function isHostedSessionStoreUnavailableError(error: unknown): boolean {
     message
       && HOSTED_SESSION_STORE_UNAVAILABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(message)),
   );
-}
-
-function isHostedDashboardSessionStoreUnavailableError(error: unknown): boolean {
-  return getErrorStringField(error, "code") === "P2024"
-    || isHostedSessionStoreUnavailableError(error);
 }
 
 const HOSTED_SESSION_STORE_UNAVAILABLE_PRISMA_CODES = new Set([
