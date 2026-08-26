@@ -49,6 +49,12 @@ interface FoodReadModel {
 }
 
 interface FoodCoreRuntime {
+  buildDailyFoodScheduledLogSlug(food: {
+    slug: string
+  }): string
+  buildDailyFoodScheduledLogTitle(food: {
+    title: string
+  }): string
   loadVault(input: {
     vaultRoot: string
   }): Promise<{
@@ -128,6 +134,61 @@ export type FoodPayload = Omit<FoodUpsertPayload, 'status'> & {
   status?: FoodUpsertPayload['status']
 }
 
+const FOOD_PUBLIC_VALIDATION_FIELDS = new Set([
+  'aliases',
+  'attachedRegimenIds',
+  'brand',
+  'calories',
+  'carbsGrams',
+  'confidence',
+  'fatGrams',
+  'fiberGrams',
+  'foodId',
+  'ingredients',
+  'kind',
+  'links',
+  'location',
+  'note',
+  'nutrition',
+  'perServing',
+  'proteinGrams',
+  'provenance',
+  'serving',
+  'slug',
+  'source',
+  'sourceDetail',
+  'status',
+  'summary',
+  'tags',
+  'targetId',
+  'title',
+  'type',
+  'vendor',
+  'waterGrams',
+])
+
+function foodValidationPublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] | undefined {
+  const publicPath: Array<string | number> = []
+  for (const segment of path) {
+    if (
+      typeof segment === 'number' &&
+      Number.isSafeInteger(segment) &&
+      segment >= 0
+    ) {
+      publicPath.push(segment)
+      continue
+    }
+    if (typeof segment === 'string' && FOOD_PUBLIC_VALIDATION_FIELDS.has(segment)) {
+      publicPath.push(segment)
+      continue
+    }
+    return undefined
+  }
+  return publicPath
+}
+
 export function scaffoldFoodPayload() {
   return parseFoodPayload({
     title: 'Regular Acai Bowl',
@@ -169,7 +230,19 @@ export function parseFoodPayload(value: unknown): FoodPayload {
   const result = foodUpsertPayloadSchema.safeParse(value)
 
   if (!result.success) {
-    throw new VaultCliError('contract_invalid', 'Food payload is invalid.')
+    throw new VaultCliError(
+      'contract_invalid',
+      'Food payload is invalid.',
+      {
+        issues: result.error.issues.flatMap((issue) => {
+          const publicPath = foodValidationPublicPath(issue.path)
+          return publicPath === undefined
+            ? []
+            : [{ code: issue.code, publicPath }]
+        }),
+        stage: 'validation',
+      },
+    )
   }
 
   if (statusProvided) {
@@ -397,6 +470,12 @@ export async function addDailyFoodRecord(input: {
       title,
       slug,
     })
+    validateDailyFoodScheduledLogSlug({
+      core,
+      existingFood: existingFood !== null,
+      foodSlug: existingFood?.slug ?? slug ?? slugifyFoodLookup(title),
+    })
+    validateDailyFoodScheduledLogTitle({ core, title })
     const persisted = await persistFoodRecord({
       core,
       vault: input.vault,
@@ -710,12 +789,7 @@ async function findFoodForDailyAdd(
         slug: candidateSlug,
       })
     } catch (error) {
-      const vaultErrorCode =
-        error && typeof error === 'object' && 'code' in error
-          ? String((error as { code?: unknown }).code ?? '')
-          : ''
-
-      if (vaultErrorCode !== 'VAULT_FOOD_MISSING') {
+      if (readVaultErrorCode(error) !== 'VAULT_FOOD_MISSING') {
         throw error
       }
     }
@@ -723,6 +797,58 @@ async function findFoodForDailyAdd(
 
   const foods = await core.listFoods(input.vault)
   return foods.find((food) => food.title === input.title) ?? null
+}
+
+function validateDailyFoodScheduledLogTitle(input: {
+  core: FoodCoreRuntime
+  title: string
+}) {
+  try {
+    input.core.buildDailyFoodScheduledLogTitle({ title: input.title })
+  } catch (error) {
+    if (readVaultErrorCode(error) !== 'VAULT_INVALID_INPUT') {
+      throw error
+    }
+
+    throw new VaultCliError(
+      'contract_invalid',
+      'The generated daily food schedule title is too long. Retry food schedule with a shorter title.',
+      {
+        issues: [{
+          code: 'too_big',
+          publicPath: ['title'],
+        }],
+        stage: 'validation',
+      },
+    )
+  }
+}
+
+function validateDailyFoodScheduledLogSlug(input: {
+  core: FoodCoreRuntime
+  existingFood: boolean
+  foodSlug: string
+}) {
+  try {
+    input.core.buildDailyFoodScheduledLogSlug({ slug: input.foodSlug })
+  } catch (error) {
+    if (readVaultErrorCode(error) !== 'VAULT_INVALID_INPUT') {
+      throw error
+    }
+
+    throw new VaultCliError(
+      'contract_invalid',
+      input.existingFood
+        ? 'The existing food slug is too long for daily scheduling. Use food rename to shorten its slug, then retry food schedule.'
+        : 'The generated daily food schedule slug is too long. Retry food schedule with a shorter --slug.',
+    )
+  }
+}
+
+function readVaultErrorCode(error: unknown): string {
+  return error && typeof error === 'object' && 'code' in error
+    ? String(error.code ?? '')
+    : ''
 }
 
 function mergeFoodAliases(

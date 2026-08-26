@@ -68,6 +68,7 @@ export interface AssistantGeneratedDeliveryResiduePruneResult {
   generatedDeliveryBytesScanned: number
   generatedDeliveryFilesPruned: number
   generatedDeliveryFilesScanned: number
+  generatedDeliveryNestedEntriesRetained: number
 }
 
 export type AssistantGeneratedDeliveryResiduePruneErrorCode =
@@ -75,7 +76,6 @@ export type AssistantGeneratedDeliveryResiduePruneErrorCode =
   | 'directory_changed'
   | 'file_changed'
   | 'root_not_directory'
-  | 'staging_not_flat'
   | 'staging_non_regular_file'
   | 'staging_symlink'
   | 'unsafe_filename'
@@ -156,6 +156,7 @@ interface AssistantGeneratedDeliveryPrunePlan {
   activeFilesRetained: number
   files: AssistantGeneratedDeliveryFileSnapshot[]
   inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[]
+  nestedEntriesRetained: number
   root: string | null
   skippedUntrustedOutbox: boolean
 }
@@ -227,6 +228,8 @@ export async function pruneAssistantGeneratedDeliveryResidue(input: {
         ),
         generatedDeliveryFilesPruned: pruneResult.filesPruned,
         generatedDeliveryFilesScanned: plan.inventoryFiles.length,
+        generatedDeliveryNestedEntriesRetained:
+          plan.nestedEntriesRetained,
       }
     },
     input.signal,
@@ -382,6 +385,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
       activeFilesRetained: 0,
       files: [],
       inventoryFiles: [],
+      nestedEntriesRetained: 0,
       root: null,
       skippedUntrustedOutbox: true,
     }
@@ -428,6 +432,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         activeFilesRetained: 0,
         files: [],
         inventoryFiles: [],
+        nestedEntriesRetained: 0,
         root: null,
         skippedUntrustedOutbox: true,
       }
@@ -450,6 +455,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         activeFilesRetained: 0,
         files: [],
         inventoryFiles: [],
+        nestedEntriesRetained: 0,
         root: null,
         skippedUntrustedOutbox: false,
       }
@@ -465,6 +471,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
 
   const files: AssistantGeneratedDeliveryFileSnapshot[] = []
   const inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[] = []
+  let nestedEntriesRetained = 0
   const entries = await readdir(root, { withFileTypes: true })
   input.signal?.throwIfAborted()
 
@@ -481,10 +488,8 @@ async function planAssistantGeneratedDeliveryPrune(input: {
       )
     }
     if (entry.isDirectory() && stats.isDirectory()) {
-      throw new AssistantGeneratedDeliveryResiduePruneError(
-        'staging_not_flat',
-        'Assistant generated-delivery staging must remain flat.',
-      )
+      nestedEntriesRetained += 1
+      continue
     }
     if (!entry.isFile() || !stats.isFile()) {
       throw new AssistantGeneratedDeliveryResiduePruneError(
@@ -544,6 +549,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     activeFilesRetained,
     files,
     inventoryFiles,
+    nestedEntriesRetained,
     root,
     skippedUntrustedOutbox: false,
   }

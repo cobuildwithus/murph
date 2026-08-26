@@ -7596,7 +7596,8 @@ function parseAttachResponseCardArguments(
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
   if (audience !== 'group') {
-    const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+    const runtimeValue = stampTrackedResponseCardSnapshot(value)
+    const parsed = attachResponseCardArgumentsSchema.safeParse(runtimeValue)
     if (parsed.success) {
       return {
         card: parsed.data.card,
@@ -7609,7 +7610,7 @@ function parseAttachResponseCardArguments(
       || Object.hasOwn(asRecord(value) ?? {}, 'card')
     ) {
       const semanticWorkout =
-        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
+        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(runtimeValue)
       if (semanticWorkout.success) {
         return {
           card: semanticWorkout.data.card,
@@ -7618,7 +7619,7 @@ function parseAttachResponseCardArguments(
         }
       }
       const diagnosticError = readAttachResponseCardDiagnosticError(
-        value,
+        runtimeValue,
         parsed.error,
       )
       return {
@@ -7657,6 +7658,30 @@ function parseAttachResponseCardArguments(
     groupChallenge: true,
     input: groupChallengeParsed.data,
     ok: true,
+  }
+}
+
+function stampTrackedResponseCardSnapshot(value: unknown): unknown {
+  const input = asRecord(value)
+  const card = asRecord(input?.card)
+  const tracking = asRecord(card?.tracking)
+  if (
+    card?.kind !== 'compact_table'
+    || tracking?.kind !== 'workout'
+    || !Object.hasOwn(card, 'workout')
+  ) {
+    return value
+  }
+
+  return {
+    ...input,
+    card: {
+      ...card,
+      tracking: {
+        ...tracking,
+        snapshotAt: new Date().toISOString(),
+      },
+    },
   }
 }
 

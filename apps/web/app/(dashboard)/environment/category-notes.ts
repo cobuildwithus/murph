@@ -7,9 +7,10 @@ import {
 } from "@murphai/contracts";
 
 import type { HabitatIndicatorNotes, ResolvedCategory } from "./home-model";
+import { toFahrenheit } from "./use-imperial-units";
 
 export type CategoryGrade = {
-  letter: "A" | "B" | "C" | "D" | "E" | null;
+  letter: "A" | "B" | "C" | "D" | "F" | null;
   pct: number | null;
   met: number;
   graded: number;
@@ -166,6 +167,7 @@ function displayLabel(
 function humanizeValue(
   value: HabitatIndicatorValue,
   indicator: HabitatIndicatorDefinition,
+  imperial: boolean,
 ): string {
   if (typeof value === "boolean") {
     return value ? "yes" : "no";
@@ -174,6 +176,9 @@ function humanizeValue(
     const valueType = indicator.valueType;
     if (valueType.kind !== "number" || !valueType.unit) {
       return String(value);
+    }
+    if (valueType.unit === "°C" && imperial) {
+      return `${toFahrenheit(value)}°F`;
     }
     const separator = valueType.unit.startsWith("°") ? "" : " ";
     return `${value}${separator}${valueType.unit}`;
@@ -188,12 +193,12 @@ function gradeLetter(
   pct: number,
   redFlags: number,
 ): Exclude<CategoryGrade["letter"], null> {
-  if (redFlags > 0) return "E";
+  if (redFlags > 0) return "F";
   if (pct >= 90) return "A";
-  if (pct >= 75) return "B";
-  if (pct >= 55) return "C";
-  if (pct >= 35) return "D";
-  return "E";
+  if (pct >= 80) return "B";
+  if (pct >= 70) return "C";
+  if (pct >= 60) return "D";
+  return "F";
 }
 
 function gradeFromCounts(
@@ -329,6 +334,7 @@ export function deriveCategoryNote(
   category: Pick<ResolvedCategory, "id" | "title" | "aspectIds">,
   values: Record<string, Record<string, HabitatIndicatorValue>>,
   indicatorNotes: HabitatIndicatorNotes = {},
+  imperial = false,
 ): CategoryNote {
   const indicators: Array<{
     aspectId: string;
@@ -357,7 +363,10 @@ export function deriveCategoryNote(
   const knownNotes = new Map<string, string>();
   for (const { indicator, note, value } of indicators) {
     if (FOLDED_INTO[indicator.id] && isKnownValue(value)) {
-      knownFoldedValues.set(indicator.id, humanizeValue(value, indicator));
+      knownFoldedValues.set(
+        indicator.id,
+        humanizeValue(value, indicator, imperial),
+      );
     }
     if (note) {
       knownNotes.set(indicator.id, note);
@@ -409,7 +418,7 @@ export function deriveCategoryNote(
 
     const evaluator = TARGET_EVALUATORS[indicator.id];
     const met = evaluateIndicatorTarget(indicator.id, value);
-    const humanizedValue = humanizeValue(value, indicator);
+    const humanizedValue = humanizeValue(value, indicator, imperial);
     const target =
       met === null || evaluator?.showGoal === false
         ? null

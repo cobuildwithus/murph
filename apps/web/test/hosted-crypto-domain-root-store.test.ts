@@ -3521,6 +3521,10 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
         initialOnboardingCompletedAt: null,
         billingStatus: input.data.billingStatus ?? HostedBillingStatus.not_started,
         createdAt: now,
+        groupPrivateConversionTrackedAt:
+          input.data.groupPrivateConversionTrackedAt instanceof Date
+            ? input.data.groupPrivateConversionTrackedAt
+            : null,
         id: input.data.id,
         pendingActivationTimeZone: null,
         signupNotificationContextEncrypted: null,

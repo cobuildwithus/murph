@@ -8,6 +8,7 @@ import {
   getHealthRegistryCommandMetadata,
   healthEntityDescriptorByKind,
 } from "@murphai/vault-usecases";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import {
   getHealthRegistryFamily,
@@ -235,6 +236,85 @@ describe("health registry family seams", () => {
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
+  });
+
+  it("keeps submitted protocol validation field-correctable", async () => {
+    const coreServices = createExplicitHealthCoreServices(async () => ({
+      core: {
+        async upsertProtocol() {
+          throw Object.assign(new Error("private core validation detail"), {
+            name: "VaultError",
+            code: "VAULT_INVALID_PROTOCOL",
+            details: {
+              validationSource: "submitted_candidate",
+              fields: [{
+                path: ["effectiveSpec"],
+                code: "invalid_type",
+                message: "PrivateProtocolSpecSentinel",
+              }],
+            },
+          });
+        },
+      } as never,
+    }));
+
+    const error = await coreServices.upsertPrivateProtocol({
+      requestId: null,
+      vault: "./vault",
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(VaultCliError);
+    expect(error).toMatchObject({
+      code: "contract_invalid",
+      context: {
+        validationSource: "submitted_candidate",
+        vaultCode: "VAULT_INVALID_PROTOCOL",
+        stage: "validation",
+        issues: [{
+          publicPath: ["effectiveSpec"],
+          code: "invalid_type",
+        }],
+      },
+    });
+    expect(error).not.toHaveProperty("repair");
+    expect(JSON.stringify(error)).not.toMatch(/PrivateProtocolSpecSentinel/u);
+  });
+
+  it("maps stored protocol corruption to vault-state recovery", async () => {
+    const coreServices = createExplicitHealthCoreServices(async () => ({
+      core: {
+        async upsertProtocol() {
+          throw Object.assign(new Error("private stored protocol detail"), {
+            name: "VaultError",
+            code: "VAULT_INVALID_PROTOCOL",
+            details: {
+              validationSource: "stored_vault_state",
+              fields: [{
+                path: ["effectiveSpecHash"],
+                code: "stale_value",
+                message: "PrivateStoredValueSentinel",
+              }],
+            },
+          });
+        },
+      } as never,
+    }));
+
+    const error = await coreServices.upsertPrivateProtocol({
+      requestId: null,
+      vault: "./vault",
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(VaultCliError);
+    expect(error).toMatchObject({
+      code: "vault_state_invalid",
+      context: {
+        validationSource: "stored_vault_state",
+        vaultCode: "VAULT_INVALID_PROTOCOL",
+      },
+    });
+    expect(error).not.toHaveProperty("repair");
+    expect(JSON.stringify(error)).not.toMatch(/PrivateStoredValueSentinel/u);
   });
 
 });

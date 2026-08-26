@@ -17,6 +17,7 @@ import {
   mealAddResultSchema,
   pathSchema,
   showResultSchema,
+  timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
@@ -685,6 +686,9 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         description:
           'Edit one meal event from typed fields.',
         options: {
+          timeZone: timeZoneSchema
+            .optional()
+            .describe('Replace the explicit IANA time zone, such as America/New_York.'),
           ingredient: mealIngredientsSchema
             .describe('Replace saved ingredients. Repeat --ingredient for each item.'),
           nutritionCalories: z.number().nonnegative().optional().describe('Replace meal calorie total.'),

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
 
 import type {
   ContractSchema,
@@ -340,7 +342,7 @@ interface DeviceAuthoritativeEventSetInput extends LooseRecord {
   currentFacets?: unknown;
 }
 
-interface ImportDeviceBatchInput {
+export interface ImportDeviceBatchInput {
   vaultRoot: string;
   provider: string;
   accountId?: string;
@@ -352,6 +354,22 @@ interface ImportDeviceBatchInput {
   authoritativeEventSets?: readonly DeviceAuthoritativeEventSetInput[];
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
+}
+
+export interface DeviceBatchImportTiming {
+  canonicalWriteElapsedMs: number;
+  eventIdentityIndexCacheHit: boolean;
+  eventIdentityIndexElapsedMs: number;
+  totalElapsedMs: number;
+}
+
+export interface DeviceBatchImportSession {
+  readonly kind: "device_batch_import_session";
+}
+
+export interface ImportDeviceBatchExecutionOptions {
+  onTiming?: (timing: DeviceBatchImportTiming) => void;
+  session?: DeviceBatchImportSession;
 }
 
 interface ImportDeviceBatchResultBase {
@@ -3157,6 +3175,208 @@ interface LegacyExternalRefReservation {
 interface DeviceEventIdentityContext {
   index: EventExternalRefIndex;
   legacyReservations: ReadonlyMap<string, LegacyExternalRefReservation>;
+}
+
+interface DeviceEventIdentityDependency {
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[];
+  eventIds: ReadonlySet<string>;
+  externalRefs: readonly ExternalRef[];
+  junctionNoIdProfileScopes: ReadonlySet<string>;
+}
+
+interface DeviceBatchImportSessionVaultState {
+  dependencyChanges: DeviceEventIdentityDependency[];
+  eventIdentityContext: DeviceEventIdentityContext;
+  eventLedgerFingerprint: string;
+}
+
+const deviceBatchImportSessionState = new WeakMap<
+  DeviceBatchImportSession,
+  Map<string, DeviceBatchImportSessionVaultState>
+>();
+
+export function createDeviceBatchImportSession(): DeviceBatchImportSession {
+  const session = Object.freeze({
+    kind: "device_batch_import_session" as const,
+  });
+  deviceBatchImportSessionState.set(session, new Map());
+  return session;
+}
+
+function buildDeviceEventIdentityDependency(
+  plan: DeviceBatchPlan,
+  additionalEventIds: readonly string[] = [],
+): DeviceEventIdentityDependency {
+  const externalRefs = plan.preparedEvents.flatMap((entry) => [
+    ...(entry.record.externalRef ? [entry.record.externalRef] : []),
+    ...entry.legacyExternalRefs,
+  ]);
+  return {
+    authoritativeEventSets: plan.authoritativeEventSets,
+    eventIds: new Set([
+      ...plan.preparedEvents.map((entry) => entry.record.id),
+      ...additionalEventIds,
+    ]),
+    externalRefs,
+    junctionNoIdProfileScopes: new Set(
+      plan.preparedEvents.flatMap((entry) => {
+        const externalRef = entry.record.externalRef;
+        const scope = externalRef
+          ? junctionNoIdProfileScopeKey(externalRef, entry.record.dataOrigin)
+          : null;
+        return scope ? [scope] : [];
+      }),
+    ),
+  };
+}
+
+function eventRefBelongsToAuthoritativeSet(
+  externalRef: ExternalRef,
+  set: NormalizedDeviceAuthoritativeEventSet,
+): boolean {
+  if (
+    externalRef.system !== set.system
+    || externalRef.resourceType !== set.resourceType
+    || externalRef.resourceId !== set.resourceId
+    || externalRef.facet === undefined
+  ) {
+    return false;
+  }
+  return set.facetPrefixes.some((prefix) =>
+    externalRef.facet === prefix || externalRef.facet?.startsWith(`${prefix}-`)
+  );
+}
+
+function authoritativeEventSetsOverlap(
+  left: NormalizedDeviceAuthoritativeEventSet,
+  right: NormalizedDeviceAuthoritativeEventSet,
+): boolean {
+  if (
+    left.system !== right.system
+    || left.resourceType !== right.resourceType
+    || left.resourceId !== right.resourceId
+  ) {
+    return false;
+  }
+  return left.facetPrefixes.some((leftPrefix) =>
+    right.facetPrefixes.some((rightPrefix) =>
+      leftPrefix === rightPrefix
+      || leftPrefix.startsWith(`${rightPrefix}-`)
+      || rightPrefix.startsWith(`${leftPrefix}-`)
+    )
+  );
+}
+
+function deviceEventIdentityDependenciesOverlap(
+  left: DeviceEventIdentityDependency,
+  right: DeviceEventIdentityDependency,
+): boolean {
+  if ([...left.eventIds].some((eventId) => right.eventIds.has(eventId))) {
+    return true;
+  }
+
+  const rightRefKeys = new Set(right.externalRefs.map(eventExternalRefKey));
+  if (left.externalRefs.some((externalRef) => rightRefKeys.has(eventExternalRefKey(externalRef)))) {
+    return true;
+  }
+
+  if (
+    [...left.junctionNoIdProfileScopes].some((scope) =>
+      right.junctionNoIdProfileScopes.has(scope)
+    )
+  ) {
+    return true;
+  }
+
+  if (left.externalRefs.some((externalRef) =>
+    right.authoritativeEventSets.some((set) =>
+      eventRefBelongsToAuthoritativeSet(externalRef, set)
+    )
+  )) {
+    return true;
+  }
+  if (right.externalRefs.some((externalRef) =>
+    left.authoritativeEventSets.some((set) =>
+      eventRefBelongsToAuthoritativeSet(externalRef, set)
+    )
+  )) {
+    return true;
+  }
+  return left.authoritativeEventSets.some((leftSet) =>
+    right.authoritativeEventSets.some((rightSet) =>
+      authoritativeEventSetsOverlap(leftSet, rightSet)
+    )
+  );
+}
+
+function readDeviceBatchImportSessionVaultState(
+  session: DeviceBatchImportSession | undefined,
+  vaultRoot: string,
+): DeviceBatchImportSessionVaultState | undefined {
+  return session ? deviceBatchImportSessionState.get(session)?.get(vaultRoot) : undefined;
+}
+
+function replaceDeviceBatchImportSessionVaultState(
+  session: DeviceBatchImportSession | undefined,
+  vaultRoot: string,
+  state: DeviceBatchImportSessionVaultState,
+): void {
+  if (!session) {
+    return;
+  }
+  deviceBatchImportSessionState.get(session)?.set(vaultRoot, state);
+}
+
+function clearDeviceBatchImportSessionVaultState(
+  session: DeviceBatchImportSession | undefined,
+  vaultRoot: string,
+): void {
+  if (!session) {
+    return;
+  }
+  deviceBatchImportSessionState.get(session)?.delete(vaultRoot);
+}
+
+function emitDeviceBatchImportTiming(
+  observer: ImportDeviceBatchExecutionOptions["onTiming"],
+  timing: DeviceBatchImportTiming,
+): void {
+  try {
+    observer?.({ ...timing });
+  } catch {
+    // Diagnostics must not turn an already-committed canonical write into an
+    // apparent import failure.
+  }
+}
+
+async function buildDeviceEventLedgerFingerprint(vaultRoot: string): Promise<string> {
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const metadata = await Promise.all(shardPaths.map(async (relativePath) => {
+    const shard = await stat(resolveVaultPath(vaultRoot, relativePath).absolutePath);
+    return [
+      relativePath,
+      shard.dev,
+      shard.ino,
+      shard.size,
+      shard.mtimeMs,
+      shard.ctimeMs,
+    ].join("\0");
+  }));
+  return createHash("sha256").update(metadata.join("\n")).digest("hex");
+}
+
+async function tryBuildDeviceEventLedgerFingerprint(
+  vaultRoot: string,
+): Promise<string | undefined> {
+  try {
+    return await buildDeviceEventLedgerFingerprint(vaultRoot);
+  } catch {
+    // A failed cache fence disables reuse. The canonical import path remains
+    // authoritative and will surface any real ledger read failure itself.
+    return undefined;
+  }
 }
 
 interface ResolvedDeviceEventIdentity {
@@ -7223,7 +7443,30 @@ function buildStoredDeviceDeliveryNoopResult(input: {
   };
 }
 
-export async function importDeviceBatch({
+export async function importDeviceBatch(
+  input: ImportDeviceBatchInput,
+  options: ImportDeviceBatchExecutionOptions = {},
+): Promise<ImportDeviceBatchResult> {
+  assertCanonicalWriteLockScope(input.vaultRoot);
+  const startedAt = performance.now();
+  const timing: DeviceBatchImportTiming = {
+    canonicalWriteElapsedMs: 0,
+    eventIdentityIndexCacheHit: false,
+    eventIdentityIndexElapsedMs: 0,
+    totalElapsedMs: 0,
+  };
+  try {
+    return await importDeviceBatchWithExecutionOptions(input, options, timing);
+  } catch (error) {
+    clearDeviceBatchImportSessionVaultState(options.session, input.vaultRoot);
+    throw error;
+  } finally {
+    timing.totalElapsedMs = Math.max(0, performance.now() - startedAt);
+    emitDeviceBatchImportTiming(options.onTiming, timing);
+  }
+}
+
+async function importDeviceBatchWithExecutionOptions({
   vaultRoot,
   provider,
   accountId,
@@ -7235,7 +7478,10 @@ export async function importDeviceBatch({
   authoritativeEventSets = [],
   ingestReceipt,
   provenance,
-}: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
+}: ImportDeviceBatchInput,
+options: ImportDeviceBatchExecutionOptions,
+timing: DeviceBatchImportTiming,
+): Promise<ImportDeviceBatchResult> {
   assertDeviceSampleRowLimit(Array.isArray(samples) ? samples.length : 0);
   const vault = await loadVault({ vaultRoot });
   const deviceBatchPlan = prepareDeviceBatchPlan({
@@ -7255,11 +7501,64 @@ export async function importDeviceBatch({
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
   });
-  const initialEventIdentityContext = await buildDeviceEventIdentityContext(
-    vaultRoot,
-    deviceBatchPlan.preparedEvents,
-    deviceBatchPlan.authoritativeEventSets,
-  );
+  const requiresEventIdentityContext = deviceBatchPlan.preparedEvents.length > 0
+    || deviceBatchPlan.authoritativeEventSets.length > 0;
+  const eventIdentityDependency = buildDeviceEventIdentityDependency(deviceBatchPlan);
+  const indexStartedAt = performance.now();
+  const sessionVaultState = requiresEventIdentityContext
+    ? readDeviceBatchImportSessionVaultState(options.session, vaultRoot)
+    : undefined;
+  const currentEventLedgerFingerprint = sessionVaultState
+    ? await tryBuildDeviceEventLedgerFingerprint(vaultRoot)
+    : undefined;
+  const sessionFingerprintMatches = sessionVaultState
+    && currentEventLedgerFingerprint !== undefined
+    ? sessionVaultState.eventLedgerFingerprint
+      === currentEventLedgerFingerprint
+    : false;
+  const cachedEventIdentityContext = sessionVaultState
+    && sessionFingerprintMatches
+    && sessionVaultState.dependencyChanges.every((dependencyChange) =>
+      !deviceEventIdentityDependenciesOverlap(eventIdentityDependency, dependencyChange)
+    )
+    ? cloneDeviceEventIdentityContext(sessionVaultState.eventIdentityContext)
+    : undefined;
+  let initialEventIdentityContext = cachedEventIdentityContext
+    ?? await buildDeviceEventIdentityContext(
+      vaultRoot,
+      deviceBatchPlan.preparedEvents,
+      deviceBatchPlan.authoritativeEventSets,
+    );
+  if (
+    cachedEventIdentityContext
+    && deviceBatchPlan.preparedEvents.some((entry) =>
+      resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+        entry,
+        cachedEventIdentityContext.index,
+      ) !== null
+    )
+  ) {
+    initialEventIdentityContext = await buildDeviceEventIdentityContext(
+      vaultRoot,
+      deviceBatchPlan.preparedEvents,
+      deviceBatchPlan.authoritativeEventSets,
+    );
+  } else if (cachedEventIdentityContext) {
+    timing.eventIdentityIndexCacheHit = true;
+  }
+  timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
+  if (requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
+    const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
+    if (eventLedgerFingerprint) {
+      replaceDeviceBatchImportSessionVaultState(options.session, vaultRoot, {
+        dependencyChanges: [],
+        eventIdentityContext: cloneDeviceEventIdentityContext(initialEventIdentityContext),
+        eventLedgerFingerprint,
+      });
+    } else {
+      clearDeviceBatchImportSessionVaultState(options.session, vaultRoot);
+    }
+  }
   deviceBatchPlan.preparedEvents = resolveJunctionFloatingFallbackEntries(
     deviceBatchPlan.preparedEvents,
     initialEventIdentityContext,
@@ -8098,7 +8397,8 @@ export async function importDeviceBatch({
     return buildNoopResult();
   }
 
-  return runCanonicalWrite({
+  const canonicalWriteStartedAt = performance.now();
+  const result: ImportDeviceBatchResult = await runCanonicalWrite({
     vaultRoot,
     operationType: "device_batch_import",
     summary: `Import ${deviceBatchPlan.provider} device batch ${persistedImportId}`,
@@ -8156,6 +8456,35 @@ export async function importDeviceBatch({
       };
     },
   });
+  timing.canonicalWriteElapsedMs = Math.max(
+    0,
+    performance.now() - canonicalWriteStartedAt,
+  );
+  if (eventAppendPlan.appendedRecordIds.length > 0) {
+    const currentSessionState = readDeviceBatchImportSessionVaultState(
+      options.session,
+      vaultRoot,
+    );
+    if (currentSessionState) {
+      const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
+      if (eventLedgerFingerprint) {
+        replaceDeviceBatchImportSessionVaultState(options.session, vaultRoot, {
+          ...currentSessionState,
+          dependencyChanges: [
+            ...currentSessionState.dependencyChanges,
+            buildDeviceEventIdentityDependency(
+              deviceBatchPlan,
+              eventReconciliation.records.map((record) => record.id),
+            ),
+          ],
+          eventLedgerFingerprint,
+        });
+      } else {
+        clearDeviceBatchImportSessionVaultState(options.session, vaultRoot);
+      }
+    }
+  }
+  return result;
 }
 
 export interface ImportEventPayloadBatchInput {

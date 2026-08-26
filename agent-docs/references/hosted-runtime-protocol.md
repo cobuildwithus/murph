@@ -1887,7 +1887,11 @@ bounded delivery-effect reconciliation without continuing the assistant
 automation lane. Reconciliation uses an observation-only approval read that
 cannot create or refresh an approval cycle; only an explicit new action request
 may refresh a denied or expired cycle. The row is never authorization or outcome
-truth.
+truth. When an already-active invocation imports the control row, it runs that
+import's owned post-checkpoint effect immediately instead of waiting for a later
+conversation message. System-only reconciliation does not become conversation
+work, flip the foreground-yield signal, steer a provider turn, or start a
+companion model reply.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 When a pending vault-file action must surface an approval capability, the
@@ -1937,9 +1941,12 @@ quiescent cleanup. The generated-delivery pass runs independently before
 pending-input compaction and broad assistant-residue maintenance, so unrelated
 maintenance failures cannot block a successful terminal-file deletion while
 checkpoint publication continues. It evaluates the complete physical
-generated-delivery inventory against the complete trusted outbox, retains exact
-active obligations, and removes terminal, changed, or orphaned files before
-archive planning. Materialization must not run between that cleanup and archive
+generated-delivery direct-file inventory against the complete trusted outbox,
+retains exact active obligations, and removes terminal, changed, or orphaned
+direct files before archive planning. A legacy nested directory remains opaque
+and retained, is counted in metadata-only diagnostics, and does not block
+cleanup of trusted direct files; it never gains generated-delivery ownership.
+Materialization must not run between that cleanup and archive
 planning because it could reintroduce residue that was absent during
 validation.
 
@@ -2222,7 +2229,14 @@ blocked incoming-line state, current assignment, healthy backup sender capacity,
 and persisted delivery shape before creating the private Linq chat. The webhook
 recipient only identifies the candidate line; the existing `HostedLinqLine`
 projection grants new-route or recovery authority. Established thread routes
-remain authoritative independently of current line-pool eligibility.
+remain authoritative independently of current line-pool eligibility. Every new
+Linq or Telegram thread-container route also materializes its ordinary unnamed
+hosted group and route-owner membership through the canonical group-store
+primitive in that same database transaction. The structural write creates no
+join code, requested health or email sharing, or memberships for observed
+roster participants. Existing routed containers that predate this invariant
+are repaired once through the bounded operator backfill, which calls the same
+primitive in serial, short transactions and emits aggregate counts only.
 Recovery deliveries use a finite five-attempt sequence within the existing
 `HostedLinqDelivery` owner. A live or successful attempt converges every source
 event for that member, failed line, and group thread. Provider-correlated failed
@@ -2271,13 +2285,23 @@ payloads or become the device-sync queue. Active foreground wake handling stays
 conversation-focused; system-lane work runs through normal invocation and
 reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
-pass. A device-sync pass has its own 90-second budget, independent of the shared
+pass. A device-sync pass has its own 120-second budget, independent of the shared
 Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
 may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
 45-second admission cap, and any admitted canonical write finishes its existing
 atomic safety boundary before yielding. Do not add a separate system-lane
 active-wake import path unless measured latency or product behavior proves the
 simpler split is insufficient.
+
+The paired `device-sync.pass_finished` runtime-log marker includes a bounded
+sample of the 16 slowest claimed jobs in that pass. Each summary identifies only
+the provider, job kind, optional code-owned resource class, outcome, attempt/job
+counts, durable-progress presence, and timings for total execution, provider
+execution, unattributed provider work, connection-source reads, credential refreshes,
+and canonical imports. It omits member/account/job identifiers, payloads,
+cursors, provider responses, health values, and raw errors. The marker declares
+the total observed count, sample limit, and truncation state. The Web parser must
+accept the object-array field before a runner capable of emitting it is deployed.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that

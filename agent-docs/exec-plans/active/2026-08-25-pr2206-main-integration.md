@@ -119,6 +119,16 @@ shared error projector and no partial writes or submitted-value echo.
   `git diff --check`, and the identifier/privacy scan. The runner source blob
   now exactly matches its pre-timeout parent while the separate bundle boundary
   test remains unchanged at the measured sample-recovery budget.
+- Current `main` through `7f7805be95` is integrated. Conflict resolution keeps
+  the current-main runner behavior and comments, composes only the reviewed
+  8,212-byte sample allowance for a 9,588,702-byte total boundary, selects the
+  current-main sample-test import superset, and regenerates the CLI schema,
+  command metadata, and skill hash from their authored sources.
+- Post-integration proof passes the 14 bundle-boundary cases, all 23 composed
+  provider/event/sample cases, CLI and Cloudflare typechecks, prepared runtime,
+  package shape, and canonical runner assembly. The Vault CLI is 9,543,029 /
+  9,588,702 bytes with an 805-byte entry and 25,155-byte static closure; all
+  eight parity probes pass and the runner is 11,385,495 / 11,393,617 bytes.
 
 ## Tasks
 

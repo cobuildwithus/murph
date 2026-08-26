@@ -603,7 +603,10 @@ Last verified: 2026-08-23
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately. Metric families are normalized
-  independently: an absent or structurally unusable family remains unknown,
+  independently: primary-only Postgres and PgBouncer families require an
+  explicit `planetscale_role="primary"` label, while the edge connection-error
+  family remains role-less by provider contract. An absent or structurally
+  unusable family remains unknown,
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
   A collection that fails before producing a usable observation, including a
@@ -1267,13 +1270,20 @@ Last verified: 2026-08-23
   contains only bounded metadata: the last pass stage, outcome, elapsed time,
   processed-job count, checkpoint/retry presence, and a typed yield reason
   (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
-  `outer_signal`, or `unknown`). A persisted start without a matching finish is
-  the queryable abrupt-loss signal and must be correlated with runner,
+  `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
+  summaries with provider, job kind, code-owned resource class, outcome,
+  attempt/job counts, durable-progress presence, total/provider execution time,
+  provider time unattributed after subtracting measured callbacks, and measured
+  connection-source read, credential-refresh, and canonical-import counts and
+  durations. The service retains at most one pass budget of those summaries in
+  memory, and the terminal marker declares both the observed count and whether
+  the slowest-job sample was truncated. A persisted start without a matching
+  finish is the queryable abrupt-loss signal and must be correlated with runner,
   container, and checkpoint events for that attempt. The pair remains
   best-effort: abrupt loss before the background writer flushes can omit either
-  marker. These entries
-  never include member/account/job identifiers, provider payloads, resource
-  values, or raw abort/error messages.
+  marker. These entries never include member/account/job identifiers, provider
+  payloads, cursor values, provider responses, health values, or raw
+  abort/error messages.
   This event taxonomy is a strict Web parser boundary. Shared workspace packages
   are build inputs, not separately deployed planes. Deploy the Web artifact that
   contains its parser first, then deploy and fully recycle the Cloudflare
@@ -1574,7 +1584,7 @@ Last verified: 2026-08-23
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 90-second device-pass cancellation can release it as an unclassified
+  hosted 120-second device-pass cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
   UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
@@ -1587,8 +1597,17 @@ Last verified: 2026-08-23
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
-  owner. One admitted workout index yields serial exact-workout SDK reads; each
-  response has an 8 MiB cap and reduces before import to one compact overall
+  owner. Before the workout index, the existing control-plane current-import
+  admission predicate intersects with the current Junction provider inventory
+  so disconnect-fenced sources stay blocked while non-disconnected recovery
+  states can use currently advertised workout-stream capability. No eligible
+  source completes this optional resource without index or stream egress;
+  mixed-source indexes discard ineligible or unattributed workouts before
+  candidate progress is computed. An exact clear-unsupported HTTP 400 skips
+  only that candidate; ambiguous or request-shape HTTP 400s remain terminal.
+  Existing optional HTTP 404/422 candidate handling is unchanged. One admitted
+  workout index yields serial exact-workout SDK reads; each response
+  has an 8 MiB cap and reduces before import to one compact overall
   feature plus at most 64 fixed-distance splits. The stable workout/source
   identity and source update version form one authoritative facet set, so a
   newer correction withdraws omitted splits. Only reduced duration, distance,
@@ -2438,6 +2457,21 @@ Last verified: 2026-08-23
   additional same-date recovery attempt but is not the cron's retry guarantee.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
+- Group-to-private growth attribution reuses that same snapshot pass and its
+  already decoded, identity-resolved group messages. For each resolved real
+  member in the bounded 14-day retained-message window, one set-based read
+  compares the earliest retained group receipt with the first canonical
+  `member.activated` receipt; one conditional batch update sets a nullable
+  member-owned tracking timestamp only when the group receipt came first. The
+  marker stores no message, sender, or group identifier, follows the member's
+  existing deletion lifecycle, and remains stable after message content
+  retires. This is sequence-based attribution limited on every run to group
+  evidence still available inside the rolling 14-day window, not causal proof;
+  sequences whose group evidence retires before activation are never counted.
+  Attribution-only decode or identity failures cannot invalidate the established
+  prior-day and trailing-seven-day activity aggregates. Attribution failures do
+  not block snapshot capture and retry only while the source evidence remains
+  retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the
@@ -2446,8 +2480,20 @@ Last verified: 2026-08-23
   serialization while the write preserves attempt and monotonic
   lease-generation authority, max-merges the publication deadline, sanitizes
   stored diagnostic JSON, and changes `updated_at` only when state changes. It
-  must not select trace ids into the application, lock an unbounded collection,
-  or open one transaction per trace.
+  selects at most 251 of the newest checkpoint candidates and locks those trace
+  rows in deterministic trace-id order inside one bounded `READ COMMITTED`
+  transaction. A second statement takes a fresh command snapshot, rechecks
+  current mailbox and lease eligibility, and updates at most the newest 250.
+  Provider, assistant, and ordinary runtime multi-row writers use the same
+  trace-id lock order. This common order prevents cross-writer row-lock cycles,
+  while the fresh checkpoint snapshot prevents an older waiting lease from
+  overwriting a newer one, without a broad transaction retry.
+  Persistence failures emit only event type, source, input cardinality, query
+  tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
+  stay out of failure logs. The bounded transaction-local trace-id list passes
+  only from the lock statement to the fresh update statement; it must not
+  escape that callback or appear in logs. The writer must not lock an unbounded
+  collection or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event
