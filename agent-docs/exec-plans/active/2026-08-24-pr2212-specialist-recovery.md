@@ -66,5 +66,18 @@ without changing automation ownership or adding a second error framework.
   schedule-kind fields, route/target fields, bounded tag and context-reference
   indices, and payload-root prefixes. The complete automation suite passes
   32/32, CLI typecheck passes, and `git diff --check` is clean.
-- Final foundation composition, prepared/package/bundle proof, and exact-head
-  review remain pending.
+- Current `main` through `52205b8c56` is integrated at merge candidate
+  `9faa1f7e14`. Shared projector and unrelated CLI owners come from `main`;
+  only the PR-owned daemon, automation, batch, and vault-initialization behavior
+  is composed. The resulting domain diff is 32 files.
+- Batch recovery now extends the existing operator-config batch envelope rather
+  than retaining the branch's duplicate result schema. The shared schema owns
+  bounded structured errors and permits empty argv for failures before command
+  parsing. Incur configuration, command metadata, and skill hash were regenerated.
+- Current-main proof passes: automation and batch 43/43, Vault Usecases 8/8,
+  affected operator-config/Vault Usecases/CLI typechecks, prepared runtime, CLI
+  package shape, docs drift/gardening, and the canonical runner assembly with
+  all eight parity probes. Vault CLI is 9,533,986 / 9,534,735 bytes with an
+  805-byte entry and 25,155-byte static closure; runner total is
+  11,365,094 / 11,393,617 bytes.
+- Exact-head final review remains pending.
