@@ -9,6 +9,6 @@
     "summary": "New connected-health updates now catch up faster for members with large histories.",
     "details": "Corrections and changes made between syncs still receive a full safety recheck before new data is accepted.",
     "relevanceTags": ["connected-health", "wearables", "sync", "reliability"],
-    "sourcePullRequests": [2306]
+    "sourcePullRequests": [2322, 2334]
   }
 }
