@@ -43,6 +43,7 @@ import { GrowthScorecard } from "../app/(dashboard)/ops/growth/growth-scorecard"
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  executeRaw: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   getHostedDashboardPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
@@ -141,6 +142,7 @@ let growthCronRoute: GrowthCronRouteModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
+  $executeRaw: mocks.executeRaw,
   hostedAccountGroup: mocks.hostedAccountGroup,
   hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
@@ -180,6 +182,7 @@ describe("hosted ops growth metrics", () => {
       member: { id: "member_ops" },
     });
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.executeRaw.mockResolvedValue(0);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValue(0);

@@ -2034,6 +2034,15 @@ model HostedThreadContainerParticipant {
   @@map("hosted_thread_container_participant")
 }
 
+model HostedGroupParticipantObservation {
+  contactLookupKey String   @id @map("contact_lookup_key")
+  firstObservedAt  DateTime @map("first_observed_at")
+  expiresAt        DateTime @map("expires_at")
+
+  @@index([expiresAt, contactLookupKey], map: "hosted_group_participant_observation_expiry_idx")
+  @@map("hosted_group_participant_observation")
+}
+
 model HostedThreadRoute {
   channel                 String
   /// Blinded canonical delivery-account projection. Null is limited to the

@@ -38,13 +38,15 @@ describe.skipIf(!runPostgresProof)(
       const firstHandle = "+15551110001";
       const laterSameMemberHandle = "+15551110002";
       const insertedHandle = "participant@example.com";
-      const additionalParticipants = Array.from({ length: 29 }, (_, index) => ({
+      const silentHandle = "silent@example.com";
+      const additionalParticipants = Array.from({ length: 28 }, (_, index) => ({
         handle: `+1555333${index.toString().padStart(4, "0")}`,
         participantMemberId: `member-roster-cap-${index.toString().padStart(2, "0")}`,
       }));
       const firstLookupKey = requireLookupKey("phone", firstHandle);
       const laterLookupKey = requireLookupKey("phone", laterSameMemberHandle);
       const insertedLookupKey = requireLookupKey("email", insertedHandle);
+      const silentLookupKey = requireLookupKey("email", silentHandle);
 
       try {
         await prisma.$transaction(async (tx) => {
@@ -59,6 +61,13 @@ describe.skipIf(!runPostgresProof)(
               created_at TIMESTAMP(3) NOT NULL,
               updated_at TIMESTAMP(3) NOT NULL,
               PRIMARY KEY (container_member_id, participant_member_id)
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_group_participant_observation (
+              contact_lookup_key TEXT PRIMARY KEY,
+              first_observed_at TIMESTAMP(3) NOT NULL,
+              expires_at TIMESTAMP(3) NOT NULL
             ) ON COMMIT DROP
           `);
           await tx.$executeRaw(Prisma.sql`
@@ -102,6 +111,7 @@ describe.skipIf(!runPostgresProof)(
               { handle: firstHandle, isMe: false, status: "active" },
               { handle: laterSameMemberHandle, isMe: false, status: "active" },
               { handle: insertedHandle, isMe: false, status: "active" },
+              { handle: silentHandle, isMe: false, status: "active" },
               ...additionalParticipants.map((participant) => ({
                 handle: participant.handle,
                 isMe: false,
@@ -121,7 +131,7 @@ describe.skipIf(!runPostgresProof)(
           });
 
           const completeRows = await readRows(tx, containerMemberId);
-          expect(completeRows).toHaveLength(32);
+          expect(completeRows).toHaveLength(31);
           expect(completeRows.find((row) =>
             row.participantMemberId === firstMemberId
           )).toMatchObject({
@@ -151,6 +161,62 @@ describe.skipIf(!runPostgresProof)(
           expect(completeRows.find((row) =>
             row.participantMemberId === additionalParticipants.at(-1)?.participantMemberId
           )?.removedAt).toBeNull();
+          const observations = await tx.$queryRaw<Array<{
+            contactLookupKey: string;
+            expiresAt: Date;
+          }>>(Prisma.sql`
+            SELECT
+              contact_lookup_key AS "contactLookupKey",
+              expires_at AS "expiresAt"
+            FROM hosted_group_participant_observation
+            ORDER BY contact_lookup_key
+          `);
+          expect(observations).toHaveLength(32);
+          expect(observations).toContainEqual({
+            contactLookupKey: silentLookupKey,
+            expiresAt: expect.any(Date),
+          });
+          expect(observations.find((observation) =>
+            observation.contactLookupKey === silentLookupKey
+          )?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+          const staleObservationAt = new Date("2026-01-01T00:00:00.000Z");
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_group_participant_observation
+            SET
+              first_observed_at = ${staleObservationAt},
+              expires_at = ${staleObservationAt}
+            WHERE contact_lookup_key = ${silentLookupKey}
+          `);
+          const refreshStartedAt = new Date();
+          await reconcileHostedThreadContainerParticipants({
+            chatId: "chat-roster-refreshed-observation",
+            containerMemberId,
+            handles: [
+              { handle: silentHandle, isMe: false, status: "active" },
+            ],
+            prisma: tx,
+            resolvedParticipants: [],
+          });
+          const [refreshedObservation] = await tx.$queryRaw<Array<{
+            expiresAt: Date;
+            firstObservedAt: Date;
+          }>>(Prisma.sql`
+            SELECT
+              first_observed_at AS "firstObservedAt",
+              expires_at AS "expiresAt"
+            FROM hosted_group_participant_observation
+            WHERE contact_lookup_key = ${silentLookupKey}
+          `);
+          if (!refreshedObservation) {
+            throw new Error("Expected the silent observation to be refreshed.");
+          }
+          expect(refreshedObservation.firstObservedAt.getTime())
+            .toBeGreaterThanOrEqual(refreshStartedAt.getTime());
+          expect(
+            refreshedObservation.expiresAt.getTime()
+              - refreshedObservation.firstObservedAt.getTime(),
+          ).toBe(14 * 24 * 60 * 60 * 1000);
 
           await tx.$executeRaw(Prisma.sql`
             UPDATE hosted_thread_container_participant
