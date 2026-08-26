@@ -36,6 +36,7 @@ import {
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
@@ -9106,6 +9107,237 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(result.status, "idle");
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("runs a late imported approval through the causal system owner before idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const foregroundCausalOnlyValues: boolean[] = [];
+    const approvalImportObserved = createDeferred<void>();
+    const effectId = "effect_late_imported_approval";
+    const approvalItem = createMailboxItem({
+      dedupeKey: `runtime.pending-effects-reconcile-requested:${effectId}`,
+      id: "mailbox_item_late_imported_approval",
+      kind: "runtime.pending-effects-reconcile-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      throw new Error("Late approval continuation must not enter a provider request.");
+    });
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.collectHostedAssistantDeliverySideEffects.mockClear();
+      mocks.drainHostedPreparedAssistantDeliveries.mockClear();
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockClear();
+      mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
+        async (input) => {
+          if (input.preferredEffectIds?.[0] !== effectId) {
+            return [];
+          }
+          return [{
+            deliveryPhase: "foreground_current_turn",
+            effectId,
+            fingerprint: `fingerprint_${effectId}`,
+            kind: "assistant.delivery",
+            payload: {
+              actorId: null,
+              answeredMailboxItemIds: [],
+              bindingDeliveryKind: null,
+              bindingDeliveryTarget: null,
+              channel: "linq",
+              deliverySourceKey: null,
+              explicitTarget: null,
+              identityId: null,
+              idempotencyKey: `assistant-outbox:${effectId}`,
+              media: [],
+              message: "Synthetic approved attachment",
+              replyToMessageId: null,
+              sessionId: "session_late_imported_approval",
+              subject: null,
+              threadId: null,
+              threadIsDirect: true,
+              transportIdempotent: true,
+              turnId: "turn_late_imported_approval",
+            },
+          }];
+        },
+      );
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: [],
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async (input) => {
+        for (const effect of input.assistantDeliveryEffects) {
+          events.push(`approval.delivery:${effect.effectId}`);
+        }
+        return input.assistantDeliveryEffects.map((effect) => ({
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent" as const,
+          effectFingerprint: effect.fingerprint,
+          effectId: effect.effectId,
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: "message_late_imported_approval",
+          providerThreadId: null,
+          retryable: false,
+          target: null,
+          targetKind: null,
+        }));
+      });
+
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = {
+        ...createPlatform({
+          mailboxPort: createMailboxPort({
+            events,
+            items: mailboxItems,
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        providerFetch,
+      } satisfies HostedRuntimePlatform;
+      const bridgeImporter = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: {
+          async decode() {
+            return {
+              status: "decoded",
+              wake: buildHostedExecutionPendingEffectsReconcileRequestedWake({
+                effectId,
+                eventId: approvalItem.dedupeKey,
+                occurredAt: approvalItem.occurredAt,
+                userId: TEST_USER_ID,
+              }),
+            };
+          },
+        },
+        runtime: normalizeHostedAssistantRuntimeConfig({}, platform),
+        vaultRoot,
+      });
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_late_imported_approval",
+              idleCheckpointDelayMs: 200,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "7".repeat(64),
+                  key: "users/bundles/member-synthetic/late-imported-approval.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item, context) {
+              const outcome = await bridgeImporter(item, context);
+              assert.equal(Object.hasOwn(outcome, "afterCheckpoint"), false);
+              events.push(`approval.import:${outcome.status}`);
+              approvalImportObserved.resolve();
+              return outcome;
+            },
+            platform,
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              foregroundCausalOnlyValues.push(input.foregroundCausalOnly === true);
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls === 1) {
+                return {
+                  afterCheckpoint: async () => {
+                    mailboxItems.push(approvalItem);
+                    runtimeWakeSignal.notify();
+                    await withRealTimeout(
+                      approvalImportObserved.promise,
+                      2_000,
+                      () => events.join(","),
+                    );
+                  },
+                  afterCheckpointKeepsForegroundImportLoop: true,
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              return await runHostedWorkspaceAssistantPhase({
+                ...input,
+                now: () => TEST_NOW,
+              });
+            },
+            vaultRoot,
+          },
+        ),
+        4_000,
+        () => events.join(","),
+      );
+
+      assert.ok(assistantPhaseCalls >= 2, events.join(","));
+      assert.deepEqual(
+        foregroundCausalOnlyValues.slice(0, 2),
+        [false, true],
+        events.join(","),
+      );
+      assert.equal(providerFetch.mock.calls.length, 0);
+      assert.ok(
+        mocks.collectHostedAssistantDeliverySideEffects.mock.calls.some(
+          ([input]) => input.preferredEffectIds?.[0] === effectId,
+        ),
+        events.join(","),
+      );
+      assert.equal(mocks.drainHostedPreparedAssistantDeliveries.mock.calls.length, 1);
+      const idleCheckpointIndex = requireEventIndex(events, "snapshot:idle_shutdown");
+      assert.ok(
+        requireEventIndex(events, `approval.delivery:${effectId}`)
+          < idleCheckpointIndex,
+        events.join(","),
+      );
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending,
+        [],
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.ok(Date.parse(result.nextWakeAt ?? "") > Date.parse(TEST_NOW));
+    } finally {
+      if (mocks.actualCollectHostedAssistantDeliverySideEffects) {
+        mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
+          mocks.actualCollectHostedAssistantDeliverySideEffects,
+        );
+      }
+      if (mocks.actualDrainHostedPreparedAssistantDeliveries) {
+        mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(
+          mocks.actualDrainHostedPreparedAssistantDeliveries,
+        );
+      }
+      if (mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch) {
+        mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockImplementation(
+          mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch,
+        );
+      }
+      mocks.collectHostedAssistantDeliverySideEffects.mockClear();
+      mocks.drainHostedPreparedAssistantDeliveries.mockClear();
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockClear();
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
