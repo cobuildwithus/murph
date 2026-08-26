@@ -1,6 +1,6 @@
 # Parse shared exercise modifiers in workout logs
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -133,6 +133,16 @@ Updated: 2026-08-26
     tracked-workout, exercise-catalog, and resident-routing coverage.
   - Assistant-engine package typecheck after the live-path fixes.
   - `git diff --check` after the live-path fixes.
-- Remaining:
-  - Commit and push the exact candidate, update PR #2340 evidence, run the final
-    PR review gate, mark the PR Ready, and require green exact-head checks.
+- Completion:
+  - Exact candidate `39aaefab59b9e2573188c104aad49615d6418588` was
+    committed and pushed, and PR #2340 now records the Ready Product UX result,
+    live evidence, affected surfaces, provider-input impact, and current change
+    shape.
+  - Parent final review found no remaining correctness, privacy, architecture,
+    or proof gap. The separate cross-cutting gate is not applicable under the
+    prompt-primary and test-fixture exemption; the required preliminary
+    Product UX/prompt/coverage pass is complete and its accepted findings are
+    resolved.
+  - Plan closure is the remaining behavior-preserving documentation commit;
+    exact-head CI and current-base merge proof remain PR admission checks.
+Completed: 2026-08-26
