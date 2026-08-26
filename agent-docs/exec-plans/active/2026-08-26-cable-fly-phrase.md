@@ -88,18 +88,44 @@ Updated: 2026-08-26
   exercises. The model therefore had no explicit boundary between ordinary
   shared-head grammar and genuine exercise ambiguity; the CLI and canonical
   workout record already support the correct three-exercise result.
+- Preliminary ReviewGPT first returned `INVALID` because its generated archive
+  omitted the mandatory assistant-verification skill. The corrected exact-head
+  package returned three substantive findings. All were accepted: keep Product
+  UX on Hold until the live journey runs, consolidate the conflicting quantity
+  guidance into one owner, and tighten plus print the live reply proof.
+- The corrected prompt now treats one exact count clearly assigned to every
+  exercise as unambiguous, and asks only when the count conflicts, is inexact,
+  or its allocation is unclear. The shared-head rule now owns exercise identity
+  only, removing the conflicting duplicate quantity instruction.
+- The public changelog fragment remains on the draft PR but must not ship while
+  the Product UX journey is on Hold.
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest for the tracked-workout skill contract.
-  - `pnpm test:assistant:live -- --test "expands coordinated workout exercise modifiers"`
+- Passed:
+  - Focused tracked-workout skill Vitest: 3 tests passed. The contract proves
+    the consolidated allocation rule and rejects the former conflicting text.
   - Assistant-engine package typecheck.
-  - Focused changelog validation and Web typecheck required by the changelog
-    workflow.
-  - `git diff --check` and required GitHub PR checks.
-- Expected outcomes:
-  - The skill contract states both the expansion and ambiguity boundaries.
-  - The live journey saves exactly three ordered exercises with the shared
-    prescription, attaches one complete workout card, and asks no clarification.
-  - All focused checks and required CI pass on the pushed candidate head.
+  - Changelog production archive test: 9 tests passed.
+  - Hosted Web typecheck.
+  - Privacy readback and `git diff --check` on every committed candidate.
+  - Corrected exact-head preliminary Product UX/prompt/coverage ReviewGPT pass
+    completed with findings; every substantive finding was accepted and the
+    code/test remediation was applied. Per the one-pass rule it is not rerun.
+- Hold:
+  - `pnpm test:assistant:live -- --test "expands coordinated workout exercise modifiers"`
+    and the same command targeting `gpt-5.5` both stop at the subscription cache
+    probe with `ASSISTANT_CODEX_USAGE_LIMIT` before the assistant turn and with
+    zero provider actions.
+  - The supported provider-auth fallback also stops before the assistant turn
+    because no provider API credential is configured.
+  - The focused journey is committed and asserts the punctuation-free clear
+    case, exact canonical exercises and shared prescription, complete quiet
+    card response, ambiguous allocation question, exactly one question mark,
+    and no write or card on ambiguity. It prints both synthetic replies for
+    review when the provider becomes available.
+- Remaining:
+  - Retry the focused live command after subscription capacity resets, review
+    both printed replies, and move Product UX from Hold to Ready only on pass.
+  - Update PR #2340 evidence, close this plan with `scripts/finish-task`, mark
+    the PR Ready, and require green exact-head GitHub checks.
