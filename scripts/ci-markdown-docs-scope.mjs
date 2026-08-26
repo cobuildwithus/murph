@@ -8,6 +8,7 @@ const PAGE_SIZE = 100;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const SAFE_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const SAFE_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/u;
+const DATED_RELEASE_NOTE_PATTERN = /^docs\/release-notes\/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/u;
 const SUPPORTED_STATUSES = new Set(["added", "modified", "removed", "renamed"]);
 
 export function isSafeRepositoryPath(value) {
@@ -26,10 +27,7 @@ export function isSafeRepositoryPath(value) {
 }
 
 export function isEligibleMarkdownDocumentationPath(value) {
-  if (!isSafeRepositoryPath(value) || !value.endsWith(".md")) return false;
-  return value.startsWith("agent-docs/research/")
-    || value.startsWith("docs/incidents/")
-    || value.startsWith("docs/release-notes/");
+  return isSafeRepositoryPath(value) && DATED_RELEASE_NOTE_PATTERN.test(value);
 }
 
 export function classifyChangedFiles(files) {

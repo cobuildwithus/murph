@@ -87,12 +87,12 @@ it read-only contents and pull-request inventory access. The classifier compares
 the event base, head, merge ref, and repository identity with the current open
 PR, traverses and count-checks the complete GitHub file inventory up to 3,000
 files, revalidates that the live PR identity is still exact after pagination,
-validates both sides of every rename, and then applies one narrow allowlist:
-historical incident notes under `docs/incidents/`, release notes under
-`docs/release-notes/`, and research records under `agent-docs/research/`.
-Operational and proof-consumed Markdown such as `AGENTS.md`, architecture and
+validates both sides of every rename, and then admits only flat, dated release
+note records matching `docs/release-notes/YYYY-MM-DD-<lowercase-slug>.md`.
+The release-note directory's `README.md`, incident and research records,
+operational and proof-consumed Markdown such as `AGENTS.md`, architecture and
 contract docs, app/package READMEs, deploy guides, skills, runtime prompts, and
-changelog sources retains full CI. Workflow files, scripts, config, generated
+changelog sources retain full CI. Workflow files, scripts, config, generated
 docs, mixed diffs, unsafe statuses or paths, stale refs, partial inventories,
 and classifier failures also retain full CI.
 The existing `Release checks (ubuntu)`, both platform-specific `CLI host matrix`

@@ -83,7 +83,10 @@ function vercelEnv(overrides = {}) {
   return env;
 }
 
-function gitRunner({ head = HEAD_SHA, inventory = "M\0docs/release-notes/update.md\0" } = {}) {
+function gitRunner({
+  head = HEAD_SHA,
+  inventory = "M\0docs/release-notes/2026-08-25-update.md\0",
+} = {}) {
   const calls = [];
   const runGit = (args) => {
     calls.push(args);
@@ -107,7 +110,7 @@ async function classify({
   env = actionsEnv(),
   event = eventPayload(),
   finalCurrent = current,
-  pages = [[file("docs/release-notes/update.md")]],
+  pages = [[file("docs/release-notes/2026-08-25-update.md")]],
 } = {}) {
   const requests = [];
   let currentRequestCount = 0;
@@ -128,11 +131,10 @@ async function classify({
   return { requests, result };
 }
 
-test("allows only inert historical and research documentation roots", () => {
+test("allows only dated release-note records", () => {
   for (const path of [
-    "agent-docs/research/audit.md",
-    "docs/incidents/incident.md",
-    "docs/release-notes/change.md",
+    "docs/release-notes/2026-03-12-vault-baseline-scaffold.md",
+    "docs/release-notes/2026-03-16-device-provider-import-foundation.md",
   ]) {
     assert.equal(isEligibleMarkdownDocumentationPath(path), true, path);
   }
@@ -145,6 +147,15 @@ test("allows only inert historical and research documentation roots", () => {
     "agent-docs/operations/workflow.md",
     "agent-docs/generated/catalog.md",
     "agent-docs/prompts/reviewer.md",
+    "agent-docs/research/2026-08-25-audit.md",
+    "agent-docs/research/murph-age-autoresearch.md",
+    "docs/incidents/2026-08-25-incident.md",
+    "docs/release-notes/README.md",
+    "docs/release-notes/change.md",
+    "docs/release-notes/2026-08-25.md",
+    "docs/release-notes/2026-8-25-change.md",
+    "docs/release-notes/2026-08-25-Change.md",
+    "docs/release-notes/archive/2026-08-25-change.md",
     "apps/web/README.md",
     "apps/cloudflare/DEPLOY.md",
     "apps/web/changelog/README.md",
@@ -173,23 +184,25 @@ test("rejects unsafe or ambiguous repository paths", () => {
 
 test("accepts additions, modifications, deletions, and eligible renames", () => {
   assert.deepEqual(classifyChangedFiles([
-    file("docs/release-notes/added.md", "added"),
-    file("docs/incidents/updated.md", "modified"),
-    file("agent-docs/research/removed.md", "removed"),
-    file("docs/incidents/renamed.md", "renamed", {
-      previous_filename: "docs/release-notes/old.md",
+    file("docs/release-notes/2026-08-25-added.md", "added"),
+    file("docs/release-notes/2026-08-24-updated.md", "modified"),
+    file("docs/release-notes/2026-08-23-removed.md", "removed"),
+    file("docs/release-notes/2026-08-22-renamed.md", "renamed", {
+      previous_filename: "docs/release-notes/2026-08-21-old.md",
     }),
   ]), { markdownOnly: true, reason: "eligible-markdown-docs" });
 });
 
 test("validates both sides of a rename", () => {
   assert.deepEqual(classifyChangedFiles([
-    file("docs/release-notes/renamed.md", "renamed", { previous_filename: "apps/web/runtime.ts" }),
+    file("docs/release-notes/2026-08-25-renamed.md", "renamed", {
+      previous_filename: "apps/web/runtime.ts",
+    }),
   ]), { markdownOnly: false, reason: "ineligible-rename-source" });
 });
 
 test("rejects unsupported status, duplicate paths, and mixed changes", () => {
-  const eligible = "docs/release-notes/change.md";
+  const eligible = "docs/release-notes/2026-08-25-change.md";
   assert.equal(classifyChangedFiles([file(eligible, "copied")]).markdownOnly, false);
   assert.equal(classifyChangedFiles([file(eligible), file(eligible)]).markdownOnly, false);
   assert.equal(classifyChangedFiles([file(eligible), file("package.json")]).markdownOnly, false);
@@ -198,9 +211,9 @@ test("rejects unsupported status, duplicate paths, and mixed changes", () => {
 test("traverses every changed-file page and requires the exact count", async () => {
   const firstPage = Array.from(
     { length: 100 },
-    (_, index) => file(`docs/release-notes/page-${index}.md`),
+    (_, index) => file(`docs/release-notes/2026-08-25-page-${index}.md`),
   );
-  const secondPage = [file("agent-docs/research/final.md")];
+  const secondPage = [file("docs/release-notes/2026-08-25-final.md")];
   const current = pullRequest({ changed_files: 101 });
   const event = eventPayload({ pullRequest: { changed_files: 101 } });
   const { requests, result } = await classify({ current, event, pages: [firstPage, secondPage] });
@@ -273,7 +286,7 @@ test("parses a complete no-rename Git inventory and rejects ambiguous statuses",
 
 test("skips only exact production main inventories containing eligible Markdown", () => {
   const eligible = gitRunner({
-    inventory: "D\0docs/incidents/old.md\0A\0docs/release-notes/new.md\0M\0agent-docs/research/audit.md\0",
+    inventory: "D\0docs/release-notes/2026-08-23-old.md\0A\0docs/release-notes/2026-08-24-new.md\0M\0docs/release-notes/2026-08-25-updated.md\0",
   });
   assert.deepEqual(
     classifyCurrentVercelBuild({ env: vercelEnv(), runGit: eligible.runGit }),
@@ -285,7 +298,7 @@ test("skips only exact production main inventories containing eligible Markdown"
   );
 
   const mixed = gitRunner({
-    inventory: "M\0docs/release-notes/change.md\0M\0apps/web/app/page.tsx\0",
+    inventory: "M\0docs/release-notes/2026-08-25-change.md\0M\0apps/web/app/page.tsx\0",
   });
   assert.deepEqual(
     classifyCurrentVercelBuild({ env: vercelEnv(), runGit: mixed.runGit }),
