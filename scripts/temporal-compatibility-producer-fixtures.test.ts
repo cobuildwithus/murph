@@ -23,6 +23,7 @@ describe("Temporal compatibility producer fixtures", () => {
     );
     expect(fixtures[0]).toEqual({
       blocked: null,
+      environmentInterviewPending: false,
       mailboxLag: [],
       workspace: null,
     });
@@ -47,8 +48,8 @@ describe("Temporal compatibility producer fixtures", () => {
         systemMailboxFrontier: "default_owned",
       },
     });
-    expect(fixtures).not.toContainEqual(expect.objectContaining({
-      environmentInterviewPending: expect.anything(),
+    expect(fixtures).toContainEqual(expect.objectContaining({
+      environmentInterviewPending: true,
     }));
   });
 

@@ -53,6 +53,7 @@ describe("visible reconciliation facts route", () => {
     ).toHaveBeenCalledWith({ userId: "member_123" });
     await expect(response.json()).resolves.toEqual({
       blocked: null,
+      environmentInterviewPending: true,
       mailboxLag: [],
       workspace: null,
     });
