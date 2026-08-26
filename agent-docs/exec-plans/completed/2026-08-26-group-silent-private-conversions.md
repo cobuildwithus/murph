@@ -1,6 +1,6 @@
 # Count silent group participants who activate privately
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -122,8 +122,11 @@ Updated: 2026-08-26
 - Accepted round three's independent roster-writer ordering finding. One SQL
   `ORDER BY` plus a focused PostgreSQL proof resolves it without new production
   machinery.
+- Passed: final ReviewGPT round four on the exact pushed remediation head with
+  no remaining findings.
 - Expected outcomes: silent roster evidence attributes exactly once only after
   activation, invalid/self/removed inputs do not observe, message and roster
   evidence dedupe at the existing marker, expired evidence is boundedly
   removed, the Ops definition matches both evidence sources, and no existing
   group authority behavior changes.
+Completed: 2026-08-26
