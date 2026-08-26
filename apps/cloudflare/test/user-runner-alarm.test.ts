@@ -7202,6 +7202,48 @@ describe("HostedUserRunner execution coordination", () => {
     )).toBe(false);
   });
 
+  it("correlates failed snapshot session-owner starts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, sql } = createRunnerHarness({
+      onStoragePut: ({ key }) => {
+        if (key === workspaceSnapshotUploadSessionCurrentStorageKey()) {
+          throw new Error("workspace snapshot session storage failed");
+        }
+      },
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    mocks.emitHostedExecutionStructuredLog.mockClear();
+
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${workspacePrefix}snapshot_failed_session_owner.snapshot.enc`,
+        snapshotId: "snapshot_failed_session_owner",
+      }),
+    )).rejects.toThrow("workspace snapshot session storage failed");
+
+    const diagnosticLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry) => entry.message
+          === "Hosted runner workspace snapshot session start diagnostic.",
+      );
+    expect(diagnosticLog).toMatchObject({
+      level: "warn",
+      userId: null,
+    });
+    expect(diagnosticLog?.details).toMatchObject({
+      snapshotStartDiagnosticScopeKind: "session_owner",
+      snapshotStartOutcomeKind: "failed",
+      snapshotStartSubstageKind: "session_create_storage",
+      workspaceAttemptId: "attempt_1",
+    });
+  });
+
   it("attributes previous-session candidate persistence to alarm work", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(FIXED_NOW));

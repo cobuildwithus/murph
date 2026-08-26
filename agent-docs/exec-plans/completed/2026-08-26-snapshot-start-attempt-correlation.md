@@ -1,6 +1,6 @@
 # Snapshot Start Attempt Correlation
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -34,6 +34,12 @@ Updated: 2026-08-26
 
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts
   --no-coverage apps/cloudflare/test/runner-outbound.test.ts
-  apps/cloudflare/test/user-runner-alarm.test.ts` — passed (372 tests).
+  apps/cloudflare/test/user-runner-alarm.test.ts` — passed (374 tests),
+  including route and session-owner failures plus the unauthorized omission
+  boundary.
 - `pnpm --dir apps/cloudflare typecheck` — passed.
 - `git diff --check` — passed.
+- Preliminary completion-specialists review — one accepted test-coverage
+  finding, resolved with focused failure and authorization-boundary proof.
+- Final cross-cutting ReviewGPT round 1 — passed with no findings.
+Completed: 2026-08-26
