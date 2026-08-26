@@ -1,6 +1,6 @@
 # Recover nutrition context and incomplete meals
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -149,3 +149,4 @@ Updated: 2026-08-26
   - Ambiguous meal: one concise question, no partial card, no fabricated
     nutrition; a follow-up can complete the same meal.
   - Ready live-reply verdicts and green required CI on the candidate head.
+Completed: 2026-08-26
