@@ -62,7 +62,11 @@ Updated: 2026-08-26
    the explicitly authorized alternate-home retry passed with the target model.
 4. [ ] Complete the repository PR/review workflow after the live journey is
    `Ready`. The preliminary specialist pass returned two findings; parent
-   dispositions and the accepted coverage remediation are recorded below.
+   dispositions and the accepted coverage remediation are recorded below. Two
+   Ready-event attempts reached the host-support production-bundle job but
+   failed its pre-build revision assertion when the mutable pull-request merge
+   ref advanced beyond the event's base revision; the patch was not built by
+   that job. The reproducible repository friction is recorded in Frog.
 
 ## Decisions
 
@@ -99,3 +103,8 @@ Updated: 2026-08-26
 - Preliminary specialist result: findings. The parent rejected the requested
   prompt-overlay restoration and accepted/remediated the production-composition
   coverage finding; no coverage patch artifact was attached.
+- Blocked CI evidence: the host-support production-bundle job failed before
+  dependency installation on both the original and refreshed Ready events
+  because its mutable candidate first parent differed from the immutable event
+  base. Other completed checks remained green; this is separate from the
+  product patch and remains a required-CI blocker.
