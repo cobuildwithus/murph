@@ -375,7 +375,17 @@ a joined group Murph. `apps/web` derives the exact group runtime, membership
 generation, origin, expiry, and private return route from the signed caller and
 web-owned rows; the model supplies only the question and an optional visible
 group label. Web rechecks membership before the group read and completion
-append. After Temporal accepts each pointer-only mailbox signal, Web starts the
+append. For a current member describing a joined Linq/iMessage/SMS group by
+people, the model may instead supply a closed participant target containing
+only familiar names, participant count, area code/last-four hints, or a generic
+email marker. Web scans a separately bounded complete membership universe,
+reads current provider rosters with concurrency four, and may consult only the
+requester's own Contacts projection. Provider handles remain transient, every
+eligible roster must be complete, exactly one group must match, and the final
+transaction revalidates the exact membership and route. The normalized
+participant-target digest is persisted with the encrypted request so replay
+cannot change evidence. This adds no participant directory or selector state.
+After Temporal accepts each pointer-only mailbox signal, Web starts the
 same payloadless, no-retry direct `ensure-processing` latency hint used by Linq;
 Temporal remains the only durable wake and reconciliation owner. The target
 child receives the server-bound requester membership `participantId`, which

@@ -110,6 +110,30 @@ describe("hosted Assistant Ask contracts", () => {
     expect(isHostedExecutionAssistantAskRequestedWake(completedWake)).toBe(false);
   });
 
+  it("preserves participant-selection replay evidence on joined-group asks", () => {
+    const participantTargetDigest = "a".repeat(64);
+    const ask = createRequestedAsk({
+      target: {
+        kind: "joined_group",
+        membershipId: "hgrpm_generation_123",
+        participantTargetDigest,
+        requestedLabel: null,
+        targetDisplayLabel: "2 people: Jordan, number ending 0456",
+      },
+    });
+
+    expect(parseHostedExecutionAssistantAskRequestedPayload(ask))
+      .toEqual(ask);
+    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
+      ...ask,
+      target: { ...ask.target, participantTargetDigest: "not-a-digest" },
+    })).toThrow(/SHA-256 digest/u);
+    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
+      ...ask,
+      target: { ...ask.target, targetDisplayLabel: undefined },
+    })).toThrow(/must appear together/u);
+  });
+
   it("parses paired events and the canonical cannot-answer result", () => {
     const requestedEvent = {
       ask: createRequestedAsk({
@@ -256,6 +280,53 @@ describe("hosted Assistant Ask runtime control", () => {
       originSessionId: ORIGIN_SESSION_ID,
       question: "What is today's workout?",
     })).toMatchObject({ groupLabel: null });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participantCount: 2,
+        participants: [
+          { displayName: "Taylor" },
+          { phoneHint: { areaCode: "415", lastFour: "9876" } },
+        ],
+      },
+      question: "What did we decide?",
+    })).toMatchObject({
+      participantTarget: {
+        participantCount: 2,
+        participants: [
+          { displayName: "Taylor" },
+          { phoneHint: { areaCode: "415", lastFour: "9876" } },
+        ],
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participants: [{ phoneHint: { lastFour: "4155559876" } }],
+      },
+      question: "What did we decide?",
+    })).toThrow(/four digits/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "handoff",
+      context: "A member completed the planned activity.",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget: {
+        participants: [{ emailParticipant: false }],
+      },
+    })).toThrow(/must be true/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participants: [{ displayName: "+1 (415) 555-9876" }],
+      },
+      question: "What did we decide?",
+    })).toThrow(/must not contain/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "ask",
       membershipId: "model_selected_membership",

@@ -50,6 +50,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import {
   getHostedLinqChatHandles,
   getHostedLinqChatSummary,
+  readHostedLinqExplicitGroupDisplayName,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
   sendHostedLinqReactionBoundChatMessage,
@@ -78,7 +79,7 @@ import {
   HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
-  type HostedOwnerAddressBookAdvisoryNamesResult,
+  type HostedAddressBookAdvisoryNamesResult,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import {
@@ -313,6 +314,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       memberId: input.memberId,
       originAssistantInputId: input.request.originAssistantInputId,
       originSessionId: input.request.originSessionId,
+      participantTarget: input.request.participantTarget,
       question: input.request.question,
     });
     if (admission.mailboxWake) {
@@ -327,6 +329,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       groupLabel: input.request.groupLabel,
       memberId: input.memberId,
       originAssistantInputId: input.request.originAssistantInputId,
+      participantTarget: input.request.participantTarget,
     });
     if (admission.mailboxWake) {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
@@ -1750,8 +1753,8 @@ async function handleHostedRuntimeGroupReadChatName(input: {
   let providerDisplayName: string | null;
   try {
     if (authority.channel === "linq") {
-      providerDisplayName = await readHostedLinqExplicitGroupDisplayName(
-        authority.threadId,
+      providerDisplayName = readHostedLinqExplicitGroupDisplayName(
+        await getHostedLinqChatSummary({ chatId: authority.threadId }),
       );
     } else if (authority.channel === "telegram") {
       providerDisplayName = await getHostedTelegramGroupTitle({
@@ -1776,47 +1779,6 @@ async function handleHostedRuntimeGroupReadChatName(input: {
         action: "read_chat_name",
         result: { displayName: null, status: "none" },
       };
-}
-
-async function readHostedLinqExplicitGroupDisplayName(
-  chatId: string,
-): Promise<string | null> {
-  const chat = await getHostedLinqChatSummary({ chatId });
-  if (chat.isGroup !== true) {
-    return null;
-  }
-  const displayName = chat.displayName
-    ? normalizeHostedGroupDisplayName(chat.displayName)
-    : null;
-  if (!displayName) {
-    return null;
-  }
-
-  // Linq defaults display_name to a comma-separated list of handles. Suppress
-  // every current SDK variant so phone numbers and emails never become the
-  // hosted group label.
-  const normalizeHandles = (handles: readonly string[]) =>
-    handles
-      .map((handle) => handle.trim().toLowerCase())
-      .filter(Boolean)
-      .sort()
-      .join("\0");
-  const displayNameKey = normalizeHandles(displayName.split(","));
-  const activeHandles = chat.handles.filter(isActiveHostedLinqChatHandle);
-  const candidateHandleSets = [
-    chat.handles,
-    activeHandles,
-    chat.handles.filter(({ isMe }) => !isMe),
-    activeHandles.filter(({ isMe }) => !isMe),
-  ];
-
-  return displayNameKey
-      && candidateHandleSets.some((handles) =>
-        handles.length > 0
-        && normalizeHandles(handles.map(({ handle }) => handle)) === displayNameKey
-      )
-    ? null
-    : displayName;
 }
 
 function renderHostedGroupJoinOfferScopeSentence(
@@ -2205,7 +2167,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
 
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
-): Promise<HostedOwnerAddressBookAdvisoryNamesResult | null> {
+): Promise<HostedAddressBookAdvisoryNamesResult | null> {
   const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
     (result) => ({ kind: "completed" as const, result }),
     (error: unknown) => ({

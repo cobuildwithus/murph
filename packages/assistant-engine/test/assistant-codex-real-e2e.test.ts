@@ -3871,6 +3871,102 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'targets a joined group from a private participant description',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-participant-target-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_participant_target',
+              recipientKey: 'recipient_private_group_participant_target',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_participant_target'],
+              conversationId: 'conversation_private_group_participant_target',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_participant_target'],
+              originSessionId: 'session_private_group_participant_target',
+              recipientKey: 'recipient_private_group_participant_target',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'handoff',
+                  result: {
+                    status: 'accepted',
+                    targetLabel: '2 people: Jordan, number ending 0456',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'My preferred display name is Member Echo. Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[group-handoff-participants-e2e] ${JSON.stringify({
+            reply: result.finalMessage.trim(),
+            request: groupRequests[0] ?? null,
+            toolCallCount: groupRequests.length,
+          })}\n`,
+        )
+
+        expect(groupRequests).toHaveLength(1)
+        expect(groupRequests[0]).toMatchObject({
+          action: 'handoff',
+          participantTarget: {
+            participants: [{ displayName: 'Jordan' }],
+          },
+        })
+        expect(groupRequests[0]).not.toHaveProperty('groupLabel')
+        expect(result.finalMessage).toMatch(/queu/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'places one bounded group call from the current request without a group-only preview turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()

@@ -29,12 +29,15 @@ import {
   isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
@@ -42,6 +45,7 @@ import {
   type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupSummary,
+  type HostedRuntimeGroupParticipantTarget,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupEmailParticipantSummary,
@@ -504,6 +508,68 @@ const groupQuestionSchema = z
     { message: 'question exceeds the Unicode code-point limit' },
   )
 
+const groupParticipantTargetSchema = z
+  .object({
+    participantCount: z
+      .number()
+      .int()
+      .min(1)
+      .max(HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX)
+      .optional(),
+    participants: z
+      .array(
+        z
+          .object({
+            displayName: z
+              .string()
+              .trim()
+              .min(1)
+              .refine(
+                (value) =>
+                  Array.from(value).length
+                  <= HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+                { message: 'displayName exceeds the Unicode code-point limit' },
+              )
+              .refine(
+                (value) =>
+                  !/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u.test(value)
+                  && !/(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u.test(value),
+                { message: 'displayName must not contain a full phone number or email' },
+              )
+              .optional(),
+            emailParticipant: z.literal(true).optional(),
+            phoneHint: z
+              .object({
+                areaCode: z.string().regex(/^\d{3}$/u).optional(),
+                lastFour: z.string().regex(/^\d{4}$/u).optional(),
+              })
+              .strict()
+              .refine(
+                (value) => value.areaCode !== undefined || value.lastFour !== undefined,
+                { message: 'phoneHint requires areaCode or lastFour' },
+              )
+              .optional(),
+          })
+          .strict()
+          .refine(
+            (value) =>
+              value.displayName !== undefined
+              || value.emailParticipant === true
+              || value.phoneHint !== undefined,
+            { message: 'participant clue is empty' },
+          ),
+      )
+      .max(HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.participantCount !== undefined
+      || (value.participants?.length ?? 0) > 0,
+    { message: 'participantTarget requires participantCount or participants' },
+  )
+
 const groupDisclosureGrantIdSchema = z
   .string()
   .trim()
@@ -520,6 +586,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .object({
       action: z.literal('ask'),
       groupLabel: groupLabelSchema.optional(),
+      participantTarget: groupParticipantTargetSchema.optional(),
       question: groupQuestionSchema,
     })
     .strict(),
@@ -528,6 +595,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       action: z.literal('handoff'),
       context: groupHandoffContextSchema,
       groupLabel: groupLabelSchema.optional(),
+      participantTarget: groupParticipantTargetSchema.optional(),
     })
     .strict(),
   z
@@ -1187,12 +1255,14 @@ type MurphGroupToolRequest =
   | {
       action: 'ask'
       groupLabel?: string
+      participantTarget?: HostedRuntimeGroupParticipantTarget
       question: string
     }
   | {
       action: 'handoff'
       context: string
       groupLabel?: string
+      participantTarget?: HostedRuntimeGroupParticipantTarget
     }
   | {
       action: 'ask_current_sender'
@@ -5008,6 +5078,9 @@ async function executeGroupTool(input: {
       ...(input.request.groupLabel !== undefined
         ? { groupLabel: input.request.groupLabel }
         : {}),
+      ...(input.request.participantTarget !== undefined
+        ? { participantTarget: input.request.participantTarget }
+        : {}),
       originAssistantInputId,
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
@@ -5034,6 +5107,9 @@ async function executeGroupTool(input: {
       ...(input.request.groupLabel === undefined
         ? {}
         : { groupLabel: input.request.groupLabel }),
+      ...(input.request.participantTarget === undefined
+        ? {}
+        : { participantTarget: input.request.participantTarget }),
       originAssistantInputId,
     }
   } else if (input.request.action === 'ask_current_sender') {

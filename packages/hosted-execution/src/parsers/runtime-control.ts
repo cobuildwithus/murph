@@ -153,6 +153,7 @@ import {
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -178,6 +179,8 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
+  type HostedRuntimeGroupParticipantTarget,
+  type HostedRuntimeGroupParticipantTargetCue,
   type HostedRuntimeGroupCurrentSenderDirectResult,
   type HostedRuntimeGroupDailyMetricReportResult,
   type HostedRuntimeGroupMemberAskResult,
@@ -1125,6 +1128,7 @@ export function parseHostedRuntimeGroupToolRequest(
         "groupLabel",
         "originAssistantInputId",
         "originSessionId",
+        "participantTarget",
         "question",
       ]),
       label,
@@ -1144,13 +1148,29 @@ export function parseHostedRuntimeGroupToolRequest(
                 }),
           }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
+      ...(record.participantTarget === undefined
+        ? {}
+        : {
+            participantTarget: record.participantTarget === null
+              ? null
+              : parseHostedRuntimeGroupParticipantTarget(
+                  record.participantTarget,
+                  `${label} participantTarget`,
+                ),
+          }),
     };
   }
   if (action === "handoff") {
     const label = "Hosted runtime group tool handoff request";
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "context", "groupLabel", "originAssistantInputId"]),
+      new Set([
+        "action",
+        "context",
+        "groupLabel",
+        "originAssistantInputId",
+        "participantTarget",
+      ]),
       label,
     );
     return {
@@ -1176,6 +1196,16 @@ export function parseHostedRuntimeGroupToolRequest(
         record.originAssistantInputId,
         `${label} originAssistantInputId`,
       ),
+      ...(record.participantTarget === undefined
+        ? {}
+        : {
+            participantTarget: record.participantTarget === null
+              ? null
+              : parseHostedRuntimeGroupParticipantTarget(
+                  record.participantTarget,
+                  `${label} participantTarget`,
+                ),
+          }),
     };
   }
   if (action === "ask_current_sender") {
@@ -4535,6 +4565,121 @@ function legacyProjectionKindsToScopes(
   return projectionKinds.map((projectionKind) =>
     parseHostedVaultShareProjectionScope(projectionKind, `${label} ${projectionKind}`)
   );
+}
+
+function parseHostedRuntimeGroupParticipantTarget(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupParticipantTarget {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["participantCount", "participants"]),
+    label,
+  );
+  const participantCount = record.participantCount;
+  if (
+    participantCount !== undefined
+    && (
+      typeof participantCount !== "number"
+      || !Number.isInteger(participantCount)
+      || participantCount < 1
+      || participantCount > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+    )
+  ) {
+    throw new TypeError(
+      `${label} participantCount must be an integer between 1 and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX}.`,
+    );
+  }
+  const participantValues = record.participants === undefined
+    ? []
+    : requireArray(record.participants, `${label} participants`);
+  if (
+    participantValues.length > HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX
+  ) {
+    throw new TypeError(
+      `${label} participants must contain at most ${HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX} entries.`,
+    );
+  }
+  const participants = participantValues.map((value, index): HostedRuntimeGroupParticipantTargetCue => {
+    const cueLabel = `${label} participants[${index}]`;
+    const cue = requireObject(value, cueLabel);
+    assertAllowedObjectKeys(
+      cue,
+      new Set(["displayName", "emailParticipant", "phoneHint"]),
+      cueLabel,
+    );
+    const displayName = cue.displayName === undefined
+      ? undefined
+      : parseHostedRuntimeGroupAskBoundedText({
+          label: `${cueLabel} displayName`,
+          maxCodePoints:
+            HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+          value: cue.displayName,
+        });
+    if (
+      displayName !== undefined
+      && (
+        /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u.test(displayName)
+        || /(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u.test(displayName)
+      )
+    ) {
+      throw new TypeError(
+        `${cueLabel} displayName must not contain a full phone number or email address.`,
+      );
+    }
+    const emailParticipant = cue.emailParticipant;
+    if (emailParticipant !== undefined && emailParticipant !== true) {
+      throw new TypeError(`${cueLabel} emailParticipant must be true when present.`);
+    }
+    let phoneHint: { areaCode?: string; lastFour?: string } | undefined;
+    if (cue.phoneHint !== undefined) {
+      const phone = requireObject(cue.phoneHint, `${cueLabel} phoneHint`);
+      assertAllowedObjectKeys(
+        phone,
+        new Set(["areaCode", "lastFour"]),
+        `${cueLabel} phoneHint`,
+      );
+      const areaCode = phone.areaCode;
+      const lastFour = phone.lastFour;
+      if (areaCode !== undefined && (
+        typeof areaCode !== "string" || !/^\d{3}$/u.test(areaCode)
+      )) {
+        throw new TypeError(`${cueLabel} phoneHint areaCode must contain three digits.`);
+      }
+      if (lastFour !== undefined && (
+        typeof lastFour !== "string" || !/^\d{4}$/u.test(lastFour)
+      )) {
+        throw new TypeError(`${cueLabel} phoneHint lastFour must contain four digits.`);
+      }
+      if (areaCode === undefined && lastFour === undefined) {
+        throw new TypeError(`${cueLabel} phoneHint must contain areaCode or lastFour.`);
+      }
+      phoneHint = {
+        ...(areaCode === undefined ? {} : { areaCode }),
+        ...(lastFour === undefined ? {} : { lastFour }),
+      };
+    }
+    if (
+      displayName === undefined
+      && emailParticipant === undefined
+      && phoneHint === undefined
+    ) {
+      throw new TypeError(`${cueLabel} must contain at least one participant clue.`);
+    }
+    return {
+      ...(displayName === undefined ? {} : { displayName }),
+      ...(emailParticipant === undefined ? {} : { emailParticipant }),
+      ...(phoneHint === undefined ? {} : { phoneHint }),
+    };
+  });
+  if (participantCount === undefined && participants.length === 0) {
+    throw new TypeError(`${label} must contain participantCount or participants.`);
+  }
+  return {
+    ...(participantCount === undefined ? {} : { participantCount }),
+    ...(participants.length === 0 ? {} : { participants }),
+  };
 }
 
 function parseHostedRuntimeGroupAssistantAskFields(

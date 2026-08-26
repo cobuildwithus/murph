@@ -16,9 +16,11 @@ import {
 } from "./linq";
 import {
   getHostedLinqChatSummary,
+  readHostedLinqExplicitGroupDisplayName,
   startHostedLinqChatTypingIndicator,
   stopHostedLinqChatTypingIndicator,
   type HostedLinqChatHandleSummary,
+  type HostedLinqChatSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
@@ -614,6 +616,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 affirmativeReaction,
                 event: planningEvent,
                 firstContactAdmissionDecision,
+                ...(planningResolution.initialGroupDisplayName
+                  ? {
+                      initialGroupDisplayName:
+                        planningResolution.initialGroupDisplayName,
+                    }
+                  : {}),
                 instantStartAllowed,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
@@ -1199,6 +1207,7 @@ function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
 
 interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  initialGroupDisplayName?: string;
   pendingGroupParticipantMemberIds?: readonly string[];
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
@@ -1237,6 +1246,9 @@ async function resolveHostedLinqPlanningEvent(input: {
         : null;
     return {
       event: messageEvent,
+      ...(pendingGroupRoster?.initialGroupDisplayName
+        ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
+        : {}),
       ...(pendingGroupRoster?.participantMemberIds == null
         ? {}
         : {
@@ -1271,7 +1283,7 @@ async function resolveHostedLinqPlanningEvent(input: {
   }
 
   let resolvedIsGroup: boolean;
-  let canonicalHandles: readonly HostedLinqChatHandleSummary[] | null = null;
+  let canonicalSummary: HostedLinqChatSummary | null = null;
   if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
@@ -1284,7 +1296,7 @@ async function resolveHostedLinqPlanningEvent(input: {
         ...(input.signal ? { signal: input.signal } : {}),
       });
       canonicalIsGroup = summary.isGroup;
-      canonicalHandles = summary.handles;
+      canonicalSummary = summary;
     } catch (error) {
       logHostedLinqChatClassification("canonical-unavailable");
       if (input.signal?.aborted) {
@@ -1317,7 +1329,7 @@ async function resolveHostedLinqPlanningEvent(input: {
     resolvedIsGroup && !threadRoute
       ? await resolveHostedLinqPendingGroupParticipantMemberIds({
           chatId: messageEvent.data.chat_id,
-          handles: canonicalHandles,
+          summary: canonicalSummary,
           prisma: input.prisma,
           signal: input.signal,
         })
@@ -1334,6 +1346,9 @@ async function resolveHostedLinqPlanningEvent(input: {
         },
       },
     },
+    ...(pendingGroupRoster?.initialGroupDisplayName
+      ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
+      : {}),
     ...(pendingGroupRoster?.participantMemberIds == null
       ? {}
       : {
@@ -1357,35 +1372,39 @@ async function resolveHostedLinqPlanningEvent(input: {
 
 async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   chatId: string;
-  handles?: readonly HostedLinqChatHandleSummary[] | null;
+  summary?: HostedLinqChatSummary | null;
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<{
   handles: readonly HostedLinqChatHandleSummary[] | null;
+  initialGroupDisplayName: string | null;
   participantMemberIds: string[] | null;
   unavailable: boolean;
 }> {
   try {
-    const summary = input.handles
-      ? null
-      : await getHostedLinqChatSummary({
+    const summary = input.summary
+      ?? await getHostedLinqChatSummary({
           chatId: input.chatId,
           timeoutMs: HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS,
           ...(input.signal ? { signal: input.signal } : {}),
         });
-    if (summary?.isGroup === false) {
+    if (summary.isGroup === false) {
       logHostedLinqPendingGroupRoster("provider_not_group");
       return {
         handles: null,
+        initialGroupDisplayName: null,
         participantMemberIds: null,
         unavailable: false,
       };
     }
-    const handles = input.handles ?? summary?.handles ?? [];
+    const handles = summary.handles;
+    const initialGroupDisplayName =
+      readHostedLinqExplicitGroupDisplayName(summary);
     if (handles.length === 0) {
       logHostedLinqPendingGroupRoster("empty_roster");
       return {
         handles,
+        initialGroupDisplayName,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1406,6 +1425,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       logHostedLinqPendingGroupRoster("oversized_roster");
       return {
         handles,
+        initialGroupDisplayName,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1421,6 +1441,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     logHostedLinqPendingGroupRoster("resolved");
     return {
       handles,
+      initialGroupDisplayName,
       participantMemberIds: memberIds,
       unavailable: false,
     };
@@ -1431,6 +1452,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     logHostedLinqPendingGroupRoster("unavailable");
     return {
       handles: null,
+      initialGroupDisplayName: null,
       participantMemberIds: null,
       unavailable: true,
     };

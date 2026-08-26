@@ -134,7 +134,10 @@ vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-client")
+  >()),
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>

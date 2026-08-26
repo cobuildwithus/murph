@@ -1314,6 +1314,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   affirmativeReaction?: boolean;
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
+  initialGroupDisplayName?: string | null;
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
   pendingGroupRosterUnavailable?: boolean;
@@ -1389,6 +1390,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       context,
       event: input.event,
       firstContactAdmissionDecision: input.firstContactAdmissionDecision,
+      initialGroupDisplayName: input.initialGroupDisplayName,
       participantMemberIds: input.pendingGroupParticipantMemberIds ?? [],
       preparedPendingGroupSetup: input.preparedPendingGroupSetup,
       preparedThreadContainerCreation: input.preparedThreadContainerCreation,
@@ -3544,6 +3546,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
+  initialGroupDisplayName?: string | null;
   participantMemberIds: readonly string[];
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
@@ -3853,6 +3856,7 @@ async function planHostedLinqGroupChatWebhook(input: {
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
       fallbackOwnerMemberId: activeSenderMemberId,
+      initialGroupDisplayName: input.initialGroupDisplayName,
       linqService: messageEvent.data.service ?? null,
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),

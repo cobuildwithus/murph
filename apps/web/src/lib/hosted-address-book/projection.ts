@@ -88,13 +88,15 @@ export type HostedAddressBookAdvisoryLookupOutcome =
   | "container_missing"
   | "disabled"
   | "matched"
+  | "member_missing"
+  | "member_suspended"
   | "no_canonical_handles"
   | "no_contact_match"
   | "no_safe_unique_label"
   | "owner_suspended"
   | "projection_disabled";
 
-export interface HostedOwnerAddressBookAdvisoryNamesResult {
+export interface HostedAddressBookAdvisoryNamesResult {
   canonicalHandleCount: number;
   contactMatchCount: number;
   names: ReadonlyMap<string, string>;
@@ -426,40 +428,16 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   phoneHandles: readonly string[];
   prisma: HostedOnboardingReadClient;
   source?: NodeJS.ProcessEnv;
-}): Promise<HostedOwnerAddressBookAdvisoryNamesResult> {
+}): Promise<HostedAddressBookAdvisoryNamesResult> {
   const source = input.source ?? process.env;
-  const requestedHandleCount = Math.min(
-    input.phoneHandles.length,
-    HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
-  );
-  let canonicalHandleCount = 0;
-  const finish = (
-    outcome: HostedAddressBookAdvisoryLookupOutcome,
-    names: ReadonlyMap<string, string> = new Map<string, string>(),
-    contactMatchCount = 0,
-  ): HostedOwnerAddressBookAdvisoryNamesResult => ({
-    canonicalHandleCount,
-    contactMatchCount: Math.min(
-      contactMatchCount,
-      HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
-    ),
-    names,
-    outcome,
-    requestedHandleCount,
-  });
-
   if (!isFeatureEnabled(source, HOSTED_ADDRESS_BOOK_ADVISORY_GATE)) {
-    return finish("disabled");
+    return emptyHostedAddressBookAdvisoryNamesResult({
+      canonicalHandleCount: 0,
+      phoneHandles: input.phoneHandles,
+      maxHandles: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+      outcome: "disabled",
+    });
   }
-  const phoneHandles = [...new Set(input.phoneHandles)]
-    .filter((handle) => isCanonicalPhoneNumber(handle))
-    .slice(0, HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES);
-  canonicalHandleCount = phoneHandles.length;
-  if (phoneHandles.length === 0) {
-    return finish("no_canonical_handles");
-  }
-
-  const signal = AbortSignal.timeout(HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
   const container = await input.prisma.hostedThreadContainer.findUnique({
     select: {
       owner: {
@@ -470,10 +448,18 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     where: { memberId: input.containerMemberId },
   });
   if (!container) {
-    return finish("container_missing");
+    return emptyHostedAddressBookAdvisoryNamesResult({
+      phoneHandles: input.phoneHandles,
+      maxHandles: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+      outcome: "container_missing",
+    });
   }
   if (container.owner.suspendedAt !== null) {
-    return finish("owner_suspended");
+    return emptyHostedAddressBookAdvisoryNamesResult({
+      phoneHandles: input.phoneHandles,
+      maxHandles: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+      outcome: "owner_suspended",
+    });
   }
   try {
     await assertHostedLaunchRequiredConsentGranted({
@@ -485,23 +471,140 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
       isHostedOnboardingError(error) &&
       error.code === "HOSTED_CONSENT_REQUIRED"
     ) {
-      return finish("consent_unavailable");
+      return emptyHostedAddressBookAdvisoryNamesResult({
+        phoneHandles: input.phoneHandles,
+        maxHandles: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+        outcome: "consent_unavailable",
+      });
     }
     throw error;
   }
 
+  return readHostedAddressBookAdvisoryNamesForMember({
+    crypto: input.crypto,
+    maxHandles: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+    memberId: container.ownerMemberId,
+    phoneHandles: input.phoneHandles,
+    prisma: input.prisma,
+    source,
+  });
+}
+
+export async function readHostedMemberAddressBookAdvisoryNames(input: {
+  crypto?: HostedAddressBookCrypto;
+  maxHandles?: number;
+  memberId: string;
+  phoneHandles: readonly string[];
+  prisma: HostedOnboardingReadClient;
+  source?: NodeJS.ProcessEnv;
+}): Promise<HostedAddressBookAdvisoryNamesResult> {
+  const maxHandles = Math.min(
+    Math.max(input.maxHandles ?? HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES, 1),
+    HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
+  );
+  const source = input.source ?? process.env;
+  if (!isFeatureEnabled(source, HOSTED_ADDRESS_BOOK_ADVISORY_GATE)) {
+    return emptyHostedAddressBookAdvisoryNamesResult({
+      canonicalHandleCount: 0,
+      phoneHandles: input.phoneHandles,
+      maxHandles,
+      outcome: "disabled",
+    });
+  }
+  const member = await input.prisma.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.memberId },
+  });
+  if (!member) {
+    return emptyHostedAddressBookAdvisoryNamesResult({
+      phoneHandles: input.phoneHandles,
+      maxHandles,
+      outcome: "member_missing",
+    });
+  }
+  if (member.suspendedAt !== null) {
+    return emptyHostedAddressBookAdvisoryNamesResult({
+      phoneHandles: input.phoneHandles,
+      maxHandles,
+      outcome: "member_suspended",
+    });
+  }
+  try {
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_CONSENT_REQUIRED"
+    ) {
+      return emptyHostedAddressBookAdvisoryNamesResult({
+        phoneHandles: input.phoneHandles,
+        maxHandles,
+        outcome: "consent_unavailable",
+      });
+    }
+    throw error;
+  }
+
+  return readHostedAddressBookAdvisoryNamesForMember({
+    crypto: input.crypto,
+    maxHandles,
+    memberId: input.memberId,
+    phoneHandles: input.phoneHandles,
+    prisma: input.prisma,
+    source,
+  });
+}
+
+async function readHostedAddressBookAdvisoryNamesForMember(input: {
+  crypto?: HostedAddressBookCrypto;
+  maxHandles: number;
+  memberId: string;
+  phoneHandles: readonly string[];
+  prisma: HostedOnboardingReadClient;
+  source: NodeJS.ProcessEnv;
+}): Promise<HostedAddressBookAdvisoryNamesResult> {
+  const requestedHandleCount = Math.min(
+    input.phoneHandles.length,
+    input.maxHandles,
+  );
+  let canonicalHandleCount = 0;
+  const finish = (
+    outcome: HostedAddressBookAdvisoryLookupOutcome,
+    names: ReadonlyMap<string, string> = new Map<string, string>(),
+    contactMatchCount = 0,
+  ): HostedAddressBookAdvisoryNamesResult => ({
+    canonicalHandleCount,
+    contactMatchCount: Math.min(contactMatchCount, input.maxHandles),
+    names,
+    outcome,
+    requestedHandleCount,
+  });
+
+  const phoneHandles = [...new Set(input.phoneHandles)]
+    .filter((handle) => isCanonicalPhoneNumber(handle))
+    .slice(0, input.maxHandles);
+  canonicalHandleCount = phoneHandles.length;
+  if (phoneHandles.length === 0) {
+    return finish("no_canonical_handles");
+  }
+
+  const signal = AbortSignal.timeout(HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
+
   const projection = await input.prisma.hostedAddressBookProjection.findUnique({
     select: { enabled: true },
-    where: { memberId: container.ownerMemberId },
+    where: { memberId: input.memberId },
   });
   if (!projection?.enabled) {
     return finish("projection_disabled");
   }
 
-  const crypto = input.crypto ?? readHostedAddressBookCrypto(source);
+  const crypto = input.crypto ?? readHostedAddressBookCrypto(input.source);
   const phoneTokens = await deriveHostedAddressBookPhoneTokens({
     crypto,
-    memberId: container.ownerMemberId,
+    memberId: input.memberId,
     phoneNumbers: phoneHandles,
     signal,
     versions: crypto.keyring.readVersions,
@@ -524,7 +627,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
       phoneTokenVersion: true,
     },
     where: {
-      memberId: container.ownerMemberId,
+      memberId: input.memberId,
       OR: crypto.keyring.readVersions.map((phoneTokenVersion) => ({
         phoneToken: { in: phoneTokens.get(phoneTokenVersion) ?? [] },
         phoneTokenVersion,
@@ -542,7 +645,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
         phoneTokenVersion: row.phoneTokenVersion,
       }),
       scope: HOSTED_ADDRESS_BOOK_NAME_SCOPE,
-      userId: container.ownerMemberId,
+      userId: input.memberId,
       value: row.advisoryNameEncrypted,
     })),
     lane: "hosted-member-private-field",
@@ -574,6 +677,24 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     namesByPhone,
     rows.length,
   );
+}
+
+function emptyHostedAddressBookAdvisoryNamesResult(input: {
+  canonicalHandleCount?: number;
+  phoneHandles: readonly string[];
+  maxHandles: number;
+  outcome: HostedAddressBookAdvisoryLookupOutcome;
+}): HostedAddressBookAdvisoryNamesResult {
+  return {
+    canonicalHandleCount: input.canonicalHandleCount
+      ?? [...new Set(input.phoneHandles)]
+        .filter((handle) => isCanonicalPhoneNumber(handle))
+        .slice(0, input.maxHandles).length,
+    contactMatchCount: 0,
+    names: new Map<string, string>(),
+    outcome: input.outcome,
+    requestedHandleCount: Math.min(input.phoneHandles.length, input.maxHandles),
+  };
 }
 
 function readHostedAddressBookCrypto(

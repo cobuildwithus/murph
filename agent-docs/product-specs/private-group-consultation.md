@@ -56,7 +56,11 @@ with prompt-delimiter characters Unicode-escaped, uses its own committed group
 conversation and tone, and authors one ordinary group message through the
 existing notification and outbox owners.
 
-The model supplies only `context` and an optional visible `groupLabel`. It never
+The model supplies only `context`, an optional exact visible `groupLabel`, and
+an optional closed participant description. The participant description may
+contain a participant count, requester-supplied familiar names, NANP area code
+plus last four, international last four, or a generic email-participant marker.
+It never contains a full phone number, email address, or internal id. The model never
 supplies member, membership, runtime, thread, route, provider, callback,
 idempotency, or mailbox identifiers. Exact replay reuses one global event/item
 identity derived from the authenticated member and accepted input, decrypts and
@@ -195,8 +199,31 @@ Web owns target resolution because it owns current `HostedGroupMember` truth.
 5. Require a valid current synthetic group-runtime identity before accepting
    the ask. The runtime may be cold; the committed request wakes it.
 
-Never fuzzy-match, pick the newest or owned group, inspect roster identities to
-guess, or fan out. `list_memberships` is not required, and the model never
+For Linq/iMessage/SMS groups, `ask` and `handoff` may instead include the closed
+participant description. This is available to every current group member, not
+only the owner. Web reads that requester's membership set up to a Web-owned
+100-group live-provider scan ceiling and fails closed above it. That ceiling is
+independent of the 25-item model response budget. Web keeps Telegram out of
+this path, opens current Linq routes in one set-based read, and fetches current provider rosters with concurrency four under one
+absolute deadline. Every eligible roster must be complete and canonical before
+participant evidence may prove uniqueness. Web removes the provider line and
+all handles that resolve to the requester, then compares the remaining people.
+Only the requester's own enabled Contacts projection may add familiar names;
+the group owner's or another member's projection is never a fallback. Without
+such a name, clarification uses only participant count, NANP area code plus
+last four, international last four, or `email participant`.
+
+Exactly one group must satisfy both an exact supplied title and every supplied
+participant clue. Separate person clues must match separate roster entries.
+Zero or multiple matches clarify with unique safe descriptions when possible;
+provider failure, malformed or incomplete roster evidence, duplicate safe
+descriptions, or an over-budget membership universe fails closed. Resolution
+and the effect stay in one Web action: there is no reusable selector token.
+Immediately before append, Web revalidates the exact membership and current
+route, and replay compares the normalized participant-description digest.
+
+Never fuzzy-match, pick the newest or owned group, consult another member's
+Contacts, guess, or fan out. `list_memberships` is not required, and the model never
 receives a membership id for an ask.
 
 The exact membership row is a hidden generation fence. Web checks it at

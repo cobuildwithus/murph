@@ -23,6 +23,7 @@ import {
   createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  readHostedLinqExplicitGroupDisplayName,
   sendHostedLinqReactionBoundChatMessage,
   shareHostedLinqContactCard,
   startHostedLinqChatTypingIndicator,
@@ -143,6 +144,7 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: "Weekend Warriors",
+      handleCount: 1,
       handles: [
         {
           handle: "+15550000000",
@@ -150,6 +152,7 @@ describe("getHostedLinqChatSummary", () => {
           status: "active",
         },
       ],
+      handlesComplete: true,
       isGroup: true,
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -196,7 +199,9 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: null,
+      handleCount: 0,
       handles: [],
+      handlesComplete: false,
       isGroup: null,
     });
   });
@@ -264,6 +269,52 @@ describe("getHostedLinqChatSummary", () => {
     } finally {
       await closeTestServer(server);
     }
+  });
+});
+
+describe("readHostedLinqExplicitGroupDisplayName", () => {
+  const handles = [
+    { handle: "+14155559876", isMe: false, status: "active" },
+    { handle: "friend@example.test", isMe: false, status: "active" },
+    { handle: "+15550000000", isMe: true, status: "active" },
+  ];
+
+  it("keeps a real group title", () => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName: "Weekend Warriors",
+      handles,
+      isGroup: true,
+    })).toBe("Weekend Warriors");
+  });
+
+  it("sanitizes control characters in a real group title", () => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName: " Weekend\u0000   Warriors ",
+      handles,
+      isGroup: true,
+    })).toBe("Weekend Warriors");
+  });
+
+  it.each([
+    "+14155559876, friend@example.test, +15550000000",
+    "friend@example.test, +14155559876",
+    "Call +1 (415) 555-9876",
+    "Email friend@example.test",
+  ])("rejects Linq's synthesized handle-list title", (displayName) => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName,
+      handles,
+      isGroup: true,
+    })).toBeNull();
+  });
+
+  it("rejects provider titles when the roster was not parsed completely", () => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName: "Weekend Warriors",
+      handles,
+      handlesComplete: false,
+      isGroup: true,
+    })).toBeNull();
   });
 });
 

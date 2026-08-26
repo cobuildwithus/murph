@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   resolveHostedAssistantNotificationDestination: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
+  selectHostedGroupByParticipants: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -48,6 +49,16 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
     mocks.assertHostedThreadRouteEgressAuthority,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-participant-target", async (
+  importOriginal,
+) => ({
+  ...await importOriginal<
+    typeof import("@/src/lib/hosted-groups/group-participant-target")
+  >(),
+  selectHostedGroupByParticipants:
+    mocks.selectHostedGroupByParticipants,
+}));
+
 import {
   buildHostedGroupContextHandoffInstructions,
   createHostedAssistantAskCompletionId,
@@ -72,6 +83,9 @@ import {
   areHostedDomainRootProviderCallsDisabled,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  createHostedGroupParticipantTargetDigest,
+} from "@/src/lib/hosted-groups/group-participant-target";
 
 const NOW = new Date("2026-07-15T12:00:00.000Z");
 const ORIGIN_MEMBER_ID = "member-personal";
@@ -153,7 +167,9 @@ function createPrisma(input: {
 
 function requestWake(input: {
   membershipId?: string;
+  participantTargetDigest?: string;
   requestedLabel?: string | null;
+  targetDisplayLabel?: string;
 } = {}) {
   const requestId = createHostedAssistantAskRequestId({
     memberId: ORIGIN_MEMBER_ID,
@@ -170,7 +186,13 @@ function requestWake(input: {
       target: {
         kind: "joined_group",
         membershipId: input.membershipId ?? "membership-one",
+        ...(input.participantTargetDigest
+          ? { participantTargetDigest: input.participantTargetDigest }
+          : {}),
         requestedLabel: input.requestedLabel ?? null,
+        ...(input.targetDisplayLabel
+          ? { targetDisplayLabel: input.targetDisplayLabel }
+          : {}),
       },
     },
     eventId: requestId,
@@ -324,6 +346,14 @@ describe("Hosted group Assistant Ask admission", () => {
         });
       },
     );
+    mocks.selectHostedGroupByParticipants.mockResolvedValue({
+      membershipId: "membership-one",
+      participantTargetDigest: "d".repeat(64),
+      routeAuthority: groupDestination().bound.externalThreadRouteAuthority,
+      status: "selected",
+      targetLabel: "1 person: Jordan",
+      targetRuntimeMemberId: TARGET_RUNTIME_MEMBER_ID,
+    });
   });
 
   it("automatically selects the only membership and appends one expiring request", async () => {
@@ -410,6 +440,83 @@ describe("Hosted group Assistant Ask admission", () => {
         }),
       }),
     );
+  });
+
+  it("persists only safe participant evidence after final authority checks", async () => {
+    const { prisma } = createPrisma();
+    const participantTarget = {
+      participants: [{ displayName: "Jordan" }],
+    } as const;
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toMatchObject({
+      result: { status: "accepted", targetLabel: "1 person: Jordan" },
+    });
+
+    expect(mocks.selectHostedGroupByParticipants).toHaveBeenCalledWith({
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      participantTarget,
+      prisma,
+      requestedLabel: null,
+    });
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: groupDestination().bound.externalThreadRouteAuthority,
+      prisma: expect.any(Object),
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          ask: expect.objectContaining({
+            target: {
+              kind: "joined_group",
+              membershipId: "membership-one",
+              participantTargetDigest: "d".repeat(64),
+              requestedLabel: null,
+              targetDisplayLabel: "1 person: Jordan",
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects replay when participant evidence changes", async () => {
+    const originalTarget = {
+      participants: [{ displayName: "Jordan" }],
+    } as const;
+    const wake = requestWake({
+      participantTargetDigest:
+        createHostedGroupParticipantTargetDigest(originalTarget),
+      targetDisplayLabel: "1 person: Jordan",
+    });
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockResolvedValue(mailboxItemForWake(wake));
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      participantTarget: {
+        participants: [{ displayName: "Casey" }],
+      },
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "request_conflict" },
+    });
+    expect(mocks.selectHostedGroupByParticipants).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
   it("asks for a label when multiple groups exist and no selector was supplied", async () => {
@@ -604,6 +711,14 @@ describe("Hosted private-to-group context handoff admission", () => {
         },
       }),
     );
+    mocks.selectHostedGroupByParticipants.mockResolvedValue({
+      membershipId: "membership-one",
+      participantTargetDigest: "d".repeat(64),
+      routeAuthority: groupDestination().bound.externalThreadRouteAuthority,
+      status: "selected",
+      targetLabel: "1 person: Jordan",
+      targetRuntimeMemberId: TARGET_RUNTIME_MEMBER_ID,
+    });
   });
 
   it("queues one expiring target-authored notification for the only group", async () => {
@@ -668,6 +783,39 @@ describe("Hosted private-to-group context handoff admission", () => {
       }),
       prisma: expect.any(Object),
     });
+  });
+
+  it("binds participant evidence into the queued handoff", async () => {
+    const { prisma } = createPrisma();
+    const context = "The member completed the planned activity.";
+    const participantTarget = {
+      participants: [{ displayName: "Jordan" }],
+    } as const;
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      result: { status: "accepted", targetLabel: "1 person: Jordan" },
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        envelope: expect.objectContaining({
+          notification: expect.objectContaining({
+            groupContextHandoff: {
+              membershipId: "membership-one",
+              originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+              participantTargetDigest: "d".repeat(64),
+              targetDisplayLabel: "1 person: Jordan",
+            },
+          }),
+        }),
+      }));
   });
 
   it("keeps multiple unnamed organic memberships fail-closed", async () => {

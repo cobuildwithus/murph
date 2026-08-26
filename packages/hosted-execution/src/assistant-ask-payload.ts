@@ -323,21 +323,53 @@ function parseHostedExecutionAssistantAskTarget(
   if (kind === "joined_group") {
     assertExactHostedExecutionAssistantAskKeys(
       target,
-      ["kind", "membershipId", "requestedLabel"],
+      [
+        "kind",
+        "membershipId",
+        "participantTargetDigest",
+        "requestedLabel",
+        "targetDisplayLabel",
+      ],
       label,
     );
+    if (
+      (target.participantTargetDigest === undefined)
+      !== (target.targetDisplayLabel === undefined)
+    ) {
+      throw new TypeError(
+        `${label}.participantTargetDigest and ${label}.targetDisplayLabel must appear together.`,
+      );
+    }
     return {
       kind,
       membershipId: parseHostedExecutionAssistantAskOpaqueId(
         target.membershipId,
         `${label}.membershipId`,
       ),
+      ...(target.participantTargetDigest === undefined
+        ? {}
+        : {
+            participantTargetDigest: parseHostedExecutionAssistantAskDigest(
+              target.participantTargetDigest,
+              `${label}.participantTargetDigest`,
+            ),
+          }),
       requestedLabel: target.requestedLabel === null
         ? null
         : parseHostedExecutionAssistantAskBoundedText({
             label: `${label}.requestedLabel`,
             maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
             value: target.requestedLabel,
+          }),
+      ...(target.targetDisplayLabel === undefined
+        ? {}
+        : {
+            targetDisplayLabel: parseHostedExecutionAssistantAskBoundedText({
+              label: `${label}.targetDisplayLabel`,
+              maxCodePoints:
+                HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+              value: target.targetDisplayLabel,
+            }),
           }),
     };
   }
@@ -396,6 +428,17 @@ function parseHostedExecutionAssistantAskTarget(
     };
   }
   throw new TypeError(`${label}.kind is invalid.`);
+}
+
+function parseHostedExecutionAssistantAskDigest(
+  value: unknown,
+  label: string,
+): string {
+  const digest = parseHostedExecutionAssistantAskOpaqueId(value, label);
+  if (!/^[0-9a-f]{64}$/u.test(digest)) {
+    throw new TypeError(`${label} must be a lowercase SHA-256 digest.`);
+  }
+  return digest;
 }
 
 function parseHostedExecutionAssistantAskResultDestination(

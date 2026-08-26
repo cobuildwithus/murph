@@ -23,11 +23,14 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -1049,7 +1052,48 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
         description:
-          'Optional only for action="ask" or action="handoff". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
+          'Optional only for action="ask" or action="handoff". An exact visible group title the member supplied, used only to disambiguate among joined groups; never an internal identifier. A phrase such as "my group with Jordan and Casey" is a participant description, not a groupLabel: omit groupLabel and use participantTarget.',
+      },
+      participantTarget: {
+        type: 'object',
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          participantCount: {
+            type: 'integer',
+            minimum: 1,
+            maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+          },
+          participants: {
+            type: 'array',
+            maxItems: HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              minProperties: 1,
+              properties: {
+                displayName: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength:
+                    HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+                },
+                emailParticipant: { type: 'boolean', const: true },
+                phoneHint: {
+                  type: 'object',
+                  additionalProperties: false,
+                  minProperties: 1,
+                  properties: {
+                    areaCode: { type: 'string', pattern: '^\\d{3}$' },
+                    lastFour: { type: 'string', pattern: '^\\d{4}$' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        description:
+          'Optional only for action="ask" or action="handoff" when the member describes a joined iMessage/SMS group by its people or participant count. Put each described person in one participants item. Use a contact displayName only when the member supplied it; use only area code and/or last four for phone clues, or emailParticipant=true for an unnamed email participant. Never send a full phone number, email address, internal ID, or guessed identity. This evidence must identify exactly one current joined group or Murph asks for clarification.',
       },
       displayName: {
         type: 'string',
@@ -1198,7 +1242,8 @@ type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
 
 const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_consult: [
-    'context', 'grantId', 'groupLabel', 'message_ref', 'question',
+    'context', 'grantId', 'groupLabel', 'message_ref', 'participantTarget',
+    'question',
   ],
   group_data: [
     'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
@@ -1254,7 +1299,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask or hand off; the host binds group/member/sender authority. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
+    'Ask or hand off; the host binds group/member/sender authority. In a private conversation, target an exact supplied title with groupLabel or people in an existing joined iMessage/SMS group with participantTarget. Clarification options are safe human descriptions, not internal IDs: repeat them naturally. When the member chooses one, put only its exact title in groupLabel when present, reconstruct its masked people/count clues in participantTarget, and omit groupLabel when it has no title. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({

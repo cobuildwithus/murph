@@ -48,6 +48,8 @@ function createHandoffWake() {
       groupContextHandoff: {
         membershipId: "membership-generation-one",
         originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        participantTargetDigest: "b".repeat(64),
+        targetDisplayLabel: "2 people: Jordan, number ending 0456",
       },
       instructions: "Use the bounded handoff context.",
       notificationPromptProfile: "context-handoff",
@@ -73,6 +75,8 @@ describe("private-to-group context handoff contracts", () => {
       groupContextHandoff: {
         membershipId: "membership-generation-one",
         originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        participantTargetDigest: "b".repeat(64),
+        targetDisplayLabel: "2 people: Jordan, number ending 0456",
       },
       instructions: "Use the bounded handoff context.",
       notificationPromptProfile: "context-handoff" as const,
@@ -91,6 +95,8 @@ describe("private-to-group context handoff contracts", () => {
     expect(wake.notification.groupContextHandoff).toEqual({
       membershipId: "membership-generation-one",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTargetDigest: "b".repeat(64),
+      targetDisplayLabel: "2 people: Jordan, number ending 0456",
     });
     expect(parseHostedExecutionWake(wake)).toEqual(wake);
     expect(HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES)
@@ -159,5 +165,15 @@ describe("private-to-group context handoff contracts", () => {
         },
       },
     })).toThrow(/membershipId/u);
+    expect(() => parseHostedExecutionWake({
+      ...wake,
+      notification: {
+        ...wake.notification,
+        groupContextHandoff: {
+          ...wake.notification.groupContextHandoff,
+          targetDisplayLabel: undefined,
+        },
+      },
+    })).toThrow(/must appear together/u);
   });
 });

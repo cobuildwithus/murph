@@ -22,6 +22,7 @@ import {
 
 import {
   HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
@@ -1877,9 +1878,22 @@ function parseHostedExecutionGroupContextHandoffNotification(
   const record = requireObject(value, label);
   assertExactHostedExecutionKeys(
     record,
-    ["membershipId", "originAssistantInputId"],
+    [
+      "membershipId",
+      "originAssistantInputId",
+      "participantTargetDigest",
+      "targetDisplayLabel",
+    ],
     label,
   );
+  if (
+    (record.participantTargetDigest === undefined)
+    !== (record.targetDisplayLabel === undefined)
+  ) {
+    throw new TypeError(
+      `${label}.participantTargetDigest and ${label}.targetDisplayLabel must appear together.`,
+    );
+  }
   const membershipId = requireString(
     record.membershipId,
     `${label}.membershipId`,
@@ -1897,7 +1911,50 @@ function parseHostedExecutionGroupContextHandoffNotification(
       record.originAssistantInputId,
       `${label}.originAssistantInputId`,
     ),
+    ...(record.participantTargetDigest === undefined
+      ? {}
+      : {
+          participantTargetDigest: parseHostedExecutionSha256Digest(
+            record.participantTargetDigest,
+            `${label}.participantTargetDigest`,
+          ),
+        }),
+    ...(record.targetDisplayLabel === undefined
+      ? {}
+      : {
+          targetDisplayLabel: parseHostedExecutionGroupTargetDisplayLabel(
+            record.targetDisplayLabel,
+            `${label}.targetDisplayLabel`,
+          ),
+        }),
   };
+}
+
+function parseHostedExecutionSha256Digest(
+  value: unknown,
+  label: string,
+): string {
+  const digest = requireString(value, label);
+  if (!/^[0-9a-f]{64}$/u.test(digest)) {
+    throw new TypeError(`${label} must be a lowercase SHA-256 digest.`);
+  }
+  return digest;
+}
+
+function parseHostedExecutionGroupTargetDisplayLabel(
+  value: unknown,
+  label: string,
+): string {
+  const displayLabel = requireString(value, label);
+  if (
+    displayLabel.trim() !== displayLabel
+    || displayLabel.length === 0
+    || [...displayLabel].length
+      > HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS
+  ) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return displayLabel;
 }
 
 function parseHostedExecutionPrivateAssistantAskCompletionNotification(

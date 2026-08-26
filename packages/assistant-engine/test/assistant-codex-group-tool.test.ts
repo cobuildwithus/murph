@@ -286,7 +286,8 @@ describe("murph.group dynamic tool", () => {
   it("advertises family-bounded schemas", () => {
     const expectedRootKeys = {
       group_consult: [
-        "action", "context", "grantId", "groupLabel", "message_ref", "question",
+        "action", "context", "grantId", "groupLabel", "message_ref",
+        "participantTarget", "question",
       ],
       group_data: [
         "action", "audience", "date", "displayName", "grantId", "message_ref",
