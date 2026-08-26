@@ -74,4 +74,6 @@ Updated: 2026-08-26
   and turn-planning tests passed 125/125; both package typechecks and
   `git diff --check` passed. The focused subscription journey was admitted but
   stopped before the turn with `ASSISTANT_CODEX_USAGE_LIMIT`, so Product UX and
-  live-model verdict remain Hold pending an available subscription run.
+  live-model verdict remain Hold pending an available subscription run. The
+  changelog archive test passed 9/9 and the hosted Web typecheck passed for the
+  public reliability note.
