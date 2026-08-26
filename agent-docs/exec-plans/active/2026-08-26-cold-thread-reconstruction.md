@@ -45,5 +45,5 @@ Updated: 2026-08-26
 
 - Focused Assistant Engine history-selection and planning tests.
 - Assistant Engine typecheck selected by the repository verification map.
-- Focused `pnpm test:assistant:live` journey using the production history builder and local subscription.
+- Focused `pnpm test:assistant:live` journey using the production provider prompt composer and local subscription, after deterministic planner coverage selects the bounded history.
 - Exact-head required GitHub Actions, preliminary Product UX and coverage specialist lenses, final cross-cutting ReviewGPT gate, parent final review, and current-base merge-tree proof.

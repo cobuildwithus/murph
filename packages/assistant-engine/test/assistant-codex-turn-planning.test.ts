@@ -5598,12 +5598,12 @@ describe('assistant Codex turn planning', () => {
     const expectedHistory = Array.from({ length: 30 }, (_, index) => ([
       {
         content:
-          `Member context ${index + 1}: ${'member detail '.repeat(10)}`,
+          `Member context ${index + 1}: ${'member detail '.repeat(10)}`.trimEnd(),
         role: 'user' as const,
       },
       {
         content:
-          `Assistant response ${index + 1}: ${'assistant detail '.repeat(10)}`,
+          `Assistant response ${index + 1}: ${'assistant detail '.repeat(10)}`.trimEnd(),
         role: 'assistant' as const,
       },
     ])).flat()

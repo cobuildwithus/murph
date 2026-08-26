@@ -362,6 +362,7 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
       try {
         const prompt = resolveAssistantProviderPrompt({
           conversationHistoryMessages,
+          dynamicTools: resolveMurphDynamicTools({}),
           providerConfig: normalizeAssistantProviderConfig({
             provider: 'codex-cli',
           }),
