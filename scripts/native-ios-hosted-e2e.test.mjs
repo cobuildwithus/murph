@@ -233,15 +233,15 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
     /^\s+apps\/web\/\*\|/mu,
     "the selector must not admit every hosted Web path",
   );
+  assert.equal(workflowTopLevelWebRegex(workflow), "^apps/web/[^/]+$");
   for (const file of [
-    "apps/web/app/api/device-sync/companion/admission/route.ts",
-    "apps/web/app/api/device-sync/companion/initial-onboarding/contact-card/route.ts",
-    "apps/web/app/api/device-sync/companion/sign-in-token/route.ts",
-    "apps/web/app/api/device-sync/companion/status/route.ts",
-    "apps/web/src/lib/hosted-onboarding/request-auth.ts",
-    "apps/web/src/lib/hosted-messages/user-facing-messages.ts",
-    "apps/web/src/lib/device-sync/control-plane.ts",
-    "apps/web/prisma/schema.prisma",
+    "apps/web/future-build.config.ts",
+    "apps/web/tsconfig.next.json",
+    "apps/web/app/api/device-sync/companion/future/route.ts",
+    "apps/web/prisma/future/schema.prisma",
+    "apps/web/scripts/ensure-prisma-client-link.ts",
+    "apps/web/scripts/future-build-owner.ts",
+    "apps/web/src/lib/future-runtime-owner.ts",
     "packages/device-syncd/src/hosted-runtime.ts",
   ]) {
     assert.equal(runWorkflowSelector(workflow, file), "selected", file);
@@ -1692,11 +1692,16 @@ function jsonResponse(value) {
 }
 
 function runWorkflowSelector(workflow, file) {
+  const topLevelWebRegex = workflowTopLevelWebRegex(workflow);
   const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
   assert.ok(match?.groups?.patterns, "workflow selector case was not found");
   const script = [
     "set -euo pipefail",
     'file="$1"',
+    `if [[ "\${file}" =~ ${topLevelWebRegex} ]]; then`,
+    '  printf "selected\\n"',
+    "  exit 0",
+    "fi",
     'case "${file}" in',
     `${match.groups.patterns})`,
     '  printf "selected\\n"',
@@ -1712,6 +1717,12 @@ function runWorkflowSelector(workflow, file) {
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
+}
+
+function workflowTopLevelWebRegex(workflow) {
+  const match = /if \[\[ "\$\{file\}" =~ (?<pattern>\S+) \]\]; then/u.exec(workflow);
+  assert.ok(match?.groups?.pattern, "top-level Web selector boundary was not found");
+  return match.groups.pattern;
 }
 
 async function runVercelBuild(environment) {

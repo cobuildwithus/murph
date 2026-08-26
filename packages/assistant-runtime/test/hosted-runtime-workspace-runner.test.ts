@@ -6609,6 +6609,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         events.push("usage:flush:done");
         resolveUsageFlushDone();
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -6731,6 +6732,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         events.push("usage:flush:done");
         resolveUsageFlushDone();
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -6833,6 +6835,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         await usageWriteGate;
         events.push("usage:done");
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -6933,6 +6936,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }
         events.push(`usage:${record.usageId}:done`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -7047,6 +7051,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         events.push("usage:flush");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };

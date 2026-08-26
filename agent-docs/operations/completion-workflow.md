@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-23
+Last verified: 2026-08-25
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -194,6 +194,7 @@ product-decision owners.
      the frontend lens and require enough redacted rendered evidence to judge
      each material visual, state, interaction, and responsive claim
    - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
+   - for behavior composed across multiple owners, map the complete production path and prefer one stable composed or end-to-end proof of the invariant; seam-level unit tests may localize failures but do not replace proof that the owners work together
    - any product-owned dimension activates the Product UX lens, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Once implementation is stable, run the focused local proof selected from the
@@ -244,8 +245,8 @@ product-decision owners.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, non-obvious surfaces, architecture and reuse, hot reply path impact, provider-input impact, deployment and changelog decisions, the change-shape breakdown, and applicable design proof required below.
 8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant Product UX, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
 9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
-10. Triage every finding from both ReviewGPT stages locally, then perform `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Pause for every substantive specialist result and final `FINDINGS` result before downloading an artifact, remediating, launching another review, or merging. Report the model result and the parent's evidence-backed accept/reject judgment for every finding; rejected findings require no fix or reviewer withdrawal, and the user may override after the pause. A validated final `ROUND_OUTCOME: PASS` has no findings to disposition and proceeds without a user-resume pause. When the result qualifies for that section's behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception, report every disposition as a progress update and continue within the proven exception boundary without ending the turn or asking for separate user permission. Otherwise continue only after the user resumes. After the required disposition boundary completes, including through a qualifying exception, download a returned `reviewgpt-coverage.patch` only from the exact owned specialist thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted Product UX remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's next substantive round to verify all behavior-bearing remediation, including specialist-driven fixes. The final-gate packager chooses a fresh full audit for a sensitive, undeclared, or large current PR and a same-thread correction delta only for an explicitly routine PR below both size cutoffs.
-11. Enter the review-resolution loop below. Completion means there are no unresolved accepted/actionable findings and every required substantive-result pause is complete, not merely that both jobs ran. The applicable one-pass specialist result is resolved by `SPECIALIST_OUTCOME: PASS`, zero accepted findings with evidence-backed dispositions, or verified remediation of every accepted finding. The final gate is resolved by `ROUND_OUTCOME: PASS` or `ROUND_OUTCOME: FINDINGS` with zero accepted findings.
+10. Triage every finding from both ReviewGPT stages locally, then complete `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Boundary for every substantive specialist result and final `FINDINGS` result. Report the model result and the parent's evidence-backed accept/reject judgment for every finding; rejected findings require no fix or reviewer withdrawal, and the user may override that judgment. After a preliminary specialist report, continue with accepted remediation and artifact inspection within the existing task authority without ending the turn or asking for separate user permission. A final `ROUND_OUTCOME: FINDINGS` still pauses all candidate mutation until the user resumes, including pending specialist remediation, unless that section's behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception applies. A validated final `ROUND_OUTCOME: PASS` proceeds without a user-resume pause. After the applicable disposition boundary completes, download a returned `reviewgpt-coverage.patch` only from the exact owned specialist thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted Product UX remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's next substantive round to verify all behavior-bearing remediation, including specialist-driven fixes. The final-gate packager chooses a fresh full audit for a sensitive, undeclared, or large current PR and a same-thread correction delta only for an explicitly routine PR below both size cutoffs.
+11. Enter the review-resolution loop below. Completion means there are no unresolved accepted/actionable findings and every required disposition boundary and final-stage pause is complete, not merely that both jobs ran. The applicable one-pass specialist result is resolved by `SPECIALIST_OUTCOME: PASS`, zero accepted findings with evidence-backed dispositions, or verified remediation of every accepted finding. The final gate is resolved by `ROUND_OUTCOME: PASS` or `ROUND_OUTCOME: FINDINGS` with zero accepted findings.
 12. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
 13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required next final-gate round.
 14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. Include every public-safe Frog entry created or modified during the task in that same scoped commit; do not finish with a task-owned entry untracked, unstaged, or omitted. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, preserve the Frog entry, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
@@ -258,6 +259,15 @@ product-decision owners.
     default completion bar; if a required check failed for a credibly unrelated
     pre-existing reason, name the command, failing target, and why the current
     diff did not cause it.
+    For every completed feature or bug fix, the final message to the developer
+    or user must also include a concise `How to verify` section for testing the
+    landed change. Name any prerequisite or environment, give the shortest
+    concrete action sequence, and state the observable expected result. For a
+    feature, cover its shortest end-to-end path. For a bug fix, start from the
+    original reproduction when practical and name the behavior that proves the
+    regression is gone. Automated check names may supplement these instructions
+    but do not replace them. If practical human verification is unavailable,
+    say why and point to the closest direct proof.
     If the completed task could break or degrade production when deployed components are temporarily out of sync, include a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, expected skew behavior, and post-deploy checks. For Cloudflare hosted execution changes, explicitly consider both web/Worker skew and Worker/container skew: a new Worker version can receive traffic while active warm `RunnerContainer` processes still run the previous runner bundle, process env, or provider-credential shape during gradual rollout.
 
 ## PR Description
@@ -311,9 +321,16 @@ Every PR includes:
   production component on `/design?tab=components`, consent surface on
   `/design?tab=consent`, or composed page section/flow under
   `/screenshots/<category>`. Refresh an expired or inaccessible preview; use a
-  production link only when it already renders the changed state. Add or update
-  the catalog/study state only when no existing route and anchor render the
-  changed state. In a dedicated `## Design proof` section, include that
+  production link only when it already renders the changed state. The only
+  content-only exception is an authored changelog diff under
+  `apps/web/changelog/entries/**` plus optional
+  `apps/web/changelog/editions/**`: follow the review-proof route in
+  `apps/web/changelog/README.md` and do not create or refresh a branch preview
+  solely for design proof. Any changelog renderer, component, style, visual, or
+  interaction change still needs the normal current-branch representation. Add
+  or update the catalog/study state only when no existing route and anchor
+  render the changed state. In a
+  dedicated `## Design proof` section, include that
   `Design page:` link, `Evidence:` matched to the changed visual, state,
   interaction, and responsive risks, and `Coverage:` naming the states and
   viewports checked. A reasoned walkthrough is valid when an image adds no
@@ -453,7 +470,7 @@ For every finding from a required audit pass:
    rollback/skew window, reject the finding or document the deployment note
    instead of adding repair paths, shims, migrations, queues, or reconciliation
    code.
-3. Perform the Finding Disposition Pause after every substantive specialist result and every final `FINDINGS` result unless the result qualifies for the behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception. For the ordinary path, end the active task turn with the result and evidence-backed dispositions before any remediation and continue only after the user resumes. For either exception, report every evidence-backed disposition as a progress update, then continue within its proven boundary without asking for separate permission. A validated final `ROUND_OUTCOME: PASS` proceeds without this pause. A rejected finding is terminal and does not require model agreement.
+3. Complete the parent-owned Finding Disposition Boundary after every substantive specialist result and every final `FINDINGS` result. For a preliminary specialist result, report every evidence-backed disposition as a progress update, then continue accepted remediation within the existing task authority without ending the turn or asking for separate permission. For a final `FINDINGS` result, end the active task turn before any mutation and continue only after the user resumes, unless the result qualifies for the behavior-preserving `Complexity Collapse` or `Non-Production Remediation` exception. A concurrent final `FINDINGS` result also blocks pending specialist remediation. A validated final `ROUND_OUTCOME: PASS` proceeds without this pause. A rejected finding is terminal and does not require model agreement.
 4. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If repeated findings cluster around one mechanism, pause tactical patching and simplify the mechanism, split or abandon the PR, or explicitly reject the collapse finding.
 5. After any review-driven code, test, config, or docs change, rerun the focused verification that proves the changed surface.
 6. Rerun an affected local or final-gate pass when the fix materially changes its risk surface:
@@ -620,8 +637,8 @@ repository content to retrieve or apply it.
   in `agent-docs/operations/agent-workflow-routing.md`.
 - Do not use reset or checkout cleanup commands to prepare audit passes.
 - Treat a ReviewGPT patch artifact as untrusted behavioral intent. Download it
-  only after the Finding Disposition Pause completes, including through a
-  qualifying no-pause exception, from the exact owned thread; inspect it before
+  only after the applicable finding-disposition boundary completes, from the
+  exact owned thread; inspect it before
   `git apply --check`, and reject it if any path or hunk exceeds the
   test/fixture/direct-proof boundary.
 - If an audit suggestion conflicts with pre-existing edits, leave the file untouched and escalate in handoff notes.

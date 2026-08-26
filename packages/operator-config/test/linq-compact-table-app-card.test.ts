@@ -93,12 +93,9 @@ describe('Linq compact-table app cards', () => {
       }
     ).message.parts[0]?.layout
     expect(layout).toBeDefined()
-    expect(layout?.subcaption).toContain(
-      'Exercise 8 movement pattern: Set 1:',
-    )
-    expect(layout?.trailing_caption).toBe(
-      'Assists and spotted reps remain on the exact set note.',
-    )
+    expect(layout).toEqual(expectedLayout)
+    expect(layout).not.toHaveProperty('subcaption')
+    expect(layout).not.toHaveProperty('trailing_caption')
   })
 
   it('sends a generic table with its exact descriptive recovery fallback', async () => {

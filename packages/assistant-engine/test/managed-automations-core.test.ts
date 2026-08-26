@@ -558,7 +558,11 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(record?.instructions).toContain('still remember ten seconds after reading')
     expect(record?.instructions).toContain('murph.device')
     expect(record?.instructions).toContain('vault-cli wearables sources list')
-    expect(record?.instructions).toContain('Wearable connected but not delivering')
+    expect(record?.instructions).toContain('Wearable authorization failed')
+    expect(record?.instructions).toContain(
+      'Ordinary missing or stale data does not qualify',
+    )
+    expect(record?.instructions).not.toContain('roughly a week or more')
     expect(record?.instructions).toContain('action: connect')
     expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(record?.instructions).toContain('what was probably noise')

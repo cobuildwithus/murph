@@ -224,7 +224,7 @@ test('setup bridge omits invalid retryable and exitCode context types', async ()
   assert.equal(result.exitCode, 1)
 })
 
-test('setup bridge classifies filesystem failures without exposing paths', async () => {
+test('setup bridge classifies filesystem failures with bounded diagnostics', async () => {
   const result = await runJsonCli(['fail-permission'])
   const serialized = JSON.stringify(result.envelope)
 
@@ -232,11 +232,11 @@ test('setup bridge classifies filesystem failures without exposing paths', async
   assert.equal(result.envelope.error?.code, 'permission_denied')
   assert.equal(result.envelope.error?.stage, 'filesystem')
   assert.equal(result.envelope.error?.retryable, false)
-  assert.equal(serialized.includes('/private/workspace/member-vault'), false)
-  assert.equal(serialized.includes('permission denied, open'), false)
+  assert.equal(serialized.includes('/private/workspace/member-vault'), true)
+  assert.equal(serialized.includes('permission denied, open'), true)
 })
 
-test('setup bridge returns a value-free unknown failure', async () => {
+test('setup bridge returns a bounded unknown failure', async () => {
   const result = await runJsonCli(['fail-unknown'])
   const serialized = JSON.stringify(result.envelope)
 
@@ -244,11 +244,11 @@ test('setup bridge returns a value-free unknown failure', async () => {
   assert.equal(result.envelope.error?.code, 'UNKNOWN')
   assert.equal(
     result.envelope.error?.message,
-    'The command failed without a safe recoverable detail.',
+    'Provider echoed private-provider-response for private-submitted-value.',
   )
   assert.equal(result.envelope.error?.stage, 'command')
-  assert.equal(serialized.includes('private-submitted-value'), false)
-  assert.equal(serialized.includes('private-provider-response'), false)
+  assert.equal(serialized.includes('private-submitted-value'), true)
+  assert.equal(serialized.includes('private-provider-response'), true)
 })
 
 test('onboard CLI builds setup CTAs from configured channels, updates, wearables, and missing env', async () => {

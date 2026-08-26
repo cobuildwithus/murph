@@ -96,7 +96,6 @@ export function BiomarkersPageClient({
   const {
     error,
     freshness,
-    refresh,
     refreshPending,
     status,
   } = useBrowserVault();
@@ -173,16 +172,7 @@ export function BiomarkersPageClient({
         <Alert variant="destructive">
           <AlertTitle>Could not load your biomarkers</AlertTitle>
           <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>Some private biomarker data is not available right now.</span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void refresh({ background: true })}
-              >
-                Retry
-              </Button>
-            </div>
+            Some private biomarker data is not available right now.
           </AlertDescription>
         </Alert>
       ) : null}

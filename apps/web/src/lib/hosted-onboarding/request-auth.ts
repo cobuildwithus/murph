@@ -32,6 +32,17 @@ export interface PrivyMemberAuthContext {
 
 export type PrivySessionContext = HostedPrivySession;
 
+export type PrivyBearerMemberAuthStage =
+  | "identity_token_verification"
+  | "member_lookup";
+
+export interface PrivyBearerMemberAuthOptions {
+  runStage?<TResult>(
+    stage: PrivyBearerMemberAuthStage,
+    run: () => Promise<TResult>,
+  ): Promise<TResult>;
+}
+
 export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
   member: HostedMemberCoreState;
 }
@@ -184,8 +195,13 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
 export async function requirePrivyMemberAuthFromBearerToken(
   request: Request,
   prisma: PrismaClient = getPrisma(),
+  options: PrivyBearerMemberAuthOptions = {},
 ): Promise<AuthenticatedPrivyMemberAuthContext> {
-  const session = await resolveHostedPrivySessionFromBearerToken(request);
+  const runStage = options.runStage ?? ((_stage, run) => run());
+  const session = await runStage(
+    "identity_token_verification",
+    () => resolveHostedPrivySessionFromBearerToken(request),
+  );
 
   if (!session) {
     throw hostedOnboardingError({
@@ -195,10 +211,13 @@ export async function requirePrivyMemberAuthFromBearerToken(
     });
   }
 
-  const member = await resolvePrivyMemberAuthFromSession({
-    identity: session.identity,
-    prisma,
-  });
+  const member = await runStage(
+    "member_lookup",
+    () => resolvePrivyMemberAuthFromSession({
+      identity: session.identity,
+      prisma,
+    }),
+  );
 
   if (!member) {
     throw hostedOnboardingError({

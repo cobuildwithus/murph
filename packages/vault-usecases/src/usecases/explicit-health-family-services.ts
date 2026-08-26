@@ -61,7 +61,10 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
-import { toRegimenUpsertVaultCliError } from "./vault-usecase-helpers.js";
+import {
+  toRegimenUpsertVaultCliError,
+  toVaultCliError,
+} from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -133,6 +136,159 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "markdown",
   "body",
 ]);
+
+interface PrivateProtocolVaultError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+}
+
+function isPrivateProtocolVaultError(error: unknown): error is PrivateProtocolVaultError {
+  return error instanceof Error
+    && error.name === "VaultError"
+    && "code" in error
+    && typeof error.code === "string";
+}
+
+function protocolValidationIssues(
+  details: Record<string, unknown> | undefined,
+): Array<{ code: unknown; publicPath: Array<string | number> }> {
+  const fields = Array.isArray(details?.fields) ? details.fields : [];
+  return fields.flatMap((field) => {
+    if (typeof field !== "object" || field === null || Array.isArray(field)) {
+      return [];
+    }
+
+    if (!("path" in field) || !Array.isArray(field.path)) {
+      return [];
+    }
+
+    return [{
+      publicPath: protocolPublicValidationPath(field.path),
+      code: "code" in field ? field.code : undefined,
+    }];
+  });
+}
+
+const PROTOCOL_PUBLIC_VALIDATION_FIELDS = new Set([
+  "activityKinds",
+  "activitySessionEvidence",
+  "after",
+  "before",
+  "commonsProtocolRef",
+  "constraints",
+  "diff",
+  "docType",
+  "doseSignature",
+  "durationMinutes",
+  "effectiveSpec",
+  "effectiveSpecHash",
+  "frequency",
+  "instructions",
+  "key",
+  "lineage",
+  "max",
+  "min",
+  "minimumDurationMinutes",
+  "minimumUsefulSessions",
+  "modality",
+  "notes",
+  "op",
+  "pageRevisionId",
+  "parentProtocolRef",
+  "path",
+  "personalization",
+  "preferences",
+  "protocolId",
+  "protocolRevisionId",
+  "rationale",
+  "reason",
+  "runSpecRevisionId",
+  "schemaVersion",
+  "sessionsPerDay",
+  "sessionsPerWeek",
+  "slug",
+  "sourceKind",
+  "status",
+  "stopConditions",
+  "target",
+  "targetSessions",
+  "temperatureC",
+  "testPlanId",
+  "title",
+]);
+
+const PROTOCOL_DYNAMIC_VALIDATION_FIELDS = new Set([
+  "after",
+  "before",
+  "constraints",
+  "preferences",
+]);
+
+function protocolPublicValidationPath(
+  path: readonly unknown[],
+): Array<string | number> {
+  const publicPath: Array<string | number> = [];
+  for (const segment of path) {
+    if (
+      typeof segment === "number"
+      && Number.isSafeInteger(segment)
+      && segment >= 0
+    ) {
+      publicPath.push(segment);
+      continue;
+    }
+    if (typeof segment !== "string" || !PROTOCOL_PUBLIC_VALIDATION_FIELDS.has(segment)) {
+      break;
+    }
+    publicPath.push(segment);
+    if (PROTOCOL_DYNAMIC_VALIDATION_FIELDS.has(segment)) {
+      break;
+    }
+  }
+  return publicPath;
+}
+
+function toPrivateProtocolVaultCliError(error: unknown): unknown {
+  if (!isPrivateProtocolVaultError(error)) {
+    return error;
+  }
+
+  if (error.code === "VAULT_INVALID_PROTOCOL") {
+    if (error.details?.validationSource !== "submitted_candidate") {
+      return new VaultCliError(
+        "vault_state_invalid",
+        "Stored protocol state is invalid.",
+        {
+          vaultCode: error.code,
+          validationSource: error.details?.validationSource === "stored_vault_state"
+            ? "stored_vault_state"
+            : "unknown",
+        },
+      );
+    }
+
+    return new VaultCliError(
+      "contract_invalid",
+      "Protocol payload is invalid.",
+      {
+        vaultCode: error.code,
+        validationSource: "submitted_candidate",
+        issues: protocolValidationIssues(error.details),
+        stage: "validation",
+      },
+    );
+  }
+
+  if (error.code === "VAULT_INVALID_INPUT") {
+    return new VaultCliError(
+      "contract_invalid",
+      error.message,
+      { vaultCode: error.code },
+    );
+  }
+
+  return toVaultCliError(error);
+}
 
 function parseRegistryPayloadWithSharedSchema(
   kind: RegistryDocFamilyKind,
@@ -1264,15 +1420,20 @@ export function createExplicitHealthCoreServices(
     },
     async upsertPrivateProtocol(input) {
       const { core } = await loadRuntime();
-      const result = await core.upsertProtocol({
-        vaultRoot: input.vault,
-        protocolId: input.protocolId,
-        slug: input.slug,
-        allowSlugRename: input.allowSlugRename,
-        title: input.title,
-        frontmatter: input.frontmatter,
-        body: input.body,
-      });
+      let result: Awaited<ReturnType<typeof core.upsertProtocol>>;
+      try {
+        result = await core.upsertProtocol({
+          vaultRoot: input.vault,
+          protocolId: input.protocolId,
+          slug: input.slug,
+          allowSlugRename: input.allowSlugRename,
+          title: input.title,
+          frontmatter: input.frontmatter,
+          body: input.body,
+        });
+      } catch (error) {
+        throw toPrivateProtocolVaultCliError(error);
+      }
       const protocolId = String(result.record.entity.protocolId);
 
       return {

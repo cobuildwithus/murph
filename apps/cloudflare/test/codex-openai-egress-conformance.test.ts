@@ -380,6 +380,21 @@ describe("pinned Codex OpenAI egress conformance", () => {
           expect(request.headers.get("authorization"))
             .toBe("Bearer openai-worker-secret");
         }
+        const firstResponsesRequest = forwardedRequests.find((request) =>
+          new URL(request.url).pathname === "/v1/responses"
+        );
+        expect(firstResponsesRequest).toBeDefined();
+        const firstResponsesBody = JSON.parse(
+          firstResponsesRequest?.body ?? "{}",
+        ) as { input?: unknown };
+        const firstResponsesInput = JSON.stringify(firstResponsesBody.input);
+        expect(firstResponsesInput.split(
+          "Use the available web search tool when requested.",
+        )).toHaveLength(2);
+        expect(firstResponsesInput.split(
+          "Search for the synthetic route-conformance result, then answer.",
+        )).toHaveLength(2);
+        expect(firstResponsesInput.split("### `web__run`")).toHaveLength(2);
         const searchRequest = forwardedRequests.find((request) =>
           new URL(request.url).pathname === "/v1/alpha/search"
         );

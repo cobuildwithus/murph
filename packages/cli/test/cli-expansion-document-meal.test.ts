@@ -17,6 +17,7 @@ import {
   repoRoot,
   requireData,
   runCli,
+  runInProcessJsonCli,
   runRawCli,
 } from './cli-test-helpers.js'
 
@@ -351,6 +352,32 @@ test(
   },
   DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
 )
+
+test('meal edit rejects a non-IANA timezone in the final repair envelope', async () => {
+  const privateTimeZone = 'Private/TimezoneSentinel'
+  const result = await runInProcessJsonCli(createDocumentMealSchemaCli(), [
+    'meal',
+    'edit',
+    'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    '--time-zone',
+    privateTimeZone,
+    '--day-key-policy',
+    'recompute',
+    '--vault',
+    './vault',
+  ])
+
+  assert.equal(result.exitCode, 1)
+  assert.equal(result.envelope.ok, false)
+  if (!result.envelope.ok) {
+    assert.equal(
+      result.envelope.error.fieldErrors?.some((field) =>
+        field.path.endsWith('timeZone')),
+      true,
+    )
+  }
+  assert.doesNotMatch(JSON.stringify(result.envelope), /Private\/TimezoneSentinel/u)
+})
 
 test('meal import-json help documents the structured payload path and override rule', async () => {
   const help = await runRawSourceCli(['meal', 'import-json', '--help'])

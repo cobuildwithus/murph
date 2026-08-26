@@ -1250,6 +1250,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
       'A removal failure or any selected photo remaining fails the run',
     )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'Return its compact unresolved-capture question when required.',
+    )
 
     await expect(ensureAutomaticMealCloseoutAutomation({
       defaultRoute,

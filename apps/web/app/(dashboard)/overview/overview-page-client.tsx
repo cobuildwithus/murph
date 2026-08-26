@@ -9,7 +9,6 @@ import {
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
-import { Button } from "@/src/components/ui/button";
 import {
   Card,
   CardContent,
@@ -35,7 +34,7 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function OverviewPage() {
-  const { client, error, refresh, refreshPending, status } = useBrowserVault();
+  const { client, error, refreshPending, status } = useBrowserVault();
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     [],
@@ -108,12 +107,7 @@ export default function OverviewPage() {
         <Alert variant="destructive">
           <AlertTitle>Could not load your overview</AlertTitle>
           <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "We couldn't unlock your dashboard data right now."}</span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
+            {error ?? "We couldn't unlock your dashboard data right now."}
           </AlertDescription>
         </Alert>
       ) : null}

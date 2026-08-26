@@ -867,12 +867,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      requestAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
+      },
+    }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
           memberId: "member_synthetic_phase",
+          releaseSha: "0123456789abcdef0123456789abcdef01234567",
+          runtimeAttemptId:
+            "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+          runtimeName: "cloudflare-hosted-runner",
           userEnvKeys: [],
         }),
       },
@@ -886,6 +896,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
             defaultTarget: hostedDefaultTarget,
+            releaseSha: "0123456789abcdef0123456789abcdef01234567",
+            runtimeAttemptId:
+              "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+            runtimeName: "cloudflare-hosted-runner",
           }),
         }),
       }),
@@ -1534,6 +1548,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -1693,6 +1708,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeUsageRecordPort: {
         async recordUsage(record) {
           return {
+            platformAiUsageAllowedAfter: true,
             recorded: true,
             usageId: record.usageId,
           };
@@ -1720,6 +1736,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -1835,6 +1852,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
         return {
+          platformAiUsageAllowedAfter: true,
           recorded: true,
           usageId: record.usageId,
         };
@@ -2266,7 +2284,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           workspaceVersion: "8",
         },
         skipDirtyPendingFetch: false,
-        timeoutMs: 90_000,
+        timeoutMs: 120_000,
       }),
     );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(
@@ -5374,6 +5392,77 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             routeBinding: "preserved",
             status: "paused",
           }));
+
+          const reminderRoot = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Send the synthetic mobility reminder.",
+            schedule: { kind: "dailyLocal", localTime: "08:00" },
+            title: "Mobility reminder",
+          });
+          if (!reminderRoot || reminderRoot.action !== "save") {
+            throw new Error("Expected root reminder save.");
+          }
+          await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: reminderRoot.updatedAt,
+            lookup: reminderRoot.automationId,
+            status: "archived",
+          });
+          const repeatedTitleReminder =
+            await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Send the new mobility reminder.",
+            schedule: { kind: "dailyLocal", localTime: "08:15" },
+            title: "Mobility reminder",
+          });
+          if (
+            !repeatedTitleReminder
+            || repeatedTitleReminder.action !== "save"
+          ) {
+            throw new Error("Expected repeated-title reminder save.");
+          }
+          expect(repeatedTitleReminder).toEqual(expect.objectContaining({
+            created: true,
+            lookupId: repeatedTitleReminder.automationId
+              .toLowerCase()
+              .replace("_", "-"),
+            status: "active",
+          }));
+          expect(repeatedTitleReminder.automationId).not.toBe(
+            reminderRoot.automationId,
+          );
+          const reservedTitleReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              instructions: "Send this ordinary synthetic reminder.",
+              schedule: { kind: "dailyLocal", localTime: "08:30" },
+              title: "Onboarding first personal read",
+            });
+          expect(reservedTitleReminder).toEqual(expect.objectContaining({
+            action: "save",
+            created: true,
+            status: "active",
+          }));
+          if (!reservedTitleReminder || reservedTitleReminder.action !== "save") {
+            throw new Error("Expected ordinary reserved-title reminder save.");
+          }
+          expect(reservedTitleReminder.automationId).not.toBe(
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          );
+          const archivedReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "inspect",
+              lookup: reminderRoot.automationId,
+            });
+          if (!archivedReminder || archivedReminder.action !== "inspect") {
+            throw new Error("Expected archived reminder inspection.");
+          }
+          expect(archivedReminder).toEqual(expect.objectContaining({
+            automationId: reminderRoot.automationId,
+            lookupId: reminderRoot.automationId.toLowerCase().replace("_", "-"),
+            status: "archived",
+          }));
+
           const stale = await executionContext.hosted?.automationTool?.request({
             action: "save",
             instructions: "Archive this stale group check-in.",
@@ -5569,13 +5658,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("distinguishes pending scheduler work from resolved occurrences after reminder patches", async () => {
+  it("distinguishes pending scheduler work, stale recurrences, and resolved occurrences after reminder patches", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
     const vaultRoot = path.join(parentRoot, "vault");
     const inputId = "ain_44444444444444444444444444444444";
-    const logRequests: HostedRuntimeLogRequest[] = [];
 
     try {
       await initializeVault({
@@ -5602,7 +5690,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
         assistantInputIds: [inputId],
         importedCount: 1,
-        logRequests,
         vaultRoot,
       }));
       const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
@@ -5823,7 +5910,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
 
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
-      const pendingProjectionCallsBefore =
+      const staleProjectionCallsBefore =
         mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
       await expect(requestAutomation({
         action: "patch",
@@ -5831,7 +5918,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         instructions: "Send the revised recurring interval reminder.",
         lookup: "recurring-interval-reminder",
       })).resolves.toEqual(expect.objectContaining({
-        occurrenceProjection: { status: "pending" },
+        occurrenceProjection: {
+          issues: ["stale_recurring_occurrence"],
+          status: "unavailable",
+        },
         schedule: {
           everyMs: 86_400_000,
           kind: "every",
@@ -5840,7 +5930,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       expect(
         mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
-        - pendingProjectionCallsBefore,
+        - staleProjectionCallsBefore,
+      ).toBe(2);
+      const staleInspectCallsBefore =
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "recurring-interval-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        occurrenceProjection: {
+          issues: ["stale_recurring_occurrence"],
+          status: "unavailable",
+        },
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        status: "active",
+      }));
+      expect(
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+        - staleInspectCallsBefore,
       ).toBe(1);
       await expect(requestAutomation({
         action: "patch",
@@ -6000,14 +6111,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       )).resolves.toMatchObject({
         state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
       });
-      expect(
-        logRequests
-          .flatMap((request) => request.entries)
-          .filter((entry) =>
-            entry.redactedJson?.schema
-              === "murph.hosted-automation-timing-verification.v1"
-          ),
-      ).toEqual([]);
+
+      vi.setSystemTime(new Date("2026-08-11T01:00:00.000Z"));
+      const implicitTimeZoneReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the implicit-timezone reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        slug: "implicit-timezone-reminder",
+        title: "Implicit timezone reminder",
+      });
+      if (implicitTimeZoneReminder.action !== "save") {
+        throw new Error("Expected implicit-timezone reminder save result.");
+      }
+      expect(implicitTimeZoneReminder).toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/New_York",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-11T06:00:00.000Z",
+          status: "resolved",
+        },
+      }));
+
+      vi.setSystemTime(new Date("2026-08-11T03:01:00.000Z"));
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "UTC",
+        vaultTimeZoneVerified: false,
+      });
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "implicit-timezone-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        effectiveTimeZone: "UTC",
+        occurrenceProjection: {
+          issues: ["default_timezone_unverified"],
+          status: "unavailable",
+        },
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        status: "active",
+      }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -6187,6 +6334,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 status: "unavailable",
               },
             }));
+
+            const staleRecurring = await automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic recurring reminder.",
+              schedule: {
+                everyMs: 86_400_000,
+                kind: "every",
+              },
+              slug: "synthetic-stale-recurring-reminder",
+              title: "Synthetic stale recurring reminder",
+            });
+            if (staleRecurring.action !== "save") {
+              throw new Error("Expected the stale recurring save result.");
+            }
+            vi.setSystemTime(new Date("2026-08-15T02:01:00.000Z"));
+            await expect(automationTool.request({
+              action: "patch",
+              expectedUpdatedAt: staleRecurring.updatedAt,
+              instructions: "Send the revised synthetic recurring reminder.",
+              lookup: "synthetic-stale-recurring-reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              occurrenceProjection: {
+                issues: ["stale_recurring_occurrence"],
+                status: "unavailable",
+              },
+            }));
           },
           turnEnvironment: null,
         });
@@ -6212,7 +6385,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           && entry.redactedJson?.schema
             === "murph.hosted-automation-timing-verification.v1"
         );
-      expect(verificationEntries).toHaveLength(8);
+      expect(verificationEntries).toHaveLength(10);
       expect(verificationEntries[0]).toEqual(expect.objectContaining({
         errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
         level: "info",
@@ -6274,6 +6447,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           automationTimingVerificationStage: "readback",
         }),
       }));
+      expect(verificationEntries[8]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "patch",
+          automationTimingVerificationIssues: ["stale_recurring_occurrence"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+        }),
+      }));
+      expect(verificationEntries[9]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "patch",
+          automationTimingVerificationIssues: ["stale_recurring_occurrence"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
       expect(JSON.stringify(logRequests)).not.toContain(
         "synthetic-private-verification-reminder",
       );
@@ -6312,6 +6505,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "Synthetic projection failure reminder",
       );
       expect(JSON.stringify(logRequests)).not.toContain("07:30");
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-stale-recurring-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "revised synthetic recurring reminder",
+      );
       expect(() => logRequests.forEach(parseHostedRuntimeLogRequest)).not.toThrow();
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
@@ -6714,7 +6913,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         buildOnboardingFirstPersonalReadAutomationSaveRequest({
           now: new Date("2026-08-06T21:00:00.000Z"),
         });
-      const genericFixedTargetRequests = [
+      const genericFixedIdentityRequests = [
         {
           action: "save" as const,
           automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -6735,17 +6934,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
           title: "Replacement by slug",
         },
-        {
-          action: "save" as const,
-          instructions: "Replace the fixed first-read policy.",
-          schedule: {
-            at: "2026-08-06T21:02:00.000Z",
-            kind: "at" as const,
-          },
-          title: "Onboarding___first / personal read",
-        },
       ];
-      for (const request of genericFixedTargetRequests) {
+      for (const request of genericFixedIdentityRequests) {
         await expect(operationScope.runAutoReplyGroup({
           executionContext: laneInput.executionContext,
           inputIds: [inputId],
@@ -6769,7 +6959,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
-          return await automationTool.request(genericFixedTargetRequests[0], {
+          return await automationTool.request(genericFixedIdentityRequests[0], {
             onboardingFirstReadCompletionTransition: true,
           });
         },
@@ -8748,6 +8938,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("exposes safe hosted device list, connect, and reconcile actions from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
+    const noDataOutreachRequests: Array<
+      Parameters<NonNullable<RuntimeDeviceSyncPort["configureNoDataOutreach"]>>[0]
+    > = [];
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -8802,6 +8995,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expiresAt: "2026-04-29T00:05:00.000Z",
           provider: request.connectTarget,
           providerLabel: "WHOOP",
+        };
+      },
+      async configureNoDataOutreach(request) {
+        noDataOutreachRequests.push(request);
+        return {
+          action: "configure_no_data_outreach" as const,
+          effectiveAfterDays: request.mode === "off"
+            ? null
+            : request.mode === "after_days"
+              ? request.afterDays
+              : 5,
+          setting: request.mode === "off"
+            ? "off" as const
+            : request.mode === "after_days"
+              ? "custom" as const
+              : "default" as const,
+          sourceProviderSlug: request.sourceProviderSlug,
+          status: "saved" as const,
         };
       },
       async fetchSnapshot(request) {
@@ -8931,6 +9142,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(reconcileRequests).toEqual([{
       connectionId: "conn_synthetic_whoop",
       signal: abortController.signal,
+    }]);
+    await expect(deviceTool.request({
+      action: "configure_no_data_outreach",
+      afterDays: 10,
+      mode: "after_days",
+      sourceProvider: "garmin",
+    })).rejects.toThrow("current private member input");
+    await expect(deviceTool.request({
+      action: "configure_no_data_outreach",
+      afterDays: 10,
+      mode: "after_days",
+      sourceProvider: "garmin",
+    }, {
+      acceptedInputAuthority: {
+        assistantInputId: "ain_00000000000000000000000000000001",
+      },
+      signal: abortController.signal,
+    })).resolves.toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 10,
+      setting: "custom",
+      sourceProvider: "garmin",
+      status: "saved",
+    });
+    expect(noDataOutreachRequests).toEqual([{
+      afterDays: 10,
+      assistantInputId: "ain_00000000000000000000000000000001",
+      mode: "after_days",
+      signal: abortController.signal,
+      sourceProviderSlug: "garmin",
     }]);
     await expect(deviceTool.request({
       action: "connect",
@@ -15554,6 +15795,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const deferredUsageRecords: AssistantUsageRecord[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       recordUsage: vi.fn(async (record) => ({
+        platformAiUsageAllowedAfter: true,
         recorded: true,
         usageId: record.usageId,
       })),
@@ -15628,9 +15870,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => "2026-04-27T00:03:00.000Z",
+      requestAttemptId:
+        "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
         return Promise.resolve();
+      },
+      runtimeIssueProvenance: {
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        runtimeName: "cloudflare-hosted-runner",
       },
       runtimeUsageRecordPort: usageRecordPort,
     });
@@ -15652,6 +15900,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           executionContext: {
             hosted: expect.objectContaining({
               memberId: "member_synthetic_phase",
+              releaseSha: "0123456789abcdef0123456789abcdef01234567",
+              runtimeAttemptId:
+                "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+              runtimeName: "cloudflare-hosted-runner",
               usageRecorder: {
                 recordUsage: expect.any(Function),
               },
@@ -20130,6 +20382,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"]
   >;
   runtimeEnv?: Record<string, string>;
+  runtimeIssueProvenance?: HostedWorkspaceRuntimeAssistantPhaseInput["runtimeIssueProvenance"];
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   signal?: HostedWorkspaceRuntimeAssistantPhaseInput["signal"];
@@ -20144,6 +20397,7 @@ function createPhaseInput(input: {
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
+  requestAttemptId?: string;
   vaultRoot?: string;
   workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
@@ -20239,7 +20493,7 @@ function createPhaseInput(input: {
         : {}),
     },
     request: {
-      attemptId: "attempt_synthetic_phase",
+      attemptId: input.requestAttemptId ?? "attempt_synthetic_phase",
       leaseGeneration: "3",
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
@@ -20336,6 +20590,7 @@ function createPhaseInput(input: {
       userEnv: input.runtimeUserEnv ?? {},
     },
     runtimeEnv: input.runtimeEnv ?? {},
+    runtimeIssueProvenance: input.runtimeIssueProvenance,
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     signal: input.signal,
     workspace: input.workspace ?? null,

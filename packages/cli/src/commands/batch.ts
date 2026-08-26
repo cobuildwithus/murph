@@ -7,65 +7,22 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
-  pathSchema,
-  VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
+  VAULT_CLI_BATCH_MAX_COMMANDS,
+  vaultCliBatchCommandErrorSchema,
+  vaultCliBatchCommandResultEnvelopeSchema,
+  vaultCliBatchResultEnvelopeSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const batchCommandOptionSchema = z.string().min(1)
-const batchCommandErrorStageSchema = z.string().regex(
-  /^(?:authorization|command|configuration|conflict|filesystem|integrity|persistence|read|render|response|transport|validation|write)$/u,
-)
-const batchPublicFieldPathSchema = z
-  .string()
-  .min(1)
-  .max(160)
-  .regex(/^(?:\$|(?:[A-Za-z_][A-Za-z0-9_-]*|\d+)(?:\.(?:[A-Za-z_][A-Za-z0-9_-]*|\d+))*)$/u)
 
-const batchCommandErrorSchema = z.object({
-  code: z.string().min(1).max(96).regex(/^[A-Za-z0-9_.:-]+$/u).optional(),
-  message: z.string().min(1).max(640),
-  retryable: z.boolean().optional(),
-  exitCode: z.number().int().positive().optional(),
-  hint: z.string().min(1).max(320).optional(),
-  stage: batchCommandErrorStageSchema.optional(),
-  fieldErrors: z.array(z.object({
-    code: z.string().min(1).max(96).regex(/^[A-Za-z0-9_.:-]+$/u).optional(),
-    expected: z.string().max(32).optional(),
-    message: z.string().min(1).max(240),
-    missing: z.boolean().optional(),
-    path: batchPublicFieldPathSchema,
-    received: z.enum(['missing', 'invalid']).optional(),
-  }).strict()).max(13).optional(),
-}).strict()
+export const batchRunResultSchema = vaultCliBatchResultEnvelopeSchema
 
-const batchCommandResultSchema = z.object({
-  index: z.number().int().nonnegative(),
-  argv: z.array(z.string().min(1)),
-  durationMs: z.number().int().nonnegative(),
-  ok: z.boolean(),
-  outputBytes: z.number().int().nonnegative().describe(
-    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
-  ),
-  outputChars: z.number().int().nonnegative().describe(
-    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
-  ),
-  stdout: z.string(),
-  data: z.unknown().optional(),
-  error: batchCommandErrorSchema.optional(),
-})
-
-export const batchRunResultSchema = z.object({
-  schema: z.string().min(1),
-  vault: pathSchema,
-  count: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  commands: z.array(batchCommandResultSchema),
-})
-
-type BatchCommandResult = z.output<typeof batchCommandResultSchema>
+type BatchCommandResult = z.output<
+  typeof vaultCliBatchCommandResultEnvelopeSchema
+>
 
 export function registerBatchCommands(cli: Cli.Cli) {
   cli.command('batch', {
@@ -100,7 +57,8 @@ export function registerBatchCommands(cli: Cli.Cli) {
       }
 
       return {
-        schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+        schema:
+          VAULT_CLI_BATCH_RESULT_SCHEMA as typeof VAULT_CLI_BATCH_RESULT_SCHEMA,
         vault: options.vault,
         count: commands.length,
         failed: commands.filter((command) => !command.ok).length,
@@ -242,22 +200,23 @@ async function runBatchCommand(input: {
   }
 }
 
-function parseChildCommandError(stdout: string): z.output<typeof batchCommandErrorSchema> | null {
+function parseChildCommandError(
+  stdout: string,
+): z.output<typeof vaultCliBatchCommandErrorSchema> | null {
   const parsedOutput = parseJsonOutput(stdout)
   if (!parsedOutput.ok || !parsedOutput.data || typeof parsedOutput.data !== 'object') {
     return null
   }
 
   const record = parsedOutput.data as Record<string, unknown>
-  const candidate = record.error ?? record
-  const parsedError = batchCommandErrorSchema.safeParse(candidate)
+  const parsedError = vaultCliBatchCommandErrorSchema.safeParse(record.error ?? record)
   return parsedError.success ? parsedError.data : null
 }
 
 function projectBatchCommandError(
   error: unknown,
-): z.output<typeof batchCommandErrorSchema> {
-  const projected = batchCommandErrorSchema.safeParse(projectVaultCliError(error))
+): z.output<typeof vaultCliBatchCommandErrorSchema> {
+  const projected = vaultCliBatchCommandErrorSchema.safeParse(projectVaultCliError(error))
   return projected.success
     ? projected.data
     : {
