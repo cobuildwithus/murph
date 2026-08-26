@@ -22,6 +22,16 @@ generic projector, validation framework, or recovery state owner.
   schema-owned parents and that validation rejects before canonical writes.
 - The current head has historical focused and bundle proof but no current-main
   integration or exact-head final review.
+- Current `main` was merged at `08cbdc0f97`; stale broad-path redaction and its
+  inbox expectation were restored to the main-owned bounded-diagnostic behavior.
+- Focused verification passes: 137 health, contract, usecase, and CLI tests;
+  14 runner bundle tests; Contracts, Vault Usecases, and CLI typechecks;
+  generated contract verification; prepared runtime; CLI package shape; and
+  both docs gates.
+- Canonical runner assembly passes all eight parity probes. The Vault CLI is
+  9,512,634 bytes against a 9,519,180-byte budget; entry is 805 bytes and the
+  static startup closure is 25,155 bytes. The runner is 11,348,803 bytes
+  against an 11,393,617-byte budget.
 
 ## Design
 
@@ -35,10 +45,10 @@ generic projector, validation framework, or recovery state owner.
 
 ## Tasks
 
-1. Merge current `main` and resolve duplicate foundation history by ownership.
-2. Prove the resulting tree is current `main` plus only the health slice,
+1. [done] Merge current `main` and resolve duplicate foundation history by ownership.
+2. [done] Prove the resulting tree is current `main` plus only the health slice,
    authored plans, generated health contracts, and measured bundle allowance.
-3. Run focused health tests, affected typechecks, generated-contract checks,
+3. [done] Run focused health tests, affected typechecks, generated-contract checks,
    prepared/package-shape checks, docs gates, and canonical runner parity proof.
 4. Push the exact candidate, retarget the PR to `main`, update the PR contract,
    and run a sensitive full ReviewGPT round with the prior finding ledger.
