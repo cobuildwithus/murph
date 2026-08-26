@@ -171,3 +171,21 @@ without changing automation ownership or adding a second error framework.
   runner assembly. The Vault CLI is 9,560,987 / 9,599,148 bytes with an
   805-byte entry and 25,155-byte static closure; all eight parity probes pass
   and the runner is 11,381,905 / 11,393,617 bytes.
+- Ready-head CI exposed two branch-owned test/tooling mismatches and one
+  transient cron assertion. Hosted bootstrap still expected invalid preserved
+  assistant defaults to be overwritten while replacing invalid hosted config,
+  contrary to the reviewed strict patch contract. Its fixture now uses valid
+  preserved assistant state and proves that state survives hosted replacement.
+- The release secret guard rejected the public Zod declaration enum member
+  `authorization: "authorization"` in three packaged declaration files. The
+  existing reviewed-public allowlist now permits only that exact key/value pair;
+  the complete 22-case guard suite passes and all three declarations scan clean.
+- The CI-failing managed-automation predecessor case passes alone and during a
+  full 128-case outbox file run. That full local run reached 127 passes before a
+  different existing 60-second case timed out, so no cron/runtime mutation was
+  made. Hosted bootstrap passes 8/8 and assistant-runtime typecheck passes.
+- Local release diagnosis also proved that the fixed 60-second CLI manifest
+  timeout can block packaging on a contended supported host even when the same
+  built command completes successfully. Frog entry
+  `20260826104842-release-cli-manifest` records the repository-actionable
+  friction; the temporary ignored-artifact timeout edit was restored.
