@@ -114,3 +114,6 @@ without changing automation ownership or adding a second error framework.
   completed effect and proves no replay or raw failure echo; the POST 502 and
   existing GET transport tests cover the other classification branches.
 - The assistant-cli focused suite passes 13/13 and its typecheck passes.
+- Exact corrected-head production assembly passes all eight parity probes. The
+  Vault CLI is 9,534,609 / 9,534,735 bytes with an 805-byte entry and
+  25,155-byte static closure; runner total is 11,365,094 / 11,393,617 bytes.
