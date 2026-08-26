@@ -1533,12 +1533,15 @@ its existing cleanup contract. Keep session-persistent setup such as connection
 transactions between backend connections. The default pool limit is 15 clients
 per module runtime, with five seconds for connection acquisition and 30 seconds
 for idle retirement; tune those values only from measured pool and database
-pressure. Connection failure logs expose only a fixed failure category and
-numeric total, idle, and waiting counts.
+pressure. Connection failure logs expose only fixed operation/source labels,
+retry attempt and disposition, the configured pool limit, and numeric
+pre-attempt and post-failure pool counts.
 
-That module permits one jittered retry only for the two ambiguous transient
-failures that prove the database did no work. A `pool_checkout_timeout` means
-the statement never reached Postgres. A `transaction_start_timeout` is Prisma's
+That module permits one jittered retry only for ambiguous transient failures
+that prove the database did no work. A `pool_checkout_timeout` means the
+statement never reached Postgres. A `connection_establishment_timeout` means
+the driver failed while opening the physical connection. A
+`transaction_start_timeout` is Prisma's
 `P2028` raised before it invokes the transaction callback. When the local pool
 is already full or has waiters, either failure is returned immediately as
 backpressure instead of re-entering the same queue. `P2028` also covers
@@ -1550,20 +1553,23 @@ host, are reported and rethrown untouched.
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
 before the prospective first waiter queues, or whenever later callers are
-already waiting. It is rate limited to once per ten seconds per pool; a pool
-with idle capacity logs nothing. `Hosted web database slow transaction
+already waiting with no idle connection. It is rate limited to once per ten
+seconds per pool; a pool with idle capacity logs nothing. `Hosted web database slow transaction
 acquisition.` measures only the wait before an interactive callback begins,
-while `Hosted web database slow transaction hold.` measures only callback time
-with a connection. Batch-array transactions use `Hosted web database slow batch
+while `Hosted web database slow transaction callback.` measures callback wall
+time and reports the effective transaction timeout without claiming the
+connection remained held for the full callback. Batch-array transactions use
+`Hosted web database slow batch
 transaction.` for total wall time because Prisma does not expose a callback
-boundary there. Each emits only a duration at five seconds or more.
+boundary there. Each emits only safe operation, timeout, outcome, and duration
+fields at five seconds or more.
 
 `Hosted web database pool configured.` records the effective limit once per
 module runtime and whether it was `configured` or inherited as the `default`.
 That limit is per module runtime, not a global cap, so the real ceiling is this
 number multiplied by the live Fluid instance count. Leaving
 `DATABASE_POOL_MAX` unset deliberately keeps the inherited default visible
-without silently changing capacity. Use the new pressure, acquisition, and hold
+without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
 
