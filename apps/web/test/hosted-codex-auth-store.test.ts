@@ -5,16 +5,23 @@ import {
   beginHostedCodexAuthAttempt,
   readHostedCodexAuthConnectionView,
 } from "@/src/lib/codex-auth/store";
+import type {
+  PreparedHostedMailboxItemAppendCrypto,
+} from "@/src/lib/hosted-mailbox/store";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedMailboxEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
+  runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+  runWithPreparedHostedMailboxItemAppendCrypto:
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
@@ -56,15 +63,25 @@ interface CodexAuthWhere {
 describe("hosted Codex auth store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async () => ({
-      item: {
-        id: "mailbox_item_codex_auth",
-      },
-    }));
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
+      async () => ({
+        item: {
+          id: "mailbox_item_codex_auth",
+        },
+      }),
+    );
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () => ({
       id: "mailbox_item_codex_auth",
     }));
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
+      async (input: {
+        append: (
+          prepared: PreparedHostedMailboxItemAppendCrypto,
+        ) => Promise<unknown>;
+        userId: string;
+      }) => input.append(buildPreparedMailboxCrypto(input.userId)),
+    );
   });
 
   it("dedupes fresh connect attempts and replaces stale ones with a new runtime wake", async () => {
@@ -86,8 +103,17 @@ describe("hosted Codex auth store", () => {
       verificationUrl: null,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(prisma.tx, "member_123");
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).toHaveBeenCalledWith({
+      append: expect.any(Function),
+      prisma: prisma.client,
+      userId: "member_123",
+    });
+    expect(
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+    ).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         action: "connect",
         attemptId: first.attemptId,
@@ -96,6 +122,7 @@ describe("hosted Codex auth store", () => {
         occurredAt: "2026-06-23T12:00:00.000Z",
         userId: "member_123",
       }),
+      prepared: buildPreparedMailboxCrypto("member_123"),
       tx: prisma.tx,
     });
 
@@ -115,7 +142,9 @@ describe("hosted Codex auth store", () => {
         verificationUrl: null,
       },
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+    ).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
       dedupeKey: `codex-auth:connect:${first.attemptId}`,
       prisma: prisma.tx,
@@ -144,7 +173,9 @@ describe("hosted Codex auth store", () => {
       userCode: null,
       verificationUrl: null,
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+    ).toHaveBeenCalledTimes(2);
   });
 
   it("reuses a fresh disconnect wake so route retries can re-signal runtime", async () => {
@@ -169,11 +200,191 @@ describe("hosted Codex auth store", () => {
       mailboxItemId: "mailbox_item_codex_auth",
       view: { state: "disconnecting" },
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+    ).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
       dedupeKey: "codex-auth:disconnect:hca_disconnectattempt",
       prisma: prisma.tx,
       userId: "member_123",
+    });
+  });
+
+  it("finishes mailbox crypto preparation before the Codex transaction opens", async () => {
+    const events: string[] = [];
+    const preparation = createDeferred<void>();
+    const prisma = createCodexAuthPrismaHarness(null, { events });
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementationOnce(
+      async (input: {
+        append: (
+          prepared: PreparedHostedMailboxItemAppendCrypto,
+        ) => Promise<unknown>;
+        prisma: CodexAuthPrismaForTest;
+        userId: string;
+      }) => {
+        events.push("provider-start");
+        expect(input.prisma).toBe(prisma.client);
+        await preparation.promise;
+        events.push("provider-finished");
+        return input.append(buildPreparedMailboxCrypto(input.userId));
+      },
+    );
+    mocks.lockHostedMemberRow.mockImplementationOnce(async () => {
+      events.push("member-lock");
+    });
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementationOnce(
+      async (input: { tx: object }) => {
+        events.push("mailbox-append");
+        expect(input.tx).toBe(prisma.tx);
+        return { item: { id: "mailbox_item_codex_auth" } };
+      },
+    );
+
+    const pending = beginHostedCodexAuthAttempt({
+      action: "connect",
+      memberId: "member_123",
+      now: new Date("2026-06-23T12:00:00.000Z"),
+      prisma: prisma.client,
+    });
+
+    await vi.waitFor(() => {
+      expect(events).toContain("provider-start");
+    });
+    expect(prisma.transaction).not.toHaveBeenCalled();
+    expect(mocks.lockHostedMemberRow).not.toHaveBeenCalled();
+
+    preparation.resolve();
+    await expect(pending).resolves.toMatchObject({
+      mailboxItemId: "mailbox_item_codex_auth",
+      view: { state: "connecting" },
+    });
+
+    expect(events.indexOf("provider-finished")).toBeLessThan(
+      events.indexOf("transaction-start"),
+    );
+    expect(events.indexOf("transaction-start")).toBeLessThan(
+      events.indexOf("member-lock"),
+    );
+    expect(events.indexOf("member-lock")).toBeLessThan(
+      events.indexOf("mailbox-append"),
+    );
+    expect(prisma.getRootAccessesDuringTransaction()).toEqual([]);
+  });
+
+  it("lets an unrelated member begin while another member's crypto preparation waits", async () => {
+    const blockedPreparation = createDeferred<void>();
+    const blockedPreparationStarted = createDeferred<void>();
+    const prisma = createCodexAuthPrismaHarness();
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
+      async (input: {
+        append: (
+          prepared: PreparedHostedMailboxItemAppendCrypto,
+        ) => Promise<unknown>;
+        userId: string;
+      }) => {
+        if (input.userId === "member_blocked") {
+          blockedPreparationStarted.resolve();
+          await blockedPreparation.promise;
+        }
+        return input.append(buildPreparedMailboxCrypto(input.userId));
+      },
+    );
+
+    const blocked = beginHostedCodexAuthAttempt({
+      action: "connect",
+      memberId: "member_blocked",
+      now: new Date("2026-06-23T12:00:00.000Z"),
+      prisma: prisma.client,
+    });
+    await blockedPreparationStarted.promise;
+    expect(prisma.transaction).not.toHaveBeenCalled();
+
+    await expect(beginHostedCodexAuthAttempt({
+      action: "connect",
+      memberId: "member_unrelated",
+      now: new Date("2026-06-23T12:00:00.000Z"),
+      prisma: prisma.client,
+    })).resolves.toMatchObject({
+      mailboxItemId: "mailbox_item_codex_auth",
+      view: { state: "connecting" },
+    });
+    expect(prisma.transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.getRecord("member_unrelated")).toMatchObject({
+      memberId: "member_unrelated",
+      state: "connecting",
+    });
+
+    blockedPreparation.resolve();
+    await expect(blocked).resolves.toMatchObject({
+      mailboxItemId: "mailbox_item_codex_auth",
+      view: { state: "connecting" },
+    });
+    expect(prisma.transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.getRootAccessesDuringTransaction()).toEqual([]);
+  });
+
+  it("keeps one attempt and dedupe identity across prepared-root re-entry", async () => {
+    const prisma = createCodexAuthPrismaHarness();
+    const firstRootDrift = new Error("prepared root changed");
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementationOnce(
+      async (input: {
+        append: (
+          prepared: PreparedHostedMailboxItemAppendCrypto,
+        ) => Promise<unknown>;
+        userId: string;
+      }) => {
+        try {
+          return await input.append(buildPreparedMailboxCrypto(
+            input.userId,
+            "root_before_rotation",
+          ));
+        } catch (error) {
+          expect(error).toBe(firstRootDrift);
+          return input.append(buildPreparedMailboxCrypto(
+            input.userId,
+            "root_after_rotation",
+          ));
+        }
+      },
+    );
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx
+      .mockRejectedValueOnce(firstRootDrift)
+      .mockResolvedValueOnce({ item: { id: "mailbox_item_codex_auth" } });
+
+    const result = await beginHostedCodexAuthAttempt({
+      action: "connect",
+      memberId: "member_123",
+      now: new Date("2026-06-23T12:00:00.000Z"),
+      prisma: prisma.client,
+    });
+
+    expect(prisma.transaction).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+    ).toHaveBeenCalledTimes(2);
+    type PreparedAppendInput = {
+      envelope: { attemptId: string; eventId: string };
+      prepared: PreparedHostedMailboxItemAppendCrypto;
+    };
+    const firstAppend = (
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0]
+    ) as PreparedAppendInput | undefined;
+    const secondAppend = (
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[1]?.[0]
+    ) as PreparedAppendInput | undefined;
+    if (!firstAppend || !secondAppend) {
+      throw new Error("Expected both prepared Codex mailbox append attempts.");
+    }
+    expect(firstAppend.envelope).toEqual(secondAppend.envelope);
+    expect(firstAppend.envelope.attemptId).toBe(result.attemptId);
+    expect(firstAppend.envelope.eventId).toBe(
+      `codex-auth:connect:${result.attemptId}`,
+    );
+    expect(firstAppend.prepared.rootKeyId).toBe("root_before_rotation");
+    expect(secondAppend.prepared.rootKeyId).toBe("root_after_rotation");
+    expect(prisma.getRecord()).toMatchObject({
+      attemptId: result.attemptId,
+      state: "connecting",
     });
   });
 
@@ -450,32 +661,47 @@ describe("hosted Codex auth store", () => {
   });
 });
 
-function createCodexAuthPrismaHarness(initial: StoredCodexAuthConnection | null = null): {
+function createCodexAuthPrismaHarness(
+  initial: StoredCodexAuthConnection | null = null,
+  options: { events?: string[] } = {},
+): {
   client: CodexAuthPrismaForTest;
-  getRecord: () => StoredCodexAuthConnection | null;
+  getRecord: (memberId?: string) => StoredCodexAuthConnection | null;
+  getRootAccessesDuringTransaction: () => string[];
   setRecord: (record: StoredCodexAuthConnection | null) => void;
+  transaction: ReturnType<typeof vi.fn>;
   tx: object;
 } {
-  let record: StoredCodexAuthConnection | null = initial;
+  const defaultMemberId = initial?.memberId ?? "member_123";
+  const records = new Map<string, StoredCodexAuthConnection>();
+  if (initial) {
+    records.set(initial.memberId, { ...initial });
+  }
   const delegate = {
     deleteMany: vi.fn(async (args: { where: CodexAuthWhere }) => {
-      if (matchesRecordWhere(record, args.where)) {
-        record = null;
+      const current = records.get(args.where.memberId) ?? null;
+      if (matchesRecordWhere(current, args.where)) {
+        records.delete(args.where.memberId);
         return { count: 1 };
       }
       return { count: 0 };
     }),
-    findUnique: vi.fn(async (args: { where: { memberId: string } }) =>
-      record?.memberId === args.where.memberId ? { ...record } : null),
+    findUnique: vi.fn(async (args: { where: { memberId: string } }) => {
+      const record = records.get(args.where.memberId);
+      return record ? { ...record } : null;
+    }),
     updateMany: vi.fn(async (args: {
       data: StoredCodexAuthConnectionUpdate;
       where: CodexAuthWhere;
     }) => {
-      const current = record;
+      const current = records.get(args.where.memberId) ?? null;
       if (!current || !matchesRecordWhere(current, args.where)) {
         return { count: 0 };
       }
-      record = applyRecordUpdate(current, args.data);
+      records.set(
+        args.where.memberId,
+        applyRecordUpdate(current, args.data),
+      );
       return { count: 1 };
     }),
     upsert: vi.fn(async (args: {
@@ -483,31 +709,69 @@ function createCodexAuthPrismaHarness(initial: StoredCodexAuthConnection | null 
       update: StoredCodexAuthConnectionUpdate;
       where: { memberId: string };
     }) => {
-      if (record?.memberId === args.where.memberId) {
-        record = applyRecordUpdate(record, args.update);
-      } else {
-        record = { ...args.create };
-      }
+      const current = records.get(args.where.memberId);
+      const record = current
+        ? applyRecordUpdate(current, args.update)
+        : { ...args.create };
+      records.set(args.where.memberId, record);
       return { ...record };
     }),
   };
   const tx = {
     hostedCodexAuthConnection: delegate,
   };
-  const client = {
-    $transaction: vi.fn(async (
-      callback: (transactionClient: typeof tx) => Promise<unknown>,
-    ) => callback(tx)),
+  let transactionDepth = 0;
+  const rootAccessesDuringTransaction: string[] = [];
+  const transaction = vi.fn(async (
+    callback: (transactionClient: typeof tx) => Promise<unknown>,
+  ) => {
+    const snapshot = new Map(records);
+    options.events?.push("transaction-start");
+    transactionDepth += 1;
+    try {
+      const result = await callback(tx);
+      options.events?.push("transaction-commit");
+      return result;
+    } catch (error) {
+      records.clear();
+      for (const [memberId, record] of snapshot) {
+        records.set(memberId, record);
+      }
+      options.events?.push("transaction-rollback");
+      throw error;
+    } finally {
+      transactionDepth -= 1;
+    }
+  });
+  const rawClient = {
+    $transaction: transaction,
     hostedCodexAuthConnection: delegate,
   };
+  const client = new Proxy(rawClient, {
+    get(target, property, receiver) {
+      if (transactionDepth > 0) {
+        rootAccessesDuringTransaction.push(String(property));
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
 
   // Narrow test double: the store touches only this delegate plus $transaction.
   return {
     client: codexAuthPrismaClientForTest(client),
-    getRecord: () => record,
-    setRecord: (next) => {
-      record = next;
+    getRecord: (memberId = defaultMemberId) => {
+      const record = records.get(memberId);
+      return record ? { ...record } : null;
     },
+    getRootAccessesDuringTransaction: () => [...rootAccessesDuringTransaction],
+    setRecord: (next) => {
+      if (next) {
+        records.set(next.memberId, { ...next });
+      } else {
+        records.delete(defaultMemberId);
+      }
+    },
+    transaction,
     tx,
   };
 }
@@ -560,4 +824,26 @@ function matchesRecordWhere(
     return record.state === where.state;
   }
   return where.state.in.includes(record.state);
+}
+
+function buildPreparedMailboxCrypto(
+  userId: string,
+  rootKeyId = `root_prepared_${userId}`,
+): PreparedHostedMailboxItemAppendCrypto {
+  return {
+    domain: "ingress",
+    rootKeyId,
+    userId,
+  };
+}
+
+function createDeferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
 }
