@@ -1995,12 +1995,14 @@ Current hosted external-data lookup boundary: `apps/web` owns read-only product 
 Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
-lane admits up to 5,000 full-text matches without sorting the whole match set,
+lane admits up to 10,000 full-text matches without sorting the whole match set,
 and a separate GiST trigram lane admits up to 5,000 nearest names before its
 full-text eligibility check. The typo fallback keeps its own bounded GiST lane.
 Canonical-key deduplication happens only after those bounded admissions.
-Ranking is deterministic within the admitted set rather than exhaustive across
-the full food catalog. Exact-id and UPC lookups retain their direct indexed paths;
+The wider full-text lane preserves representative choice and canonical diversity
+across the established 5,000-row boundary fixture. Ranking is deterministic
+within the admitted set rather than exhaustive across the full food catalog.
+Exact-id and UPC lookups retain their direct indexed paths;
 supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
 foods name-rank and exact-name-rank indexes before this private-food query shape

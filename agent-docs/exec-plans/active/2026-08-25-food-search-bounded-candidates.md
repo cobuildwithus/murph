@@ -42,7 +42,9 @@ Updated: 2026-08-25
 
 1. Risk: bounding candidates can hide brand-only or distant-name FTS matches.
    Mitigation: retain a separately bounded unordered GIN-admitted FTS lane and
-   cover brand-only, generic-only, exact, apostrophe, and typo journeys.
+   give it enough headroom to preserve the established greater-than-5,000 alias
+   diversity fixture; cover brand-only, generic-only, exact, apostrophe, and
+   private-food typo journeys.
 2. Risk: a synthetically fast small fixture hides catalog-scale plan behavior.
    Mitigation: add a large common-token PostgreSQL regression that proves the
    plan caps work before ranking, then re-probe the production-scale DB read-only.
@@ -65,8 +67,8 @@ Updated: 2026-08-25
 - Keep the existing timeout as a correctness boundary; do not mask the query
   defect by increasing it.
 - Use two complementary bounded admission lanes: GIN-first FTS for brand/search
-  text recall and GiST nearest-name for name relevance, with canonical dedupe
-  only after their bounded union.
+  text recall (10,000 rows) and GiST nearest-name for name relevance (5,000
+  rows), with canonical dedupe only after their bounded union.
 
 ## Verification
 

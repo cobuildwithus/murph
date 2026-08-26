@@ -367,7 +367,7 @@ describe("foods query helpers", () => {
     expect(ftsNearestSql).toContain("FROM name_nearest_matches");
     expect(ftsNearestSql).not.toContain("FROM foods");
     expect(searchCall?.text).toMatch(
-      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 5000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
+      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
       /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,

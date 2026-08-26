@@ -22,6 +22,7 @@ const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
 const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 5_000;
+const PRODUCT_LABEL_SEARCH_FTS_MATCH_LIMIT = 10_000;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -2118,7 +2119,7 @@ async function searchGenericProductLabels(
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+          LIMIT ${PRODUCT_LABEL_SEARCH_FTS_MATCH_LIMIT}
         ),
         name_nearest_matches AS MATERIALIZED (
           SELECT

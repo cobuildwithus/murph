@@ -751,12 +751,14 @@ The current search path uses built-in Postgres full-text search plus the
 their existing 250-candidate SQL bound, and supplement searches retain their
 existing ranking path. Private food-name search uses a separate bounded
 retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 5,000 GIN full-text matches, and 5,000 GiST
+most 250 literal exact-name rows, 10,000 GIN full-text matches, and 5,000 GiST
 nearest-name candidates before full-text eligibility, similarity scoring,
 canonical-key deduplication, and window sorting. The typo fallback keeps its own
 5,000-row GiST lane so its trigram threshold behavior remains unchanged.
-Ranking is deterministic within the admitted set; it is intentionally not an
-exhaustive whole-catalog ranking. Exact IDs and UPCs continue to use direct lookup
+The wider full-text lane preserves representative choice and canonical diversity
+across the established 5,000-row boundary fixture. Ranking is deterministic
+within the admitted set; it is intentionally not an exhaustive whole-catalog
+ranking. Exact IDs and UPCs continue to use direct lookup
 paths.
 
 For an existing labels database, run

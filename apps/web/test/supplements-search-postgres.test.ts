@@ -557,6 +557,12 @@ const TYPO_CASES: readonly SearchCase[] = [
   { category: "typo", name: "acid missing i", query: "alpha lipoic acd", expectedTopId: "generic-alpha-lipoic-acid" },
 ] as const;
 
+const FOOD_EXACT_ADMISSION_LIMIT = 250;
+const FOOD_FTS_ADMISSION_LIMIT = 10_000;
+const FOOD_NEAREST_NAME_ADMISSION_LIMIT = 5_000;
+const FOOD_MAX_SORT_INPUT = FOOD_EXACT_ADMISSION_LIMIT +
+  FOOD_FTS_ADMISSION_LIMIT + FOOD_NEAREST_NAME_ADMISSION_LIMIT;
+
 const UNICODE_CASES: readonly SearchCase[] = [
   { category: "unicode", name: "curly possessive apostrophe", query: "Doctor’s Best Magnesium", expectedTopId: "doctors-best-magnesium" },
   { category: "unicode", name: "modifier-letter possessive apostrophe", query: "Doctorʼs Best Magnesium", expectedTopId: "doctors-best-magnesium" },
@@ -874,21 +880,21 @@ describe.runIf(Boolean(testDatabaseUrl))(
           label
         )
         SELECT
-          CASE WHEN seed = 100
+          CASE WHEN seed = 6000
             THEN 'zz-food-boundary-fts-alias-priority'
             ELSE 'food-boundary-fts-alias-' || seed::text
           END,
           'food-boundary-fts-alias',
           'usda_branded',
           'food-boundary-fts-alias-' || seed::text,
-          CASE WHEN seed = 100 THEN 1 ELSE 100 END,
+          CASE WHEN seed = 6000 THEN 1 ELSE 100 END,
           'Boundaryfts Alias',
           NULL,
           NULL,
           false,
           'Boundaryfts Alias',
           '{"fixture":true}'::jsonb
-        FROM generate_series(1, 100) AS aliases(seed)
+        FROM generate_series(1, 6000) AS aliases(seed)
 
         UNION ALL
 
@@ -988,7 +994,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       20_000,
     );
 
-    it("keeps exact ranking, admitted canonical dedupe, and stable results", async () => {
+    it("keeps food ranking and canonical diversity beyond the match cap", async () => {
       const first = await foodQueries.searchFoods({
         includeOffMarket: false,
         limit: 50,
@@ -1008,6 +1014,36 @@ describe.runIf(Boolean(testDatabaseUrl))(
       expect(repeated.map((row) => row.id)).toEqual(
         first.map((row) => row.id),
       );
+    }, 20_000);
+
+    it("recovers a private food through the trigram fallback", async () => {
+      const q = "Butter Chiken with Basmati Rice";
+      const predicates = await client.query<{
+        fts_match: boolean;
+        trigram_match: boolean;
+      }>(
+        `
+        SELECT
+          to_tsvector('simple', search_text) @@
+            websearch_to_tsquery('simple', $1) AS fts_match,
+          name % $1::text AS trigram_match
+        FROM foods
+        WHERE id = 'trader-joes:099032'
+        `,
+        [q],
+      );
+      expect(predicates.rows[0]).toEqual({
+        fts_match: false,
+        trigram_match: true,
+      });
+
+      const rows = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 5,
+        q,
+      });
+
+      expect(rows.map((row) => row.id)).toContain("trader-joes:099032");
     }, 20_000);
 
     it.each(["% boundaryfts", "_ boundaryfts"])(
@@ -1042,9 +1078,11 @@ describe.runIf(Boolean(testDatabaseUrl))(
 );
 
 type ExplainPlanNode = {
+  "Actual Loops"?: number;
   "Actual Rows"?: number;
   "Index Name"?: string;
   "Node Type"?: string;
+  "Parent Relationship"?: string;
   Plans?: ExplainPlanNode[];
 };
 
@@ -1053,6 +1091,10 @@ function flattenExplainPlan(node: ExplainPlanNode): ExplainPlanNode[] {
     node,
     ...(node.Plans ?? []).flatMap((child) => flattenExplainPlan(child)),
   ];
+}
+
+function explainRowsProcessed(node: ExplainPlanNode): number {
+  return (node["Actual Rows"] ?? 0) * (node["Actual Loops"] ?? 1);
 }
 
 describe.runIf(Boolean(testDatabaseUrl))(
@@ -1183,10 +1225,21 @@ describe.runIf(Boolean(testDatabaseUrl))(
         expect(broadNodes.some((node) =>
           node["Index Name"] === "foods_perf_name_rank_idx"
         )).toBe(true);
-        for (const sortNode of broadNodes.filter((node) =>
-          node["Node Type"] === "Sort"
-        )) {
-          expect(sortNode["Actual Rows"] ?? 0).toBeLessThanOrEqual(10_250);
+        const sortNodes = broadNodes.filter((node) =>
+          node["Node Type"] === "Sort" ||
+          node["Node Type"] === "Incremental Sort"
+        );
+        expect(sortNodes.length).toBeGreaterThan(0);
+        for (const sortNode of sortNodes) {
+          const sortInputs = (sortNode.Plans ?? []).filter((child) =>
+            child["Parent Relationship"] === "Outer"
+          );
+          expect(sortInputs).toHaveLength(1);
+          const sortInput = sortInputs[0];
+          expect(sortInput).toBeDefined();
+          expect(explainRowsProcessed(sortInput ?? {})).toBeLessThanOrEqual(
+            FOOD_MAX_SORT_INPUT,
+          );
         }
 
         const brandOnly = await queries.searchFoods({
