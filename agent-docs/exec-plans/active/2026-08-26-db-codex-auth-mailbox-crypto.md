@@ -12,7 +12,8 @@ Updated: 2026-08-26
 
 ## Success criteria
 
-- Codex auth prepares mailbox crypto before opening its transaction.
+- Codex auth prepares mailbox crypto before opening the transaction that
+  commits a new auth attempt and mailbox wake.
 - The transaction uses only the existing prepared-crypto append surface.
 - Attempt, event, and dedupe identity remain stable across the supported single
   prepared-root retry.
@@ -57,21 +58,38 @@ Updated: 2026-08-26
   Codex-auth-specific crypto owner.
 - Preserve one attempt ID across prepared-root re-entry rather than creating a
   second logical auth attempt.
+- Preserve provider-independent terminal no-op and existing-wake reuse paths:
+  those short locked decisions return without invoking mailbox crypto
+  preparation.
 
 ## Verification
 
 - Commands to run: focused Codex auth/mailbox Vitest files; scoped ESLint;
   hosted Web typecheck; `git diff --check`; exact static call-path searches.
-- Expected outcomes: all checks pass, preparation occurs before any transaction
-  or member lock, unrelated members are not blocked by preparation, and the
-  Codex auth path contains no legacy provider-capable transaction append.
+- Expected outcomes: all checks pass, preparation occurs before the transaction
+  that commits a new wake, terminal no-op and existing-wake reuse paths stay
+  provider-independent, unrelated members are not blocked by preparation, and
+  the Codex auth path contains no legacy provider-capable transaction append.
 - Completed local proof:
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-codex-auth-store.test.ts`
     passed.
+  - After accepting the preliminary specialist finding, `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-codex-auth-store.test.ts apps/web/test/settings-chatgpt-route.test.ts`
+    passed.
   - `pnpm --dir apps/web typecheck` passed.
   - `pnpm --dir apps/web exec eslint src/lib/codex-auth/store.ts test/hosted-codex-auth-store.test.ts`
+    passed.
+  - After accepting the preliminary specialist finding,
+    `pnpm --dir apps/web exec eslint src/lib/codex-auth/store.ts test/hosted-codex-auth-store.test.ts test/settings-chatgpt-route.test.ts`
     passed.
   - `git diff --check` passed.
   - Static diff searches found no credential/direct-identifier shapes, no
     remaining Codex-auth legacy mailbox append import, and no new `as any` or
     `as unknown` casts.
+
+## ReviewGPT disposition
+
+- Preliminary `completion-specialists` returned one finding: unconditional
+  mailbox crypto preparation wrapped terminal no-op and existing-wake reuse
+  outcomes. Accepted. Remediation keeps those paths provider-independent,
+  prepares crypto only for a new wake commit, and revalidates under the member
+  lock before appending.
