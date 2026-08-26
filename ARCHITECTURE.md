@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-16
+Last verified: 2026-08-25
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -121,11 +121,17 @@ task-identity change remains a typed terminal handoff.
 Review responses, model proof,
 browser access, and downloaded patches remain in an owner-only parent transient
 directory outside the issue worktree. Only a clean fresh branch may install
-pinned dependencies, before any Codex child runs. One ephemeral Codex child
-then receives a native permission profile that denies root filesystem access,
-allows only minimal command-runtime reads plus issue-worktree reads and writes,
-and denies tool network. Its synthetic home and temporary directory live inside
-the ignored worktree output root. User config, plugins, configured MCP servers,
+pinned dependencies, before any Codex child runs. Before launch, the parent
+resolves the exact Codex executable selected by its inherited PATH, copies those
+bytes to an owner-only `bin/codex` beneath the ignored worker output root, and
+launches that workspace-local copy. The copy remains present until the owned
+child process group is reaped and is removed with the same worker-output cleanup
+on success or failure; no host installation tree is added to child authority.
+One ephemeral Codex child then receives a native permission profile that denies
+root filesystem access, allows only minimal command-runtime reads plus
+issue-worktree reads and writes, and denies tool network. Its executable,
+synthetic home, and temporary directory live inside the ignored worktree output
+root. User config, plugins, configured MCP servers,
 SSH agents, browser roots, Git common metadata, and parent evidence paths are
 unavailable. Shell commands inherit only a small benign environment allowlist,
 so the authentication-only `CODEX_HOME` locator does not enter model-visible

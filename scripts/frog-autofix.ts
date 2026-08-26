@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
+  accessSync,
   chmodSync,
+  constants,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -1195,6 +1198,116 @@ function isLaunchAgentLoaded(): boolean {
   ).status === 0;
 }
 
+function resolveCodexExecutable(cwd: string): string {
+  const searchPath = process.env.PATH;
+  if (!searchPath) throw new Error("Codex executable could not be resolved");
+  for (const entry of searchPath.split(path.delimiter)) {
+    let directory = cwd;
+    if (entry) {
+      directory = path.isAbsolute(entry) ? entry : path.resolve(cwd, entry);
+    }
+    const candidate = path.join(directory, "codex");
+    try {
+      accessSync(candidate, constants.X_OK);
+      const resolved = realpathSync(candidate);
+      const state = lstatSync(resolved);
+      if (state.isFile() && !state.isSymbolicLink()) return resolved;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "ENOENT" || code === "ENOTDIR") continue;
+      throw error;
+    }
+  }
+  throw new Error("Codex executable could not be resolved");
+}
+
+function pathIsStrictDescendant(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return Boolean(relative)
+    && !path.isAbsolute(relative)
+    && relative !== ".."
+    && !relative.startsWith(`..${path.sep}`);
+}
+
+function materializeCodexWorkerExecutable(
+  selectedExecutable: string,
+  worktree: string,
+  outputDirectory: string,
+): string {
+  const logicalWorktree = path.resolve(worktree);
+  const logicalOutput = path.resolve(outputDirectory);
+  if (!pathIsStrictDescendant(logicalWorktree, logicalOutput)) {
+    throw new Error("worker output directory must stay inside the issue worktree");
+  }
+  const source = realpathSync(selectedExecutable);
+  const sourceState = lstatSync(source);
+  if (!sourceState.isFile() || sourceState.isSymbolicLink()) {
+    throw new Error("selected Codex executable is not a regular file");
+  }
+  accessSync(source, constants.X_OK);
+
+  const physicalWorktreeBeforeCreate = realpathSync(logicalWorktree);
+  let existingParent = path.dirname(logicalOutput);
+  while (!existsSync(existingParent)) {
+    existingParent = path.dirname(existingParent);
+  }
+  const physicalExistingParent = realpathSync(existingParent);
+  if (
+    physicalExistingParent !== physicalWorktreeBeforeCreate
+    && !pathIsStrictDescendant(
+      physicalWorktreeBeforeCreate,
+      physicalExistingParent,
+    )
+  ) {
+    throw new Error("worker output directory must stay inside the issue worktree");
+  }
+
+  mkdirSync(logicalOutput, { mode: 0o700, recursive: true });
+  const physicalWorktree = realpathSync(logicalWorktree);
+  const physicalOutput = realpathSync(logicalOutput);
+  if (!pathIsStrictDescendant(physicalWorktree, physicalOutput)) {
+    throw new Error("worker output directory must stay inside the issue worktree");
+  }
+  chmodSync(logicalOutput, 0o700);
+  const binDirectory = path.join(logicalOutput, "bin");
+  mkdirSync(binDirectory, { mode: 0o700, recursive: false });
+  chmodSync(binDirectory, 0o700);
+  const executable = path.join(binDirectory, "codex");
+  copyFileSync(source, executable, constants.COPYFILE_EXCL);
+  chmodSync(executable, 0o700);
+  const state = lstatSync(executable);
+  if (!state.isFile() || state.isSymbolicLink()) {
+    throw new Error("worker Codex executable is not a regular private file");
+  }
+  return executable;
+}
+
+function removeCodexWorkerOutput(
+  worktree: string,
+  outputDirectory: string,
+): void {
+  const logicalWorktree = path.resolve(worktree);
+  const logicalOutput = path.resolve(outputDirectory);
+  if (!pathIsStrictDescendant(logicalWorktree, logicalOutput)) {
+    throw new Error("worker output directory must stay inside the issue worktree");
+  }
+  try {
+    lstatSync(logicalOutput);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const physicalWorktree = realpathSync(logicalWorktree);
+  const physicalParent = realpathSync(path.dirname(logicalOutput));
+  if (
+    physicalParent !== physicalWorktree
+    && !pathIsStrictDescendant(physicalWorktree, physicalParent)
+  ) {
+    throw new Error("worker output directory must stay inside the issue worktree");
+  }
+  rmSync(logicalOutput, { force: true, recursive: true });
+}
+
 function runCodexPermissionSmoke(primary: string) {
   mkdirSync(supportRoot, { mode: 0o700, recursive: true });
   const outsideRoot = path.join(
@@ -1208,22 +1321,29 @@ function runCodexPermissionSmoke(primary: string) {
   );
   const codexHome = path.join(outsideRoot, "codex-home");
   const outsideCanary = path.join(outsideRoot, "outside-canary");
+  const outsideWriteCanary = path.join(outsideRoot, "outside-write-canary");
   const insideCanary = path.join(workspaceRoot, "inside-canary");
   const workerHome = path.join(workspaceRoot, "home");
   const workerTmp = path.join(workspaceRoot, "tmp");
   mkdirSync(outsideRoot, { mode: 0o700, recursive: false });
   mkdirSync(codexHome, { mode: 0o700, recursive: true });
-  mkdirSync(workerHome, { mode: 0o700, recursive: true });
-  mkdirSync(workerTmp, { mode: 0o700, recursive: true });
   writePrivateFileAtomically(outsideCanary, "outside\n", 0o600);
   try {
+    const selectedExecutable = resolveCodexExecutable(primary);
+    const workerExecutable = materializeCodexWorkerExecutable(
+      selectedExecutable,
+      primary,
+      workspaceRoot,
+    );
+    mkdirSync(workerHome, { mode: 0o700, recursive: true });
+    mkdirSync(workerTmp, { mode: 0o700, recursive: true });
     requireCommand(
-      "env",
+      "/usr/bin/env",
       [
         `CODEX_HOME=${codexHome}`,
         `HOME=${workerHome}`,
         `TMPDIR=${workerTmp}`,
-        "codex",
+        workerExecutable,
         "sandbox",
         "--cd",
         primary,
@@ -1232,10 +1352,11 @@ function runCodexPermissionSmoke(primary: string) {
         "frog-workspace-only",
         "/bin/zsh",
         "-c",
-        'test -r package.json && test -z "${CODEX_HOME:-}" && /usr/bin/touch "$1" && test -f "$1" && ! /bin/cat "$2" >/dev/null 2>&1 && ! /usr/bin/curl -fsS --max-time 2 https://example.com >/dev/null 2>&1',
+        'test -r package.json && test -z "${CODEX_HOME:-}" && /usr/bin/touch "$1" && test -f "$1" && ! /bin/cat "$2" >/dev/null 2>&1 && ! /usr/bin/touch "$3" >/dev/null 2>&1 && ! /usr/bin/curl -fsS --max-time 2 https://example.com >/dev/null 2>&1',
         "frog-permission-smoke",
         insideCanary,
         outsideCanary,
+        outsideWriteCanary,
       ],
       primary,
     );
@@ -1243,8 +1364,9 @@ function runCodexPermissionSmoke(primary: string) {
       !existsSync(insideCanary)
       || !lstatSync(insideCanary).isFile()
       || lstatSync(insideCanary).isSymbolicLink()
+      || existsSync(outsideWriteCanary)
     ) {
-      throw new Error("Codex permission smoke did not prove workspace writes");
+      throw new Error("Codex permission smoke did not prove workspace-only writes");
     }
   } finally {
     if (existsSync(workspaceRoot)) {
@@ -1422,10 +1544,11 @@ function safeRemoveTransientDirectory(transientRoot: string, candidate: string) 
   rmSync(candidate, { force: false, recursive: true });
 }
 
-async function runWorker(
+export async function runWorker(
   worktree: string,
   prompt: string,
   outputDirectory: string,
+  selectedExecutable: string,
   codexHome: string,
   onStart: (pid: number) => void,
 ): Promise<{ status: number; timedOut: boolean }> {
@@ -1436,40 +1559,49 @@ async function runWorker(
   }
   const workerHome = path.join(outputDirectory, "home");
   const workerTmp = path.join(outputDirectory, "tmp");
-  mkdirSync(workerHome, { mode: 0o700, recursive: true });
-  mkdirSync(workerTmp, { mode: 0o700, recursive: true });
-  const child = spawn(
-    "codex",
-    buildCodexWorkerArguments({
-      lastMessageFile: path.join(outputDirectory, "last-message.txt"),
+  try {
+    const workerExecutable = materializeCodexWorkerExecutable(
+      selectedExecutable,
       worktree,
-    }),
-    {
-      cwd: worktree,
-      detached: true,
-      env: (() => {
-        const environment = safeToolEnvironment({
-          CODEX_HOME: codexHome,
-          HOME: workerHome,
-          TMPDIR: workerTmp,
-        });
-        delete environment.SSH_AUTH_SOCK;
-        delete environment.GH_TOKEN;
-        delete environment.GITHUB_TOKEN;
-        delete environment.XDG_CACHE_HOME;
-        delete environment.XDG_CONFIG_HOME;
-        return environment;
-      })(),
-      stdio: ["pipe", "ignore", "ignore"],
-    },
-  );
-  child.stdin?.end(prompt);
-  return await superviseOwnedWorker(
-    child,
-    onStart,
-    boundedRuntimeMs(FROG_AUTOFIX_WORKER_TIMEOUT_MS, 31_000),
-    30_000,
-  );
+      outputDirectory,
+    );
+    mkdirSync(workerHome, { mode: 0o700, recursive: true });
+    mkdirSync(workerTmp, { mode: 0o700, recursive: true });
+    const child = spawn(
+      workerExecutable,
+      buildCodexWorkerArguments({
+        lastMessageFile: path.join(outputDirectory, "last-message.txt"),
+        worktree,
+      }),
+      {
+        cwd: worktree,
+        detached: true,
+        env: (() => {
+          const environment = safeToolEnvironment({
+            CODEX_HOME: codexHome,
+            HOME: workerHome,
+            TMPDIR: workerTmp,
+          });
+          delete environment.SSH_AUTH_SOCK;
+          delete environment.GH_TOKEN;
+          delete environment.GITHUB_TOKEN;
+          delete environment.XDG_CACHE_HOME;
+          delete environment.XDG_CONFIG_HOME;
+          return environment;
+        })(),
+        stdio: ["pipe", "ignore", "ignore"],
+      },
+    );
+    child.stdin?.end(prompt);
+    return await superviseOwnedWorker(
+      child,
+      onStart,
+      boundedRuntimeMs(FROG_AUTOFIX_WORKER_TIMEOUT_MS, 31_000),
+      30_000,
+    );
+  } finally {
+    removeCodexWorkerOutput(worktree, outputDirectory);
+  }
 }
 
 function safeShellLiteral(value: string): string {
@@ -3581,16 +3713,17 @@ async function runEditOnlyCycle(options: {
     "audit-packages",
     "frog-autofix-worker",
   );
-  if (existsSync(outputDirectory)) rmSync(outputDirectory, { force: true, recursive: true });
+  removeCodexWorkerOutput(options.worktree, outputDirectory);
+  const selectedExecutable = resolveCodexExecutable(options.primary);
   recordEvent("worker_started", options.issueNumber);
   const result = await runWorker(
     options.worktree,
     prompt,
     outputDirectory,
+    selectedExecutable,
     options.codexHome,
     options.lock.setWorker,
   );
-  if (existsSync(outputDirectory)) rmSync(outputDirectory, { force: true, recursive: true });
   const workerFailure = terminalWorkerFailureClass(result);
   if (workerFailure) {
     recordEvent(

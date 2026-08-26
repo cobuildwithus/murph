@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-23
+Last verified: 2026-08-25
 
 ## Local Frog autofix scheduling
 
@@ -87,7 +87,12 @@ Last verified: 2026-08-23
   The runner sends `SIGTERM`, then a bounded `SIGKILL` only to a group it created
   and still owns, and retains cleanup/lock ownership until the group—not merely
   its leader—disappears. ReviewGPT and CI instructions impose their own
-  three-hour waits; an individual Codex child is bounded to two hours.
+  three-hour waits; an individual Codex child is bounded to two hours. The
+  parent launches that child through a private copy of the exact PATH-selected
+  Codex executable inside the existing ignored worker output root. That copy,
+  synthetic home, temporary directory, and last-message output share one cleanup
+  owner and remain until the process group is reaped, then are removed in a
+  `finally` path for both successful and failed worker execution.
   ReviewGPT, browser, command, or GitHub infrastructure unavailability,
   ambiguous worktree state, pending or indeterminate CI, and failed issue
   closure leave recoverable GitHub/worktree state for a later pass. Missing or

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-23
+Last verified: 2026-08-25
 
 ## Local Frog autofix authority
 
@@ -11,12 +11,17 @@ Last verified: 2026-08-23
   non-model parent receives ambient GitHub, browser, SSH-agent, and Git-common
   access. It builds review archives from committed Git objects and keeps
   ReviewGPT responses, model proof, browser downloads, and prompts in one
-  owner-only transient directory outside the issue worktree. The Codex child
-  uses a native permission profile that denies root access, allows only minimal
-  command-runtime reads plus issue-worktree reads and writes, and denies tool
-  network. Its synthetic home and temporary directory are inside an ignored
-  worktree output root. It receives no SSH agent, GitHub token, browser profile,
-  Git common directory, parent review path, plugin, user config, or configured
+  owner-only transient directory outside the issue worktree. The parent resolves
+  the exact Codex executable selected by its inherited PATH, copies only that
+  executable into an owner-only `bin/codex` beneath the ignored worker output
+  root, and launches the copy; it never grants the worker read authority to a
+  home, package, local-bin, or configuration tree. The Codex child uses a native
+  permission profile that denies root access, allows only minimal command-runtime
+  reads plus issue-worktree reads and writes, and denies tool network. Its
+  executable, synthetic home, and temporary directory are inside the ignored
+  worktree output root and are removed together after the owned process group is
+  reaped on success or failure. It receives no SSH agent, GitHub token, browser
+  profile, Git common directory, parent review path, plugin, user config, or configured
   MCP server; browser, app, image, web-search, multi-agent, and MCP-install
   features are explicitly disabled, and project Codex/MCP config is rejected.
   Shell commands inherit only a small benign environment allowlist that omits

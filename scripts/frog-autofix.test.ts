@@ -75,6 +75,7 @@ import {
   primaryAdvanceRequiresRestart,
   recoverablePullRequestBody,
   recoveredReviewPassState,
+  runWorker,
   recoveredReviewHandoffBody,
   requiredCheckWatchHandoff,
   requireImplementationCompletion,
@@ -1995,6 +1996,11 @@ describe("Frog autofix guards", () => {
     expect(authorityFences[1]).toBeLessThan(
       editOnly.indexOf("runParentVerification("),
     );
+    expect(editOnly).toContain(
+      "const selectedExecutable = resolveCodexExecutable(options.primary)",
+    );
+    expect(editOnly.indexOf("const selectedExecutable = resolveCodexExecutable(options.primary)"))
+      .toBeLessThan(editOnly.indexOf("const result = await runWorker("));
     const refresh = editOnly.indexOf("refreshAndRequireCommittedFrictionTask(");
     expect(refresh).toBeGreaterThan(editOnly.indexOf("const result = await runWorker("));
     expect(refresh).toBeGreaterThan(editOnly.indexOf("commitParentOwnedChanges("));
@@ -3972,6 +3978,139 @@ try {
     expect(parseEventLog("not-json\n")).toBeNull();
   });
 
+  it("launches a private workspace-local copy of the selected Codex executable and cleans it", async () => {
+    if (process.platform === "win32") return;
+    const hostRoot = mkdtempSync(path.join(tmpdir(), "frog-worker-host-"));
+    const worktree = mkdtempSync(path.join(tmpdir(), "frog-worker-worktree-"));
+    const hostBin = path.join(hostRoot, "bin");
+    const sourceExecutable = path.join(hostBin, "codex");
+    const outputDirectory = path.join(
+      worktree,
+      "audit-packages",
+      "frog-autofix-worker",
+    );
+    const localExecutable = path.join(outputDirectory, "bin", "codex");
+    const launchedPath = path.join(worktree, "worker-launched-path");
+    try {
+      mkdirSync(hostBin, { recursive: true });
+      writeFileSync(sourceExecutable, [
+        "#!/bin/sh",
+        'if [ "${FROG_FAKE_CODEX_REEXEC:-}" != "1" ]; then',
+        '  FROG_FAKE_CODEX_REEXEC=1 exec "$0" "$@"',
+        "fi",
+        'test -x "$0" || exit 9',
+        'printf "%s\\n" "$0" > "$PWD/worker-launched-path"',
+        "IFS= read -r mode || true",
+        'test "$mode" != "fail" || exit 7',
+      ].join("\n"));
+      chmodSync(sourceExecutable, 0o755);
+      const sourceHash = createHash("sha256")
+        .update(readFileSync(sourceExecutable))
+        .digest("hex");
+      const runCase = async (prompt: string, expectedStatus: number) => {
+        let observedStart = false;
+        const result = await runWorker(
+          worktree,
+          `${prompt}\n`,
+          outputDirectory,
+          sourceExecutable,
+          path.join(hostRoot, "codex-home"),
+          (pid) => {
+            expect(pid).toBeGreaterThan(0);
+            observedStart = true;
+            expect(existsSync(localExecutable)).toBe(true);
+            expect(statSync(outputDirectory).mode & 0o777).toBe(0o700);
+            expect(statSync(path.dirname(localExecutable)).mode & 0o777).toBe(0o700);
+            expect(statSync(localExecutable).mode & 0o777).toBe(0o700);
+            expect(
+              path.relative(realpathSync(outputDirectory), realpathSync(localExecutable)),
+            ).toBe(path.join("bin", "codex"));
+            expect(
+              createHash("sha256")
+                .update(readFileSync(localExecutable))
+                .digest("hex"),
+            ).toBe(sourceHash);
+          },
+        );
+        expect(result).toEqual({ status: expectedStatus, timedOut: false });
+        expect(observedStart).toBe(true);
+        expect(readFileSync(launchedPath, "utf8").trim()).toBe(localExecutable);
+        expect(existsSync(outputDirectory)).toBe(false);
+      };
+      await runCase("success", 0);
+      await runCase("fail", 7);
+      expect(existsSync(sourceExecutable)).toBe(true);
+    } finally {
+      rmSync(hostRoot, { force: true, recursive: true });
+      rmSync(worktree, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects worker output symlink escapes without touching outside paths", async () => {
+    if (process.platform === "win32") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-worker-boundary-"));
+    const worktree = path.join(root, "worktree");
+    const hostBin = path.join(root, "host-bin");
+    const sourceExecutable = path.join(hostBin, "codex");
+    const outputParent = path.join(worktree, "audit-packages");
+    const outputDirectory = path.join(outputParent, "frog-autofix-worker");
+    const outsideRoot = path.join(root, "outside");
+    const outsideSentinel = path.join(outsideRoot, "sentinel");
+    try {
+      mkdirSync(worktree, { recursive: true });
+      mkdirSync(hostBin, { recursive: true });
+      mkdirSync(outputParent, { recursive: true });
+      mkdirSync(outsideRoot, { recursive: true });
+      writeFileSync(sourceExecutable, "#!/bin/sh\nexit 0\n");
+      chmodSync(sourceExecutable, 0o755);
+      writeFileSync(outsideSentinel, "outside\n");
+
+      await expect(
+        runWorker(
+          worktree,
+          "success\n",
+          path.join(outsideRoot, "direct-worker-output"),
+          sourceExecutable,
+          path.join(root, "codex-home"),
+          () => undefined,
+        ),
+      ).rejects.toThrow("worker output directory must stay inside the issue worktree");
+      expect(readdirSync(outsideRoot)).toEqual(["sentinel"]);
+
+      symlinkSync(outsideRoot, outputDirectory, "dir");
+      await expect(
+        runWorker(
+          worktree,
+          "success\n",
+          outputDirectory,
+          sourceExecutable,
+          path.join(root, "codex-home"),
+          () => undefined,
+        ),
+      ).rejects.toThrow("worker output directory must stay inside the issue worktree");
+      expect(readFileSync(outsideSentinel, "utf8")).toBe("outside\n");
+      expect(readdirSync(outsideRoot)).toEqual(["sentinel"]);
+      expect(existsSync(outputDirectory)).toBe(false);
+
+      rmSync(outputParent, { force: true, recursive: true });
+      symlinkSync(outsideRoot, outputParent, "dir");
+      await expect(
+        runWorker(
+          worktree,
+          "success\n",
+          outputDirectory,
+          sourceExecutable,
+          path.join(root, "codex-home"),
+          () => undefined,
+        ),
+      ).rejects.toThrow("worker output directory must stay inside the issue worktree");
+      expect(readFileSync(outsideSentinel, "utf8")).toBe("outside\n");
+      expect(readdirSync(outsideRoot)).toEqual(["sentinel"]);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("keeps the Codex worker edit-only without network or added host roots", () => {
     const args = buildCodexWorkerArguments({
       lastMessageFile: "<OUTPUT_FILE>",
@@ -4008,6 +4147,48 @@ try {
       "standalone_web_search",
     ]) expect(args).toContain(feature);
     expect(args).not.toContain("danger-full-access");
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const permissionSmoke = source.slice(
+      source.indexOf("function runCodexPermissionSmoke"),
+      source.indexOf("function install("),
+    );
+    expect(permissionSmoke).toContain(
+      "const selectedExecutable = resolveCodexExecutable(primary)",
+    );
+    expect(permissionSmoke).toContain("materializeCodexWorkerExecutable(");
+    expect(permissionSmoke).toContain("outsideWriteCanary");
+    expect(permissionSmoke).toContain("codexWorkerPermissionArguments()");
+  });
+
+  it("keeps the permission-smoke worker environment off the bounded supervisor", () => {
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const permissionSmoke = source.slice(
+      source.indexOf("function runCodexPermissionSmoke"),
+      source.indexOf("function install("),
+    );
+    const invocationStart = permissionSmoke.indexOf("    requireCommand(");
+    const invocation = permissionSmoke.slice(
+      invocationStart,
+      permissionSmoke.indexOf("    if (", invocationStart),
+    );
+
+    expect(invocation).toContain('requireCommand(\n      "/usr/bin/env",');
+    expect(invocation).toContain("`CODEX_HOME=${codexHome}`");
+    expect(invocation).toContain("`HOME=${workerHome}`");
+    expect(invocation).toContain("`TMPDIR=${workerTmp}`");
+    expect(invocation.indexOf("workerExecutable")).toBeGreaterThan(
+      invocation.indexOf("`TMPDIR=${workerTmp}`"),
+    );
+    expect(invocation).toContain("      primary,\n    );");
+    expect(invocation).not.toContain("CODEX_HOME: codexHome");
+    expect(invocation).not.toContain("HOME: workerHome");
+    expect(invocation).not.toContain("TMPDIR: workerTmp");
   });
 
   it("auto-merges only deterministic Frog implementation and issue-bound plan scope", () => {

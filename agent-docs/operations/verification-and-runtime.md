@@ -863,8 +863,9 @@ an explicit Frog script allowlist that excludes the GitHub Actions-owned
 `scripts/frog-pr-context.ts` on direct/rename/copy paths, and fixed content-free
 foreground admission/implementation/review/check/merge progress with an
 explicit success terminal line. A macOS
-permission smoke must also apply the exact native worker profile and prove an
-in-worktree read/write succeeds while an outside-root read and a network
+permission smoke must also initialize the workspace-local copy of the exact
+PATH-selected Codex executable, apply the exact native worker profile, and prove
+an in-worktree read/write succeeds while outside-root read/write and a network
 request fail:
 
 ```sh

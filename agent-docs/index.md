@@ -82,7 +82,9 @@ Git-parsed protected patch targets and protected-main path/digest identities in 
 prompt, exact task/skill evidence in implementation and canonical review ZIPs,
 strict kind-specific review response grammar, no historical
 close-only path, a native workspace-only Codex
-permission profile, canonical parent-owned ReviewGPT gates whose complete
+permission profile that launches a private workspace-local copy of the exact
+PATH-selected executable and removes it after parent-owned process-group reaping,
+canonical parent-owned ReviewGPT gates whose complete
 prompt-preset surface, including its four exact delegated specialist lens
 prompts, is trusted-main-bound and whose archive uses the exact digest-bound parent-local
 body with pre/post-wait and pre-persistence drift checks that preserve a new
