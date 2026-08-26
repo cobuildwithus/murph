@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -25,6 +25,23 @@ const EXPENSIVE_WORKFLOWS = new Map([
   ["web-viewport-overflow.yml", ["viewport-overflow"]],
 ]);
 const READY_ONLY_TYPES = ["opened", "reopened", "ready_for_review"];
+const MARKDOWN_SCOPE_JOB = "markdown-docs-scope";
+const FULL_VERIFICATION_CONDITION = "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
+const NONCANCELABLE_FULL_VERIFICATION_CONDITION = "if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
+const FULL_STEP_CONDITION = "if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}";
+const CANCELABLE_MARKDOWN_WORKFLOWS = [
+  "foreground-reply-state-cardinality.yml",
+  "host-support.yml",
+  "repo-hygiene.yml",
+  "web-viewport-overflow.yml",
+];
+const REQUIRED_OWNER_JOBS = new Map([
+  ["host-support.yml", "release-checks-linux"],
+  ["hosted-stripe-billing.yml", "billing-required"],
+  ["repo-hygiene.yml", "tracked-artifacts"],
+  ["foreground-reply-state-cardinality.yml", "bounded-work"],
+  ["web-viewport-overflow.yml", "viewport-overflow"],
+]);
 const DRAFT_GUARD = [
   "      - name: Reject draft pull request proof",
   "        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}",
@@ -61,6 +78,10 @@ function jobBlock(source, jobName) {
   return next < 0 ? rest : rest.slice(0, next);
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 function inspectExpensiveWorkflow(source, name, jobs) {
   assert.deepEqual(triggerTypes(source), READY_ONLY_TYPES, `${name} must be ready-only`);
   assert.doesNotMatch(eventBlock(source, "pull_request"), /\bsynchronize\b/u, `${name} must not run on synchronize`);
@@ -83,10 +104,310 @@ function inspectExpensiveWorkflow(source, name, jobs) {
   }
 }
 
+function inspectTrustedMarkdownScope(source, name) {
+  assert.doesNotMatch(eventBlock(source, "pull_request"), /^    paths(?:-ignore)?:/mu, `${name} must not use event path filters`);
+  const classifier = jobBlock(source, MARKDOWN_SCOPE_JOB);
+  assert.match(classifier, /^    name: Classify [^\n]+ documentation scope$/mu);
+  assert.match(classifier, /^    if: \$\{\{ github\.event_name == 'pull_request' \}\}$/mu);
+  assert.match(classifier, /^    permissions:\n      contents: read\n      pull-requests: read$/mu, `${name} classifier needs only read authority`);
+  assert.match(classifier, /^      markdown_only: \$\{\{ steps\.scope-result\.outputs\.markdown_only \}\}$/mu);
+  assert.match(classifier, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
+  assert.match(classifier, /sparse-checkout: scripts\/ci-markdown-docs-scope\.mjs/u);
+  assert.match(classifier, /sparse-checkout-cone-mode: false/u);
+  assert.match(classifier, /test "\$\(git rev-parse HEAD\)" = "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
+  assert.match(classifier, /node scripts\/ci-markdown-docs-scope\.mjs/u);
+  assert.match(classifier, /CHECKOUT_OUTCOME: \$\{\{ steps\.checkout-base\.outcome \}\}/u);
+  assert.match(classifier, /CLASSIFIER_OUTCOME: \$\{\{ steps\.classify\.outcome \}\}/u);
+  assert.match(classifier, /CLASSIFIER_MARKDOWN_ONLY: \$\{\{ steps\.classify\.outputs\.markdown_only \}\}/u);
+  assert.match(classifier, /if \[\[ "\$CHECKOUT_OUTCOME" == "success" && "\$CLASSIFIER_OUTCOME" == "success" && "\$CLASSIFIER_MARKDOWN_ONLY" == "true" \]\]/u);
+  assert.doesNotMatch(classifier, /pull_request\.head\.sha|refs\/pull|pnpm install|setup-node/u, `${name} classifier must not check out or execute candidate code`);
+
+  const requiredOwner = jobBlock(source, REQUIRED_OWNER_JOBS.get(name));
+  assert.match(requiredOwner, new RegExp(`^    needs:(?: ${MARKDOWN_SCOPE_JOB}|\\n      - ${MARKDOWN_SCOPE_JOB})$`, "mu"));
+  assert.match(requiredOwner, /exact-inventory Markdown documentation proof/u);
+}
+
+function inspectCancellationAwareJobs(source, name) {
+  assert.match(source, /^  cancel-in-progress: true$/mu, `${name} must cancel superseded runs`);
+  for (const jobName of workflowJobNames(source)) {
+    const job = jobBlock(source, jobName);
+    const steps = job.indexOf("    steps:\n");
+    assert.ok(steps >= 0, `${name}:${jobName} must own steps`);
+    assert.doesNotMatch(
+      job.slice(0, steps),
+      /^    if: .*\balways\(\)/mu,
+      `${name}:${jobName} must not survive cancellation through always()`,
+    );
+  }
+}
+
 test("expensive pull-request workflows are ready-only and fail closed for draft opens", async () => {
   for (const [name, jobs] of EXPENSIVE_WORKFLOWS) {
     inspectExpensiveWorkflow(await workflow(name), name, jobs);
   }
+});
+
+test("each required owner uses an exact-base trusted Markdown classifier", async () => {
+  const classifierNames = [];
+  for (const name of REQUIRED_OWNER_JOBS.keys()) {
+    const source = await workflow(name);
+    inspectTrustedMarkdownScope(source, name);
+    classifierNames.push(jobBlock(source, MARKDOWN_SCOPE_JOB).match(/^    name: ([^\n]+)$/mu)?.[1]);
+  }
+  assert.equal(new Set(classifierNames).size, classifierNames.length, "classifier checks must not share duplicate display names");
+});
+
+test("cancelable Markdown workflows release superseded jobs", async () => {
+  for (const name of CANCELABLE_MARKDOWN_WORKFLOWS) {
+    inspectCancellationAwareJobs(await workflow(name), name);
+  }
+
+  const host = await workflow("host-support.yml");
+  assert.throws(
+    () => inspectCancellationAwareJobs(
+      host.replace("if: ${{ !cancelled() }}", "if: ${{ always() }}"),
+      "host-support.yml",
+    ),
+    /must not survive cancellation/u,
+  );
+});
+
+test("runtime-heavy jobs skip only an affirmative trusted Markdown result", async () => {
+  const host = await workflow("host-support.yml");
+  for (const jobName of [
+    "release-build-typecheck-linux",
+    "release-package-coverage-linux",
+    "release-app-verification-linux",
+    "production-runner-bundle-budget-linux",
+    "release-fixture-coverage-linux",
+  ]) {
+    assert.match(jobBlock(host, jobName), new RegExp(`^    ${escapeRegExp(FULL_VERIFICATION_CONDITION)}$`, "mu"));
+  }
+
+  const cliHostMatrix = jobBlock(host, "cli-host-matrix");
+  assert.match(cliHostMatrix, /^    if: \$\{\{ !cancelled\(\) \}\}$/mu);
+  assert.match(
+    cliHostMatrix,
+    /CLI host matrix \(\$\{\{ matrix\.os \}\}\) satisfied by exact-inventory Markdown documentation proof/u,
+  );
+  assert.match(
+    cliHostMatrix,
+    new RegExp(`- uses: actions/checkout@[^\\n]+\\n        ${escapeRegExp(FULL_STEP_CONDITION)}$`, "mu"),
+  );
+  for (const stepName of [
+    "Setup pnpm",
+    "Setup Node",
+    "Install deps",
+    "Build workspace",
+    "Prepare built CLI runtime artifacts",
+    "Run cross-platform CLI coverage",
+  ]) {
+    assert.match(
+      cliHostMatrix,
+      new RegExp(`- name: ${escapeRegExp(stepName)}\\n        ${escapeRegExp(FULL_STEP_CONDITION)}$`, "mu"),
+      `CLI host matrix ${stepName} must stay on the full verification path`,
+    );
+  }
+
+  const billing = await workflow("hosted-stripe-billing.yml");
+  assert.match(
+    jobBlock(billing, "billing-hermetic"),
+    new RegExp(`^    ${escapeRegExp(NONCANCELABLE_FULL_VERIFICATION_CONDITION)}$`, "mu"),
+  );
+
+  const repoHygiene = await workflow("repo-hygiene.yml");
+  assert.match(jobBlock(repoHygiene, "temporal-compatibility-producer"), /needs\.markdown-docs-scope\.outputs\.markdown_only != 'true'/u);
+  for (const [name, heavyNeedle] of [
+    ["repo-hygiene.yml", "pnpm install --frozen-lockfile"],
+    ["foreground-reply-state-cardinality.yml", "pnpm install --frozen-lockfile"],
+    ["web-viewport-overflow.yml", "scripts/install-playwright-chromium.sh"],
+  ]) {
+    const source = await workflow(name);
+    const owner = jobBlock(source, REQUIRED_OWNER_JOBS.get(name));
+    const heavyIndex = owner.indexOf(heavyNeedle);
+    assert.ok(heavyIndex >= 0, `${name} heavy step must remain present`);
+    assert.match(
+      owner.slice(
+        Math.max(0, heavyIndex - 300),
+        heavyIndex + heavyNeedle.length + 300,
+      ),
+      /if: \$\{\{ github\.event_name != 'pull_request' \|\| needs\.markdown-docs-scope\.outputs\.markdown_only != 'true' \}\}/u,
+      `${name} heavy step must retain full main-push and fail-closed PR admission`,
+    );
+  }
+});
+
+test("Host Support runs one exact merge-candidate documentation proof", async () => {
+  const source = await workflow("host-support.yml");
+  const docsProof = jobBlock(source, "markdown-docs-proof");
+  assert.match(docsProof, /^    name: Markdown documentation proof$/mu);
+  assert.match(docsProof, /^    needs: markdown-docs-scope$/mu);
+  assert.match(
+    docsProof,
+    /^    if: \$\{\{ !cancelled\(\) && github\.event_name == 'pull_request' && needs\.markdown-docs-scope\.result == 'success' && needs\.markdown-docs-scope\.outputs\.markdown_only == 'true' \}\}$/mu,
+  );
+  assert.match(docsProof, /^    permissions:\n      contents: read$/mu);
+  assert.match(docsProof, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(docsProof, /persist-credentials: false/u);
+  assert.match(docsProof, /EXPECTED_MERGE_SHA: \$\{\{ github\.event\.pull_request\.merge_commit_sha \}\}/u);
+  assert.match(docsProof, /test "\$CANDIDATE_SHA" = "\$EXPECTED_MERGE_SHA"/u);
+  assert.match(docsProof, /test "\$\(git rev-parse HEAD\)" = "\$CANDIDATE_SHA"/u);
+  assert.match(docsProof, /git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "\$BASE_SHA"/u);
+  assert.match(docsProof, /git diff --check "\$BASE_SHA" "\$CANDIDATE_SHA" --/u);
+  assert.match(docsProof, /pnpm install --frozen-lockfile/u);
+  assert.match(docsProof, /MURPH_DOCS_DRIFT_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
+  assert.match(docsProof, /MURPH_DOCS_DRIFT_CANDIDATE_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.doesNotMatch(docsProof, /pull_request\.head\.sha/u);
+  assert.match(docsProof, /run: pnpm docs:drift/u);
+  assert.match(docsProof, /run: pnpm docs:gardening/u);
+
+  const releaseChecks = jobBlock(source, "release-checks-linux");
+  assert.match(releaseChecks, /^      - markdown-docs-proof$/mu);
+  assert.match(releaseChecks, /DOCS_RESULT: \$\{\{ needs\.markdown-docs-proof\.result \}\}/u);
+});
+
+test("documentation proof excludes base-only changes after the PR base moves", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "pr-docs-merge-candidate-proof-"));
+  const runGit = (...args) => {
+    const result = spawnSync("git", args, {
+      cwd: tempDir,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+
+  try {
+    runGit("init", "--initial-branch=main");
+    runGit("config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com");
+    runGit("config", "user.name", "github-actions[bot]");
+    await writeFile(path.join(tempDir, "README.md"), "fixture\n");
+    runGit("add", "README.md");
+    runGit("commit", "-m", "initial");
+
+    runGit("switch", "-c", "release-note");
+    await mkdir(path.join(tempDir, "docs", "release-notes"), { recursive: true });
+    const releaseNote = "docs/release-notes/2026-08-26-ci-fast-path.md";
+    await writeFile(path.join(tempDir, releaseNote), "# CI fast path\n");
+    runGit("add", releaseNote);
+    runGit("commit", "-m", "add release note");
+    const headSha = runGit("rev-parse", "HEAD");
+
+    runGit("switch", "main");
+    await mkdir(path.join(tempDir, "agent-docs", "operations"), { recursive: true });
+    const baseOnlyDoc = "agent-docs/operations/base-only.md";
+    await writeFile(path.join(tempDir, baseOnlyDoc), "# Base-only change\n");
+    runGit("add", baseOnlyDoc);
+    runGit("commit", "-m", "advance base");
+    const baseSha = runGit("rev-parse", "HEAD");
+
+    runGit("merge", "--no-ff", "release-note", "-m", "synthetic pull request merge");
+    const mergeCandidateSha = runGit("rev-parse", "HEAD");
+    const inventory = (candidateSha) => runGit(
+      "diff",
+      "--name-only",
+      baseSha,
+      candidateSha,
+      "--",
+    ).split("\n").filter(Boolean).sort();
+
+    assert.deepEqual(inventory(headSha), [baseOnlyDoc, releaseNote]);
+    assert.deepEqual(inventory(mergeCandidateSha), [releaseNote]);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("trusted classifier drift fails closed into the full workflow", async () => {
+  const name = "host-support.yml";
+  const source = await workflow(name);
+  for (const mutation of [
+    source.replace(
+      "ref: ${{ github.event.pull_request.base.sha }}",
+      "ref: ${{ github.event.pull_request.head.sha }}",
+    ),
+    source.replace(
+      'if [[ "$CHECKOUT_OUTCOME" == "success" && "$CLASSIFIER_OUTCOME" == "success" && "$CLASSIFIER_MARKDOWN_ONLY" == "true" ]]; then',
+      'if [[ "$CLASSIFIER_MARKDOWN_ONLY" == "true" ]]; then',
+    ),
+    source.replace("node scripts/ci-markdown-docs-scope.mjs", "node scripts/untrusted-classifier.mjs"),
+  ]) {
+    assert.throws(() => inspectTrustedMarkdownScope(mutation, name));
+  }
+});
+
+test("Release checks accepts exactly docs-proof or full-shard receipts", async () => {
+  const source = await workflow("host-support.yml");
+  const base = {
+    APP_RESULT: "skipped",
+    BUILD_RESULT: "skipped",
+    BUNDLE_RESULT: "skipped",
+    DOCS_RESULT: "success",
+    EVENT_NAME: "pull_request",
+    FIXTURE_RESULT: "skipped",
+    MARKDOWN_ONLY: "true",
+    PACKAGE_RESULT: "skipped",
+    SCOPE_RESULT: "success",
+  };
+  assert.equal(runWorkflowStep(source, "Check release proof mode", base).status, 0);
+  assert.equal(runWorkflowStep(source, "Check release proof mode", {
+    ...base,
+    APP_RESULT: "success",
+  }).status, 1);
+  assert.equal(runWorkflowStep(source, "Check release proof mode", {
+    ...base,
+    DOCS_RESULT: "failure",
+  }).status, 1);
+
+  const full = {
+    ...base,
+    APP_RESULT: "success",
+    BUILD_RESULT: "success",
+    BUNDLE_RESULT: "success",
+    DOCS_RESULT: "skipped",
+    FIXTURE_RESULT: "success",
+    MARKDOWN_ONLY: "false",
+    PACKAGE_RESULT: "success",
+  };
+  assert.equal(runWorkflowStep(source, "Check release proof mode", full).status, 0);
+  assert.equal(runWorkflowStep(source, "Check release proof mode", {
+    ...full,
+    PACKAGE_RESULT: "skipped",
+  }).status, 1);
+  assert.equal(runWorkflowStep(source, "Check release proof mode", {
+    ...full,
+    DOCS_RESULT: "success",
+  }).status, 1);
+});
+
+test("required Stripe boundary accepts docs-only skipped and full proof modes", async () => {
+  const source = await workflow("hosted-stripe-billing.yml");
+  const base = {
+    EVENT_NAME: "pull_request",
+    HERMETIC_RESULT: "skipped",
+    LIVE_RESULT: "skipped",
+    MARKDOWN_ONLY: "true",
+    SCOPE_RESULT: "success",
+  };
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", base).status, 0);
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    HERMETIC_RESULT: "success",
+  }).status, 1);
+
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    HERMETIC_RESULT: "success",
+    MARKDOWN_ONLY: "false",
+  }).status, 0);
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    EVENT_NAME: "push",
+    HERMETIC_RESULT: "success",
+    LIVE_RESULT: "success",
+    MARKDOWN_ONLY: "",
+    SCOPE_RESULT: "skipped",
+  }).status, 0);
 });
 
 test("restoring synchronize to an expensive workflow is detected", async () => {
@@ -380,6 +701,14 @@ function extractWorkflowStepScript(source, stepName) {
   }
   assert.ok(scriptLines.length > 0, `${stepName} script must be readable`);
   return scriptLines.join("\n");
+}
+
+function runWorkflowStep(source, stepName, env) {
+  return spawnSync("bash", ["-c", extractWorkflowStepScript(source, stepName)], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
 }
 
 async function runDraftResetScenario({

@@ -168,6 +168,7 @@ import {
 import {
   resolveAssistantVaultImageResponseMedia,
 } from '../assistant/vault-file-send.js'
+
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'

@@ -274,7 +274,7 @@ export function EnvironmentProgressStudy() {
           script={GAP_SCRIPTS[30]}
         />
       </StudyState>
-      <StudyState label="70% · Ask only for remaining gaps">
+      <StudyState label="70% · Ask only for remaining details">
         <EnvironmentCaptureCard
           contactOptions={DESIGN_CONTACT_OPTIONS}
           coverage={70}

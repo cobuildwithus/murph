@@ -1038,8 +1038,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        allowedRouteActions: ["apply-runtime-control-request"],
-        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+        allowedRouteActions: [
+          "apply-runtime-control-request",
+          "apply-member-action",
+        ],
+        allowedWakeKinds: [
+          "runtime.pending-effects-reconcile-requested",
+          "member.action.requested",
+        ],
       }),
     );
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
@@ -1277,8 +1283,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
 
       expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
         expect.objectContaining({
-          allowedRouteActions: ["apply-runtime-control-request"],
-          allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+          allowedRouteActions: [
+            "apply-runtime-control-request",
+            "apply-member-action",
+          ],
+          allowedWakeKinds: [
+            "runtime.pending-effects-reconcile-requested",
+            "member.action.requested",
+          ],
         }),
       );
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({

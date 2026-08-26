@@ -196,3 +196,9 @@ without changing automation ownership or adding a second error framework.
   terminal, and replay-safe GET transport failures advertise retry. The tests
   now assert those finite codes, stages, retryability values, and non-echo
   guarantees without changing production behavior.
+- Current `main` through `e59227e3af` is integrated after the test-only CI
+  correction. The only two conflicts were the runner bundle owner and its
+  focused test; both resolve byte-for-byte to current `main`, which replaced the
+  historical absolute total-byte allowance with the exact first-parent relative
+  comparison. The obsolete branch-local absolute cap is not resurrected. The
+  reviewed Core/runtime production behavior is unchanged by this base merge.

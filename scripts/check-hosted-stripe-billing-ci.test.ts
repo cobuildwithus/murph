@@ -76,10 +76,18 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects dropping the pull-request live exclusion from the boundary", async () => {
     const source = (await readWorkflow()).replace(
-      'pull_request)\n              if [[ "$LIVE_RESULT" != "skipped" ]]',
-      "pull_request)\n              if false",
+      'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]',
+      "if false",
     );
     expect(issueCodes(source)).toContain("missing-pr-live-exclusion");
+  });
+
+  it("rejects running Stripe jobs under the Markdown-only receipt", async () => {
+    const source = (await readWorkflow()).replace(
+      'if [[ "$HERMETIC_RESULT" != "skipped" || "$LIVE_RESULT" != "skipped" ]]',
+      "if false",
+    );
+    expect(issueCodes(source)).toContain("missing-docs-only-skip-boundary");
   });
 
   it("rejects restoring a marker that silently skips live proof", async () => {
