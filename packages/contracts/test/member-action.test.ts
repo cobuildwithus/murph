@@ -182,6 +182,27 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts a preference-only workout editor action", () => {
+    const request = validRequest();
+    const preferenceOnly = {
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [],
+        weightUnitPreference: "kg" as const,
+      },
+    };
+
+    expect(parseMemberActionRequestV1(preferenceOnly)).toEqual(preferenceOnly);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...preferenceOnly,
+      action: {
+        ...preferenceOnly.action,
+        weightUnitPreference: undefined,
+      },
+    }).success).toBe(false);
+  });
+
   it("requires new sets to append contiguously after retained sets", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({

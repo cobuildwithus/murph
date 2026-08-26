@@ -34,6 +34,8 @@ export interface StartLiveWorkoutExerciseInput {
   note?: string
   reps?: number
   setCount?: number
+  targetWeight?: number
+  targetWeightUnit?: LoadUnit
 }
 
 export interface StartLiveWorkoutInput {
@@ -217,6 +219,9 @@ export function buildLiveWorkoutCardEditor(input: {
       const result = logged
         ? projectWorkoutSessionEditorResult(exercise, set)
         : null
+      const targetResult = logged
+        ? null
+        : projectWorkoutSessionEditorTarget(exercise)
       if (logged && result === null) {
         return null
       }
@@ -229,10 +234,21 @@ export function buildLiveWorkoutCardEditor(input: {
       if (logged && (actual === null || actual === undefined)) {
         return null
       }
-      editorSets.push({ logged, result })
+      const target = targetResult === null
+        ? cardSet.target
+        : renderWorkoutSessionEditorResultV1(
+            encodeWorkoutSessionEditorResult(targetResult),
+            exercise.unitOverride ?? null,
+          )
+      if (target === undefined) {
+        return null
+      }
+      editorSets.push(targetResult === null
+        ? { logged, result }
+        : { logged, result, targetResult })
       presentationSets.push({
         status: logged ? 'completed' : 'pending',
-        target: cardSet.target,
+        target,
         actual: logged ? actual ?? 'Logged' : null,
       })
     }
@@ -262,6 +278,29 @@ export function buildLiveWorkoutCardEditor(input: {
       version: 1,
     },
   }
+}
+
+function projectWorkoutSessionEditorTarget(
+  exercise: WorkoutExercise,
+): WorkoutMemberActionExpectedSetResultV1 | null {
+  const reps = exercise.memberRepsPerSet ?? null
+  const weight = exercise.targetWeightPerSet ?? null
+  if (weight !== null) {
+    return {
+      kind: 'weight_reps',
+      reps,
+      weight,
+      weightUnit: exercise.targetWeightUnit === exercise.unitOverride
+        ? null
+        : exercise.targetWeightUnit ?? null,
+    }
+  }
+  if (reps !== null) {
+    return exercise.mode === 'weight_reps'
+      ? { kind: 'weight_reps', reps, weight: null, weightUnit: null }
+      : { kind: 'reps', reps }
+  }
+  return null
 }
 
 function projectWorkoutSessionEditorResult(

@@ -78,6 +78,8 @@ interface WorkoutResult {
       name: string
       note?: string
       sourceExerciseId?: string
+      targetWeightPerSet?: number
+      targetWeightUnit?: string
       order: number
       setPlanIsFinite?: boolean
       sets: Array<Record<string, unknown>>
@@ -273,6 +275,37 @@ test('live workout commands target exact records without a global active singlet
     'workout', 'show', overlapping.eventId, '--vault', vaultRoot,
   ])).envelope)
   assert.equal(shownOther.entity.data.workout.endedAt, undefined)
+})
+
+test('ad-hoc workout start preserves exact per-set weight and reps targets', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-targets-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+  const started = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Bench session',
+    '--exercise',
+    'name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  assert.ok(started.workout)
+  assert.deepEqual(started.workout.exercises[0], {
+    name: 'Bench press',
+    order: 1,
+    mode: 'weight_reps',
+    unitOverride: 'lb',
+    memberRepsPerSet: 8,
+    targetWeightPerSet: 135,
+    targetWeightUnit: 'lb',
+    setPlanIsFinite: true,
+    sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+  })
 })
 
 test('workout start writes one complete ordered exercise batch in one canonical creation', async () => {

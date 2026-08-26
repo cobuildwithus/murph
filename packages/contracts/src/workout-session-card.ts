@@ -157,6 +157,7 @@ const workoutSessionEditorSetV1Schema = z
   .object({
     logged: z.boolean(),
     result: workoutSessionEditorResultV1Schema.nullable(),
+    targetResult: workoutSessionEditorResultV1Schema.nullable().optional(),
   })
   .strict()
   .superRefine((set, context) => {
@@ -165,6 +166,13 @@ const workoutSessionEditorSetV1Schema = z
         code: "custom",
         message: "Only a logged set carries an editable result.",
         path: ["result"],
+      });
+    }
+    if (set.logged && set.targetResult != null) {
+      context.addIssue({
+        code: "custom",
+        message: "A completed set cannot carry an editable target default.",
+        path: ["targetResult"],
       });
     }
   });
@@ -259,6 +267,27 @@ export type WorkoutSessionAppCardEnvelopeV6 = {
       ]
     >;
     f: string | null;
+    b: string;
+    d: string;
+  };
+};
+
+export type WorkoutSessionAppCardEnvelopeV7 = {
+  schemaVersion: 7;
+  card: WorkoutSessionAppCardEnvelopeV4["card"];
+  editor?: {
+    v: 1;
+    e: Array<
+      [
+        exerciseUnit: "l" | "k" | null,
+        sets: Array<
+          [
+            result: WorkoutSessionEditorResultWireV1 | null,
+            targetResult: WorkoutSessionEditorResultWireV1 | null,
+          ]
+        >,
+      ]
+    >;
     b: string;
     d: string;
   };
@@ -360,17 +389,97 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
   };
 }
 
+export function buildWorkoutSessionAppCardEnvelopeV7(input: {
+  editor?: WorkoutSessionEditorProjectionV1;
+  title: string;
+  subtitle: string | null;
+  footer: string | null;
+  workout: WorkoutSessionDetailV1;
+}): WorkoutSessionAppCardEnvelopeV7 {
+  const card = buildWorkoutSessionAppCardEnvelopeV4(input).card;
+  if (input.editor === undefined) {
+    return { schemaVersion: 7, card };
+  }
+  const editor = workoutSessionEditorProjectionV1Schema.parse(input.editor);
+  const v6 = buildWorkoutSessionAppCardEnvelopeV6({ ...input, editor });
+  return {
+    schemaVersion: 7,
+    card,
+    editor: {
+      v: 1,
+      e: v6.card.e.map((exercise, exerciseIndex) => {
+        const editorExercise = editor.exercises[exerciseIndex];
+        const cardExercise = card.e[exerciseIndex];
+        if (!editorExercise || !cardExercise) {
+          throw new TypeError("Workout editor projection does not match the card exercises.");
+        }
+        return [
+          exercise[1],
+          exercise[2].map((set, setIndex) => {
+            const editorSet = editorExercise.sets[setIndex];
+            const cardSet = cardExercise[1][setIndex];
+            if (!editorSet || !cardSet) {
+              throw new TypeError("Workout editor projection does not match the card sets.");
+            }
+            const renderedResult = set[2] === null
+              ? null
+              : renderWorkoutSessionEditorResultV1(
+                  set[2],
+                  decodeWorkoutWeightUnit(exercise[1]),
+                );
+            const encodedTarget = editorSet.targetResult == null
+              ? null
+              : encodeWorkoutEditorResult(editorSet.targetResult);
+            const renderedTarget = encodedTarget === null
+              ? null
+              : renderWorkoutSessionEditorResultV1(
+                  encodedTarget,
+                  decodeWorkoutWeightUnit(exercise[1]),
+                );
+            if (
+              renderedResult !== cardSet[2]
+              || (encodedTarget !== null && renderedTarget !== cardSet[1])
+            ) {
+              throw new TypeError("Workout editor values do not match the readable card.");
+            }
+            return [
+              set[2],
+              encodedTarget,
+            ];
+          }),
+        ];
+      }),
+      b: editor.actionBinding,
+      d: editor.setRemovalBinding,
+    },
+  };
+}
+
 /**
- * Restores the readable presentation snapshot from either workout-card wire.
- * The V6 action and removal bindings are validated and intentionally omitted
+ * Restores the readable presentation snapshot from any workout-card wire.
+ * Editor bindings and typed defaults are validated and intentionally omitted
  * from presentation.
  */
 export function parseWorkoutSessionAppCardEnvelopeV4(
   value: unknown,
 ): WorkoutSessionAppCardPresentationV4 | null {
   if (
+    isRecord(value)
+    && Object.hasOwn(value, "schemaVersion")
+    && value.schemaVersion === 7
+    && Object.hasOwn(value, "card")
+  ) {
+    return parseWorkoutSessionAppCardEnvelopeV4({
+      schemaVersion: 4,
+      card: value.card,
+    });
+  }
+  if (
     !isExactRecord(value, ["schemaVersion", "card"])
-    || (value.schemaVersion !== 4 && value.schemaVersion !== 6)
+    || (
+      value.schemaVersion !== 4
+      && value.schemaVersion !== 6
+    )
     || !isExactRecord(
       value.card,
       value.schemaVersion === 6
@@ -380,6 +489,7 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
   ) {
     return null;
   }
+  const includesEditor = value.schemaVersion === 6;
   const card = value.card;
   if (
     card.k !== "w"
@@ -392,9 +502,9 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     || (card.s !== "a" && card.s !== "c")
     || !Array.isArray(card.e)
     || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
-    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.b))
-    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.d))
-    || (value.schemaVersion === 6 && card.s !== "a")
+    || (includesEditor && !isWorkoutActionBinding(card.b))
+    || (includesEditor && !isWorkoutActionBinding(card.d))
+    || (includesEditor && card.s !== "a")
   ) {
     return null;
   }
@@ -403,21 +513,21 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
   for (const exercise of card.e) {
     if (
       !Array.isArray(exercise)
-      || exercise.length !== (value.schemaVersion === 6 ? 3 : 2)
+      || exercise.length !== (includesEditor ? 3 : 2)
       || !isSingleLineText(
         exercise[0],
         workoutSessionCardV1Bounds.exerciseName,
       )
-      || (value.schemaVersion === 6
+      || (includesEditor
         && !isEncodedWorkoutWeightUnit(exercise[1]))
-      || !Array.isArray(exercise[value.schemaVersion === 6 ? 2 : 1])
+      || !Array.isArray(exercise[includesEditor ? 2 : 1])
     ) {
       return null;
     }
-    const encodedExerciseUnit = value.schemaVersion === 6
+    const encodedExerciseUnit = includesEditor
       ? exercise[1]
       : null;
-    const encodedSets = exercise[value.schemaVersion === 6 ? 2 : 1];
+    const encodedSets = exercise[includesEditor ? 2 : 1];
     if (!Array.isArray(encodedSets)) {
       return null;
     }
@@ -426,7 +536,7 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
       if (
         !Array.isArray(set)
         || set.length !== 3
-        || (value.schemaVersion === 6
+        || (includesEditor
           ? set[0] !== "p" && set[0] !== "c"
           : set[0] !== "p" && set[0] !== "c" && set[0] !== "s")
         || !isNullableSingleLineText(
@@ -437,13 +547,13 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
         return null;
       }
       if (
-        value.schemaVersion === 6
+        includesEditor
         && set[0] === "p"
         && set[2] !== null
       ) {
         return null;
       }
-      const renderedEditorActual = value.schemaVersion === 6
+      const renderedEditorActual = includesEditor
         ? set[0] === "p" && set[2] === null
           ? null
           : renderWorkoutSessionEditorResultV1(
@@ -615,6 +725,10 @@ function isExactRecord(
     && !Array.isArray(value)
     && Object.keys(value).length === keys.length
     && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isSingleLineText(value: unknown, maxLength: number): value is string {

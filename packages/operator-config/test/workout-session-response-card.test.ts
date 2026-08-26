@@ -167,10 +167,8 @@ describe('workout session response cards', () => {
 
     expect(url.length).toBeLessThan(2_048)
     expect(decodeAppCardUrl(url)).toEqual({
-      schemaVersion: 6,
+      schemaVersion: 7,
       card: {
-        b: ACTIVE_WORKOUT_CARD.editor.actionBinding,
-        d: ACTIVE_WORKOUT_CARD.editor.setRemovalBinding,
         k: 'w',
         v: 1,
         t: 'Push day',
@@ -179,24 +177,45 @@ describe('workout session response cards', () => {
         e: [
           [
             'Bench press',
-            'l',
             [
-              ['c', '185 lb × 8', ['w', 8, 185, null]],
-              ['c', '185 lb × 8', ['w', 7, 185, 'l']],
+              ['c', '185 lb × 8', '185 lb × 8'],
+              ['c', '185 lb × 8', '185 lb × 7'],
               ['p', '185 lb × 6–8', null],
             ],
           ],
           [
             'Incline dumbbell press',
-            'l',
             [
-              ['c', '55 lb × 10', ['w', 10, 55, null]],
+              ['c', '55 lb × 10', '55 lb × 10'],
               ['p', '55 lb × 8–10', null],
               ['p', null, null],
             ],
           ],
         ],
         f: 'Reply with the exercise, set, and result to log or correct it.',
+      },
+      editor: {
+        v: 1,
+        b: ACTIVE_WORKOUT_CARD.editor.actionBinding,
+        d: ACTIVE_WORKOUT_CARD.editor.setRemovalBinding,
+        e: [
+          [
+            'l',
+            [
+              [['w', 8, 185, null], null],
+              [['w', 7, 185, 'l'], null],
+              [null, null],
+            ],
+          ],
+          [
+            'l',
+            [
+              [['w', 10, 55, null], null],
+              [null, null],
+              [null, null],
+            ],
+          ],
+        ],
       },
     })
     expect(JSON.stringify(decodeAppCardUrl(url))).not.toContain('evt_')
@@ -208,7 +227,7 @@ describe('workout session response cards', () => {
     expect(JSON.stringify(imageEnvelope)).not.toContain('"b"')
   })
 
-  it('routes enhanced compact tables through V6 and ordinary tables through V3', () => {
+  it('routes enhanced workout cards through V7 and ordinary tables through V3', () => {
     expect(encodeCompactTableAppCardUrl(ACTIVE_WORKOUT_CARD)).toBe(
       encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),
     )
@@ -304,8 +323,62 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1624, 1905, 1624])
+    expect(urls.map((url) => url.length)).toEqual([1403, 1612, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
+  })
+
+  it('drops the whole editor when the readable V7 card still fits', () => {
+    const exercises = Array.from({ length: 10 }, (_, exerciseIndex) => ({
+      name: `Strength movement ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 4 }, () => ({
+        status: 'pending' as const,
+        target: '135 lb × 8',
+        actual: null,
+      })),
+    }))
+    const card = {
+      kind: 'compact_table' as const,
+      version: 1 as const,
+      title: 'Full strength session',
+      subtitle: null,
+      footer: null,
+      tracking: ACTIVE_WORKOUT_CARD.tracking,
+      workout: {
+        version: 1 as const,
+        state: 'active' as const,
+        exercises,
+      },
+      editor: {
+        actionBinding: 'a'.repeat(64),
+        setRemovalBinding: 'b'.repeat(64),
+        version: 1 as const,
+        exercises: exercises.map((exercise) => ({
+          unitOverride: 'lb' as const,
+          sets: exercise.sets.map(() => ({
+            logged: false,
+            result: null,
+            targetResult: {
+              kind: 'weight_reps' as const,
+              reps: 8,
+              weight: 135,
+              weightUnit: null,
+            },
+          })),
+        })),
+      },
+    }
+
+    const url = encodeWorkoutSessionAppCardUrl(card)
+    const envelope = decodeAppCardUrl(url)
+
+    expect(url.length).toBeLessThan(2_048)
+    expect(envelope).toMatchObject({
+      schemaVersion: 7,
+      card: { e: expect.arrayContaining([
+        ['Strength movement 10', expect.any(Array)],
+      ]) },
+    })
+    expect(envelope).not.toHaveProperty('editor')
   })
 
   it('encodes a complete 11×3 late-active card when its measured URL fits', () => {

@@ -4,6 +4,7 @@ import {
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
+  buildWorkoutSessionAppCardEnvelopeV7,
   compactTableResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
   workoutSessionCardV1Bounds,
@@ -70,6 +71,109 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
     ],
   },
 };
+
+it("encodes typed pending targets separately from logged results", () => {
+  const workout = workoutSessionDetailV1Schema.parse({
+    version: 1,
+    state: "active",
+    exercises: [{
+      name: "Bench press",
+      sets: Array.from({ length: 3 }, () => ({
+        status: "pending",
+        target: "135 lb × 8",
+        actual: null,
+      })),
+    }],
+  });
+  const envelope = buildWorkoutSessionAppCardEnvelopeV7({
+    title: "Bench press — 135 lb × 8",
+    subtitle: null,
+    footer: null,
+    workout,
+    editor: {
+      actionBinding: "a".repeat(64),
+      setRemovalBinding: "b".repeat(64),
+      version: 1,
+      exercises: [{
+        unitOverride: "lb",
+        sets: Array.from({ length: 3 }, () => ({
+          logged: false,
+          result: null,
+          targetResult: {
+            kind: "weight_reps" as const,
+            reps: 8,
+            weight: 135,
+            weightUnit: null,
+          },
+        })),
+      }],
+    },
+  });
+
+  expect(envelope.schemaVersion).toBe(7);
+  expect(envelope.card.e[0]?.[1]).toEqual([
+    ["p", "135 lb × 8", null],
+    ["p", "135 lb × 8", null],
+    ["p", "135 lb × 8", null],
+  ]);
+  expect(envelope.editor?.e[0]?.[1]).toEqual([
+    [null, ["w", 8, 135, null]],
+    [null, ["w", 8, 135, null]],
+    [null, ["w", 8, 135, null]],
+  ]);
+  expect(parseCompactTableAppCardEnvelope(envelope)).toMatchObject({
+    title: "Bench press — 135 lb × 8",
+    workout,
+  });
+  expect(parseCompactTableAppCardEnvelope({
+    ...envelope,
+    editor: "malformed",
+    futureCapability: { v: 1 },
+  })).toMatchObject({
+    title: "Bench press — 135 lb × 8",
+    workout,
+  });
+});
+
+it("rejects typed editor values that disagree with the readable card", () => {
+  const workout = workoutSessionDetailV1Schema.parse({
+    version: 1,
+    state: "active",
+    exercises: [{
+      name: "Bench press",
+      sets: [{
+        status: "pending",
+        target: "135 lb × 8",
+        actual: null,
+      }],
+    }],
+  });
+
+  expect(() => buildWorkoutSessionAppCardEnvelopeV7({
+    title: "Bench press",
+    subtitle: null,
+    footer: null,
+    workout,
+    editor: {
+      actionBinding: "a".repeat(64),
+      setRemovalBinding: "b".repeat(64),
+      version: 1,
+      exercises: [{
+        unitOverride: "lb",
+        sets: [{
+          logged: false,
+          result: null,
+          targetResult: {
+            kind: "weight_reps",
+            reps: 10,
+            weight: 135,
+            weightUnit: null,
+          },
+        }],
+      }],
+    },
+  })).toThrow("Workout editor values do not match the readable card.");
+});
 
 const TRACKED_WORKOUT_EDITOR = {
   actionBinding: "a".repeat(64),

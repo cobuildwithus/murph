@@ -29,6 +29,62 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('projects exact ad-hoc prescriptions into every pending editor row', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        memberRepsPerSet: 8,
+        targetWeightPerSet: 135,
+        targetWeightUnit: 'lb',
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+      }],
+    })
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_test_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: Array.from({ length: 3 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+
+    assert.deepEqual(
+      projected?.workout.exercises[0]?.sets,
+      Array.from({ length: 3 }, () => ({
+        status: 'pending',
+        target: '135 lb × 8',
+        actual: null,
+      })),
+    )
+    assert.deepEqual(
+      projected?.editor.exercises[0]?.sets,
+      Array.from({ length: 3 }, () => ({
+        logged: false,
+        result: null,
+        targetResult: {
+          kind: 'weight_reps',
+          reps: 8,
+          weight: 135,
+          weightUnit: null,
+        },
+      })),
+    )
+  })
+
   test('projects exact editable field families from canonical set state', () => {
     const workout = workoutSessionSchema.parse({
       sourceApp: LIVE_WORKOUT_SOURCE_APP,

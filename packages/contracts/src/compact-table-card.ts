@@ -5,7 +5,7 @@ import { contractIdMaxLength, idPattern } from "./ids.ts";
 import { isStrictIsoDateTime } from "./time.ts";
 import {
   buildWorkoutSessionAppCardEnvelopeV4,
-  buildWorkoutSessionAppCardEnvelopeV6,
+  buildWorkoutSessionAppCardEnvelopeV7,
   parseWorkoutSessionAppCardEnvelopeV4,
   workoutSessionDetailV1Schema,
   workoutSessionEditorProjectionV1Schema,
@@ -100,6 +100,12 @@ function encodedAppCardPayloadLength(envelope: unknown): number {
   ).byteLength;
   const base64PaddingLength = (3 - (payloadByteLength % 3)) % 3;
   return 4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
+}
+
+function fitsInlineAppCardEnvelope(envelope: unknown): boolean {
+  return IMESSAGE_APP_CARD_URL_PREFIX.length
+    + encodedAppCardPayloadLength(envelope)
+    < IMESSAGE_APP_CARD_URL_MAX_LENGTH;
 }
 
 function addEncodedLengthIssues(
@@ -229,14 +235,22 @@ const compactTableWorkoutResponseCardV1Schema = z
       return;
     }
     try {
+      const editableEnvelope = buildWorkoutSessionAppCardEnvelopeV7({
+        editor: card.editor,
+        title: card.title,
+        subtitle: card.subtitle,
+        footer: card.footer,
+        workout: card.workout,
+      });
       addEncodedLengthIssues(
-        buildWorkoutSessionAppCardEnvelopeV6({
-          editor: card.editor,
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        }),
+        fitsInlineAppCardEnvelope(editableEnvelope)
+          ? editableEnvelope
+          : buildWorkoutSessionAppCardEnvelopeV7({
+              title: card.title,
+              subtitle: card.subtitle,
+              footer: card.footer,
+              workout: card.workout,
+            }),
         context,
         "workout editor",
         { image: false, inline: true },
@@ -307,7 +321,11 @@ export function parseCompactTableAppCardEnvelope(
     return presentation;
   }
 
-  if (value.schemaVersion === 4 || value.schemaVersion === 6) {
+  if (
+    value.schemaVersion === 4
+    || value.schemaVersion === 6
+    || value.schemaVersion === 7
+  ) {
     const parsed = parseWorkoutSessionAppCardEnvelopeV4(value);
     return parsed === null
       ? null
@@ -324,10 +342,21 @@ export function parseCompactTableAppCardEnvelope(
 function isExactAppCardEnvelope(
   value: unknown,
 ): value is { schemaVersion: unknown; card: unknown } {
-  return typeof value === "object"
-    && value !== null
-    && !Array.isArray(value)
-    && Object.keys(value).length === 2
-    && Object.hasOwn(value, "schemaVersion")
-    && Object.hasOwn(value, "card");
+  if (
+    !isRecord(value)
+    || !Object.hasOwn(value, "schemaVersion")
+    || !Object.hasOwn(value, "card")
+  ) {
+    return false;
+  }
+  return value.schemaVersion === 7
+    || (
+      Object.keys(value).length === 2
+      && Object.hasOwn(value, "schemaVersion")
+      && Object.hasOwn(value, "card")
+    );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
