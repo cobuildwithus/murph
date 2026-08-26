@@ -791,6 +791,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'active' },
         })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: finiteWorkout.id,
+          events: started.jsonEvents,
+          state: 'active',
+        })
+        expect(started.runtimeIssueInputs).toEqual([])
         expect(started.transcriptMessage).toContain(
           `[Murph tracked workout source: ${finiteWorkout.id};`,
         )
@@ -922,6 +928,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'completed' },
         })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: finiteWorkout.id,
+          events: finalSet.jsonEvents,
+          state: 'completed',
+        })
+        expect(finalSet.runtimeIssueInputs).toEqual([])
         expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual(
           Array.from({ length: 8 }, () => 9),
         )
@@ -12949,6 +12961,31 @@ function readDynamicToolAttempts(
       tool,
     }]
   })
+}
+
+function expectStructuredWorkoutAuthoringAttempt(input: {
+  entityId: string
+  events: readonly unknown[]
+  state: 'active' | 'completed'
+}): void {
+  const attempts = readDynamicToolAttempts(input.events).filter(
+    (attempt) => attempt.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name,
+  )
+  expect(attempts).toHaveLength(1)
+
+  const card = readRecord(attempts[0]?.argumentsValue.card)
+  expect(card).toMatchObject({
+    kind: 'compact_table',
+    tracking: {
+      entityId: input.entityId,
+      kind: 'workout',
+    },
+    workout: { state: input.state },
+  })
+  expect(card).not.toHaveProperty('columns')
+  expect(card).not.toHaveProperty('rowHeader')
+  expect(card).not.toHaveProperty('rows')
+  expect(readRecord(card?.tracking)).not.toHaveProperty('snapshotAt')
 }
 
 function readCompletedAgentMessages(

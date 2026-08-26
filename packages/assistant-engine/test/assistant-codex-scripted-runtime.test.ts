@@ -6769,7 +6769,6 @@ if (!tool) {
       tracking: {
         kind: 'workout',
         entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-        snapshotAt: '2026-08-09T19:45:00.000Z',
       },
       workout: {
         version: 1,
@@ -6795,7 +6794,7 @@ if (!tool) {
           })),
         })),
       },
-    } satisfies AssistantResponseCard
+    } as const
     const cards = [
       {
         kind: 'compact_table',
@@ -6864,7 +6863,19 @@ if (!tool) {
         includesResponseCardNutritionV2Shape: true,
       })
       expect(result.runtimeIssueInputs).toEqual([])
-      expect(result.responseCard).toEqual(card)
+      if ('workout' in card) {
+        expect(result.responseCard).toMatchObject({
+          ...card,
+          tracking: {
+            ...card.tracking,
+            snapshotAt: expect.stringMatching(
+              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+            ),
+          },
+        })
+      } else {
+        expect(result.responseCard).toEqual(card)
+      }
     }
 
     const incompleteNutritionCards = [
