@@ -140,3 +140,12 @@ Updated: 2026-08-25
 - Hosted Web changelog component proof passed all 9 selected tests for the new
   member-facing reliability item.
 - `scripts/frog list` reported no unresolved repository friction.
+
+## Review results
+
+- Preliminary Product UX/coverage review accepted two findings: simplify the
+  public changelog to member language, and add composed proof for between-job
+  foreground yielding plus partial progress before a later bounded-drain error.
+  Both corrections stay within content and direct-test surfaces.
+- Final ReviewGPT round 1 passed the full exact-head audit with no qualifying
+  correctness, architecture, privacy, purpose, or experience finding.
