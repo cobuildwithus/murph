@@ -29,6 +29,7 @@ import {
   stageAssistantInputEventForMailboxItem,
   stagePendingLinqAssistantInputForMailboxItem,
   withRealTimeout,
+  writeSyntheticAssistantAutoReplyTerminalEvidence,
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
@@ -3974,6 +3975,258 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(warmWorkspaceRoot);
       await removeTempRoot(coldWorkspaceRoot);
+    }
+  });
+
+  test("keeps restored replyable input ahead of a consented ask and device maintenance", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const pendingInputItem = createMailboxItem({
+      id: "mailbox_item_restored_reply_before_ask",
+      lane: "conversation",
+      laneSeq: "1",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+    const firstAsk = createMailboxItem({
+      dedupeKey: "assistant.ask.requested:restored-reply-first",
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      id: "mailbox_item_restored_reply_ask",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:restored-reply-device",
+      id: "mailbox_item_restored_reply_device",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    });
+    let assistantAskPrepareCalls = 0;
+    const originalAutomationPass =
+      mocks.runAssistantAutomationPass.getMockImplementation();
+    const assistantInputServiced = createDeferred<void>();
+    const assistantRuntimeAbortController = new AbortController();
+    let assistantRuntimePromise:
+      | ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess>
+      | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      assert.ok(originalAutomationPass);
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const pendingAssistantInputId = await stagePendingLinqAssistantInputForMailboxItem({
+        item: pendingInputItem,
+        vaultRoot,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedAssistantAskSystemMailboxItem(firstAsk),
+        vaultRoot,
+        wake: createConsentedMemberAssistantAskRequestedWake({
+          eventId: firstAsk.dedupeKey,
+        }),
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/restored-reply-before-ask.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_restored_reply_before_ask",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/restored-reply-before-ask-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Restored reply ordering work was already imported.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            assistantAskPort: {
+              async request(request) {
+                if (request.action === "complete") {
+                  throw new Error("Terminal restored-reply ask must not complete again.");
+                }
+                assistantAskPrepareCalls += 1;
+                return {
+                  action: "prepare",
+                  status: "terminal",
+                  terminalReason: "unavailable",
+                };
+              },
+            },
+            deviceSyncPort,
+            events,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must hand the restored reply to an assistant wake.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantAskPrepareCalls, 0);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+        ]),
+        [
+          [firstAsk.id, "pending"],
+          [deviceItem.id, "pending"],
+        ],
+      );
+
+      const assistantWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/restored-reply-assistant-handoff.bundle.json",
+        vaultRoot,
+      });
+      let assistantPhaseInputIds: readonly string[] = [];
+      mocks.runAssistantAutomationPass.mockImplementation(
+        async (automationInput: RunAssistantAutomationPassInput) => {
+          const candidates = await automationInput.inputSource?.listInputCandidates({
+            afterCursor: null,
+            limit: 10,
+            sourceId: "linq",
+          });
+          const inputIds = candidates?.inputs.map((candidate) =>
+            candidate.event.inputId
+          ) ?? [];
+          if (inputIds.length === 0) {
+            return {
+              currentTurnDeliveryIntentIds: [],
+              nextWakeAt: null,
+              progressed: false,
+            };
+          }
+
+          assistantPhaseInputIds = inputIds;
+          await writeSyntheticAssistantAutoReplyTerminalEvidence({
+            inputId: pendingAssistantInputId,
+            vaultRoot,
+          });
+          assistantInputServiced.resolve();
+          return {
+            currentTurnDeliveryIntentIds: [],
+            nextWakeAt: null,
+            progressed: true,
+          };
+        },
+      );
+      assistantRuntimePromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_restored_reply_assistant_handoff",
+            workspaceVersion: "1",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/restored-reply-assistant-handoff-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Assistant handoff input was already imported.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[assistantWorkspace.hash, assistantWorkspace.bytes]]),
+            assistantAskPort: {
+              async request(request) {
+                if (request.action === "complete") {
+                  throw new Error("Terminal restored-reply ask must not complete again.");
+                }
+                assistantAskPrepareCalls += 1;
+                return {
+                  action: "prepare",
+                  status: "terminal",
+                  terminalReason: "unavailable",
+                };
+              },
+            },
+            deviceSyncPort,
+            events,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: result.nextWakeAt,
+                nextWakeReason: result.nextWakeReason,
+                snapshotRef: assistantWorkspace.snapshotRef,
+                version: "1",
+              }),
+            }),
+          }),
+          signal: assistantRuntimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+      await withRealTimeout(
+        assistantInputServiced.promise,
+        30_000,
+        () => events.join(","),
+      );
+      assert.deepEqual(assistantPhaseInputIds, [pendingAssistantInputId]);
+      assistantRuntimeAbortController.abort(
+        new DOMException("Synthetic assistant handoff proof complete.", "AbortError"),
+      );
+      await assistantRuntimePromise.catch(() => undefined);
+    } finally {
+      assistantRuntimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      await assistantRuntimePromise?.catch(() => undefined);
+      if (originalAutomationPass) {
+        mocks.runAssistantAutomationPass.mockImplementation(
+          originalAutomationPass,
+        );
+      }
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
     }
   });
 

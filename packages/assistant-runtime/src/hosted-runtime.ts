@@ -230,6 +230,7 @@ import {
 import {
   compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  inspectHostedPendingAssistantInputWakeCandidate,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
   assertNever,
@@ -2306,7 +2307,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         userId: null,
       });
     };
-    const returnInitialMailboxImportBeforeForeground = async () => {
+    const returnInitialMailboxImportBeforeForeground = async (handoff?: {
+      assistantWakeAt: string;
+    }) => {
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
@@ -2339,7 +2342,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
       const stagedAssistantInput =
         hostedMailboxImportStagedConversationInput(initialMailboxImport);
-      const checkpointNextWake = !assistantExecutionBlocked && assistantCronWake?.dueNow
+      const checkpointNextWake = handoff
+        ? selectEarliestHostedRuntimeWake([
+            {
+              at: handoff.assistantWakeAt,
+              reason: HOSTED_ASSISTANT_WAKE_REASON,
+            },
+            {
+              at: assistantCronWake?.at ?? null,
+              reason: assistantCronWake?.reason ?? null,
+            },
+          ])
+        : !assistantExecutionBlocked && assistantCronWake?.dueNow
         ? {
             nextWakeAt: assistantCronWake.at,
             nextWakeReason: assistantCronWake.reason,
@@ -2390,7 +2404,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         && hostedRuntimeWakeIsDue(activeWorkspace.nextWakeAt ?? null);
       const dueAssistantHandoffRequiresCheckpoint =
         !assistantExecutionBlocked
-        && assistantCronWake?.dueNow === true
+        && (handoff !== undefined || assistantCronWake?.dueNow === true)
         && !activeWorkspaceAlreadyOwnsDueAssistantWake;
 
       if (
@@ -3344,14 +3358,31 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     }
     let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
     let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
+    const systemMailboxOwnerSelectionAt = new Date().toISOString();
     const selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
       && !assistantExecutionBlocked
       ? findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: null,
-          now: new Date().toISOString(),
+          now: systemMailboxOwnerSelectionAt,
           state: await readHostedSystemMailboxState(restored.vaultRoot),
         })
       : null;
+    const ordinaryConsentedAssistantAskSelected =
+      selectedSystemMailboxOwnerItem?.routeAction === "run-assistant-ask"
+      && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
+      && !isHostedApprovedContinuationSystemMailboxItem(
+        selectedSystemMailboxOwnerItem,
+      );
+    const pendingAssistantInputProjection = ordinaryConsentedAssistantAskSelected
+      ? await inspectHostedPendingAssistantInputWakeCandidate({
+          vaultRoot: restored.vaultRoot,
+        })
+      : null;
+    if (pendingAssistantInputProjection?.hasCandidate === true) {
+      return await returnInitialMailboxImportBeforeForeground({
+        assistantWakeAt: systemMailboxOwnerSelectionAt,
+      });
+    }
     const systemMailboxForegroundOwnerSelected =
       selectedSystemMailboxOwnerItem !== null
       && (

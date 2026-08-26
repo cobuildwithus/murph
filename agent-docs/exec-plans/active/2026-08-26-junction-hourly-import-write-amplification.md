@@ -67,7 +67,10 @@ Updated: 2026-08-26
    preserve foreground-message preemption and durable retry.
 5. [x] Finish focused verification, affected typechecks, privacy/diff review,
    Frog logging, and Product UX walkthrough.
-6. [ ] Commit, push, run final review with required CI, deploy, and prove live
+6. [x] Prove restored replyable input cannot sit behind the exact Ask barrier;
+   hand the existing positive pending-input projection to the ordinary assistant
+   owner without running the Ask or later device maintenance.
+7. [ ] Commit, push, run final review with required CI, deploy, and prove live
    mailbox and device-sync convergence.
 
 ## Decisions
@@ -87,6 +90,12 @@ Updated: 2026-08-26
   still admitted device maintenance. Bind the handoff to the already-selected
   item and hold only model-free maintenance until that item terminalizes or
   durably requeues; queue deletion or a second scheduler is unnecessary.
+- Accepted final-review finding: an exact Ask barrier could start before
+  replyable conversation input already present in the restored pending-input
+  projection. Gate only the ordinary consented-member Ask on a positive
+  candidate, persist an assistant wake ahead of the system wake, and leave both
+  the Ask and later device maintenance pending. An incomplete empty index is not
+  positive evidence and must preserve exact-Ask admission.
 - Rejected: increasing hosted timeouts, changing resource admission, deleting
   queued work, or locally expiring the Ask without its Web-owned terminal result.
 
@@ -110,4 +119,7 @@ Updated: 2026-08-26
 - A foreground message still preempts background device maintenance under the
   existing rules, aborting and durably requeuing an in-flight exact Ask before
   the conversation proceeds.
+- A reply already present at restore schedules and runs through the ordinary
+  assistant owner before the durable-head Ask or later device maintenance;
+  the next invocation proves the staged input is still serviceable.
 - Provider failure preserves the same one-hour cursor and outer retry path.
