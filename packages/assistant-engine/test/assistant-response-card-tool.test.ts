@@ -1154,6 +1154,22 @@ describe('murph.attach_response_card', () => {
       card: ROUTINE_CARD,
       kind: 'attach-response-card',
     })
+    const {
+      footer: _omittedFooter,
+      subtitle: _omittedSubtitle,
+      ...routineWithoutOptionalText
+    } = ROUTINE_CARD
+    expect(readCardToolRequest(
+      { card: routineWithoutOptionalText },
+      'attach_exercise_routine_card',
+    )).toEqual({
+      card: {
+        ...routineWithoutOptionalText,
+        footer: null,
+        subtitle: null,
+      },
+      kind: 'attach-response-card',
+    })
     expect(readCardToolRequest(
       { card: CARD },
       'attach_exercise_routine_card',

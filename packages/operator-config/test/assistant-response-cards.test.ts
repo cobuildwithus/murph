@@ -368,6 +368,11 @@ describe('assistant response cards', () => {
         version: { const: 1 },
       },
     })
+    expect(exerciseRoutineResponseCardJsonSchema.required).not.toContain('footer')
+    expect(exerciseRoutineResponseCardJsonSchema.required).not.toContain(
+      'subtitle',
+    )
+    expect(exerciseRoutineResponseCardJsonSchema.required).toContain('safety')
     expect(assistantResponseCardSchema.parse(ROUTINE_CARD)).toEqual(ROUTINE_CARD)
     expect(assistantResponseCardSchema.parse({
       ...ROUTINE_CARD,

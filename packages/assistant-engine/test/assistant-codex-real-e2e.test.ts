@@ -1822,18 +1822,21 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             channel: 'telegram' as const,
             expected: 'card' as const,
             label: 'attended Telegram',
+            minimalPresentation: true,
             scheduledOccurrenceAt: undefined,
           },
           {
             channel: 'telegram' as const,
             expected: 'card' as const,
             label: 'scheduled Telegram',
+            minimalPresentation: false,
             scheduledOccurrenceAt: '2026-08-12T11:30:00.000Z',
           },
           {
             channel: 'linq' as const,
             expected: 'media' as const,
             label: 'attended Linq',
+            minimalPresentation: false,
             scheduledOccurrenceAt: undefined,
           },
         ]
@@ -1867,7 +1870,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             modelProvider: config.modelProvider,
             prompt: scenario.scheduledOccurrenceAt
               ? 'Teach the saved one-movement doorway stretch routine now. It is 8 repetitions over 60 seconds. Stop if pain increases.'
-              : 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases.',
+              : `Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases.${scenario.minimalPresentation ? ' Keep the presentation minimal without a subtitle or footer.' : ''}`,
             reasoningEffort: 'low',
             sandbox: 'workspace-write',
             workingDirectory,
@@ -1887,6 +1890,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               safety: expect.stringMatching(/pain/iu),
               totalSeconds: 60,
             })
+            if (scenario.minimalPresentation) {
+              expect(result.responseCard, `${scenario.label} optional text`)
+                .toMatchObject({ footer: null, subtitle: null })
+            }
             expect(result.responseMedia, `${scenario.label} media`).toEqual([])
             expect(
               result.finalMessage.trim(),
