@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 
 ## Local Frog autofix authority
 
@@ -12,10 +12,14 @@ Last verified: 2026-08-25
   access. It builds review archives from committed Git objects and keeps
   ReviewGPT responses, model proof, browser downloads, and prompts in one
   owner-only transient directory outside the issue worktree. The parent resolves
-  the exact Codex executable selected by its inherited PATH, copies only that
-  executable into an owner-only `bin/codex` beneath the ignored worker output
-  root, and launches the copy; it never grants the worker read authority to a
-  home, package, local-bin, or configuration tree. The Codex child uses a native
+  the exact Codex executable selected by its inherited PATH. Native executables
+  pass through; the pinned `@openai/codex` launcher must resolve through its own
+  current-platform package mapping to exactly one regular executable under its
+  installed `vendor/<target>/bin/codex` layout. Unsupported, unpinned, missing,
+  or ambiguous launchers fail closed. The parent copies only that native leaf
+  into an owner-only `bin/codex` beneath the ignored worker output root and
+  launches the copy; it never grants the worker read authority to a home,
+  package, local-bin, or configuration tree. The Codex child uses a native
   permission profile that denies root access, allows only minimal command-runtime
   reads plus issue-worktree reads and writes, and denies tool network. Its
   executable, synthetic home, and temporary directory are inside the ignored

@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -122,11 +122,16 @@ Review responses, model proof,
 browser access, and downloaded patches remain in an owner-only parent transient
 directory outside the issue worktree. Only a clean fresh branch may install
 pinned dependencies, before any Codex child runs. Before launch, the parent
-resolves the exact Codex executable selected by its inherited PATH, copies those
-bytes to an owner-only `bin/codex` beneath the ignored worker output root, and
-launches that workspace-local copy. The copy remains present until the owned
-child process group is reaped and is removed with the same worker-output cleanup
-on success or failure; no host installation tree is added to child authority.
+resolves the exact Codex executable selected by its inherited PATH. An
+already-native executable passes through unchanged; the
+pinned `@openai/codex` package launcher is resolved through its declared
+current-platform package to exactly one regular `vendor/<target>/bin/codex`
+leaf, while unsupported, unpinned, missing, or ambiguous launcher layouts fail
+closed. The parent copies only those native leaf bytes to an owner-only
+`bin/codex` beneath the ignored worker output root and launches that
+workspace-local copy. The copy remains present until the owned child process
+group is reaped and is removed with the same worker-output cleanup on success
+or failure; no host installation tree is added to child authority.
 One ephemeral Codex child then receives a native permission profile that denies
 root filesystem access, allows only minimal command-runtime reads plus
 issue-worktree reads and writes, and denies tool network. Its executable,

@@ -2,14 +2,17 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -19,6 +22,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir, platform, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1198,7 +1202,7 @@ function isLaunchAgentLoaded(): boolean {
   ).status === 0;
 }
 
-function resolveCodexExecutable(cwd: string): string {
+export function resolveCodexExecutable(cwd: string): string {
   const searchPath = process.env.PATH;
   if (!searchPath) throw new Error("Codex executable could not be resolved");
   for (const entry of searchPath.split(path.delimiter)) {
@@ -1229,7 +1233,196 @@ function pathIsStrictDescendant(root: string, candidate: string): boolean {
     && !relative.startsWith(`..${path.sep}`);
 }
 
-function materializeCodexWorkerExecutable(
+type JsonObject = Record<string, unknown>;
+
+function readJsonObject(filePath: string, failure: string): JsonObject {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(filePath, "utf8"));
+  } catch {
+    throw new Error(failure);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(failure);
+  }
+  return value as JsonObject;
+}
+
+function objectValue(value: unknown): JsonObject | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonObject
+    : null;
+}
+
+function pinnedCodexVersion(): string {
+  const manifest = readJsonObject(
+    path.join(repoRoot, "packages", "assistant-engine", "package.json"),
+    "pinned Codex package metadata is invalid",
+  );
+  const devDependencies = objectValue(manifest.devDependencies);
+  const version = devDependencies?.["@openai/codex"];
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/u.test(version)) {
+    throw new Error("pinned Codex package metadata is invalid");
+  }
+  return version;
+}
+
+function isNativeExecutableForCurrentPlatform(filePath: string): boolean {
+  const header = Buffer.alloc(4);
+  const descriptor = openSync(filePath, "r");
+  let bytesRead = 0;
+  try {
+    bytesRead = readSync(descriptor, header, 0, header.length, 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  if (process.platform === "linux") {
+    return bytesRead === 4 && header.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+  }
+  if (process.platform === "win32") {
+    return bytesRead >= 2 && header[0] === 0x4d && header[1] === 0x5a;
+  }
+  if (process.platform !== "darwin" || bytesRead !== 4) return false;
+  return new Set([
+    "feedface",
+    "cefaedfe",
+    "feedfacf",
+    "cffaedfe",
+    "cafebabe",
+    "bebafeca",
+    "cafebabf",
+    "bfbafeca",
+  ]).has(header.toString("hex"));
+}
+
+function codexPackageManifestForLauncher(source: string): string {
+  if (
+    path.basename(source) === "codex"
+    && path.basename(path.dirname(source)) === ".bin"
+  ) {
+    const packageJson = path.join(
+      path.dirname(path.dirname(source)),
+      "@openai",
+      "codex",
+      "package.json",
+    );
+    if (!existsSync(packageJson)) {
+      throw new Error("selected Codex package launcher is unsupported");
+    }
+    return realpathSync(packageJson);
+  }
+
+  let directory = path.dirname(source);
+  for (let depth = 0; depth < 4; depth += 1) {
+    const packageJson = path.join(directory, "package.json");
+    if (existsSync(packageJson)) {
+      const manifest = readJsonObject(
+        packageJson,
+        "selected Codex package launcher is unsupported",
+      );
+      if (manifest.name === "@openai/codex") {
+        const bin = typeof manifest.bin === "string"
+          ? manifest.bin
+          : objectValue(manifest.bin)?.codex;
+        if (typeof bin !== "string") {
+          throw new Error("selected Codex package launcher is unsupported");
+        }
+        const declaredLauncher = realpathSync(path.resolve(directory, bin));
+        if (declaredLauncher !== source) {
+          throw new Error("selected Codex package launcher is unsupported");
+        }
+        return realpathSync(packageJson);
+      }
+    }
+    directory = path.dirname(directory);
+  }
+  throw new Error("selected Codex package launcher is unsupported");
+}
+
+function resolvePinnedCodexNativeLeaf(packageJson: string): string {
+  const manifest = readJsonObject(
+    packageJson,
+    "selected Codex package launcher is unsupported",
+  );
+  const version = pinnedCodexVersion();
+  if (manifest.name !== "@openai/codex" || manifest.version !== version) {
+    throw new Error("selected Codex package launcher is not the pinned version");
+  }
+  const suffix = `${process.platform}-${process.arch}`;
+  const platformPackage = `@openai/codex-${suffix}`;
+  const expectedPlatformVersion = `${version}-${suffix}`;
+  const optionalDependencies = objectValue(manifest.optionalDependencies);
+  if (
+    optionalDependencies?.[platformPackage]
+      !== `npm:@openai/codex@${expectedPlatformVersion}`
+  ) {
+    throw new Error("selected Codex package launcher does not support this platform");
+  }
+
+  let platformPackageJson: string;
+  try {
+    platformPackageJson = createRequire(packageJson).resolve(
+      `${platformPackage}/package.json`,
+    );
+  } catch {
+    throw new Error("selected Codex platform package is not installed");
+  }
+  const resolvedPlatformPackageJson = realpathSync(platformPackageJson);
+  const platformManifest = readJsonObject(
+    resolvedPlatformPackageJson,
+    "selected Codex platform package metadata is invalid",
+  );
+  if (
+    platformManifest.name !== "@openai/codex"
+    || platformManifest.version !== expectedPlatformVersion
+  ) {
+    throw new Error("selected Codex platform package metadata is invalid");
+  }
+
+  const platformRoot = path.dirname(resolvedPlatformPackageJson);
+  const vendorRoot = path.join(platformRoot, "vendor");
+  const vendorState = lstatSync(vendorRoot);
+  if (!vendorState.isDirectory() || vendorState.isSymbolicLink()) {
+    throw new Error("selected Codex platform package vendor layout is invalid");
+  }
+  const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
+  const candidates: string[] = [];
+  for (const entry of readdirSync(vendorRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const candidate = path.join(vendorRoot, entry.name, "bin", binaryName);
+    if (!existsSync(candidate)) continue;
+    const state = lstatSync(candidate);
+    if (!state.isFile() || state.isSymbolicLink()) {
+      throw new Error("selected Codex native payload is not a regular file");
+    }
+    accessSync(candidate, constants.X_OK);
+    const resolved = realpathSync(candidate);
+    if (!pathIsStrictDescendant(platformRoot, resolved)) {
+      throw new Error("selected Codex native payload escaped its package");
+    }
+    if (!isNativeExecutableForCurrentPlatform(resolved)) {
+      throw new Error("selected Codex native payload is not platform-native");
+    }
+    candidates.push(resolved);
+  }
+  if (candidates.length !== 1) {
+    throw new Error("selected Codex platform package has ambiguous native payload");
+  }
+  return candidates[0];
+}
+
+function resolveCodexWorkerNativeSource(selectedExecutable: string): string {
+  const source = realpathSync(selectedExecutable);
+  const state = lstatSync(source);
+  if (!state.isFile() || state.isSymbolicLink()) {
+    throw new Error("selected Codex executable is not a regular file");
+  }
+  accessSync(source, constants.X_OK);
+  if (isNativeExecutableForCurrentPlatform(source)) return source;
+  return resolvePinnedCodexNativeLeaf(codexPackageManifestForLauncher(source));
+}
+
+export function materializeCodexWorkerExecutable(
   selectedExecutable: string,
   worktree: string,
   outputDirectory: string,
@@ -1239,12 +1432,7 @@ function materializeCodexWorkerExecutable(
   if (!pathIsStrictDescendant(logicalWorktree, logicalOutput)) {
     throw new Error("worker output directory must stay inside the issue worktree");
   }
-  const source = realpathSync(selectedExecutable);
-  const sourceState = lstatSync(source);
-  if (!sourceState.isFile() || sourceState.isSymbolicLink()) {
-    throw new Error("selected Codex executable is not a regular file");
-  }
-  accessSync(source, constants.X_OK);
+  const source = resolveCodexWorkerNativeSource(selectedExecutable);
 
   const physicalWorktreeBeforeCreate = realpathSync(logicalWorktree);
   let existingParent = path.dirname(logicalOutput);

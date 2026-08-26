@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,6 +72,7 @@ import {
   mergedIssueClosureAction,
   mergedPullRequestForClosure,
   loadedRunnerControlsMatch,
+  materializeCodexWorkerExecutable,
   normalizeParentReviewArchive,
   primaryAdvanceRequiresRestart,
   recoverablePullRequestBody,
@@ -81,6 +83,7 @@ import {
   requireImplementationCompletion,
   requiredPullRequestCheckState,
   renderTerminalRepairHandoffBody,
+  resolveCodexExecutable,
   resolveReviewBaselineState,
   reusableRepairPhase,
   restoreRecoveredHandoffBeforeWorktreeRecovery,
@@ -3978,12 +3981,11 @@ try {
     expect(parseEventLog("not-json\n")).toBeNull();
   });
 
-  it("launches a private workspace-local copy of the selected Codex executable and cleans it", async () => {
+  it("passes through an already-native executable, launches its private copy, and cleans it", async () => {
     if (process.platform === "win32") return;
     const hostRoot = mkdtempSync(path.join(tmpdir(), "frog-worker-host-"));
     const worktree = mkdtempSync(path.join(tmpdir(), "frog-worker-worktree-"));
-    const hostBin = path.join(hostRoot, "bin");
-    const sourceExecutable = path.join(hostBin, "codex");
+    const sourceExecutable = process.execPath;
     const outputDirectory = path.join(
       worktree,
       "audit-packages",
@@ -3992,18 +3994,12 @@ try {
     const localExecutable = path.join(outputDirectory, "bin", "codex");
     const launchedPath = path.join(worktree, "worker-launched-path");
     try {
-      mkdirSync(hostBin, { recursive: true });
-      writeFileSync(sourceExecutable, [
-        "#!/bin/sh",
-        'if [ "${FROG_FAKE_CODEX_REEXEC:-}" != "1" ]; then',
-        '  FROG_FAKE_CODEX_REEXEC=1 exec "$0" "$@"',
-        "fi",
-        'test -x "$0" || exit 9',
-        'printf "%s\\n" "$0" > "$PWD/worker-launched-path"',
-        "IFS= read -r mode || true",
-        'test "$mode" != "fail" || exit 7',
+      writeFileSync(path.join(worktree, "exec"), [
+        'const fs = require("node:fs");',
+        'const mode = fs.readFileSync(0, "utf8").trim();',
+        'fs.writeFileSync("worker-launched-path", `${process.execPath}\n`);',
+        'process.exit(mode === "fail" ? 7 : 0);',
       ].join("\n"));
-      chmodSync(sourceExecutable, 0o755);
       const sourceHash = createHash("sha256")
         .update(readFileSync(sourceExecutable))
         .digest("hex");
@@ -4034,7 +4030,9 @@ try {
         );
         expect(result).toEqual({ status: expectedStatus, timedOut: false });
         expect(observedStart).toBe(true);
-        expect(readFileSync(launchedPath, "utf8").trim()).toBe(localExecutable);
+        expect(readFileSync(launchedPath, "utf8").trim()).toBe(
+          path.join(realpathSync(worktree), path.relative(worktree, localExecutable)),
+        );
         expect(existsSync(outputDirectory)).toBe(false);
       };
       await runCase("success", 0);
@@ -4046,23 +4044,202 @@ try {
     }
   });
 
+  it("materializes the real pinned package launcher as its platform-native leaf and initializes codex exec safely", () => {
+    if (process.platform === "win32") return;
+    const launcher = path.join(
+      repositoryRoot,
+      "packages",
+      "assistant-engine",
+      "node_modules",
+      ".bin",
+      "codex",
+    );
+    expect(existsSync(launcher)).toBe(true);
+    const worktree = mkdtempSync(path.join(tmpdir(), "frog-worker-pinned-codex-"));
+    const outputDirectory = path.join(
+      worktree,
+      "audit-packages",
+      "frog-autofix-worker",
+    );
+    const previousPath = process.env.PATH;
+    try {
+      process.env.PATH = path.dirname(launcher);
+      const selectedExecutable = resolveCodexExecutable(repositoryRoot);
+      expect(selectedExecutable).toBe(realpathSync(launcher));
+
+      const packageJson = realpathSync(path.join(
+        repositoryRoot,
+        "packages",
+        "assistant-engine",
+        "node_modules",
+        "@openai",
+        "codex",
+        "package.json",
+      ));
+      const manifest = JSON.parse(readFileSync(packageJson, "utf8")) as {
+        optionalDependencies?: Record<string, string>;
+        version?: string;
+      };
+      const suffix = `${process.platform}-${process.arch}`;
+      const platformPackage = `@openai/codex-${suffix}`;
+      expect(manifest.optionalDependencies?.[platformPackage]).toBe(
+        `npm:@openai/codex@${manifest.version}-${suffix}`,
+      );
+      const platformPackageJson = realpathSync(
+        createRequire(packageJson).resolve(`${platformPackage}/package.json`),
+      );
+      const vendorRoot = path.join(path.dirname(platformPackageJson), "vendor");
+      const binaryName = "codex";
+      const nativeLeaves = readdirSync(vendorRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+        .map((entry) => path.join(vendorRoot, entry.name, "bin", binaryName))
+        .filter((candidate) => existsSync(candidate) && statSync(candidate).isFile());
+      expect(nativeLeaves).toHaveLength(1);
+      const nativeLeaf = realpathSync(nativeLeaves[0]);
+
+      const materialized = materializeCodexWorkerExecutable(
+        selectedExecutable,
+        worktree,
+        outputDirectory,
+      );
+      const materializedHash = createHash("sha256")
+        .update(readFileSync(materialized))
+        .digest("hex");
+      expect(materializedHash).toBe(
+        createHash("sha256").update(readFileSync(nativeLeaf)).digest("hex"),
+      );
+      expect(materializedHash).not.toBe(
+        createHash("sha256")
+          .update(readFileSync(selectedExecutable))
+          .digest("hex"),
+      );
+
+      const workerHome = path.join(outputDirectory, "home");
+      const workerTmp = path.join(outputDirectory, "tmp");
+      mkdirSync(workerHome, { mode: 0o700, recursive: true });
+      mkdirSync(workerTmp, { mode: 0o700, recursive: true });
+      const initializationArguments = buildCodexWorkerArguments({
+        lastMessageFile: path.join(outputDirectory, "last-message.txt"),
+        worktree,
+      });
+      initializationArguments[initializationArguments.length - 1] = "--help";
+      const initialization = spawnSync(materialized, initializationArguments, {
+        cwd: worktree,
+        encoding: "utf8",
+        env: {
+          CI: "1",
+          CODEX_HOME: workerHome,
+          HOME: workerHome,
+          LANG: "C",
+          LC_ALL: "C",
+          NO_COLOR: "1",
+          PATH: "/usr/bin:/bin",
+          TERM: "dumb",
+          TMPDIR: workerTmp,
+        },
+        timeout: 30_000,
+      });
+      expect(initialization.error).toBeUndefined();
+      expect(initialization.signal).toBeNull();
+      expect(initialization.status, initialization.stderr).toBe(0);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(worktree, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed for an unsupported Codex launcher", () => {
+    if (process.platform === "win32") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-worker-unsupported-launcher-"));
+    const worktree = path.join(root, "worktree");
+    const sourceExecutable = path.join(root, "bin", "codex");
+    const outputDirectory = path.join(
+      worktree,
+      "audit-packages",
+      "frog-autofix-worker",
+    );
+    try {
+      mkdirSync(path.dirname(sourceExecutable), { recursive: true });
+      mkdirSync(worktree, { recursive: true });
+      writeFileSync(sourceExecutable, "#!/bin/sh\nexit 0\n");
+      chmodSync(sourceExecutable, 0o755);
+      expect(() => materializeCodexWorkerExecutable(
+        sourceExecutable,
+        worktree,
+        outputDirectory,
+      )).toThrow("selected Codex package launcher is unsupported");
+      expect(existsSync(outputDirectory)).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed when a pinned package launcher has an ambiguous native payload", () => {
+    if (process.platform === "win32") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-worker-ambiguous-launcher-"));
+    const worktree = path.join(root, "worktree");
+    const nodeModules = path.join(root, "node_modules");
+    const launcher = path.join(nodeModules, ".bin", "codex");
+    const packageRoot = path.join(nodeModules, "@openai", "codex");
+    const suffix = `${process.platform}-${process.arch}`;
+    const platformPackage = `@openai/codex-${suffix}`;
+    const platformRoot = path.join(nodeModules, ...platformPackage.split("/"));
+    const outputDirectory = path.join(
+      worktree,
+      "audit-packages",
+      "frog-autofix-worker",
+    );
+    try {
+      mkdirSync(path.dirname(launcher), { recursive: true });
+      mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
+      mkdirSync(platformRoot, { recursive: true });
+      mkdirSync(worktree, { recursive: true });
+      writeFileSync(launcher, "#!/bin/sh\nexit 0\n");
+      chmodSync(launcher, 0o755);
+      writeFileSync(path.join(packageRoot, "bin", "codex.js"), "#!/usr/bin/env node\n");
+      writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
+        bin: { codex: "bin/codex.js" },
+        name: "@openai/codex",
+        optionalDependencies: {
+          [platformPackage]: `npm:@openai/codex@0.149.1-${suffix}`,
+        },
+        version: "0.149.1",
+      }));
+      writeFileSync(path.join(platformRoot, "package.json"), JSON.stringify({
+        name: "@openai/codex",
+        version: `0.149.1-${suffix}`,
+      }));
+      for (const triple of ["first-target", "second-target"]) {
+        const leaf = path.join(platformRoot, "vendor", triple, "bin", "codex");
+        mkdirSync(path.dirname(leaf), { recursive: true });
+        copyFileSync(process.execPath, leaf);
+        chmodSync(leaf, 0o755);
+      }
+      expect(() => materializeCodexWorkerExecutable(
+        launcher,
+        worktree,
+        outputDirectory,
+      )).toThrow("selected Codex platform package has ambiguous native payload");
+      expect(existsSync(outputDirectory)).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("rejects worker output symlink escapes without touching outside paths", async () => {
     if (process.platform === "win32") return;
     const root = mkdtempSync(path.join(tmpdir(), "frog-worker-boundary-"));
     const worktree = path.join(root, "worktree");
-    const hostBin = path.join(root, "host-bin");
-    const sourceExecutable = path.join(hostBin, "codex");
+    const sourceExecutable = process.execPath;
     const outputParent = path.join(worktree, "audit-packages");
     const outputDirectory = path.join(outputParent, "frog-autofix-worker");
     const outsideRoot = path.join(root, "outside");
     const outsideSentinel = path.join(outsideRoot, "sentinel");
     try {
       mkdirSync(worktree, { recursive: true });
-      mkdirSync(hostBin, { recursive: true });
       mkdirSync(outputParent, { recursive: true });
       mkdirSync(outsideRoot, { recursive: true });
-      writeFileSync(sourceExecutable, "#!/bin/sh\nexit 0\n");
-      chmodSync(sourceExecutable, 0o755);
       writeFileSync(outsideSentinel, "outside\n");
 
       await expect(

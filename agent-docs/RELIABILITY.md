@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 
 ## Local Frog autofix scheduling
 
@@ -88,8 +88,12 @@ Last verified: 2026-08-25
   and still owns, and retains cleanup/lock ownership until the group—not merely
   its leader—disappears. ReviewGPT and CI instructions impose their own
   three-hour waits; an individual Codex child is bounded to two hours. The
-  parent launches that child through a private copy of the exact PATH-selected
-  Codex executable inside the existing ignored worker output root. That copy,
+  parent launches that child through a private copy of the native executable
+  selected by PATH. A native selection passes through; the pinned
+  `@openai/codex` launcher resolves through its declared current-platform package
+  to exactly one regular executable `vendor/<target>/bin/codex` leaf, and any
+  unsupported, unpinned, missing, or ambiguous launcher fails closed. Only that
+  leaf is copied into the existing ignored worker output root. The copy,
   synthetic home, temporary directory, and last-message output share one cleanup
   owner and remain until the process group is reaped, then are removed in a
   `finally` path for both successful and failed worker execution.

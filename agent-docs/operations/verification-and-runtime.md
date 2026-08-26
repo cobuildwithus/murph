@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -863,10 +863,15 @@ an explicit Frog script allowlist that excludes the GitHub Actions-owned
 `scripts/frog-pr-context.ts` on direct/rename/copy paths, and fixed content-free
 foreground admission/implementation/review/check/merge progress with an
 explicit success terminal line. A macOS
-permission smoke must also initialize the workspace-local copy of the exact
-PATH-selected Codex executable, apply the exact native worker profile, and prove
-an in-worktree read/write succeeds while outside-root read/write and a network
-request fail:
+permission smoke must also initialize the workspace-local native Codex copy,
+apply the exact native worker profile, and prove an in-worktree read/write
+succeeds while outside-root read/write and a network request fail. Focused
+coverage must point PATH at the real pinned
+`packages/assistant-engine/node_modules/.bin/codex` launcher, prove the copied
+bytes equal the package's unique current-platform `vendor/<target>/bin/codex`
+leaf rather than the launcher, and start the actual `codex exec` command surface
+with the same strict permission/config arguments in a synthetic credential-free
+environment that requires no network or developer-specific path:
 
 ```sh
 pnpm exec vitest run scripts/frog-autofix.test.ts \
