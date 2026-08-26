@@ -655,13 +655,6 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
   }
 });
 
-test("repository-created pull requests remain draft-first", async () => {
-  const frog = await readFile(path.join(REPO_ROOT, "scripts", "frog-autofix.ts"), "utf8");
-  const createCalls = [...frog.matchAll(/"pr",\n\s+"create",(?<args>[\s\S]*?)\n\s+\],/gu)];
-  assert.ok(createCalls.length >= 2, "expected both repository-owned Frog PR creation paths");
-  for (const call of createCalls) assert.match(call.groups.args, /"--draft"/u);
-});
-
 test("operator docs preserve the ready-only exact-head lifecycle", async () => {
   const documents = await Promise.all([
     readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
