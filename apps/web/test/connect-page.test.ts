@@ -50,6 +50,7 @@ vi.mock("@/src/components/ui/dialog", () => {
     DialogContent: ({
       children,
       className,
+      inert,
       showCloseButton = true,
     }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
       createElement(
@@ -57,6 +58,7 @@ vi.mock("@/src/components/ui/dialog", () => {
         {
           className,
           "data-dialog-content": "true",
+          "data-dialog-inert": inert ? "true" : "false",
         },
         children,
         showCloseButton
@@ -108,6 +110,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedMurphContactOptions: vi.fn(),
   routerRefresh: vi.fn(),
+  searchParams: null as URLSearchParams | null,
 }));
 
 vi.mock("next/navigation", async (importOriginal) => {
@@ -116,6 +119,7 @@ vi.mock("next/navigation", async (importOriginal) => {
   return {
     ...actual,
     useRouter: () => ({ refresh: mocks.routerRefresh }),
+    useSearchParams: () => mocks.searchParams,
   };
 });
 
@@ -146,6 +150,7 @@ vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
 }));
 
 beforeEach(() => {
+  mocks.searchParams = null;
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValue({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -848,6 +853,297 @@ test("ConnectSourcesGrid opens source hashes in a dialog and clears them on clos
   assert.doesNotMatch(reopenedDialog.textContent ?? "", /Fitbit/u);
   assert.ok(reopenedDialog.querySelector('[data-connect-source="oura"]'));
   await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid hands a signed-out source dialog to auth without losing its continuation hash", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(ConnectSourcesGrid, {
+        authenticated: false,
+        sources: [
+          {
+            connectTarget: "fitbit",
+            description: "Sleep, activity, heart rate, and workouts.",
+            id: "fitbit",
+            logo: {
+              className: "size-11 object-contain",
+              height: 44,
+              src: "/fitbit.svg",
+              width: 44,
+            },
+            name: "Fitbit",
+          },
+        ],
+      }),
+    ),
+    {
+      location: {
+        hash: "#fitbit",
+        href: "https://example.test/connect#fitbit",
+        origin: "https://example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  const sourceDialog = rendered.container.querySelector("[data-dialog-open]");
+  assert.ok(sourceDialog);
+  const signInButton = sourceDialog.querySelector(
+    'button[aria-label="Sign in to Murph"]',
+  );
+  assert.ok(signInButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    signInButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(mocks.authDialogProps?.open, true);
+    assert.match(rendered.container.textContent ?? "", /Auth dialog/u);
+  });
+  assert.equal(rendered.container.querySelector("[data-dialog-open]"), null);
+  assert.equal(rendered.window.location.hash, "#fitbit");
+  assert.equal(rendered.replaceState.mock.calls.length, 0);
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps source-dialog errors visible until authorization owns the handoff", async () => {
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(Response.json(
+      {
+        error: {
+          code: "DEVICE_SYNC_CONNECT_FAILED",
+          message: "Oura could not open. Please try again.",
+        },
+      },
+      { status: 502 },
+    ))
+    .mockResolvedValueOnce(Response.json({
+      authorizationUrl: "https://oura.example.test/oauth/start",
+    }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectTarget: "oura",
+          description: "Sleep and recovery.",
+          id: "oura",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/oura.png",
+            width: 44,
+          },
+          name: "Oura",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: "#oura",
+        href: "https://example.test/connect#oura",
+        origin: "https://example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  const connectButton = rendered.container.querySelector(
+    '[data-dialog-open] button[aria-label="Connect Oura"]',
+  );
+  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    connectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    const sourceDialog = rendered.container.querySelector("[data-dialog-open]");
+    assert.ok(sourceDialog);
+    assert.match(
+      sourceDialog.querySelector("[role='alert']")?.textContent ?? "",
+      /Oura could not open\. Please try again\./u,
+    );
+  });
+  assert.equal(rendered.window.location.hash, "#oura");
+  assert.equal(rendered.replaceState.mock.calls.length, 0);
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.equal(connectButton.disabled, false);
+
+  await act(async () => {
+    connectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(
+      rendered.assign.mock.calls[0]?.[0],
+      "https://oura.example.test/oauth/start",
+    );
+  });
+  assert.equal(rendered.container.querySelector("[data-dialog-open]"), null);
+  assert.equal(rendered.window.location.hash, "");
+  assert.equal(rendered.replaceState.mock.calls.length, 1);
+  assert.equal(fetch.mock.calls.length, 2);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid replaces a focused source dialog with its connection preflight", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectTarget: "garmin",
+          description: "Workouts, sleep, stress, and heart rate.",
+          id: "garmin",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/garmin.png",
+            width: 44,
+          },
+          name: "Garmin",
+          requiresVitalDisclosure: true,
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: "#garmin",
+        href: "https://example.test/connect#garmin",
+        origin: "https://example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  const connectButton = rendered.container.querySelector(
+    '[data-dialog-open] button[aria-label="Connect Garmin"]',
+  );
+  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    connectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  const successorDialog = rendered.container.querySelector("[data-dialog-open]");
+  assert.ok(successorDialog);
+  assert.match(successorDialog.textContent ?? "", /Turn on Historical Data/u);
+  assert.equal(
+    successorDialog.querySelector('[data-connect-source="garmin"]'),
+    null,
+  );
+  assert.equal(rendered.window.location.hash, "");
+  assert.equal(rendered.replaceState.mock.calls.length, 1);
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps a failed focused Fitbit migration retry in its dialog", async () => {
+  const fetch = vi.fn(async () => Response.json(
+    {
+      error: {
+        code: "DEVICE_SYNC_DISCONNECT_FAILED",
+        message: "Fitbit migration could not be retried right now.",
+      },
+    },
+    { status: 502 },
+  ));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [createFitbitMigrationSource({
+        migrationRetryRequired: true,
+        migrationState: "cutover_ready",
+      })],
+    }),
+    {
+      location: {
+        hash: "#fitbit",
+        href: "https://example.test/connect#fitbit",
+        origin: "https://example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  const retryButton = rendered.container.querySelector(
+    '[data-dialog-open] button[aria-label="Retry Fitbit migration now"]',
+  );
+  assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    retryButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    const sourceDialog = rendered.container.querySelector("[data-dialog-open]");
+    assert.ok(sourceDialog);
+    assert.match(
+      sourceDialog.querySelector("[role='alert']")?.textContent ?? "",
+      /Fitbit migration could not be retried right now\./u,
+    );
+  });
+  assert.equal(rendered.window.location.hash, "#fitbit");
+  assert.equal(rendered.replaceState.mock.calls.length, 0);
+  assert.equal(retryButton.disabled, false);
+
+  await rendered.cleanup();
+});
+
+test("connect source card screenshot study makes its focused dialog inert", async () => {
+  mocks.searchParams = new URLSearchParams("connectSourceDialog=fitbit");
+  const { ConnectSourceCardStudy } = await import(
+    "../app/design/connect-source-card-study"
+  );
+  const markup = renderToStaticMarkup(createElement(ConnectSourceCardStudy));
+
+  assert.match(markup, /id="connect-source-dialog"/u);
+  assert.match(markup, /data-dialog-inert="true"/u);
 });
 
 test("sortConnectSourcesByConnectionState keeps connected sources first, then popularity order", async () => {

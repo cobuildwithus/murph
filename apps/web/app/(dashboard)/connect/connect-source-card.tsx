@@ -229,7 +229,7 @@ export function SourceCard({
               <AuthButton
                 aria-label="Sign in to Murph"
                 className="self-end"
-                onConnect={onSignIn}
+                onAuthRequired={onSignIn}
               >
                 Sign in
               </AuthButton>
