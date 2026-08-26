@@ -929,6 +929,13 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
         const commands = await readFile(commandLogPath, 'utf8')
         expect(commands.match(/--exercise /gu)).toHaveLength(3)
         expect(commands).not.toContain('workout exercise add')
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            exerciseNames: normalizedNames,
+            finalMessage: result.finalMessage,
+            scenario: 'clear-shared-head',
+          })}\n`,
+        )
 
         const commandCountBeforeAmbiguousTurn = commands
           .trim()
@@ -953,13 +960,27 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
 
         expect(workoutsAfterAmbiguousTurn).toHaveLength(1)
         expect(ambiguousResult.responseCard).toBeNull()
-        expect(ambiguousResult.finalMessage).toMatch(/\?/u)
+        expect(ambiguousResult.finalMessage.match(/\?/gu)).toHaveLength(1)
+        expect(ambiguousResult.finalMessage).toMatch(/3|three/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/sets?/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/standing/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/seated/iu)
         expect(ambiguousResult.finalMessage).toMatch(
-          /standing|seated|split|which exercise/iu,
+          /split|divide|allocate|how many.*(?:each|per)/iu,
+        )
+        expect(ambiguousResult.finalMessage).not.toMatch(
+          /what (?:is|does).*standing|what (?:is|does).*seated|what.*cable press|which exercise (?:do you mean|is this)/iu,
         )
         expect(ambiguousResult.runtimeIssueInputs).toEqual([])
         expect(ambiguousTurnCommands.join('\n')).not.toMatch(
           /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u,
+        )
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            finalMessage: ambiguousResult.finalMessage,
+            mutationCommands: ambiguousTurnCommands,
+            scenario: 'ambiguous-quantity-allocation',
+          })}\n`,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

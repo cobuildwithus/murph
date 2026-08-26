@@ -94,7 +94,14 @@ describe('assistant live workout card skill', () => {
       'expand each modifier into one distinct exercise by carrying the shared exercise head across the list',
     )
     expect(skill).toContain(
-      'Ask one narrow question only when the exercise identities or quantity allocation remain genuinely ambiguous',
+      'When one exact count clearly applies to every exercise in a coordinated list, apply it to each.',
     )
+    expect(skill).toContain(
+      'Ask one narrow question when the count conflicts, is not exact, or its allocation across multiple exercises is unclear.',
+    )
+    expect(skill).toContain(
+      'Ask one narrow question only when the exercise identities remain genuinely ambiguous',
+    )
+    expect(skill).not.toContain('count conflicts, could apply to multiple exercises')
   })
 })
