@@ -137,4 +137,6 @@ Updated: 2026-08-25
   focused suites: 14 selected tests passed across 7 test files.
 - Affected package typechecks passed for Core, Importers, Device Sync,
   Assistant Runtime, and Hosted Execution.
+- Hosted Web changelog component proof passed all 9 selected tests for the new
+  member-facing reliability item.
 - `scripts/frog list` reported no unresolved repository friction.
