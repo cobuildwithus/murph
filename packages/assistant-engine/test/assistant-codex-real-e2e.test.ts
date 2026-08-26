@@ -141,7 +141,10 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
-import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import {
+  extractCodexAssistantProviderUsage,
+  resolveAssistantProviderPrompt,
+} from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
@@ -317,6 +320,97 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
+
+describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+  it(
+    'answers from an early detail retained across sixty committed messages',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-cold-conversation-reconstruction-e2e-'),
+      )
+      const conversationHistoryMessages = Array.from(
+        { length: 30 },
+        (_, index) => index === 0
+          ? [
+              {
+                content:
+                  'For the synthetic packing checklist, put the train tickets in the cobalt folder.',
+                role: 'user' as const,
+              },
+              {
+                content:
+                  'Got it. The train tickets go in the cobalt folder.',
+                role: 'assistant' as const,
+              },
+            ]
+          : [
+              {
+                content:
+                  `Synthetic checklist item ${index + 1}: ${'routine packing note '.repeat(8)}`,
+                role: 'user' as const,
+              },
+              {
+                content:
+                  `Synthetic checklist response ${index + 1}: ${'routine confirmation '.repeat(8)}`,
+                role: 'assistant' as const,
+              },
+            ],
+      ).flat()
+      const userPrompt = 'Which folder did we pick for the train tickets?'
+
+      try {
+        const prompt = resolveAssistantProviderPrompt({
+          conversationHistoryMessages,
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+          }),
+          userPrompt,
+          workingDirectory,
+        })
+        expect(conversationHistoryMessages).toHaveLength(60)
+        expect(Buffer.byteLength(prompt, 'utf8')).toBeGreaterThan(12_000)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyMessages: conversationHistoryMessages.length,
+            promptBytes: Buffer.byteLength(prompt, 'utf8'),
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
+        expect(result.finalMessage).toMatch(/cobalt/iu)
+        expect(result.finalMessage).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
