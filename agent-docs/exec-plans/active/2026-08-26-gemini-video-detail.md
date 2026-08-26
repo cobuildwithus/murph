@@ -79,7 +79,16 @@ Updated: 2026-08-26
 
 ## Product UX Walkthrough
 
-- Pending implementation and direct journey proof.
+- The standard path keeps `sampling_mode` omitted/defaulted, sends one 1 FPS
+  request with medium thinking and no output cap, and returns natural
+  observational text.
+- The push-up-form path selects `detailed_motion` before egress, sends one 5 FPS
+  request with the same medium thinking and no output cap, and asks only the
+  focused form question.
+- Negative, unavailable, and failed outcomes remain honest without automatic
+  second-pass analysis, diagnosis language, or routine policy recitals.
+- Result: `Hold` only because the real-Codex lane reached its usage limit before
+  any provider action; deterministic owner and reply-shape proof passed.
 
 ## Verification
 
@@ -102,6 +111,20 @@ Updated: 2026-08-26
 - Assistant Engine, Hosted Execution, and Cloudflare package typechecks passed.
 - The focused changelog page test passed with 9 tests, and the Web typecheck
   passed for the content-only release note.
+- `pnpm provider-requests:guard` and `pnpm docs:drift` passed.
+- A pinned real Codex App Server capture against a hermetic Responses stub used
+  identical synthetic direct/group video turns, production code mode, and
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`. It serialized the complete
+  provider-visible `include`, `input`, `instructions`, `parallel_tool_calls`,
+  `text`, `tool_choice`, and `tools` fields, while excluding model selection,
+  reasoning, storage/streaming, service-tier, cache/account, and transport
+  metadata identically and normalizing volatile paths and identifiers.
+- The direct initial request changes from 25,107 tokens / 115,873 UTF-8 bytes
+  to 25,220 / 116,406: +113 tokens (+0.4501%) and +533 bytes (+0.4600%),
+  entirely from the focused video-tool description and sampling enum/schema.
+  The representative group request is byte-for-byte unchanged at 20,991
+  tokens / 97,243 bytes because the current private-direct authority boundary
+  does not expose the tool there.
 - The focused real-Codex journey compiled and started against the default local
   subscription, but the lane returned `ASSISTANT_CODEX_USAGE_LIMIT` before any
   provider action. Live reply review remains `Hold` until one authorized
