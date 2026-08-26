@@ -251,122 +251,108 @@ function parseJsonBloodTestResult(
   return parsed.data;
 }
 
-function matchesStaticIssue(
-  issue: ZodIssue,
-  code: ZodIssue["code"],
-  path: readonly PropertyKey[],
-): boolean {
-  return (
-    issue.code === code &&
-    issue.path.length === path.length &&
-    issue.path.every((segment, index) => segment === path[index])
-  );
+interface BloodTestIssueSelection {
+  issue: ZodIssue;
+  paths: readonly (readonly PropertyKey[])[];
 }
 
-function matchesReferenceRangeAlternatives(issue: ZodIssue): boolean {
-  if (
-    issue.code !== "invalid_union" ||
-    !matchesStaticIssue(issue, "invalid_union", ["referenceRange"]) ||
-    issue.errors.length !== 3
-  ) {
-    return false;
+function selectBloodTestIssues(
+  issue: ZodIssue,
+  prefix: readonly PropertyKey[] = [],
+): readonly BloodTestIssueSelection[] {
+  if (issue.code !== "invalid_union" || issue.errors.length === 0) {
+    return [{
+      issue,
+      paths: [[...prefix, ...issue.path]],
+    }];
   }
 
-  return (["low", "high", "text"] as const).every((field, index) =>
-    issue.errors[index]?.some((nestedIssue) =>
-      matchesStaticIssue(nestedIssue, "invalid_type", [field])) === true);
+  const unionPrefix = [...prefix, ...issue.path];
+  const branches = issue.errors.map((branch) =>
+    branch.flatMap((nestedIssue) =>
+      selectBloodTestIssues(nestedIssue, unionPrefix)));
+  const minimumErrorCount = Math.min(...branches.map((branch) => branch.length));
+  const bestBranches = branches.filter(
+    (branch) => branch.length === minimumErrorCount,
+  );
+  if (bestBranches.length === 1) return bestBranches[0];
+
+  const paths = bestBranches
+    .flatMap((branch) => branch)
+    .flatMap((selection) => selection.paths)
+    .filter((path, index, allPaths) =>
+      allPaths.findIndex((candidate) =>
+        bloodTestPathsMatch([candidate], [path])) === index);
+  return [{ issue, paths }];
 }
 
-function matchesMissingResultAlternative(issue: ZodIssue): boolean {
-  return (
-    matchesStaticIssue(issue, "invalid_type", ["value"]) ||
-    matchesStaticIssue(issue, "invalid_type", ["textValue"])
-  );
+function bloodTestPathsMatch(
+  actual: readonly (readonly PropertyKey[])[],
+  expected: readonly (readonly PropertyKey[])[],
+): boolean {
+  return actual.length === expected.length && expected.every((expectedPath) =>
+    actual.some((actualPath) =>
+      actualPath.length === expectedPath.length &&
+      actualPath.every((segment, index) => segment === expectedPath[index])));
+}
+
+function commonBloodTestPath(
+  paths: readonly (readonly PropertyKey[])[],
+): readonly PropertyKey[] {
+  const firstPath = paths[0] ?? [];
+  const mismatch = firstPath.findIndex((segment, index) =>
+    paths.some((path) => path[index] !== segment));
+  return mismatch === -1 ? firstPath : firstPath.slice(0, mismatch);
 }
 
 function bloodTestResultValidationRecovery(
   issues: readonly ZodIssue[],
   occurrence: number,
 ) {
-  const resultUnion = issues.find(
-    (issue) =>
-      issue.code === "invalid_union" &&
-      matchesStaticIssue(issue, "invalid_union", []) &&
-      issue.errors.length > 0,
+  const selections = issues.flatMap((issue) => selectBloodTestIssues(issue));
+  const concreteSelections = selections.filter(
+    (selection) => selection.issue.code !== "invalid_union",
   );
+  const recoverySelections = concreteSelections.length > 0
+    ? concreteSelections : selections;
+  const soleSelection = recoverySelections.length === 1
+    ? recoverySelections[0] : undefined;
+  const flagValues = soleSelection?.issue.code === "invalid_value"
+    ? soleSelection.issue.values : undefined;
+  let message = "Invalid --result blood-test analyte payload.";
 
-  if (resultUnion?.code === "invalid_union") {
-    if (
-      resultUnion.errors.every((branch) =>
-        branch.some((issue) =>
-          matchesStaticIssue(issue, "invalid_value", ["flag"])) &&
-        branch.every(
-          (issue) =>
-            matchesStaticIssue(issue, "invalid_value", ["flag"]) ||
-            matchesReferenceRangeAlternatives(issue) ||
-            matchesMissingResultAlternative(issue),
-        ))
-    ) {
-      return {
-        message: `Set flag to one of: ${BLOOD_TEST_RESULT_FLAGS.join(", ")}.`,
-        issues: [
-          publicValidationIssue(
-            { code: "invalid_value" },
-            ["result", occurrence, "flag"],
-          ),
-        ],
-      };
-    }
-
-    if (
-      resultUnion.errors.every((branch) =>
-        branch.some(matchesReferenceRangeAlternatives) &&
-        branch.every(
-          (issue) =>
-            matchesReferenceRangeAlternatives(issue) ||
-            matchesMissingResultAlternative(issue),
-        ))
-    ) {
-      return {
-        message: "Provide at least one of low, high, or text.",
-        issues: [
-          publicValidationIssue(
-            { code: "invalid_union" },
-            ["result", occurrence, "referenceRange"],
-          ),
-        ],
-      };
-    }
-
-    if (
-      resultUnion.errors.length === 2 &&
-      resultUnion.errors[0]?.length === 1 &&
-      resultUnion.errors[1]?.length === 1 &&
-      matchesStaticIssue(resultUnion.errors[0][0], "invalid_type", ["value"]) &&
-      matchesStaticIssue(
-        resultUnion.errors[1][0],
-        "invalid_type",
-        ["textValue"],
-      )
-    ) {
-      return {
-        message: "Provide either value or textValue.",
-        issues: [
-          publicValidationIssue(
-            { code: "invalid_union" },
-            ["result", occurrence],
-          ),
-        ],
-      };
-    }
+  if (
+    soleSelection !== undefined &&
+    bloodTestPathsMatch(soleSelection.paths, [["value"], ["textValue"]])
+  ) {
+    message = "Provide either value or textValue.";
+  } else if (
+    soleSelection !== undefined &&
+    bloodTestPathsMatch(soleSelection.paths, [
+      ["referenceRange", "low"],
+      ["referenceRange", "high"],
+      ["referenceRange", "text"],
+    ])
+  ) {
+    message = "Provide at least one of low, high, or text.";
+  } else if (
+    soleSelection !== undefined &&
+    bloodTestPathsMatch(soleSelection.paths, [["flag"]]) &&
+    flagValues?.length === BLOOD_TEST_RESULT_FLAGS.length &&
+    BLOOD_TEST_RESULT_FLAGS.every((flag) => flagValues.includes(flag))
+  ) {
+    message = `Set flag to one of: ${BLOOD_TEST_RESULT_FLAGS.join(", ")}.`;
   }
 
   return {
-    message: "Invalid --result blood-test analyte payload.",
-    issues: issues.map((issue) =>
+    message,
+    issues: recoverySelections.map((selection) =>
       publicValidationIssue(
-        issue,
-        bloodTestResultPublicPath(issue.path, occurrence),
+        selection.issue,
+        bloodTestResultPublicPath(
+          commonBloodTestPath(selection.paths),
+          occurrence,
+        ),
       )),
   };
 }
@@ -457,6 +443,7 @@ function bloodTestResultPublicPath(
       case "text":
         return ["result", occurrence, "referenceRange", nestedField];
     }
+    return ["result", occurrence, "referenceRange"];
   }
   switch (field) {
     case "analyte":

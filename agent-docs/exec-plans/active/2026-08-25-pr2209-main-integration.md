@@ -45,6 +45,20 @@ generic projector, validation framework, or recovery state owner.
 - Exact corrected-head production assembly passes all eight parity probes. The
   Vault CLI is 9,509,571 / 9,519,180 bytes with an 805-byte entry and
   25,155-byte static closure; runner total is 11,346,915 / 11,393,617 bytes.
+- The next full-snapshot audit found that the blood-test command's manual Zod
+  union branch-count matcher could misclassify an invalid supplied
+  `referenceRange.low` as a missing range and collapse fixed-field failures to
+  the result root. The accepted correction selects the least-error union
+  branch, preserves each concrete issue leaf, deduplicates only tied
+  alternatives, and collapses those alternatives to their common finite
+  parent. It deletes 13 net production lines and adds no shared parser,
+  reflection layer, sanitizer, projector, retry owner, or state.
+- Prepared runtime generation, all 24 blood-test save cases, CLI typecheck, CLI
+  package-shape verification, and `git diff --check` pass. The built-CLI proof
+  covers malformed `referenceRange.low`, analyte, slug, unit, simultaneous
+  fixed leaves, missing value/text alternatives, a genuinely empty reference
+  range, and invalid flags. Every case retains value non-echo and zero ledger
+  writes.
 
 ## Round-four retrospective
 
@@ -95,6 +109,6 @@ generic projector, validation framework, or recovery state owner.
    prepared/package-shape checks, docs gates, and canonical runner parity proof.
 4. Push the exact candidate, retarget the PR to `main`, update the PR contract,
    and run a sensitive full ReviewGPT round with the prior finding ledger.
-   [done through the round-three finding and local correction]
+   [done through the next full-snapshot finding and local correction]
 5. Resolve accepted findings, close the plan, admit the exact head to required
    CI, prove a clean current-base merge, merge, and retire the worktree.

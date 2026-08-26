@@ -1337,11 +1337,68 @@ test("blood-test save reports known duplicate link fields without echoing values
   }
 });
 
-test("built CLI reports blood-test alternatives and enum choices without echoing values or writing", async () => {
+test("built CLI reports finite blood-test fields and alternatives without echoing values or writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-repair-alternatives-",
   );
   const cases = [
+    {
+      privateValue: "private-reference-low",
+      result: {
+        analyte: "Synthetic analyte",
+        value: 45,
+        referenceRange: { low: "private-reference-low" },
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.referenceRange.low",
+      code: "invalid_type",
+    },
+    {
+      privateValue: "private-analyte-marker",
+      result: {
+        analyte: "private-analyte-marker".repeat(12),
+        value: 45,
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.analyte",
+      code: "too_big",
+    },
+    {
+      privateValue: "private slug marker",
+      result: {
+        analyte: "Synthetic analyte",
+        slug: "private slug marker",
+        value: 45,
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.slug",
+      code: "invalid_format",
+    },
+    {
+      privateValue: "private-unit-marker",
+      result: {
+        analyte: "Synthetic analyte",
+        value: 45,
+        unit: "private-unit-marker".repeat(5),
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.unit",
+      code: "too_big",
+    },
+    {
+      privateValue: "private-multiple-fields-marker",
+      result: {
+        analyte: "private-multiple-fields-marker".repeat(12),
+        value: 45,
+        unit: "private-multiple-fields-marker".repeat(5),
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.analyte",
+      code: "too_big",
+      additionalFieldErrors: [
+        { path: "result.1.unit", code: "too_big" },
+      ],
+    },
     {
       privateValue: "private-missing-result-marker",
       result: { analyte: "private-missing-result-marker" },
@@ -1398,15 +1455,21 @@ test("built CLI reports blood-test alternatives and enum choices without echoing
       assert.equal(result.error?.code, "invalid_option", entry.path);
       assert.equal(result.error?.stage, "validation", entry.path);
       assert.equal(result.error?.message, entry.message, entry.path);
-      assert.deepEqual(result.error?.fieldErrors, [
-        {
-          path: entry.path,
-          code: entry.code,
+      const expectedFields = [
+        { path: entry.path, code: entry.code },
+        ...("additionalFieldErrors" in entry
+          ? entry.additionalFieldErrors ?? []
+          : []),
+      ];
+      assert.deepEqual(
+        result.error?.fieldErrors,
+        expectedFields.map((field) => ({
+          ...field,
           message: "This field is invalid.",
           expected: "",
           received: "invalid",
-        },
-      ]);
+        })),
+      );
       assert.equal(JSON.stringify(result).includes(entry.privateValue), false, entry.path);
       assert.equal(
         await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
