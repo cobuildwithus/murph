@@ -12,6 +12,7 @@ import {
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
+import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
 import { GrowthSponsorships } from "../(dashboard)/ops/growth/growth-sponsorships";
 import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
 import { ReferralLinkUsage } from "../(dashboard)/ops/growth/referral-link-usage";
@@ -71,6 +72,23 @@ const DAILY_SERIES = GROWTH_DATES.map((date, index) => ({
   newMembers: 2 + ((index * 3) % 8),
   trialStarts: 1 + ((index * 2) % 5),
 }));
+
+const GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: GROWTH_DATES.map((date, index) => ({
+    conversions: index === 16 || index === 22
+      ? 1
+      : index === 28
+        ? 2
+        : 0,
+    date,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
+const EMPTY_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: GROWTH_DATES.map((date) => ({ conversions: 0, date })),
+  total: 0,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
 
 const REFERRAL_LINK_DAILY_SERIES = GROWTH_DATES.map((date, index) => {
   const claims = index === GROWTH_DATES.length - 1
@@ -398,6 +416,24 @@ export function GrowthScorecardStudy() {
           messageSeries={MESSAGE_SERIES}
           monthlyRevenueSeries={MONTHLY_REVENUE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}
+        />
+      </div>
+      <div id="growth-group-private-conversions">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Group to private conversion log
+        </div>
+        <GroupPrivateConversions
+          conversions={GROUP_PRIVATE_CONVERSIONS}
+          titleId="design-growth-group-private-conversions-title"
+        />
+      </div>
+      <div id="growth-group-private-conversions-empty">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Group to private conversion log · empty
+        </div>
+        <GroupPrivateConversions
+          conversions={EMPTY_GROUP_PRIVATE_CONVERSIONS}
+          titleId="design-growth-group-private-conversions-empty-title"
         />
       </div>
       <div id="growth-referral-link-usage">

@@ -2457,6 +2457,17 @@ Last verified: 2026-08-23
   additional same-date recovery attempt but is not the cron's retry guarantee.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
+- Group-to-private growth attribution reuses that same snapshot pass and its
+  already decoded, identity-resolved group messages. For each resolved real
+  member in the bounded 14-day retained-message window, one set-based read
+  compares the earliest retained group receipt with the first canonical
+  `member.activated` receipt; one conditional batch update sets a nullable
+  member-owned tracking timestamp only when the group receipt came first. The
+  marker stores no message, sender, or group identifier, follows the member's
+  existing deletion lifecycle, and remains stable after message content
+  retires. This is sequence-based attribution with a retention-limited initial
+  backfill, not causal proof; failures do not block snapshot capture and retry
+  only while the source evidence remains retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the
