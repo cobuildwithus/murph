@@ -52,6 +52,9 @@ shared error projector and no partial writes or submitted-value echo.
   fractional heart rate and incompatible units. Focused proof covers a later
   import index, non-echo, zero samples/batches/audits, and the unchanged success
   path; importer, Vault-usecase, and CLI tests and typechecks pass.
+- Exact corrected-head production assembly passes all eight parity probes. The
+  Vault CLI is 9,503,331 / 9,508,867 bytes with an 805-byte entry and
+  25,155-byte static closure; runner total is 11,336,664 / 11,393,617 bytes.
 
 ## Design
 
