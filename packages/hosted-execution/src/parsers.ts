@@ -49,6 +49,7 @@ import type {
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationPromptProfile,
   HostedExecutionGroupContextHandoffNotification,
+  HostedExecutionOperatorTaskNotification,
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   HostedExecutionPrivateAssistantAskCompletionNotification,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
@@ -1821,6 +1822,14 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.notificationPromptProfile`,
               ),
         }),
+    ...(record.operatorTask === undefined
+      ? {}
+      : {
+          operatorTask: parseHostedExecutionOperatorTaskNotification(
+            record.operatorTask,
+            `${label}.operatorTask`,
+          ),
+        }),
     ...(record.privateAssistantAskCompletion === undefined
       ? {}
       : {
@@ -1841,6 +1850,23 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionOperatorTaskNotification(
+  value: unknown,
+  label: string,
+): HostedExecutionOperatorTaskNotification {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, ["expiresAt", "taskId"], label);
+  const expiresAt = requireString(record.expiresAt, `${label}.expiresAt`);
+  const date = new Date(expiresAt);
+  if (!Number.isFinite(date.getTime()) || date.toISOString() !== expiresAt) {
+    throw new TypeError(`${label}.expiresAt must be a canonical timestamp.`);
+  }
+  return {
+    expiresAt,
+    taskId: requireString(record.taskId, `${label}.taskId`),
   };
 }
 

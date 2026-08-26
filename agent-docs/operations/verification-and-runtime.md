@@ -258,10 +258,19 @@ reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
+If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
+any provider action and an explicitly authorized absolute alternate path is
+already available, rerun that same focused journey once with
+`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. The runner selects that home's
+existing auth and config without copying credentials. Do not auto-discover
+profiles or cycle through homes. If no authorized alternate path is available,
+or if the supplied alternate is also blocked, record `Hold`.
+
 Assistant Engine's lower-level opt-in live Codex journeys still use
 `MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
 credential, while explicit subscription mode uses the normal local Codex home
-for auth and is developer-local rather than hermetic CI evidence. The
+by default and may select one alternate local home for auth. It remains
+developer-local rather than hermetic CI evidence. The
 generated-image avatar journey must exercise the production tool contracts in
 three natural turns: launch with a truthful wait acknowledgement, trusted
 completion media attachment with no group mutation, and a later explicit
@@ -842,113 +851,6 @@ only when a non-PR task would otherwise require a broader local command. The
 text-only docs/process fast path remains the default for eligible Markdown-only
 docs work unless the change will be pushed directly to a shared default branch.
 
-The local Frog autofix entrypoint uses `scripts/frog-autofix scan` for a
-non-repairing live admission proof. The command may fetch `origin/main` and
-query public issue metadata, but it must not create durable autofix state or a
-worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
-implementation proof includes the real leader-first descendant timeout,
-parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
-tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
-conflict rejection, both sides of real Git renames/copies, product-runtime
-merge pausing, complete trusted prompt-preset and delegated specialist-lens
-coverage, final-retrospective
-handoff and queue advancement, same-named fork/different-operator rejection,
-closed-unmerged and descendant-head handoff continuity, terminal versus
-transient required-check classification, conflict disposition, real native
-two-contender serialization, operator-created but foreign-edited baseline/PASS/
-open-and-closed-handoff rejection with safe body recovery, parent-local
-baseline plus exact/ancestor human-handoff preservation when a foreign body
-edit is composed with an unchanged or newer same-repository branch head,
-pre-tooling handoff return with dirty bytes unchanged and no child/model/push,
-remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
-implementation prompts whose archives contain only the exact immutable
-`origin/main` friction task blob and path/digest manifest, and do not request or
-use a mutable GitHub-content connector,
-parent-verified worker authority that rejects candidate task/Frog-skill/
-worker-template or root/nested `AGENTS.md` changes, including ignored untracked
-instructions, before and after child execution; validates protected paths from
-Git's parsed patch targets; and binds the task, skill, and instruction
-paths/digests into the child prompt,
-task edit/move/delete/replacement/binding-drift rejection after long waits and
-at both merge fences including final-scope ref movement, fresh post-wait task
-reads, trusted remote-no-PR task provenance, terminal missing or
-rejected patch/response and edit-only worker outcomes that publish a fixed-body
-empty-tree handoff without candidate bytes or a second implementation, local
-terminal recovery before remote synchronization, foreign deterministic-branch
-preservation, cross-process pre/post-neutral-body recovery using the immutable
-first-reviewed candidate, exact current-neutral/candidate and branch-
-nonexistence lease authorization, plus
-retryable post-worker authority infrastructure after the parent commit,
-unchanged-PR ancestor normalization that preserves the pre-remote PR-head
-marker while discarding unpushed candidate bytes without a push, non-ancestor
-and projection-drift rejection, and next-issue advancement,
-100-plus-record
-cursor pagination before parent cardinality, clean post-commit/pre-first-push
-resume without a second implementation request or child, exact parent-local
-body/head provenance for push-before-PR recovery plus rejection of seeded or
-stale-tracking remote-no-PR branches, issue-authority revocation before push and
-before draft creation, mandatory foul-play prompt ordering, unrelated hostile
-evidence ignore behavior, boundary-weakening task/candidate refusal,
-parent-local review-body archive binding with changed digest/editor/body/head
-rejection before and after each model wait and before metadata persistence,
-fresh trusted-review-control comparison after each canonical model wait and at
-both finalization refreshes with exact-head handoff on drift,
-loaded-runner-version comparison against each of those freshly fetched refs,
-with unrelated main movement allowed and exact-head handoff before response
-acceptance, merge, or issue closure on loaded authority drift,
-candidate-and-runner-bound persisted PASS recovery that rejects legacy or
-drifted evidence across restarts, plus frozen scriptless primary dependency
-reconciliation before the mutating parent loads, dependency-free exact-process-
-group supervision with a fixed deadline and confirmed descendant cleanup before
-native-lock release, foreign numeric process-group reuse refusal, bootstrap
-loaded-runner coverage, lockfile coverage in
-the trusted review-control inventory, and a real macOS install/`RunAtLoad`
-handoff that waits only at the generated launcher boundary, admits exactly once
-after prompt gate release, times out behind a longer repair, and retains the
-same native-gate inode,
-operator-handoff preservation during a blocked model review, non-closing exact
-issue binding across short and full-URL forms plus parent-only post-merge
-closure and never-closed retry that refuses deliberate reopen,
-strict kind-specific specialist/final response structure, one final
-implementation completion marker, and production composition of implementation
-and canonical preliminary/final ZIPs with exact task/skill bytes and manifests
-plus fail-closed omission proof and filename-independent exactly-one bounded
-regular-archive selection with stale parent-owned archive replacement on retry,
-an explicit Frog script allowlist that excludes the GitHub Actions-owned
-`scripts/frog-pr-context.ts` on direct/rename/copy paths, and fixed content-free
-foreground admission/implementation/review/check/merge progress with an
-explicit success terminal line. A macOS
-permission smoke must also apply the exact native worker profile and prove an
-in-worktree read/write succeeds while an outside-root read and a network
-request fail:
-
-```sh
-pnpm exec vitest run scripts/frog-autofix.test.ts \
-  --config scripts/vitest.config.ts --no-coverage
-pnpm exec vitest run packages/cli/test/release-script-coverage-audit.test.ts \
-  --config packages/cli/vitest.workspace.ts --no-coverage
-bash -n scripts/frog-autofix scripts/package-audit-context-full.sh
-scripts/frog-autofix verify-permissions
-scripts/frog-autofix scan
-```
-
-After the owning PR merges, installation proof must run from the exact clean
-primary checkout: install with the intended Codex home, confirm `status`
-reports `loaded=yes` and `interval_seconds=7200`, inspect the generated plist,
-launcher, relative locators, lock, and bounded event log for owner-only modes
-and identifier/credential absence. Confirm the stable native gate remains while
-the JSON owner record clears and that `RunAtLoad` records a prompt first
-admission rather than disappearing behind installation, then invoke one manual
-`run`. When no
-committed eligible binding exists, success is a no-worker event. When one does
-exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
-end proof; a locally successful child exit alone is not completion evidence.
-For a local-agent-only test issue, require automatic merge plus closure. For any
-diff outside the narrow local-agent classifier, require a ready reviewed PR and
-open issue, then confirm the runner reports `awaiting_human_merge` without a
-merge or close call.
-
-
 ## Hosted Temporal Replay Proof
 
 Private `cobuildwithus/murph-cloud` owns the Temporal Workflows, Activities,
@@ -1233,7 +1135,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
 - A dedicated onboarding entrypoint exists at `node packages/cli/dist/bin.js onboard ...`; it is routed from `packages/cli/src/bin.ts` instead of the main `vault-cli` manifest so installer-style host provisioning can happen without reshaping the data-plane command graph.
 - The built CLI package shape exposes a `murph` bin alias that targets the same built entrypoint as `vault-cli`; `murph`, `murph --help`, and `murph onboard ...` route to the onboarding surface, while other commands continue through the main operator surface. Interactive TTY onboarding now opens a compact assistant/channel/wearable stepper with inline readiness badges for Telegram, Garmin, Oura, Strava, and WHOOP, restores canonical wearable selections from `bank/preferences.json`, can prompt for missing runtime credentials for the current onboarding run without persisting them, persists the selected wearable providers back into that canonical preferences singleton, opens any selected wearable connect flow that is ready before handoff, defers scheduled-update preset installation until the operator later binds an explicit outbound destination, and then routes to `assistant run` when a configured auto-reply channel remains enabled. The repo's release flow now publishes only `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core` under one shared version and one git tag. Workspace-private runtime and owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/runtime-state`, `@murphai/assistantd`, and `@murphai/device-syncd` remain installable from a checkout and are bundled into the relevant public tarballs when needed. The tag-driven GitHub Actions publish job relies on npm trusted publishing for that smaller package set, and npm trust is package-level rather than repo-level, so live npm publication depends on each public `@murphai/*` package being bound to `cobuildwithus/murph` and `.github/workflows/release.yml`. The repo ships `pnpm release:trust:github` to bootstrap those package-level bindings from an npm-authenticated maintainer shell; if a package is already bound incorrectly in npm, maintainers must revoke that package's existing trust entry before rerunning the bootstrap helper.
 - Repo-local host bootstrap is handled by `scripts/setup-host.sh`, which delegates to the existing Homebrew-based `scripts/setup-macos.sh` path on macOS and can reuse or download Node 24.14.1+ locally on Linux before activating `pnpm` through corepack, installing workspace dependencies, building the workspace, and delegating to the built setup entrypoint. `scripts/setup-macos.sh` still hard-fails off macOS, `scripts/setup-linux.sh` hard-fails off non-Linux hosts, and `--dry-run` remains a wrapper-only planning mode for those shell entrypoints.
-- GitHub Actions host-support CI now runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface but splits it into parallel jobs for release metadata, clean workspace build, typecheck, artifact hygiene, doc gardening, package coverage shards, app verification, fixture coverage, and the production runner-bundle byte budget, with a final `Release checks (ubuntu)` aggregator so required-check naming stays stable and the budget cannot remain an optional side check. The bundle lane is authoritative only on native Linux x86_64: it installs from the frozen lockfile and runs the full production `runner:bundle` command rather than an assemble-only or preflight-skipping substitute. Pull-request runs measure the current merge candidate, verify its second parent is the exact event head and its first parent is the base branch resolved directly from `origin`, then recheck that base after assembly; a stale or moving `main` therefore fails instead of certifying an obsolete comparison. Local macOS byte totals are diagnostic and must not be used to reset the deployment budget. The Ubuntu app-verification shard alone provisions loopback PostgreSQL 17 and injects the dedicated supplement-search test database variable; this runs the transactional 100+ case search corpus in PR and `main` CI without changing the unreachable hosted-web build database placeholder used by the rest of the app verification.
+- GitHub Actions host-support CI now runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface but splits it into parallel jobs for release metadata, clean workspace build, typecheck, artifact hygiene, doc gardening, package coverage shards, app verification, fixture coverage, and the production runner-bundle byte budget, with a final `Release checks (ubuntu)` aggregator so required-check naming stays stable and the budget cannot remain an optional side check. The bundle lane is authoritative only on native Linux x86_64: pinned checkout actions place the exact candidate and its direct `HEAD^1` parent in isolated sibling paths, each checkout installs from its own frozen lockfile, and each runs the full production `runner:bundle` command rather than an assemble-only or preflight-skipping substitute. Pull requests use GitHub's merge candidate and prove its event candidate/base/head identities at that boundary; `main` pushes use the exact pushed commit and its direct first parent. The ordinary bundler retains absolute entry-chunk and static-startup-closure caps, while the CI owner rejects total-output growth only above `max(96 KiB, floor(1% of exact base total))`. Local macOS byte totals remain diagnostic rather than budget authority. The Ubuntu app-verification shard alone provisions loopback PostgreSQL 17 and injects the dedicated supplement-search test database variable; this runs the transactional 100+ case search corpus in PR and `main` CI without changing the unreachable hosted-web build database placeholder used by the rest of the app verification.
 - Repo-local source-resolved workspace aliases are intentionally limited to the package allowlists exported from `config/workspace-source-resolution.ts`; within those allowlists, Vitest subpaths resolve only through explicit workspace entries plus package-declared public exports rather than wildcarding arbitrary internals. Packages outside that helper stay on their existing emitted-JS-shaped import conventions until a caller explicitly opts them into source resolution.
 - `packages/device-syncd` exposes the local HTTP control plane for wearable OAuth/webhook/reconcile flows, binds `127.0.0.1` by default unless `DEVICE_SYNC_HOST` overrides it, rejects non-loopback control-route callers, requires a bearer token for `/providers/*`, `/accounts/*`, and other control routes, can expose only `/oauth/*/callback` plus `/webhooks/*` on a separate `DEVICE_SYNC_PUBLIC_HOST`/`PORT` listener when public ingress is needed, stores tokens outside the vault, serializes active jobs per account to avoid refresh-token races, and only allows cross-origin post-connect redirects when `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS` includes the requesting origin. Murph's CLI-managed launcher may provide the default control token, state DB path, and loopback base URL for the selected vault, but it still talks to the daemon strictly over that localhost HTTP boundary.
 - The hosted integration control-plane entrypoint lives under `apps/web`; Prisma CLI configuration now lives in `apps/web/prisma.config.ts` for Prisma 7, the hosted production Next build uses the supported Webpack fallback with its explicit build worker and memory optimizations while interactive development remains on Turbopack, interactive hosted `next dev` uses `apps/web/.next-dev`, cold-boot smoke uses `apps/web/.next-smoke`, hosted-web modules that import the shared Prisma client now require `DATABASE_URL` at module load so missing DB env fails fast, package and app typecheck bootstrap the exact tracked Next route-type stub import before `tsc` so clean clones do not depend on leftover generated files, browser-authenticated device-sync routes trust only short-lived request-bound signed assertions from a trusted auth edge/proxy and consume each assertion nonce once to reject replay, hosted onboarding uses Privy as fresh proof for login, linking, and security-sensitive identity operations while successful completion mints a first-party opaque app session stored by hashed token in `HostedWebSession`; settings, account, billing, export, and deletion use that Murph app session, and identity sync routes require both the app session and fresh same-member Privy proof. Hosted onboarding stores only invite/member/billing metadata plus embedded-wallet linkage rather than canonical health data, hosted onboarding Checkout uses subscription mode while authenticated direct paid Pulse/Edge members may separately create fixed one-time usage-credit Checkout Sessions in Settings, hosted Stripe webhook ingress records minimal event receipts before authoritative subscription or usage-credit reconciliation, imports successful hosted assistant usage rows into `hosted_ai_usage` after the hosted commit succeeds so Postgres remains the canonical usage and append-only credit-ledger owner with no active Stripe meter cron, and blocks subsequent usage-bearing work when included plus purchased capacity is exhausted, hosted onboarding Linq ingress stores chat and recipient-line routing in `HostedMemberRouting`, records quota counters in `HostedLinqDailyState`, and appends canonical `conversation.message` ingress instead of using legacy `/api/linq` binding/event queues, and every Cloudflare-bound hosted execution mutation now appends canonical external ingress in the same transaction as the originating onboarding and device-sync state change so ordering, dedupe, mailbox sequencing, and checkpoint fencing stay web-owned instead of flowing through `execution_outbox`. Repo-local Next/Vitest resolution for workspace packages is centralized in `config/workspace-source-resolution.ts` and intentionally limited to the helper's explicit package lists plus package-declared public export entries.

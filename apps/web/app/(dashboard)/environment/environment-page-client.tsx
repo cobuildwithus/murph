@@ -13,7 +13,7 @@ import {
   normalizeHabitatCityOrRegion,
 } from "@murphai/contracts";
 import Image from "next/image";
-import { LoaderCircle, ShieldCheck } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -494,11 +494,7 @@ export function EnvironmentShell({
   return (
     <div className="flex w-full flex-col gap-10">
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <PageHeader
-          eyebrow="Habitat"
-          title="Your environment"
-          description="What Murph knows about your home, and what to check next."
-        />
+        <PageHeader title="Your environment" />
         {actions ? (
           <div className="flex shrink-0 items-center gap-5 sm:pb-1">
             {actions}
@@ -528,22 +524,16 @@ export function EnvironmentEmptyState({
     >
       <div className="grid lg:grid-cols-[6fr_5fr]">
         <div className="flex flex-col px-6 py-8 sm:px-8 sm:py-10 lg:px-10 lg:py-12">
-          <p className="flex items-center gap-2 text-base font-medium text-primary sm:text-sm">
-            <ShieldCheck
-              className="size-5 shrink-0 sm:size-4"
-              aria-hidden="true"
-            />
-            Private to you
-          </p>
           <h2
             id="environment-empty-title"
-            className="mt-7 max-w-[19ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-foreground"
+            className="max-w-[19ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-foreground"
           >
-            See how your home supports your sleep, air and focus.
+            Fill in your report to review your setup for sleep, air quality and
+            focus.
           </h2>
           <p className="mt-5 max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground">
-            Talk through one short topic at a time. Murph saves each clear
-            answer before moving on.
+            Answer one short topic at a time. Murph turns your answers into a
+            grade and practical next checks.
           </p>
 
           <div className="mt-8 flex flex-col items-start gap-4">
@@ -556,7 +546,7 @@ export function EnvironmentEmptyState({
                 processing
                   ? "Saving report…"
                   : script.flow === "walkthrough"
-                  ? "Start report"
+                  ? "Fill in my report"
                   : script.flow === "fill-gaps"
                   ? "Continue report"
                   : "Update by voice"
@@ -766,7 +756,6 @@ export function EnvironmentReport({
 
 export function EnvironmentCaptureCard({
   contactOptions,
-  coverage,
   known,
   script,
   onVoiceAccepted,
@@ -784,8 +773,6 @@ export function EnvironmentCaptureCard({
     (sum, topic) => sum + (topic.focus?.length ?? 0),
     0,
   );
-  const topicCount = script.topics.length;
-
   return (
     <section className="flex flex-col gap-5 rounded-xl border border-border bg-card px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
       <div className="min-w-0">
@@ -794,21 +781,17 @@ export function EnvironmentCaptureCard({
             ? "All current details covered"
             : known === 0
             ? "Build your environment report in one take"
-            : coverage < 50
-            ? "Complete the picture"
-            : "Fill the remaining gaps"}
+            : missing === 1
+            ? "Fill in the remaining detail"
+            : `Fill in the remaining ${missing} details`}
         </h2>
-        <p className="mt-1 max-w-[68ch] text-pretty text-base text-muted-foreground sm:text-sm">
-          {updating
-            ? "Tell Murph if something changes at home or in your workspace."
-            : known === 0
-            ? "Talk through sleep, air, light, recovery and work. Murph saves each topic as you go."
-            : `${missing} ${
-                missing === 1 ? "detail" : "details"
-              } missing · ${topicCount} short ${
-                topicCount === 1 ? "topic" : "topics"
-              }`}
-        </p>
+        {updating || known === 0 ? (
+          <p className="mt-1 max-w-[68ch] text-pretty text-base text-muted-foreground sm:text-sm">
+            {updating
+              ? "Tell Murph if something changes at home or in your workspace."
+              : "Talk through sleep, air, light, recovery and work. Murph saves each topic as you go."}
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-3">
         <EnvironmentVoiceCapture
@@ -823,7 +806,7 @@ export function EnvironmentCaptureCard({
               : updating
               ? "Update by voice"
               : known === 0
-              ? "Start report"
+              ? "Fill in my report"
               : "Continue report"
           }
           triggerVariant={updating ? "outline" : "default"}
@@ -913,7 +896,7 @@ function environmentUpdateSummary(
       ? `Added ${state.factsAdded} details.`
       : "Murph saved your changes.";
   if (state.remainingDetails === 0) {
-    return `${added} Your current report has no remaining gaps.`;
+    return `${added} Your current report has no remaining details.`;
   }
   return `${added} ${state.remainingDetails} ${
     state.remainingDetails === 1 ? "detail is" : "details are"

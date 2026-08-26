@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  memberActionOutcomeV1Schema,
   memberActionRequestV1Schema,
   parseMemberActionRequestV1,
 } from "../src/member-action.ts";
@@ -130,6 +131,56 @@ describe("member action contract", () => {
     expect(memberActionRequestV1Schema.safeParse({
       ...validRequest(),
       actionId: "retry-1",
+    }).success).toBe(false);
+  });
+
+  it("accepts one bounded workout snapshot request and canonical card result", () => {
+    const snapshotRequest = {
+      action: {
+        kind: "workout.live.snapshot",
+        presentation: {
+          title: "Strength",
+          subtitle: null,
+          footer: "Log each set.",
+          workout: {
+            version: 1,
+            state: "active",
+            exercises: [{
+              name: "Leg press",
+              sets: [{ status: "pending", target: "8 reps", actual: null }],
+            }],
+          },
+        },
+        version: 1,
+        workoutBinding: "a".repeat(64),
+      },
+      actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      requestedAt: "2026-08-12T15:00:00.000Z",
+      schemaVersion: 1,
+    };
+    expect(memberActionRequestV1Schema.parse(snapshotRequest)).toEqual(
+      snapshotRequest,
+    );
+
+    const outcome = {
+      actionId: snapshotRequest.actionId,
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: null,
+      result: {
+        cardUrl: "https://www.withmurph.ai/#murph-card=abc_123",
+        kind: "workout.live.snapshot",
+        version: 1,
+      },
+      schemaVersion: 1,
+      status: "unchanged",
+    };
+    expect(memberActionOutcomeV1Schema.parse(outcome)).toEqual(outcome);
+    expect(memberActionOutcomeV1Schema.safeParse({
+      ...outcome,
+      result: {
+        ...outcome.result,
+        cardUrl: "https://example.com/#murph-card=abc_123",
+      },
     }).success).toBe(false);
   });
 

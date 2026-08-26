@@ -201,12 +201,10 @@ export async function readHostedRuntimeReconciliationFacts(
       prisma,
       userId: input.userId,
     }),
-    input.decisionSource === "status"
-      ? readPendingHostedEnvironmentInterviewMailboxItem({
-          prisma,
-          userId: input.userId,
-        })
-      : null,
+    readPendingHostedEnvironmentInterviewMailboxItem({
+      prisma,
+      userId: input.userId,
+    }),
   ]);
   const environmentInterviewPending = pendingEnvironmentInterview !== null;
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
@@ -698,6 +696,7 @@ function emitHostedRuntimeReconciliationFacts(event: {
     component: "hosted.orchestration.reconciliation",
     conversationLagPresent: hasHostedMailboxLag(event.facts.mailboxLag, "conversation"),
     decisionSource: event.request.decisionSource ?? "workflow",
+    environmentInterviewPending: event.facts.environmentInterviewPending,
     mailboxLagLaneCount: event.facts.mailboxLag.length,
     retryAtPresent: event.facts.blocked?.retryAt !== null
       && event.facts.blocked?.retryAt !== undefined,

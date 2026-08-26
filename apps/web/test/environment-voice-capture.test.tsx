@@ -81,7 +81,10 @@ import {
   summarizeEnvironmentInterviewCompletion,
   withoutSavedFields,
 } from "../app/(dashboard)/environment/environment-voice-capture";
-import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
+import {
+  buildEnvironmentVoiceScript,
+  type EnvironmentVoiceScript,
+} from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
 
 const SCRIPT: EnvironmentVoiceScript = {
@@ -838,6 +841,22 @@ test("tells the extractor how to read a checklist topic, a range, and imperial u
   assert.match(instructions, /an approximate single number/i);
   assert.match(instructions, /leaves the field unresolved and writes nothing/);
   assert.match(instructions, /Fahrenheit to Celsius/);
+});
+
+test("gives the extractor a deterministic precedence for multiple indoor smoke sources", () => {
+  const script = buildEnvironmentVoiceScript({});
+  const smokeTopic = script.topics.find((topic) =>
+    topic.fields?.some((field) => field.indicatorId === "smoke_sources"),
+  );
+  assert.ok(smokeTopic);
+
+  const instructions = buildTopicInstructions(smokeTopic, null, "en");
+
+  assert.match(
+    instructions,
+    /store smoking before fireplace before frequent_candles/,
+  );
+  assert.match(instructions, /Keep every additional source in the note/);
 });
 
 test("reports nothing left to ask when this session answered every field", () => {

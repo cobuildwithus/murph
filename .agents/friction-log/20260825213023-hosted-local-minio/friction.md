@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local Docker isolation drops macOS contexts and plugins'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2328'
 ---
 
 ## Expected Behavior
