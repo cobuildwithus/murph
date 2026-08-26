@@ -2138,9 +2138,8 @@ async function searchGenericProductLabels(
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          -- With FTS deliberately absent, PostgreSQL can use the GiST KNN
-          -- scan and stop after a fixed number of eligible names. The FTS
-          -- predicate runs only after this candidate set is materialized.
+          -- This GiST KNN branch runs only when indexed FTS found rows. The
+          -- mutually exclusive typo branch below owns no-FTS searches.
           ORDER BY name <->>> $1::text
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
@@ -2158,7 +2157,8 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM name_nearest_matches
           WHERE
-            ${stemmed ? `(
+            EXISTS (SELECT 1 FROM fts_index_matches)
+            AND ${stemmed ? `(
               to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
               OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
             )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
@@ -2211,10 +2211,31 @@ async function searchGenericProductLabels(
             upc,
             off_market,
             data_origin_priority
-          FROM name_nearest_matches
-          WHERE
-            NOT EXISTS (SELECT 1 FROM fts_matches)
-            AND name % $1::text
+          FROM (
+            SELECT
+              id,
+              canonical_key,
+              data_origin,
+              data_origin_id,
+              name,
+              brand,
+              upc,
+              off_market,
+              data_origin_priority
+            FROM ${tableSql}
+            WHERE
+              NOT EXISTS (SELECT 1 FROM fts_index_matches)
+              AND ($2::boolean OR off_market = false)
+              AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+              AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+              AND ${excludedDataOriginsSql}
+            -- Whole-name distance is exactly the ordering behind the trigram
+            -- threshold below, so eligible rows always precede ineligible
+            -- rows while the GiST KNN scan remains bounded.
+            ORDER BY name <-> $1::text
+            LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+          ) nearest_names
+          WHERE name % $1::text
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT

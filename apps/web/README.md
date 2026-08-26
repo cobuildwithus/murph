@@ -753,10 +753,12 @@ existing ranking path. Private food-name search uses a separate bounded
 retrieval contract for the roughly two-million-row foods corpus: it admits at
 most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
 nearest-name candidates before similarity scoring, canonical-key deduplication,
-and window sorting. Full-text name relevance and false-full-text typo recovery
-reuse that one materialized nearest-name set. The shared admissions preserve
-representative choice and canonical diversity across the established 5,000-row
-boundary fixture. Ranking is deterministic
+and window sorting. Exactly one GiST branch is realized: full-text searches use
+strict-word-nearest names, while no-FTS typo searches use whole-name distance
+and its matching whole-name threshold. That shared metric keeps eligible typo
+matches ahead of ineligible names before the cap. The bounded admissions
+preserve representative choice and canonical diversity across the established
+5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
 ranking. Exact IDs and UPCs continue to use direct lookup
 paths.

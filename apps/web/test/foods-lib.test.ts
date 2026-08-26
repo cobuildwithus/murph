@@ -345,7 +345,7 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain("trigram_matches AS MATERIALIZED");
     expect(searchCall?.text).toContain("trigram_candidates AS MATERIALIZED");
     expect(searchCall?.text).toContain(
-      "NOT EXISTS (SELECT 1 FROM fts_matches)",
+      "NOT EXISTS (SELECT 1 FROM fts_index_matches)",
     );
     const searchSql = searchCall?.text ?? "";
     const ftsIndexSql = searchSql.slice(
@@ -365,6 +365,9 @@ describe("foods query helpers", () => {
     expect(nameNearestSql).not.toContain("to_tsvector");
     expect(nameNearestSql).toContain("ORDER BY name <->>> $1::text");
     expect(ftsNearestSql).toContain("FROM name_nearest_matches");
+    expect(ftsNearestSql).toContain(
+      "EXISTS (SELECT 1 FROM fts_index_matches)",
+    );
     expect(ftsNearestSql).not.toContain("FROM foods");
     expect(searchCall?.text).toMatch(
       /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
@@ -379,7 +382,10 @@ describe("foods query helpers", () => {
       /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_index_matches[\s\S]*?SELECT \* FROM fts_nearest_matches/u,
     );
     expect(searchCall?.text).toMatch(
-      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?name % \$1::text/u,
+      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM \([\s\S]*?FROM foods[\s\S]*?NOT EXISTS \(SELECT 1 FROM fts_index_matches\)[\s\S]*?ORDER BY name <-> \$1::text\s*LIMIT 10000[\s\S]*?\) nearest_names\s*WHERE name % \$1::text/u,
+    );
+    expect(searchCall?.text).not.toMatch(
+      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches/u,
     );
     expect(searchCall?.text).not.toContain("trigram_nearest_matches");
     expect(searchCall?.text).not.toContain("fts_canonical_matches");
@@ -518,7 +524,7 @@ describe("foods query helpers", () => {
     );
     expect(searchCall?.text.match(
       /\(\$4::text\[\] IS NULL OR data_origin = ANY\(\$4::text\[\]\)\)/gu,
-    )).toHaveLength(3);
+    )).toHaveLength(4);
     expect(searchCall?.values).toEqual([
       "chicken breast cooked skinless",
       false,
