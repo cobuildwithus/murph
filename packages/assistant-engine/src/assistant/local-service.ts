@@ -2100,20 +2100,22 @@ export async function sendAssistantMessageLocal(
           if (draftWindowOutcome.kind === 'review') {
             providerRequestOrdinal = 1
             try {
-              const accepted = await acceptActiveTurnInput({
-                activeTurnInput: draftWindowOutcome.acceptedInput,
-                providerRequestAcceptedInputIds,
-                providerRequestOrdinal,
-                sessionId: currentSession.sessionId,
-              })
-              replyDeliveryContexts.push(
-                pickAssistantReplyDeliveryContext(currentInput),
-              )
+              if (draftWindowOutcome.acceptedInput) {
+                const accepted = await acceptActiveTurnInput({
+                  activeTurnInput: draftWindowOutcome.acceptedInput,
+                  providerRequestAcceptedInputIds,
+                  providerRequestOrdinal,
+                  sessionId: currentSession.sessionId,
+                })
+                replyDeliveryContexts.push(
+                  pickAssistantReplyDeliveryContext(currentInput),
+                )
+                acceptedInputIdsByDeliveryContextOrdinal[
+                  replyDeliveryContexts.length - 1
+                ] = accepted.acceptedInputItems.map((item) => item.id)
+              }
               providerRequestDeliveryContextBaseOrdinal =
                 replyDeliveryContexts.length - 1
-              acceptedInputIdsByDeliveryContextOrdinal[
-                providerRequestDeliveryContextBaseOrdinal
-              ] = accepted.acceptedInputItems.map((item) => item.id)
               currentSession = applyAssistantProviderTurnResumeInMemory({
                 providerResult,
                 session: currentSession,

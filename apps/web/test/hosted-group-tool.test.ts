@@ -917,7 +917,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "handoff",
-        context: "Sunny logged a 405 lb deadlift personal record today.",
+        context: "The member set a personal record today.",
         groupLabel: "100 Club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
       },
@@ -928,7 +928,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "100 Club",
       memberId: "member_self",
       originAssistantInputId: `ain_${"a".repeat(32)}`,

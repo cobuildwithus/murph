@@ -37,7 +37,15 @@ Internal control routes:
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
   the bound user's runtime. Both credentials receive the real accepted-or-retry
   result after start/wake intent is accepted, not after the runtime reaches
-  idle; the direct path does not hide that result behind Worker `waitUntil()`
+  idle; the direct path does not hide that result behind Worker `waitUntil()`.
+  The server-derived direct marker plus a valid direct-ingress attempt identity
+  lets foreground/default work exact-abort and replace active system-mailbox
+  work. Once the child acknowledges that abort, the runner keeps its outer
+  transport alive until the child settles its current atomic persistence
+  boundary; only then can the foreground replacement take the fence. A stale,
+  failed, or unavailable child abort keeps the existing fail-closed outer
+  cancellation. Callback-signed Temporal/default work retains the cooperative
+  wake-and-retry behavior.
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
   Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
   distinguishes those two existing callers; an empty legacy request remains

@@ -404,7 +404,7 @@ describe("runner bundle vault-cli esbuild step", () => {
   // Budget enforcement is unit-tested with injected budgets against synthetic
   // metafiles; the production call site inside bundleInstalledVaultCliBinary
   // uses the real constants against the real esbuild metafile.
-  it("fails the byte budgets with actual-vs-budget numbers and the largest inputs", () => {
+  it("fails the startup budgets with actual-vs-budget numbers and the largest inputs", () => {
     const metafile: Metafile = {
       inputs: {
         "node_modules/heavy-dep/index.js": { bytes: 700, imports: [] },
@@ -442,13 +442,12 @@ describe("runner bundle vault-cli esbuild step", () => {
       assertVaultCliBundleWithinBudgets(metafile, {
         entryBytes: 200,
         staticClosureBytes: 200,
-        totalBytes: 800,
       }),
     ).toThrow(
       new RegExp(
         [
-          "total output 1100B exceeds budget 800B",
-          ".*entry chunk \\.bundle/bin\\.js 300B exceeds budget 200B",
+          "entry chunk \\.bundle/bin\\.js 300B exceeds budget 200B",
+          ".*static startup closure 300B exceeds budget 200B",
           // Largest inputs listed in descending byte order.
           "[\\s\\S]*700B node_modules/heavy-dep/index\\.js",
           "[\\s\\S]*250B packages/cli/src/scoped-command\\.ts",
@@ -461,13 +460,12 @@ describe("runner bundle vault-cli esbuild step", () => {
       assertVaultCliBundleWithinBudgets(metafile, {
         entryBytes: 300,
         staticClosureBytes: 300,
-        totalBytes: 1100,
       }),
     ).toEqual({ entryBytes: 300, staticClosureBytes: 300, totalBytes: 1100 });
   });
 
-  it("locks the production total-byte budget at its exact boundary", () => {
-    const createMetafile = (lazyChunkBytes: number): Metafile => ({
+  it("reports total lazy output without enforcing an absolute total cap", () => {
+    const metafile: Metafile = {
       inputs: {},
       outputs: {
         ".bundle/bin.js": {
@@ -478,24 +476,19 @@ describe("runner bundle vault-cli esbuild step", () => {
           inputs: {},
         },
         ".bundle/chunk-lazy.js": {
-          bytes: lazyChunkBytes,
+          bytes: 20_000_000,
           exports: [],
           imports: [],
           inputs: {},
         },
       },
-    });
+    };
 
-    expect(
-      assertVaultCliBundleWithinBudgets(createMetafile(9_524_346)),
-    ).toEqual({
+    expect(assertVaultCliBundleWithinBudgets(metafile)).toEqual({
       entryBytes: 10_000,
       staticClosureBytes: 10_000,
-      totalBytes: 9_534_346,
+      totalBytes: 20_010_000,
     });
-    expect(() =>
-      assertVaultCliBundleWithinBudgets(createMetafile(9_524_347)),
-    ).toThrow(/total output 9534347B exceeds budget 9534346B/u);
   });
 
   it("rejects dynamic-to-static graph drift without relying on total size growth", () => {
@@ -520,7 +513,6 @@ describe("runner bundle vault-cli esbuild step", () => {
     const budgets = {
       entryBytes: 100,
       staticClosureBytes: 200,
-      totalBytes: 800,
     };
 
     expect(assertVaultCliBundleWithinBudgets(

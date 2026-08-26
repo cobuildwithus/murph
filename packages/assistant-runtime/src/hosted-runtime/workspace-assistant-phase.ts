@@ -319,9 +319,11 @@ const HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS = [
 ] as const;
 const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
+  "apply-member-action",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
+  "member.action.requested",
 ] as const;
 const HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
