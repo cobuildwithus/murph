@@ -1541,6 +1541,3 @@ export {
   usefulHistoricalSummaryCompletionCases,
   usefulHistoricalSummaryRecordByResource,
 };
-
-
-
