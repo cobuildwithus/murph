@@ -12,6 +12,7 @@ import {
 import {
   deleteExpiredHostedRuntimeLogs,
   deleteHostedRuntimeLogDataForUsers,
+  hostedRuntimeLogLockKey,
   hostedRuntimeLogSubjectKey,
   listHostedRuntimeLogs,
   listHostedRuntimeTurnTimingLogs,
@@ -181,86 +182,178 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     )).resolves.toMatchObject({ rowCount: 1 });
   });
 
-  it("deletes a row when append owns the subject lock first", async () => {
+  it("holds zero isolated clients while three primary reads stall at pool max two", async () => {
+    const isolatedPool = new PgPool({
+      connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
+      max: 2,
+    });
+    const sql = poolDatabase(isolatedPool);
+    const allAuthorityReadsEntered = deferred();
+    const releaseAuthorityReads = deferred();
+    let authorityReads = 0;
+    const appends = Array.from({ length: 3 }, (_, index) => {
+      const userId = `member_runtime_log_pool_stall_${String(index)}_${randomToken()}`;
+      rememberSubject(subjectKeys, userId);
+      return recordHostedRuntimeLogs({
+        database: sql,
+        entries: [runtimeEntry()],
+        isUserActive: async () => {
+          authorityReads += 1;
+          if (authorityReads === 3) {
+            allAuthorityReadsEntered.resolve();
+          }
+          await releaseAuthorityReads.promise;
+          return true;
+        },
+        userId,
+      });
+    });
+
+    try {
+      await allAuthorityReadsEntered.promise;
+      expect(isolatedPool.totalCount).toBe(0);
+      expect(isolatedPool.idleCount).toBe(0);
+      expect(isolatedPool.waitingCount).toBe(0);
+      releaseAuthorityReads.resolve();
+      await expect(Promise.all(appends)).resolves.toEqual([1, 1, 1]);
+    } finally {
+      releaseAuthorityReads.resolve();
+      await Promise.allSettled(appends);
+      await isolatedPool.end();
+    }
+  });
+
+  it("deletes a row when append owns the isolated subject lock first", async () => {
     const sql = requireDatabase(database);
     const userId = `member_runtime_log_append_first_${randomToken()}`;
     const subjectKey = rememberSubject(subjectKeys, userId);
-    const authorityEntered = deferred();
-    const releaseAuthority = deferred();
+    const appendLocked = deferred();
+    const releaseAppend = deferred();
 
     const append = recordHostedRuntimeLogs({
-      database: sql,
-      entries: [runtimeEntry()],
-      isUserActive: async () => {
-        authorityEntered.resolve();
-        await releaseAuthority.promise;
-        return true;
-      },
-      userId,
-    });
-    await authorityEntered.promise;
-
-    const deletion = deleteHostedRuntimeLogDataForUsers({
-      database: sql,
-      timeoutMs: 5_000,
-      userIds: [userId],
-    });
-    await nextTurn();
-    releaseAuthority.resolve();
-
-    await expect(append).resolves.toBe(1);
-    await expect(deletion).resolves.toBe(1);
-    await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
-  });
-
-  it("makes a delayed append recheck primary authority when deletion locks first", async () => {
-    const sql = requireDatabase(database);
-    const userId = `member_runtime_log_delete_first_${randomToken()}`;
-    const subjectKey = rememberSubject(subjectKeys, userId);
-    const deletionLocked = deferred();
-    const releaseDeletion = deferred();
-    let authorityChecks = 0;
-
-    const deletion = deleteHostedRuntimeLogDataForUsers({
       database: afterQuery(sql, async (text) => {
         if (!text.includes("pg_advisory_xact_lock")) {
           return;
         }
-        deletionLocked.resolve();
-        await releaseDeletion.promise;
+        appendLocked.resolve();
+        await releaseAppend.promise;
       }),
+      entries: [runtimeEntry()],
+      isUserActive: async () => true,
+      userId,
+    });
+    await appendLocked.promise;
+
+    const deletion = deleteHostedRuntimeLogDataForUsers({
+      database: sql,
       timeoutMs: 5_000,
       userIds: [userId],
     });
-    await deletionLocked.promise;
+    await nextTurn();
+    releaseAppend.resolve();
 
-    // This models the canonical primary suspension fence that commits before
-    // the receipt-owned isolated cleanup starts.
+    await expect(append).resolves.toBe(1);
+    await expect(deletion).resolves.toBe(1);
+    await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+    await expect(
+      countDeletionFences(requirePool(pool), subjectKey),
+    ).resolves.toBe(1);
+  });
+
+  it("drops a stale active append after deletion commits in the pre-check gap", async () => {
+    const sql = requireDatabase(database);
+    const userId = `member_runtime_log_delete_first_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
+    const appendConnectEntered = deferred();
+    const releaseAppendConnect = deferred();
+    let authorityChecks = 0;
+
     const append = recordHostedRuntimeLogs({
-      database: sql,
+      database: beforeConnect(sql, async () => {
+        appendConnectEntered.resolve();
+        await releaseAppendConnect.promise;
+      }),
       entries: [runtimeEntry()],
       isUserActive: async () => {
         authorityChecks += 1;
-        return false;
+        return true;
       },
       userId,
     });
-    await nextTurn();
-    expect(authorityChecks).toBe(0);
-
-    releaseDeletion.resolve();
-    await expect(deletion).resolves.toBe(0);
-    await expect(append).resolves.toBe(0);
+    await appendConnectEntered.promise;
     expect(authorityChecks).toBe(1);
+
+    // The append has already accepted primary authority but has not checked out
+    // an isolated client. Deletion can acquire, commit, and release the isolated
+    // subject lock before the append opens its transaction.
+    try {
+      await expect(deleteHostedRuntimeLogDataForUsers({
+        database: sql,
+        timeoutMs: 5_000,
+        userIds: [userId],
+      })).resolves.toBe(0);
+      await expect(
+        countDeletionFences(requirePool(pool), subjectKey),
+      ).resolves.toBe(1);
+    } finally {
+      releaseAppendConnect.resolve();
+    }
+
+    await expect(append).resolves.toBe(0);
     await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+  });
+
+  it("rolls back a timed-out cleanup and lets repeated deletion converge", async () => {
+    const postgres = requirePool(pool);
+    const sql = requireDatabase(database);
+    const userId = `member_runtime_log_timeout_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
 
     await expect(recordHostedRuntimeLogs({
       database: sql,
       entries: [runtimeEntry()],
-      isUserActive: async () => false,
+      isUserActive: async () => true,
       userId,
+    })).resolves.toBe(1);
+
+    const lockOwner = await postgres.connect();
+    await lockOwner.query("BEGIN");
+    await lockOwner.query(
+      "SELECT pg_advisory_xact_lock($1::bigint)",
+      [hostedRuntimeLogLockKey(subjectKey)],
+    );
+    try {
+      const timeoutError = await deleteHostedRuntimeLogDataForUsers({
+        database: sql,
+        timeoutMs: 1_500,
+        userIds: [userId],
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(timeoutError).toBeInstanceOf(Error);
+      expect(["55P03", "57014"]).toContain(
+        (timeoutError as { code?: string }).code,
+      );
+      await expect(countRows(postgres, subjectKey)).resolves.toBe(1);
+      await expect(countDeletionFences(postgres, subjectKey)).resolves.toBe(0);
+    } finally {
+      await lockOwner.query("ROLLBACK");
+      lockOwner.release();
+    }
+
+    await expect(deleteHostedRuntimeLogDataForUsers({
+      database: sql,
+      timeoutMs: 5_000,
+      userIds: [userId],
+    })).resolves.toBe(1);
+    await expect(deleteHostedRuntimeLogDataForUsers({
+      database: sql,
+      timeoutMs: 5_000,
+      userIds: [userId],
     })).resolves.toBe(0);
-    await expect(countRows(requirePool(pool), subjectKey)).resolves.toBe(0);
+    await expect(countRows(postgres, subjectKey)).resolves.toBe(0);
+    await expect(countDeletionFences(postgres, subjectKey)).resolves.toBe(1);
   });
 
   it("sorts overlapping multi-subject cleanup locks and avoids deadlock", async () => {
@@ -430,6 +523,24 @@ function timingEntry(input: {
   };
 }
 
+function beforeConnect(
+  database: HostedRuntimeLogSqlDatabase,
+  hook: () => Promise<void>,
+): HostedRuntimeLogSqlDatabase {
+  return {
+    async connect() {
+      await hook();
+      return database.connect();
+    },
+    async query<Row extends Record<string, unknown>>(
+      text: string,
+      values?: readonly unknown[],
+    ): Promise<HostedRuntimeLogSqlResult<Row>> {
+      return database.query<Row>(text, values);
+    },
+  };
+}
+
 function afterQuery(
   database: HostedRuntimeLogSqlDatabase,
   hook: (text: string, values: readonly unknown[]) => Promise<void>,
@@ -505,6 +616,21 @@ function poolDatabase(pool: Pool): HostedRuntimeLogSqlDatabase {
 async function countRows(pool: Pool, subjectKey: string): Promise<number> {
   const result = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM hosted_runtime_log WHERE subject_key = $1",
+    [subjectKey],
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
+
+async function countDeletionFences(
+  pool: Pool,
+  subjectKey: string,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `
+      SELECT count(*)::text AS count
+      FROM hosted_runtime_log_deletion_fence
+      WHERE subject_key = $1
+    `,
     [subjectKey],
   );
   return Number(result.rows[0]?.count ?? "0");

@@ -222,6 +222,7 @@ describe("hosted runtime log database migration", () => {
       deletionFenceMigration,
       cleanupMigration,
       contractMigration,
+      runtimeLogStore,
     ] = await Promise.all([
       readFile(path.join(appRoot, "prisma/runtime-logs/schema.prisma"), "utf8"),
       readFile(path.join(appRoot, "prisma/schema.prisma"), "utf8"),
@@ -240,6 +241,10 @@ describe("hosted runtime log database migration", () => {
       readFile(path.join(
         appRoot,
         "prisma/contract-migrations/20260807162546_drop_hosted_runtime_log_after_drain/migration.sql",
+      ), "utf8"),
+      readFile(path.join(
+        appRoot,
+        "src/lib/hosted-runtime-log/store.ts",
       ), "utf8"),
     ]);
 
@@ -268,6 +273,12 @@ describe("hosted runtime log database migration", () => {
     expect(deletionFenceMigration).not.toContain("REFERENCES");
     expect(deletionFenceMigration).not.toContain("DROP ");
     expect(deletionFenceMigration.match(/CREATE TABLE/gu)).toHaveLength(1);
+    expect(runtimeLogStore).toContain(
+      "ON CONFLICT (subject_key) DO NOTHING",
+    );
+    expect(runtimeLogStore).not.toContain(
+      "DELETE FROM hosted_runtime_log_deletion_fence",
+    );
     expect(cleanupMigration).toContain(
       'ADD COLUMN "runtime_logs_completed_at" TIMESTAMP(3);',
     );

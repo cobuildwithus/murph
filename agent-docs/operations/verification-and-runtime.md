@@ -1193,6 +1193,11 @@ the advisory budget.
   `pg_typeof(column)::text` when the column type matters, and only use
   `column AT TIME ZONE 'UTC'` when the query is intentionally converting a
   UTC-naive value into a PostgreSQL `timestamptz`.
+- For isolated hosted runtime-log authority and deletion-fence changes, run
+  `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_RUNTIME_LOG_POSTGRES=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-runtime-log-postgres-concurrency.test.ts`.
+  The proof requires a loopback PostgreSQL URL, creates a temporary migrated
+  logical database, and covers pool-max-two zero checkout, both race orderings,
+  timeout rollback, repeated deletion, reads, retention, and topology rejection.
 - The private `cobuildwithus/murph-cloud` repository owns the hosted Temporal
   worker's Render Blueprint, deployment workflow, production configuration, and
   integration check. This public repository retains the released contracts,

@@ -104,10 +104,9 @@ describe("dedicated hosted runtime log store", () => {
     expect(BigInt(lockKey)).toBeLessThan(2n ** 63n);
   });
 
-  it("locks, rechecks primary member authority, and writes one validated batch", async () => {
+  it("resolves primary authority before checkout, then locks and writes one validated batch", async () => {
     const userId = "member_runtime_logs_1";
     const subjectKey = hostedRuntimeLogSubjectKey(userId);
-    const isUserActive = vi.fn(async () => true);
     const database = new FakeSqlDatabase({
       clientResults: [
         {},
@@ -116,6 +115,10 @@ describe("dedicated hosted runtime log store", () => {
         { rowCount: 2 },
         {},
       ],
+    });
+    const isUserActive = vi.fn(async () => {
+      expect(database.connectCount).toBe(0);
+      return true;
     });
 
     const detailedEntry: HostedRuntimeLogEntry = {
@@ -219,8 +222,9 @@ describe("dedicated hosted runtime log store", () => {
     expect(database.calls).toHaveLength(0);
   });
 
-  it("validates the whole batch before opening a transaction", async () => {
+  it("validates the whole batch before reading primary authority or checking out", async () => {
     const database = new FakeSqlDatabase();
+    const isUserActive = vi.fn(async () => true);
     await expect(Reflect.apply(recordHostedRuntimeLogs, undefined, [{
       database,
       entries: [
@@ -230,17 +234,20 @@ describe("dedicated hosted runtime log store", () => {
           level: "fatal",
         },
       ],
-      isUserActive: async () => true,
+      isUserActive,
       userId: "member_runtime_logs_invalid",
     }])).rejects.toThrow(/level/u);
 
+    expect(isUserActive).not.toHaveBeenCalled();
     expect(database.connectCount).toBe(0);
   });
 
-  it("drops delayed batches when the primary member is suspended or gone", async () => {
-    const isUserActive = vi.fn(async () => false);
-    const database = new FakeSqlDatabase({
-      clientResults: [{}, {}, {}],
+  it("drops delayed batches before isolated checkout when the primary member is suspended or gone", async () => {
+    const database = new FakeSqlDatabase();
+    const isUserActive = vi.fn(async () => {
+      await Promise.resolve();
+      expect(database.connectCount).toBe(0);
+      return false;
     });
 
     await expect(recordHostedRuntimeLogs({
@@ -251,11 +258,9 @@ describe("dedicated hosted runtime log store", () => {
     })).resolves.toBe(0);
 
     expect(isUserActive).toHaveBeenCalledOnce();
-    expect(database.client.calls.map((call) => compactSql(call.text))).toEqual([
-      "BEGIN",
-      "SELECT pg_advisory_xact_lock($1::bigint)",
-      "COMMIT",
-    ]);
+    expect(database.connectCount).toBe(0);
+    expect(database.client.calls).toHaveLength(0);
+    expect(database.client.released).toBe(false);
   });
 
   it("locks subjects deterministically and deletes by full subject key", async () => {
@@ -340,7 +345,7 @@ describe("dedicated hosted runtime log store", () => {
     expect(timeoutValue).toMatch(/^[0-9]+ms$/u);
     const timeoutMs = Number(String(timeoutValue).replace(/ms$/u, ""));
     expect(timeoutMs).toBeGreaterThan(0);
-    expect(timeoutMs).toBeLessThanOrEqual(2_000);
+    expect(timeoutMs).toBeLessThanOrEqual(Math.floor(4_000 / 3));
     const lockSql = compactSql(database.client.calls[2]!.text);
     expect(lockSql).toContain("WITH ordered_locks AS MATERIALIZED");
     expect(lockSql).toContain(
@@ -352,6 +357,35 @@ describe("dedicated hosted runtime log store", () => {
     expect(compactSql(database.client.calls[4]!.text)).toContain(
       "DELETE FROM hosted_runtime_log",
     );
+  });
+
+  it("rolls back without deleting when deletion-fence persistence fails", async () => {
+    const database = new FakeSqlDatabase({
+      clientResults: [
+        {},
+        {},
+        { error: new Error("fence unavailable") },
+        {},
+      ],
+    });
+
+    await expect(deleteHostedRuntimeLogDataForUsers({
+      database,
+      userIds: ["member_runtime_logs_fence_failure"],
+    })).rejects.toThrow("fence unavailable");
+
+    expect(database.client.calls.map((call) => compactSql(call.text))).toEqual([
+      "BEGIN",
+      expect.stringContaining("WITH ordered_locks AS MATERIALIZED"),
+      expect.stringContaining(
+        "INSERT INTO hosted_runtime_log_deletion_fence",
+      ),
+      "ROLLBACK",
+    ]);
+    expect(database.client.calls.some((call) =>
+      compactSql(call.text).includes("DELETE FROM hosted_runtime_log")
+    )).toBe(false);
+    expect(database.client.released).toBe(true);
   });
 
   it("rolls back and releases the client when a diagnostic insert fails", async () => {
