@@ -585,6 +585,17 @@ consumer-first cutover live in
 
 ## Hosted Assistant Ask
 
+### Operator tasks
+
+Allowlisted Web operators may admit one member-bound `diagnostic` or
+`member_message` task. `HostedOperatorTask` owns only audit/status and the
+encrypted private diagnostic result. The existing encrypted system mailbox is
+the work queue: diagnostics reuse `assistant.ask.requested`, while messages
+reuse `assistant.notification.requested` and the ordinary transcript/outbox
+delivery path. The exported Web admission function is the single entry point
+for Ops, workflows, and future cron callers; callers supply a stable
+idempotency key rather than creating another scheduler or delivery owner.
+
 Assistant Ask is one typed request/reply primitive over the existing encrypted
 hosted mailbox. `assistant.ask.requested` carries one bounded question to an
 authorized target runtime, and `assistant.ask.completed` returns one bounded

@@ -2634,3 +2634,16 @@ one last-applied id is sufficient until its terminal outcome commits, without a
 second receipt store. Validated set removal uses the existing exact-workout
 canonical rewrite after full binding validation, while generic structural edits
 remain fail-closed against saved-set loss.
+
+## Hosted operator tasks
+
+One Web transaction writes the operator-task audit row and its encrypted
+mailbox item. Stable caller idempotency maps to one task and mailbox identity;
+the persisted request-shape digest makes replay with different authority or
+content fail closed. Runtime wake is only a post-commit hint. Diagnostics use
+the existing retrying detached Assistant Ask controller and idempotent
+completion callback. Messages reauthorize the task before provider work and at
+the existing pre-delivery hook, then mark the task complete only after exactly
+one queue-only delivery intent exists. The existing notification identity,
+route check, transcript commit, outbox dedupe, line-health, and provider retry
+owners remain the delivery state machine.
