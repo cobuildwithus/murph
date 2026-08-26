@@ -32,11 +32,15 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
    The guarded line sync backfills current env-configured lines and verifies at least one configured assignable DB line exists before DB-backed assignment code serves traffic. Provider inventory sync stays on the explicit operator/contact-card path so production deploys do not depend on the Linq inventory API.
 
-2. Wait until the new application build is live, then dry-run one bounded route-projection batch with production environment injection:
+2. Wait until the new application build is live, then add a reviewed,
+   task-specific route-projection step to the existing `Hosted Web Contract
+   Migrations` workflow as described in
+   `apps/web/README.md#production-database-maintenance`. The protected step maps
+   `HOSTED_WEB_DIRECT_DATABASE_URL` to `DATABASE_URL` after exact-deployment
+   proof, then dry-runs one bounded batch:
 
    ```bash
    NODE_OPTIONS=--conditions=react-server \
-     vercel env run --environment=production -- \
      pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
    ```
 
@@ -48,7 +52,6 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
    ```bash
    NODE_OPTIONS=--conditions=react-server \
-     vercel env run --environment=production -- \
      pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
    ```
 
@@ -58,7 +61,6 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
    ```bash
    NODE_OPTIONS=--conditions=react-server \
-     vercel env run --environment=production -- \
      pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
    ```
 

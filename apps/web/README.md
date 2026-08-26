@@ -1490,25 +1490,43 @@ roll back independently because final provider authorization remains Web-owned.
 exact SQL transition, while `production-migration-guard.test.ts` pins the
 production-alias proof, drain, second alias proof, and migration-owner order.
 
+### Production database maintenance
+
+Murph's production `DATABASE_URL` and `DIRECT_DATABASE_URL` are Vercel
+Sensitive values. Their values are non-readable after creation, so
+`vercel env run` is not a production database credential source even when the
+variable names appear in `vercel env ls`.
+
+Run a database-backed production maintenance script only from a reviewed,
+task-specific step in the existing `Hosted Web Contract Migrations` workflow.
+Keep that job attached to the GitHub `production` environment, reuse its exact
+deployed-main verification and pre/post-drain production-alias proofs, and map
+`secrets.HOSTED_WEB_DIRECT_DATABASE_URL` to `DATABASE_URL` only on the bounded
+maintenance step. Preserve the script's dry-run, batch limit, apply gate, and
+terminal check. Remove the task-specific step after convergence. Do not add a
+generic command input, duplicate the production database secret, or download a
+Vercel environment file for local execution.
+
+Maintenance-script `--help` examples are local/test commands only. Their caller
+must provide an approved non-production `DATABASE_URL` directly.
+
 The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
 `HostedThreadRoute.accountLookupKey` and its index; old application code remains
 compatible if the build fails after migration. Once the replacement build is
 live, a count-and-decrypt dry run may begin. Before applying, prove the
 production alias points at the replacement build, wait the configured
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
-the alias again. Then repeat bounded projection batches until readiness:
+the alias again. A reviewed task-specific step in the protected workflow then
+runs the exact bounded commands until readiness:
 
 ```bash
 NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
   pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
 
 NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
   pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
 
 NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
   pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
 ```
 

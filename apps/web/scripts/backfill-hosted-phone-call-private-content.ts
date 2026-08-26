@@ -10,18 +10,21 @@ interface HostedPhoneCallPrivateContentBackfillScriptOptions {
 }
 
 const usage = `
-Usage:
+Local/test usage from the repository root (the caller must provide an approved non-production DATABASE_URL):
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-phone-call-private-content.ts [--batch-size 50]
 
   # Perform one bounded batch only after the replacement alias is proven and
   # the configured prior-function drain has elapsed:
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-phone-call-private-content.ts --apply [--batch-size 50]
+
+Production:
+  Add the exact bounded command to a reviewed task-specific step in the
+  protected Hosted Web Contract Migrations workflow. See
+  apps/web/README.md#production-database-maintenance.
 
 Options:
   --apply                 Encrypt and scrub one post-drain batch. Before the final

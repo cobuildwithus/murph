@@ -11,20 +11,23 @@ interface ScriptOptions {
 }
 
 const usage = `
-Usage:
+Local/test usage from the repository root (the caller must provide an approved non-production DATABASE_URL):
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts \\
     --granted-before <consumer-deploy-ISO> [--batch-size 25]
 
   # Apply one bounded batch only after the new runtime consumer and complete
   # pending-aware Web release are deployed:
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts \\
     --apply --granted-before <consumer-deploy-ISO> [--batch-size 25]
+
+Production:
+  Add the exact bounded command to a reviewed task-specific step in the
+  protected Hosted Web Contract Migrations workflow. See
+  apps/web/README.md#production-database-maintenance.
 
 Options:
   --apply                    Rotate legacy materialized or orphaned-pending

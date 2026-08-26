@@ -13,11 +13,14 @@ interface Options {
 }
 
 const usage = `
-Usage:
+Local/test usage from the repository root (the caller must provide an approved non-production DATABASE_URL):
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/prepare-app-review-member.ts --email <reviewer-email> --create-privy-user --apply
+
+Production:
+  Use the authenticated same-origin hosted Ops route. Do not run this script
+  against production or put a reviewer principal in workflow-dispatch input.
 
 Options:
   --email <email>          Resolve the Privy reviewer user by email.

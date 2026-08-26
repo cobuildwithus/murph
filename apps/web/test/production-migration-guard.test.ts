@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,35 @@ const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
 
 describe("hosted web production migration guard", () => {
+  test("keeps production database maintenance on the protected workflow path", async () => {
+    const repoRoot = path.resolve(appRoot, "..", "..");
+    const scriptPaths = (await readdir(path.join(appRoot, "scripts")))
+      .filter((entry) => entry.endsWith(".ts"))
+      .map((entry) => path.join(appRoot, "scripts", entry));
+    const operatorSurfaces = [
+      path.join(appRoot, "README.md"),
+      path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
+      ...scriptPaths,
+    ];
+    const productionVercelEnvRun =
+      /vercel env run[^\n]*(?:--environment(?:=|\s+)|-e(?:=|\s+))production/u;
+
+    for (const surfacePath of operatorSurfaces) {
+      const surface = await readFile(surfacePath, "utf8");
+      assert.doesNotMatch(
+        surface,
+        productionVercelEnvRun,
+        `${path.relative(repoRoot, surfacePath)} must route production database maintenance through the protected workflow`,
+      );
+    }
+
+    const webReadme = await readFile(path.join(appRoot, "README.md"), "utf8");
+    assert.match(webReadme, /### Production database maintenance/u);
+    assert.match(webReadme, /Vercel\s+Sensitive values/u);
+    assert.match(webReadme, /secrets\.HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.match(webReadme, /Do not add a\ngeneric command input/u);
+  });
+
   test("runs only for main-branch Vercel production deploys", () => {
     const runnable: HostedWebProductionMigrationEnvironment = {
       VERCEL: "1",
