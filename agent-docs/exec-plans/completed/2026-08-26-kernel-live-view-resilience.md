@@ -11,10 +11,12 @@ Success criteria:
   browser session even when its Live View URL cannot be embedded by Murph.
 - Post-handoff browser restoration has the same behavior.
 - Live View URLs remain encrypted at rest, absent from model-visible results,
-  and rejected at the first-party handoff page unless they pass the existing
-  origin policy.
-- Focused deterministic tests cover both the recovered automation path and the
-  preserved exposure denial.
+  and rejected before a first-party handoff link or Managed Auth fallback can
+  expose them unless they pass the shared origin policy.
+- The shared policy accepts Kernel's documented `*.kernel.sh:8443` and
+  `*.onkernel.com:8443` viewer families and derives the matching CSP sources.
+- Focused deterministic tests cover the recovered automation path, safe
+  publication boundary, supported host families, CSP, and exposure denial.
 
 ## Product UX Patch
 
@@ -29,15 +31,17 @@ Affected paths:
 
 1. Automation-only task: Murph reaches and operates the requested site without
    surfacing an internal Live View configuration failure.
-2. Human handoff: Murph never exposes an unapproved Live View origin; the
-   existing first-party handoff boundary rejects it.
+2. Human handoff: Murph never publishes an unusable link or exposes an
+   unapproved Live View origin; direct and Managed Auth fallback boundaries
+   reject it before publication.
 3. Approved Kernel Live View: existing encrypted storage and handoff behavior
    remain unchanged.
 
 ## Constraints
 
 - Trust the authenticated Kernel browser/session control plane for automation;
-  do not broaden iframe or WebSocket CSP sources.
+  derive only Kernel's documented Live View host families from one code-owned
+  source and do not admit arbitrary HTTPS origins.
 - Keep raw Live View URLs, provider payloads, private conversation evidence,
   and member identifiers out of tests, logs, docs, and review artifacts.
 - Do not add schema, retry, queue, configuration, or dependency changes.
@@ -47,17 +51,22 @@ Affected paths:
 ## Approach
 
 1. Remove Live View origin admission from browser creation and restoration.
-2. Preserve encrypted capability storage and the existing validation at
-   `readHandoffPageState`, where the URL can actually be disclosed.
-3. Convert the two origin-rejection provisioning regressions into automation
-   success regressions while retaining the handoff exposure-denial test.
-4. Run scoped verification, exact-head review, CI, and current-base merge proof.
+2. Derive the validator and iframe/WebSocket CSP from one canonical list for
+   Kernel's documented `kernel.sh` and `onkernel.com` viewer families.
+3. Validate direct handoffs before publishing their link and validate Managed
+   Auth only when it actually converts to the Live View fallback.
+4. Cover automation continuity, pre-publication denial, fallback cleanup,
+   supported host families, CSP, and handoff exposure with focused tests.
+5. Run scoped verification, exact-head review, CI, and current-base merge proof.
 
 ## State
 
-Implementation in progress.
+Implementation complete; verification and landing are in progress.
 
-The optional real-Codex continuation probe was removed after its local
-subscription run stopped at the usage limit before any provider action. That
-probe exercised the unchanged model-facing tool contract rather than the
-Web-owned Kernel admission boundary, so keeping it would not prove this fix.
+The required focused real-Codex continuation journey remains committed for
+repeatable browser-behavior proof. Its local run stopped at
+`ASSISTANT_CODEX_USAGE_LIMIT` before any provider action, so this attempt is a
+live-proof Hold rather than pass/fail evidence for the Web-owned boundary.
+Status: completed
+Updated: 2026-08-26
+Completed: 2026-08-26

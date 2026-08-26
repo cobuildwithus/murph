@@ -29,6 +29,7 @@ describe("ComputerUseService", () => {
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -78,6 +79,40 @@ describe("ComputerUseService", () => {
       suggestedReply: "done",
     });
     expect(store.handoff?.tokenHash).toHaveLength(64);
+  });
+
+  it("does not publish a direct handoff when the stored Live View origin is not allowed", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({ updatedAt: now });
+    const store = new FakeComputerUseStore({ run });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret:
+          "https://proxy.untrusted.example.test:8443/browser/live/token",
+      }),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+      retryable: true,
+    });
+    expect(store.handoff).toBeNull();
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
   });
 
   it("requires a fresh persisted HTTPS browser domain before creating a managed-login handoff", async () => {
@@ -211,6 +246,7 @@ describe("ComputerUseService", () => {
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -269,6 +305,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -485,6 +522,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -544,6 +582,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -615,6 +654,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -679,6 +719,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -803,6 +844,7 @@ describe("ComputerUseService", () => {
     });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -880,6 +922,7 @@ describe("ComputerUseService", () => {
       run: createRunRecord({ updatedAt: now }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -3852,6 +3895,7 @@ describe("ComputerUseService", () => {
     });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -9722,6 +9766,13 @@ function createFakeCrypto(input: {
       return encryptInput.value ?? null;
     },
   };
+}
+
+function createAllowedLiveViewCrypto(): ComputerUseCrypto {
+  return createFakeCrypto({
+    decryptedRunSecret:
+      "https://proxy.test-browser.kernel.sh:8443/browser/live/token",
+  });
 }
 
 function deterministicRunBrowserNameMatcher() {
