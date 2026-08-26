@@ -55,7 +55,11 @@ import {
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -7997,6 +8001,193 @@ describeRealCodex('real Codex support escalation e2e', () => {
   )
 })
 
+describeRealCodex('real Codex Kernel browser continuation e2e', () => {
+  it(
+    'opens an account portal, reports setup readiness, and does not enter private information',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-kernel-browser-inspection-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const requests: Array<{
+        body: Record<string, unknown>
+        url: string
+      }> = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'computer-use',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          fetchImpl: async (
+            request: string | URL | Request,
+            init?: RequestInit,
+          ): Promise<Response> => {
+            const url = request instanceof Request
+              ? request.url
+              : String(request)
+            const body = JSON.parse(String(init?.body)) as Record<
+              string,
+              unknown
+            >
+            requests.push({ body, url })
+
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs'
+            ) {
+              return new Response(JSON.stringify({
+                expiresAt: '2026-08-26T19:00:00.000Z',
+                reused: false,
+                runId: 'run_synthetic_portal',
+                status: 'running',
+                title: 'Account portal',
+                url: 'https://portal.example.test/setup',
+                visibleText: [
+                  'Account portal loaded.',
+                  'Setup is ready.',
+                  'A mailing address is required to continue.',
+                ].join('\n'),
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish'
+            ) {
+              return new Response(JSON.stringify({
+                ok: true,
+                runId: 'run_synthetic_portal',
+                status: 'completed',
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            throw new Error(`Unexpected hosted computer request: ${url}`)
+          },
+          hostedToolContext: createRealCodexComputerHostedToolContext(),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Open https://portal.example.test/setup and tell me whether account setup is ready.',
+            'Do not enter or submit personal or payment information.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const computerToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_FINISH_RUN_TOOL.name,
+          MURPH_COMPUTER_OPEN_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const prohibitedToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('computer-use/SKILL.md')
+          && action.output.includes('# Computer Use')
+        )
+        const computerCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && computerToolNames.has(action.tool)
+        )
+        const openCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_OPEN_TOOL.name
+        )
+        const finishCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_FINISH_RUN_TOOL.name
+        )
+        const prohibitedCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && prohibitedToolNames.has(action.tool)
+        )
+
+        expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(openCalls).toHaveLength(1)
+        expect(finishCalls).toHaveLength(1)
+        expect(prohibitedCalls).toHaveLength(0)
+        expect(openCalls[0]?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(openCalls[0]).toMatchObject({
+          argumentsValue: {
+            startUrl: 'https://portal.example.test/setup',
+          },
+        })
+        expect(finishCalls[0]).toMatchObject({
+          argumentsValue: {
+            outcome: 'completed',
+            runId: 'run_synthetic_portal',
+          },
+        })
+        expect(requests).toEqual([
+          {
+            body: {
+              goal: 'Hosted computer task.',
+              resumeAfterMailboxItemId: null,
+              resumeDeliveryContext: null,
+              startUrl: 'https://portal.example.test/setup',
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs',
+          },
+          {
+            body: {
+              outcome: 'completed',
+              summary: null,
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish',
+          },
+        ])
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/setup/iu)
+        expect(reply).toMatch(/ready/iu)
+        expect(reply).not.toMatch(
+          /setup (?:is )?complete|information (?:was|has been) submitted/iu,
+        )
+        expect(reply).not.toMatch(/HOSTED_COMPUTER|LIVE_VIEW_ORIGIN/iu)
+        process.stdout.write(
+          `[kernel-browser-continuation-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'account-setup-readiness',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -11147,6 +11338,27 @@ function createRealCodexSupportHostedToolContext(
       inboundMailboxItemIds: ['mailbox-support'],
       originSessionId: `session-support-${conversationScope}`,
       recipientKey: `recipient-support-${conversationScope}`,
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
+  }
+}
+
+function createRealCodexComputerHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_computer'],
+      conversationId: 'conversation-computer-direct',
+      conversationScope: 'direct',
+      inboundMailboxItemIds: ['mailbox-computer'],
+      originSessionId: 'session-computer-direct',
+      recipientKey: 'recipient-computer-direct',
     }),
     sendVaultFile: async () => ({
       filename: 'unused',

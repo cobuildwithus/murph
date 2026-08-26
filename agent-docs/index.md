@@ -24,6 +24,13 @@ reuse, and focused proof are specified by
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
+Kernel browser-session authority is independent of the optional Live View
+capability. Web-owned automation may continue when that viewer cannot be safely
+embedded. One code-owned Kernel host policy derives validation and CSP, while
+direct handoff publication and Managed Auth fallback remain fail-closed human
+exposure boundaries. This split is specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, and `apps/web/README.md`.
+
 Large hand-authored runtime and provider suites are partitioned into
 behavior-owned test modules backed by adjacent owner-specific harnesses. Root,
 diff-aware, package, and release coverage lanes run those owners on the ordinary
