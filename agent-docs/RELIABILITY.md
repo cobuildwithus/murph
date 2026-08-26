@@ -2453,8 +2453,9 @@ Last verified: 2026-08-23
   revenue, member, and message snapshot fields. After that write, the cron
   returns non-success so monitoring exposes the missed activity capture and the
   same authenticated endpoint can be manually rerun for that UTC date; Vercel
-  does not retry a failed cron invocation automatically. An ops-page read is an
-  additional same-date recovery attempt but is not the cron's retry guarantee.
+  does not retry a failed cron invocation automatically. That authenticated
+  endpoint is the sole same-date mutation and recovery owner; the ops page is
+  read-only and never captures a snapshot while rendering.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Group-to-private growth attribution reuses that same snapshot pass and its
