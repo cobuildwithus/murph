@@ -6,6 +6,7 @@ Last verified: 2026-08-25
 
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
+| `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-5.6-terra`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
 | `.github/workflows/foreground-reply-state-cardinality.yml` | Every-PR asymptotic gate that requires foreground reply filesystem work to saturate as unrelated persisted state grows. | The shared meter, convention-discovered `*-state-cardinality.test.ts` probes, fail-closed primitive coverage, and maintenance rules are specified in `agent-docs/references/README.md#foreground-reply-state-cardinality`. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/review-gpt-package-concurrency.test.ts` | Hermetic ReviewGPT packaging contract and two-process proof. | PR-bound default, `--both`, and `--txt` modes fail before producing or reporting incomplete artifacts; repo-visible canonical-path candidates cannot shadow staged context; simultaneous preliminary and final ZIP invocations use separate private staging directories and distinct shared-output names while both archives retain only their own metadata under stable `review-gpt-pr-context/**` paths; invocation directories are removed without a shared lock. |
 | `pnpm typecheck` | Full workspace type proof through stable TypeScript 7. Independent guards overlap the clean contracts prerequisite; package/app no-emit checks use bounded no-sort fanout. The hosted web invokes the root compiler explicitly while retaining local TypeScript 5 only for framework/Solana tools that still require the legacy compiler API or peer range. Repo-owned source-analysis checks use Babel's parser instead of a TypeScript compiler API, leaving the web-local TypeScript 5 boundary independently removable once its consumers support TypeScript 7. Tsconfig path-map discovery reads root configs shallowly and scans only `packages/**` plus `apps/**`, avoiding unrelated local residue. Repo tools reuse an ignored incremental cache. | `scripts/*.{sh,mjs,ts}`, `e2e/smoke/verify-scenario-integrity.ts`, `packages/contracts/**`, `packages/clinical-records/**`, `packages/hosted-execution/**`, `packages/hosted-local-harness/**`, `packages/runtime-state/**`, `packages/operator-config/**`, `packages/assistant-engine/**`, `packages/assistant-cli/**`, `packages/setup-cli/**`, `packages/cli/**`, `packages/openclaw-plugin/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**`, `packages/inboxd/**`, `packages/parsers/**`, `packages/assistantd/**`, `packages/assistant-runtime/**`, `packages/health-metrics/**`, `packages/query/**`, `apps/web/**`, `apps/cloudflare/**`, `config/workspace-source-resolution.ts` |
@@ -402,6 +403,17 @@ de-identified product-only summary while excluding synthetic semantic private
 context and raw wording; the group case remains tool-free.
 Routine CI compiles the live-provider scenario but skips it without an explicit
 supported provider credential.
+
+Assistant-behavior changes use
+`pnpm test:assistant:live -- --test "<unique test-name pattern>"` after their
+deterministic prompt/tool/effect proof. The guarded runner selects only
+`assistant-codex-real-e2e.test.ts`, requires a focused Vitest name pattern, and
+defaults to the authenticated local Codex subscription with
+`gpt-5.6-terra`. Its harness unit tests prove that subscription mode leaves
+`CODEX_HOME` unset, passes only the minimal normal-home environment, and cannot
+silently replace the existing isolated provider-key mode. Live scenarios print
+only synthetic reply evidence for human UX review; routine CI keeps the live
+gate unset and makes no paid request.
 
 ## Current CI Workflows
 

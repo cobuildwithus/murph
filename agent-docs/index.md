@@ -43,6 +43,16 @@ are specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/operations/pr-reviewgpt-loop.md`.
 
+Changes that can alter Murph's interpretation, tool behavior, silence
+decision, or user-visible reply require deterministic boundary proof plus one
+focused production-derived real-Codex journey and manual review of the actual
+synthetic replies. The one-command local subscription runner, provider-key
+boundary, UX verdict, and PR evidence contract are specified by
+`.agents/skills/verify-murph-assistant/SKILL.md`,
+`agent-docs/operations/completion-workflow.md`,
+`agent-docs/operations/verification-and-runtime.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Required Temporal compatibility tolerates only the bounded `404` visibility
 window for the exact private run id returned by an accepted dispatch. It never
 searches for or guesses a run, and every later polling, identity, reader, and
