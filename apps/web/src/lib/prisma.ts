@@ -70,7 +70,7 @@ const DATABASE_POOL_FAILURE_BY_PRISMA_CODE = new Map<
   DatabasePoolFailureCategory
 >([
   ["P1001", "unreachable"],
-  ["P1008", "connection_timeout"],
+  ["P1002", "connection_timeout"],
   ["P1011", "tls_error"],
   ["P1017", "connection_closed"],
   ["P2024", "pool_checkout_timeout"],
@@ -114,6 +114,10 @@ const DATABASE_POOL_FAILURE_BY_SQLSTATE = new Map<
 const PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE = "08P01";
 const PGBOUNCER_MAX_CLIENT_CONN_MESSAGE =
   "no more connections allowed (max_client_conn)";
+// Preserve the prior root-plus-four-cause reach while bounding the adapter
+// branch that Prisma can add at each node.
+const DATABASE_POOL_FAILURE_TRAVERSAL_MAX_DEPTH = 4;
+const DATABASE_POOL_FAILURE_TRAVERSAL_MAX_NODES = 8;
 
 installHostedWebWarningFilters();
 
@@ -502,12 +506,23 @@ function resolveDatabasePoolMax(poolMax?: number): number {
 function resolveDatabasePoolFailureCategory(
   error: unknown,
 ): DatabasePoolFailureCategory | null {
-  let current: unknown = error;
+  const pending: { depth: number; value: unknown }[] = [
+    { depth: 0, value: error },
+  ];
   const seen = new Set<unknown>();
 
-  for (let depth = 0; current !== undefined && current !== null && depth < 5; depth += 1) {
-    if (seen.has(current)) {
+  for (
+    let index = 0;
+    index < pending.length && seen.size < DATABASE_POOL_FAILURE_TRAVERSAL_MAX_NODES;
+    index += 1
+  ) {
+    const candidate = pending[index];
+    if (!candidate) {
       break;
+    }
+    const current = candidate.value;
+    if (current === undefined || current === null || seen.has(current)) {
+      continue;
     }
     seen.add(current);
 
@@ -559,7 +574,20 @@ function resolveDatabasePoolFailureCategory(
       return "connection_limit";
     }
 
-    current = readUnknownProperty(current, "cause");
+    if (candidate.depth >= DATABASE_POOL_FAILURE_TRAVERSAL_MAX_DEPTH) {
+      continue;
+    }
+    const nextDepth = candidate.depth + 1;
+    const cause = readUnknownProperty(current, "cause");
+    if (cause !== undefined && cause !== null) {
+      pending.push({ depth: nextDepth, value: cause });
+    }
+    const meta = readUnknownProperty(current, "meta");
+    const driverAdapterError = readUnknownProperty(meta, "driverAdapterError");
+    const driverAdapterCause = readUnknownProperty(driverAdapterError, "cause");
+    if (driverAdapterCause !== undefined && driverAdapterCause !== null) {
+      pending.push({ depth: nextDepth, value: driverAdapterCause });
+    }
   }
 
   return null;
