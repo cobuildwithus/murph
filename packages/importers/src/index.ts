@@ -24,8 +24,6 @@ export type {
   CsvSampleImportInput,
   CsvSampleImportPlan,
   CsvSampleImportResult,
-  CsvSampleImportRepair,
-  CsvSampleImportRepairField,
   CsvSampleImportSkipReasonCount,
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,

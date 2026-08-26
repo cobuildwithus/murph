@@ -51,31 +51,31 @@ export interface CsvSampleImportSkipReasonCount {
   reason: string;
 }
 
-export interface CsvSampleImportRepairField {
-  path: string | readonly PropertyKey[];
-  code: string;
-  message: string;
-  expected?: string;
-  missing?: boolean;
-  sampleField?: string;
-  stream?: SampleStream;
-}
-
-export interface CsvSampleImportRepair {
-  fields: readonly CsvSampleImportRepairField[];
-  hint?: string;
-  stage: "validation";
-}
+type CsvSampleImportFailure =
+  | { code: "timestamp_column_inference_failed" }
+  | { code: "value_column_inference_failed" }
+  | {
+    code: "no_importable_rows";
+    importIndexes: readonly number[];
+  }
+  | {
+    code: "invalid_sample";
+    importIndex: number;
+    sampleField: string;
+    stream: SampleStream;
+  };
 
 export class CsvSampleImportError extends Error {
-  readonly code: string;
-  readonly repair: CsvSampleImportRepair;
+  readonly failure: CsvSampleImportFailure;
 
-  constructor(code: string, message: string, repair: CsvSampleImportRepair) {
-    super(message);
+  constructor(failure: CsvSampleImportFailure) {
+    super(failure.code);
     this.name = "CsvSampleImportError";
-    this.code = code;
-    this.repair = repair;
+    this.failure = failure;
+  }
+
+  get code(): CsvSampleImportFailure["code"] {
+    return this.failure.code;
   }
 }
 
@@ -401,20 +401,10 @@ export async function prepareCsvSampleImport(
   const imports = collectors.map((collector) => finalizeImportCollector(collector));
 
   if (imports.every((entry) => entry.importedCount === 0)) {
-    throw new CsvSampleImportError(
-      "no_importable_rows",
-      "Sample CSV did not contain any importable sample rows.",
-      {
-        stage: "validation",
-        fields: imports.map((entry, index) => ({
-          path: ["imports", index, "samples"],
-          code: "no_importable_rows",
-          message: `${entry.stream} skipped ${formatSkipReasonCounts(entry.skipReasons)}.`,
-          expected: "at least one row with a parseable timestamp and numeric value",
-        })),
-        hint: "Correct the timestamp or value cells identified by the skip counts, then retry.",
-      },
-    );
+    throw new CsvSampleImportError({
+      code: "no_importable_rows",
+      importIndexes: imports.map((_, index) => index),
+    });
   }
 
   return stripUndefined({
@@ -944,41 +934,7 @@ function createCsvInferenceError(field: "tsColumn" | "valueColumn"): CsvSampleIm
     ? "timestamp_column_inference_failed"
     : "value_column_inference_failed";
 
-  return new CsvSampleImportError(
-    code,
-    "Sample CSV column inference failed.",
-    {
-      stage: "validation",
-      fields: [
-        {
-          path: field,
-          code,
-          message: isTimestamp
-            ? "No recognizable timestamp column was inferred."
-            : "No recognizable sample value column was inferred.",
-          expected: isTimestamp
-            ? "timestamp column selected with --ts-column"
-            : "sample value column selected with --value-column",
-        },
-      ],
-      hint: isTimestamp
-        ? "Check --delimiter, then retry with --ts-column set to the exact timestamp column name."
-        : "Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.",
-    },
-  );
-}
-
-function formatSkipReasonCounts(
-  skipReasons: readonly CsvSampleImportSkipReasonCount[],
-): string {
-  const visibleReasons = skipReasons
-    .slice(0, 4)
-    .map((entry) => `${entry.reason}=${entry.count}`);
-  const omittedCount = Math.max(0, skipReasons.length - visibleReasons.length);
-
-  return omittedCount === 0
-    ? visibleReasons.join(", ")
-    : `${visibleReasons.join(", ")} (+${omittedCount} more reasons)`;
+  return new CsvSampleImportError({ code });
 }
 
 function normalizeOptionalNumber(value: unknown, stream: SampleStream): number | undefined {

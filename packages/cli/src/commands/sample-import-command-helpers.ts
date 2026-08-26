@@ -234,197 +234,138 @@ async function loadImportersRuntimeForCommand(
   }
 }
 
-const CSV_SAMPLE_REPAIR_CODES = new Set([
-  'invalid_sample',
-  'no_importable_rows',
-  'timestamp_column_inference_failed',
-  'value_column_inference_failed',
-])
+type CsvSampleFailure =
+  | { code: 'timestamp_column_inference_failed' }
+  | { code: 'value_column_inference_failed' }
+  | {
+    code: 'no_importable_rows'
+    importIndexes: readonly number[]
+  }
+  | {
+    code: 'invalid_sample'
+    importIndex: number
+    sampleField: string
+    stream: string
+  }
 
 function toCsvSampleCliError(error: unknown): unknown {
-  if (!isRecord(error) || error.name !== 'CsvSampleImportError') {
+  const failure = readCsvSampleFailure(error)
+  if (!failure) {
     return error
   }
 
-  const code = error.code
-  const repair = error.repair
-  if (
-    typeof code !== 'string'
-    || !CSV_SAMPLE_REPAIR_CODES.has(code)
-    || !isRecord(repair)
-    || !Array.isArray(repair.fields)
-  ) {
-    return error
-  }
-
-  if (code === 'invalid_sample') {
-    return toCsvSampleSemanticCliError(repair.fields) ?? error
-  }
-
-  const issues = repair.fields.flatMap(toCsvSampleIssues)
-  const message = createCsvSampleErrorMessage(code, repair.fields)
-  if (issues.length === 0 || !message) {
-    return error
-  }
-
-  return new VaultCliError(
-    'invalid_payload',
-    message,
-    { issues, stage: 'validation' },
-  )
-}
-
-function toCsvSampleSemanticCliError(
-  fields: readonly unknown[],
-): VaultCliError | null {
-  if (fields.length !== 1 || !isRecord(fields[0])) {
-    return null
-  }
-
-  const field = fields[0]
-  const publicPath = toCsvSamplesIssuePath(field.path)
-  if (
-    !publicPath
-    || typeof field.sampleField !== 'string'
-    || typeof field.stream !== 'string'
-  ) {
-    return null
-  }
-
-  const issue = sampleImportIssue(field.sampleField, field.stream)
-  if (!issue) {
-    return null
-  }
-
-  const { hint, ...fieldIssue } = issue
-  return new VaultCliError(
-    'invalid_payload',
-    'Sample CSV contains an invalid sample field.',
-    {
-      issues: [{ publicPath, ...fieldIssue }],
-      stage: 'validation',
-      ...(hint ? { hint } : {}),
-    },
-  )
-}
-
-interface CsvSampleIssue {
-  code: 'custom'
-  expected: 'array' | 'string'
-  publicPath: readonly (string | number)[]
-}
-
-const CSV_SKIP_REASON_MESSAGES: Readonly<Record<string, string>> = {
-  'non-numeric value': 'had a non-numeric value',
-  'unparseable timestamp': 'had an unparseable timestamp',
-  'unparseable timestamp; non-numeric value':
-    'had an unparseable timestamp and non-numeric value',
-}
-
-function toCsvSampleIssues(value: unknown): CsvSampleIssue[] {
-  if (
-    !isRecord(value)
-    || typeof value.code !== 'string'
-    || typeof value.message !== 'string'
-  ) {
-    return []
-  }
-
-  if (value.code === 'timestamp_column_inference_failed') {
-    return [{ code: 'custom', expected: 'string', publicPath: ['tsColumn'] }]
-  }
-  if (value.code === 'value_column_inference_failed') {
-    return [{ code: 'custom', expected: 'string', publicPath: ['valueColumn'] }]
-  }
-
-  if (value.code !== 'no_importable_rows') {
-    return []
-  }
-
-  const publicPath = toCsvSamplesIssuePath(value.path)
-  if (!publicPath || readCsvSkipCounts(value.message).length === 0) {
-    return []
-  }
-
-  return [{ code: 'custom', expected: 'array', publicPath }]
-}
-
-interface CsvSkipCount {
-  count: number
-  message: string
-}
-
-function readCsvSkipCounts(message: string): CsvSkipCount[] {
-  const counts = /^[a-z_]+ skipped (.+)\.$/u.exec(message)?.[1]
-  if (!counts) {
-    return []
-  }
-
-  return counts.split(', ').flatMap((entry): CsvSkipCount[] => {
-    const match = /^(unparseable timestamp(?:; non-numeric value)?|non-numeric value)=(\d+)$/u.exec(entry)
-    if (!match) {
-      return []
+  switch (failure.code) {
+    case 'timestamp_column_inference_failed': {
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV column inference failed. Check --delimiter, then retry with --ts-column set to the exact timestamp column name.',
+        {
+          issues: [{ code: 'custom', expected: 'string', publicPath: ['tsColumn'] }],
+          stage: 'validation',
+        },
+      )
     }
-    const reasonMessage = CSV_SKIP_REASON_MESSAGES[match[1] ?? '']
-    const count = Number(match[2])
-    return reasonMessage && Number.isSafeInteger(count) && count > 0
-      ? [{ count, message: reasonMessage }]
-      : []
-  })
-}
-
-function createCsvSampleErrorMessage(
-  code: string,
-  fields: readonly unknown[],
-): string | null {
-  if (code === 'timestamp_column_inference_failed') {
-    return 'Sample CSV column inference failed. Check --delimiter, then retry with --ts-column set to the exact timestamp column name.'
-  }
-  if (code === 'value_column_inference_failed') {
-    return 'Sample CSV column inference failed. Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.'
-  }
-  if (code !== 'no_importable_rows') {
-    return null
-  }
-
-  const totals = new Map<string, number>()
-  for (const field of fields) {
-    if (!isRecord(field) || typeof field.message !== 'string') {
-      continue
+    case 'value_column_inference_failed': {
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV column inference failed. Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.',
+        {
+          issues: [{ code: 'custom', expected: 'string', publicPath: ['valueColumn'] }],
+          stage: 'validation',
+        },
+      )
     }
-    for (const entry of readCsvSkipCounts(field.message)) {
-      const nextCount = (totals.get(entry.message) ?? 0) + entry.count
-      if (!Number.isSafeInteger(nextCount)) {
-        return null
+    case 'no_importable_rows': {
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV did not contain any importable rows. Correct invalid timestamp or numeric value cells, then retry.',
+        {
+          issues: failure.importIndexes.map((importIndex) => ({
+            code: 'custom',
+            expected: 'array',
+            publicPath: ['imports', importIndex, 'samples'],
+          })),
+          stage: 'validation',
+        },
+      )
+    }
+    case 'invalid_sample': {
+      const issue = sampleImportIssue(failure.sampleField, failure.stream)
+      if (!issue) {
+        return error
       }
-      totals.set(entry.message, nextCount)
+
+      const { hint, ...fieldIssue } = issue
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV contains an invalid sample field.',
+        {
+          issues: [{
+            publicPath: ['imports', failure.importIndex, 'samples'],
+            ...fieldIssue,
+          }],
+          stage: 'validation',
+          ...(hint ? { hint } : {}),
+        },
+      )
     }
   }
-  if (totals.size === 0) {
-    return null
-  }
 
-  const summary = Array.from(totals, ([message, count]) =>
-    `${count} ${count === 1 ? 'row' : 'rows'} ${message}`
-  ).join('; ')
-  return `Sample CSV did not contain any importable rows. Skipped rows: ${summary}. Correct those timestamp or numeric value cells, then retry.`
+  const exhaustive: never = failure
+  return exhaustive
 }
 
-function toCsvSamplesIssuePath(
-  value: unknown,
-): readonly ['imports', number, 'samples'] | null {
+function readCsvSampleFailure(error: unknown): CsvSampleFailure | null {
   if (
-    !Array.isArray(value)
-    || value.length !== 3
-    || value[0] !== 'imports'
-    || typeof value[1] !== 'number'
-    || !Number.isSafeInteger(value[1])
-    || value[1] < 0
-    || value[2] !== 'samples'
+    !isRecord(error)
+    || error.name !== 'CsvSampleImportError'
+    || !isRecord(error.failure)
+    || typeof error.failure.code !== 'string'
   ) {
     return null
   }
-  return ['imports', value[1], 'samples']
+
+  const failure = error.failure
+  if (
+    failure.code === 'timestamp_column_inference_failed'
+    || failure.code === 'value_column_inference_failed'
+  ) {
+    return { code: failure.code }
+  }
+
+  if (failure.code === 'no_importable_rows') {
+    if (
+      !Array.isArray(failure.importIndexes)
+      || failure.importIndexes.length === 0
+      || failure.importIndexes.some((value) =>
+        typeof value !== 'number'
+        || !Number.isSafeInteger(value)
+        || value < 0
+      )
+      || new Set(failure.importIndexes).size !== failure.importIndexes.length
+    ) {
+      return null
+    }
+    return { code: failure.code, importIndexes: failure.importIndexes }
+  }
+
+  if (
+    failure.code === 'invalid_sample'
+    && typeof failure.importIndex === 'number'
+    && Number.isSafeInteger(failure.importIndex)
+    && failure.importIndex >= 0
+    && typeof failure.sampleField === 'string'
+    && typeof failure.stream === 'string'
+  ) {
+    return {
+      code: failure.code,
+      importIndex: failure.importIndex,
+      sampleField: failure.sampleField,
+      stream: failure.stream,
+    }
+  }
+
+  return null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

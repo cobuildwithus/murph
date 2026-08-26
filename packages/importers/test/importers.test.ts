@@ -426,7 +426,14 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
         },
         { corePort },
       ),
-    /did not contain any importable sample rows/,
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.deepEqual(error.failure, {
+        code: "no_importable_rows",
+        importIndexes: [0],
+      });
+      return true;
+    },
   );
 
   await assert.throws(
@@ -499,11 +506,6 @@ test("sample CSV repair errors expose fixed value-free guidance without cell val
     `timestamp,${wideHeaders.join(",")}\n2043-02-01T00:00:00Z,${wideHeaders.map(() => "72").join(",")}\n`,
   );
   const { corePort } = createCorePortSpy();
-  const timestampExpected = "timestamp column selected with --ts-column";
-  const timestampHint = "Check --delimiter, then retry with --ts-column set to the exact timestamp column name.";
-  const valueExpected = "sample value column selected with --value-column";
-  const valueHint = "Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.";
-
   async function readRepairError(filePath: string): Promise<CsvSampleImportError> {
     try {
       await prepareCsvSampleImport({ filePath });
@@ -514,19 +516,15 @@ test("sample CSV repair errors expose fixed value-free guidance without cell val
     }
   }
 
-  function assertValueFreeRepair(
+  function assertValueFreeFailure(
     error: CsvSampleImportError,
     input: {
       code: "timestamp_column_inference_failed" | "value_column_inference_failed";
-      field: "tsColumn" | "valueColumn";
       sentinels: readonly string[];
     },
   ): void {
-    const isTimestamp = input.field === "tsColumn";
     assert.equal(error.code, input.code);
-    assert.equal(error.repair.fields[0]?.path, input.field);
-    assert.equal(error.repair.fields[0]?.expected, isTimestamp ? timestampExpected : valueExpected);
-    assert.equal(error.repair.hint, isTimestamp ? timestampHint : valueHint);
+    assert.deepEqual(error.failure, { code: input.code });
     const serialized = JSON.stringify(error);
     for (const sentinel of input.sentinels) {
       assert.equal(serialized.includes(sentinel), false);
@@ -538,11 +536,9 @@ test("sample CSV repair errors expose fixed value-free guidance without cell val
     (error) => {
       assert.ok(error instanceof CsvSampleImportError);
       assert.equal(error.code, "no_importable_rows");
-      assert.deepEqual(error.repair.fields[0], {
-        path: ["imports", 0, "samples"],
+      assert.deepEqual(error.failure, {
         code: "no_importable_rows",
-        message: "heart_rate skipped unparseable timestamp; non-numeric value=1.",
-        expected: "at least one row with a parseable timestamp and numeric value",
+        importIndexes: [0],
       });
       assert.equal(JSON.stringify(error).includes("private-timestamp-cell"), false);
       assert.equal(JSON.stringify(error).includes("private-value-cell"), false);
@@ -550,49 +546,42 @@ test("sample CSV repair errors expose fixed value-free guidance without cell val
     },
   );
 
-  assertValueFreeRepair(await readRepairError(privateHeaderPath), {
+  assertValueFreeFailure(await readRepairError(privateHeaderPath), {
     code: "timestamp_column_inference_failed",
-    field: "tsColumn",
     sentinels: [privateTimestampHeader, privateMetricHeader, "private-cell"],
   });
 
-  assertValueFreeRepair(await readRepairError(customValuePath), {
+  assertValueFreeFailure(await readRepairError(customValuePath), {
     code: "value_column_inference_failed",
-    field: "valueColumn",
     sentinels: [customValueHeader],
   });
 
   const headerless = await readRepairError(headerlessPath);
-  assertValueFreeRepair(headerless, {
+  assertValueFreeFailure(headerless, {
     code: "timestamp_column_inference_failed",
-    field: "tsColumn",
     sentinels: [headerlessTimestamp, headerlessValue],
   });
 
-  assertValueFreeRepair(await readRepairError(preamblePath), {
+  assertValueFreeFailure(await readRepairError(preamblePath), {
     code: "timestamp_column_inference_failed",
-    field: "tsColumn",
     sentinels: [preamble, preambleHeaderA, preambleHeaderB, "private-preamble-cell"],
   });
 
   const wrongDelimiter = await readRepairError(wrongDelimiterPath);
-  assertValueFreeRepair(wrongDelimiter, {
+  assertValueFreeFailure(wrongDelimiter, {
     code: "timestamp_column_inference_failed",
-    field: "tsColumn",
     sentinels: [wrongDelimiterHeader, wrongDelimiterTimestamp, wrongDelimiterValue],
   });
 
   const longHeaderError = await readRepairError(longHeaderPath);
-  assertValueFreeRepair(longHeaderError, {
+  assertValueFreeFailure(longHeaderError, {
     code: "value_column_inference_failed",
-    field: "valueColumn",
     sentinels: [longHeader, longHeader.slice(0, 24)],
   });
 
   const wideHeaderError = await readRepairError(wideHeaderPath);
-  assertValueFreeRepair(wideHeaderError, {
+  assertValueFreeFailure(wideHeaderError, {
     code: "value_column_inference_failed",
-    field: "valueColumn",
     sentinels: wideHeaders,
   });
   assert.ok(JSON.stringify(wideHeaderError).length < 1_000);

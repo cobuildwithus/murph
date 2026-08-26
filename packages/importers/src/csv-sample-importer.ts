@@ -31,10 +31,6 @@ export type {
 } from "./csv-sample-import-planner.ts";
 export { CsvSampleImportError } from "./csv-sample-import-planner.ts";
 export type {
-  CsvSampleImportRepair,
-  CsvSampleImportRepairField,
-} from "./csv-sample-import-planner.ts";
-export type {
   SampleSeriesInputRecord,
   SampleSeriesSummaryInput,
   SampleSummaryProfile,
@@ -172,23 +168,12 @@ function toCsvSampleWriteError(
     return error;
   }
 
-  return new CsvSampleImportError(
-    "invalid_sample",
-    "Sample CSV contains an invalid sample field.",
-    {
-      stage: "validation",
-      fields: [
-        {
-          path: ["imports", importIndex, "samples"],
-          code: "invalid_sample",
-          message: "Planned samples failed semantic validation.",
-          expected: "samples valid for the planned stream",
-          sampleField,
-          stream,
-        },
-      ],
-    },
-  );
+  return new CsvSampleImportError({
+    code: "invalid_sample",
+    importIndex,
+    sampleField,
+    stream,
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

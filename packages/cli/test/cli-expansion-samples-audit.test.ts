@@ -112,7 +112,7 @@ test('samples batch show help and model metadata describe the list-to-show id co
   assert.doesNotMatch(llms, /by transform id|transform batch id|xfm_<ULID>/iu)
 })
 
-test.sequential('sample CSV failures expose fixed value-free repair guidance without raw cell echo', async () => {
+test.sequential('sample CSV failures expose value-free guidance without multiplying physical row counts across streams', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-repair-'))
   const invalidRowsPath = path.join(vaultRoot, 'invalid-rows.csv')
   const timestampInferencePath = path.join(vaultRoot, 'timestamp-inference.csv')
@@ -137,9 +137,10 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
 
     const timestampCellSentinel = 'private-timestamp-cell'
     const valueCellSentinel = 'private-value-cell'
+    const stepsCellSentinel = 'private-steps-cell'
     await writeFile(
       invalidRowsPath,
-      `timestamp,bpm\n${timestampCellSentinel},${valueCellSentinel}\n`,
+      `timestamp,bpm,steps\n${timestampCellSentinel},${valueCellSentinel},${stepsCellSentinel}\n`,
       'utf8',
     )
 
@@ -158,12 +159,16 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     assert.equal(invalidRows.error.fieldErrors?.[0]?.code, 'custom')
     assert.equal(invalidRows.error.fieldErrors?.[0]?.expected, 'array')
     assert.equal(invalidRows.error.fieldErrors?.[0]?.message, 'This field is invalid.')
+    assert.equal(invalidRows.error.fieldErrors?.[1]?.path, 'imports.1.samples')
+    assert.equal(invalidRows.error.fieldErrors?.[1]?.expected, 'array')
     assert.equal(
       invalidRows.error.message,
-      'Sample CSV did not contain any importable rows. Skipped rows: 1 row had an unparseable timestamp and non-numeric value. Correct those timestamp or numeric value cells, then retry.',
+      'Sample CSV did not contain any importable rows. Correct invalid timestamp or numeric value cells, then retry.',
     )
+    assert.doesNotMatch(invalidRows.error.message, /\b\d+ rows?\b/iu)
     assert.equal(JSON.stringify(invalidRows).includes(timestampCellSentinel), false)
     assert.equal(JSON.stringify(invalidRows).includes(valueCellSentinel), false)
+    assert.equal(JSON.stringify(invalidRows).includes(stepsCellSentinel), false)
 
     const privateTimestampHeader = 'custom_private_time_header'
     const privateTimestampCell = 'private-timestamp-inference-cell'

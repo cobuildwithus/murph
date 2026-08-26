@@ -129,6 +129,23 @@ shared error projector and no partial writes or submitted-value echo.
   package shape, and canonical runner assembly. The Vault CLI is 9,543,029 /
   9,588,702 bytes with an 805-byte entry and 25,155-byte static closure; all
   eight parity probes pass and the runner is 11,385,495 / 11,393,617 bytes.
+- Round six found that `no_importable_rows` serialized per-stream skip counts
+  into importer-owned English and the CLI parsed and summed that prose as
+  physical-row counts. One invalid physical row recognized as two sample
+  streams therefore became two skipped rows in user guidance. The finding is
+  accepted because the code path proves both the duplicate prose ownership and
+  the count inflation.
+- The correction deletes the generic repair-field protocol, skip-reason prose
+  formatter/parser, and CLI count aggregation. The importer now carries only a
+  finite failure code, safe import indexes for an empty plan, or the existing
+  import index/canonical stream/finite sample field tuple for semantic errors.
+  One exhaustive CLI switch owns the fixed messages and field issues.
+- Focused proof passes all 29 importer owner tests, all 10 sample/audit CLI
+  journeys, both affected package typechecks, prepared-runtime generation, CLI
+  package-shape verification, and all 14 runner-bundle boundary tests. The CLI
+  journey uses one physical row recognized as heart rate and steps, verifies
+  both safe import paths, and proves the resulting guidance contains no row
+  count or raw cell value.
 
 ## Tasks
 
