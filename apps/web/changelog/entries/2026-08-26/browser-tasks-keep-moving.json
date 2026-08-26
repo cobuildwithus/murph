@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "browser-tasks-keep-moving",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Browser tasks keep moving",
+    "summary": "Murph can continue a browser task when the optional live viewer is temporarily unavailable.",
+    "details": "If a task needs you to take over, Murph still uses the protected handoff and never exposes an unapproved viewer.",
+    "relevanceTags": ["assistant", "browser", "reliability"],
+    "sourcePullRequests": [2360]
+  }
+}
