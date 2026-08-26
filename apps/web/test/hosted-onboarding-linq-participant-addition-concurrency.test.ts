@@ -1,7 +1,46 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const groupActionAuthorityMocks = vi.hoisted(() => ({
+  hasActivationProof: vi.fn(),
+  readWake: vi.fn(),
+  resolveSenderMemberId: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-mailbox/store")
+  >();
+  return {
+    ...actual,
+    readHostedMailboxConversationWakeByAssistantInputId:
+      groupActionAuthorityMocks.readWake,
+  };
+});
+
+vi.mock("@/src/lib/hosted-groups/group-message-sender", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-groups/group-message-sender")
+  >();
+  return {
+    ...actual,
+    resolveHostedGroupMessageSenderMemberId:
+      groupActionAuthorityMocks.resolveSenderMemberId,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/member-activation")
+  >();
+  return {
+    ...actual,
+    hasHostedMemberActivationProof:
+      groupActionAuthorityMocks.hasActivationProof,
+  };
+});
 
 import {
   deleteHostedAddressBookProjection,
@@ -29,9 +68,19 @@ import {
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
 import {
+  readHostedGroupMembershipsForMember,
+} from "@/src/lib/hosted-groups/group-store";
+import {
+  assertHostedGroupParticipantActionOriginHasOwnMurph,
+} from "@/src/lib/hosted-groups/participant-action-authority";
+import {
   ensureHostedThreadContainerRouteTx,
   type PreparedHostedThreadContainerCreation,
 } from "@/src/lib/hosted-routing/thread-container-service";
+import {
+  parseHostedGroupMaterializationScriptOptions,
+  runHostedGroupMaterializationCommand,
+} from "@/scripts/backfill-hosted-group-materialization";
 import {
   buildHostedThreadDeliveryRoute,
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
@@ -203,6 +252,9 @@ async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
     select: { ownerMemberId: true },
     where: { memberId: fixture.containerMemberId },
   });
+  await fixture.observer.hostedGroup.deleteMany({
+    where: { runtimeMemberId: fixture.containerMemberId },
+  });
   await fixture.observer.hostedThreadContainer.deleteMany({
     where: { memberId: fixture.containerMemberId },
   });
@@ -221,6 +273,44 @@ async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
     fixture.participantClient.$disconnect(),
     fixture.observer.$disconnect(),
   ]);
+}
+
+async function expectCanonicalOwnerActionAuthority(input: {
+  containerMemberId: string;
+  ownerMemberId: string;
+  prisma: PrismaClient;
+  threadId: string;
+}): Promise<void> {
+  const originAssistantInputId = `ain_${"a".repeat(32)}`;
+  const routeAuthority = {
+    accountLookupKey: "test-account",
+    channel: "linq" as const,
+    containerMemberId: input.containerMemberId,
+    threadId: input.threadId,
+  };
+  groupActionAuthorityMocks.readWake.mockResolvedValue({
+    userId: input.containerMemberId,
+  });
+  groupActionAuthorityMocks.resolveSenderMemberId
+    .mockResolvedValue(input.ownerMemberId);
+  groupActionAuthorityMocks.hasActivationProof.mockResolvedValue(true);
+
+  await expect(assertHostedGroupParticipantActionOriginHasOwnMurph({
+    originAssistantInputId,
+    prisma: input.prisma,
+    routeAuthority,
+  })).resolves.toBe(input.ownerMemberId);
+
+  groupActionAuthorityMocks.resolveSenderMemberId
+    .mockResolvedValue("member_roster_only");
+  await expect(assertHostedGroupParticipantActionOriginHasOwnMurph({
+    originAssistantInputId,
+    prisma: input.prisma,
+    routeAuthority,
+  })).rejects.toMatchObject({
+    code: "HOSTED_GROUP_PARTICIPANT_ACTION_AUTHORITY_REQUIRED",
+    httpStatus: 403,
+  });
 }
 
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
@@ -566,6 +656,72 @@ function observeHostedThreadRouteLockAttempt(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
+    it("backfills a historical route through the production command and private membership read", async () => {
+      const fixture = await createRouteFixture();
+      try {
+        await expect(fixture.observer.hostedGroup.findUnique({
+          where: { runtimeMemberId: fixture.containerMemberId },
+        })).resolves.toBeNull();
+
+        await expect(runHostedGroupMaterializationCommand({
+          now: () => new Date("2026-08-25T12:00:00.000Z"),
+          options: parseHostedGroupMaterializationScriptOptions([
+            "--apply",
+            "--batch-size",
+            "100",
+          ]),
+          prisma: fixture.observer,
+        })).resolves.toMatchObject({
+          failedRows: 0,
+          materializedRows: 1,
+          remainingRows: 0,
+        });
+        await expect(readHostedGroupMembershipsForMember({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.observer,
+        })).resolves.toEqual({
+          memberships: [{
+            displayName: null,
+            grantedVaultShareProjectionScopes: [],
+            kind: "custom",
+            memberCount: 1,
+            membershipId: expect.any(String),
+            ownerJoinCode: null,
+            requestedVaultShareProjectionScopes: [],
+            role: "owner",
+            runtimeMemberId: fixture.containerMemberId,
+          }],
+          truncated: false,
+        });
+        await expectCanonicalOwnerActionAuthority({
+          containerMemberId: fixture.containerMemberId,
+          ownerMemberId: fixture.ownerMemberId,
+          prisma: fixture.observer,
+          threadId: fixture.threadId,
+        });
+        await expect(fixture.observer.hostedVaultShare.count({
+          where: { destinationMemberId: fixture.containerMemberId },
+        })).resolves.toBe(0);
+        await expect(runHostedGroupMaterializationCommand({
+          options: parseHostedGroupMaterializationScriptOptions(["--check"]),
+          prisma: fixture.observer,
+        })).resolves.toEqual({
+          complete: true,
+          pendingRows: 0,
+        });
+        await expect(runHostedGroupMaterializationCommand({
+          options: parseHostedGroupMaterializationScriptOptions(["--apply"]),
+          prisma: fixture.observer,
+        })).resolves.toMatchObject({
+          materializedRows: 0,
+          remainingRows: 0,
+          selectedRows: 0,
+        });
+      } finally {
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
     it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
@@ -584,6 +740,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         `member_thread_create_container_a_${fixtureId}`,
         `member_thread_create_container_b_${fixtureId}`,
       ] as const;
+      const saturatedDestinationMemberIds = Array.from(
+        { length: 25 },
+        (_, index) => `member_thread_create_share_destination_${index}_${fixtureId}`,
+      );
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const winnerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const loserClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -597,9 +757,24 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       configureHostedContactPrivacyKeyringForTest("v1");
       try {
         await observer.hostedMember.createMany({
-          data: ownerMemberIds.map((id) => ({
-            billingStatus: "active" as const,
-            id,
+          data: [
+            ...ownerMemberIds.map((id) => ({
+              billingStatus: "active" as const,
+              id,
+            })),
+            ...saturatedDestinationMemberIds.map((id) => ({ id })),
+          ],
+        });
+        await observer.hostedVaultShare.createMany({
+          data: saturatedDestinationMemberIds.map((destinationMemberId, index) => ({
+            destinationMemberId,
+            grantedAt: new Date("2026-08-25T11:00:00.000Z"),
+            grantorMemberId: ownerMemberIds[0],
+            id: `share_thread_create_${index}_${fixtureId}`,
+            projectionKind: "profile-name.v0",
+            projectionScopeJson: { projectionKind: "profile-name.v0" },
+            projectionScopeKey: "profile-name.v0",
+            status: "granted",
           })),
         });
         const [winnerPreparation, loserPreparation] = await Promise.all([
@@ -728,6 +903,60 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedMailboxItem.count({
           where: { userId: { in: [...containerMemberIds] } },
         })).resolves.toBe(1);
+        await expect(observer.hostedGroup.findUnique({
+          where: { runtimeMemberId: containerMemberIds[0] },
+          select: {
+            displayName: true,
+            joinCode: true,
+            kind: true,
+            members: {
+              orderBy: { memberId: "asc" },
+              select: { memberId: true, role: true },
+            },
+            ownerMemberId: true,
+            runtimeMemberId: true,
+          },
+        })).resolves.toEqual({
+          displayName: null,
+          joinCode: null,
+          kind: "custom",
+          members: [{ memberId: ownerMemberIds[0], role: "owner" }],
+          ownerMemberId: ownerMemberIds[0],
+          runtimeMemberId: containerMemberIds[0],
+        });
+        await expect(readHostedGroupMembershipsForMember({
+          memberId: ownerMemberIds[0],
+          prisma: observer,
+        })).resolves.toEqual({
+          memberships: [{
+            displayName: null,
+            grantedVaultShareProjectionScopes: [],
+            kind: "custom",
+            memberCount: 1,
+            membershipId: expect.any(String),
+            ownerJoinCode: null,
+            requestedVaultShareProjectionScopes: [],
+            role: "owner",
+            runtimeMemberId: containerMemberIds[0],
+          }],
+          truncated: false,
+        });
+        await expectCanonicalOwnerActionAuthority({
+          containerMemberId: containerMemberIds[0],
+          ownerMemberId: ownerMemberIds[0],
+          prisma: observer,
+          threadId,
+        });
+        await expect(observer.hostedVaultShare.count({
+          where: { destinationMemberId: containerMemberIds[0] },
+        })).resolves.toBe(0);
+        await expect(observer.hostedVaultShare.count({
+          where: {
+            grantorMemberId: ownerMemberIds[0],
+            projectionScopeKey: "profile-name.v0",
+            status: "granted",
+          },
+        })).resolves.toBe(25);
       } finally {
         releaseWinner.resolve();
         await Promise.allSettled([
@@ -743,13 +972,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await observer.hostedThreadRoute.deleteMany({
           where: { containerMemberId: { in: [...containerMemberIds] } },
         });
+        await observer.hostedGroup.deleteMany({
+          where: { runtimeMemberId: { in: [...containerMemberIds] } },
+        });
         await observer.hostedThreadContainer.deleteMany({
           where: { memberId: { in: [...containerMemberIds] } },
         });
         await observer.hostedMember.deleteMany({
           where: {
             id: {
-              in: [...ownerMemberIds, ...containerMemberIds],
+              in: [
+                ...ownerMemberIds,
+                ...containerMemberIds,
+                ...saturatedDestinationMemberIds,
+              ],
             },
           },
         });
@@ -881,6 +1117,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
         await observer.hostedThreadRoute.deleteMany({
           where: { containerMemberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedGroup.deleteMany({
+          where: { runtimeMemberId: { in: [...containerMemberIds] } },
         });
         await observer.hostedThreadContainer.deleteMany({
           where: { memberId: { in: [...containerMemberIds] } },

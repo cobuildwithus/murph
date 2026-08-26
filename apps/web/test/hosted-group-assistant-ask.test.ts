@@ -109,7 +109,7 @@ function membership(input: {
 } = {}) {
   return {
     group: {
-      displayName: input.displayName ?? "100 Club",
+      displayName: input.displayName === undefined ? "100 Club" : input.displayName,
       runtimeMemberId: input.runtimeMemberId === undefined
         ? TARGET_RUNTIME_MEMBER_ID
         : input.runtimeMemberId,
@@ -668,6 +668,37 @@ describe("Hosted private-to-group context handoff admission", () => {
       }),
       prisma: expect.any(Object),
     });
+  });
+
+  it("keeps multiple unnamed organic memberships fail-closed", async () => {
+    const { prisma } = createPrisma({
+      memberships: [
+        membership({ displayName: null, id: "membership-one" }),
+        membership({
+          displayName: null,
+          id: "membership-two",
+          runtimeMemberId: "member-other-group-runtime",
+        }),
+      ],
+    });
+
+    await expect(requestHostedGroupContextHandoff({
+      context: "A bounded fact.",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_labels_unavailable",
+      },
+    });
+    expect(mocks.resolveHostedAssistantNotificationDestination)
+      .not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
   });
 
   it("fails before mailbox crypto when the group route is unavailable", async () => {

@@ -162,3 +162,12 @@ without changing automation ownership or adding a second error framework.
   data remains a typed terminal configuration error with neutral guidance, all
   preserving mutations still reject invalid nested data without changing file
   bytes, and hosted replacement accepts only the invalid section it replaces.
+- Current `main` through `7f7805be95` is integrated. The two mechanical bundle
+  conflicts preserve current-main device-sync telemetry and compose only the
+  reviewed 18,658-byte Core/runtime allowance for a 9,599,148-byte total
+  boundary; entry and static-startup limits remain unchanged.
+- Post-integration proof passes the 14 bundle-boundary cases, operator-config
+  and Cloudflare typechecks, prepared runtime, package shape, and canonical
+  runner assembly. The Vault CLI is 9,560,987 / 9,599,148 bytes with an
+  805-byte entry and 25,155-byte static closure; all eight parity probes pass
+  and the runner is 11,381,905 / 11,393,617 bytes.

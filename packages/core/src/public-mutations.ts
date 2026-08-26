@@ -626,8 +626,11 @@ export async function promoteInboxExperimentNote(
 
 export async function importDeviceBatch(
   input: Parameters<typeof importDeviceBatchInternal>[0],
+  options: Parameters<typeof importDeviceBatchInternal>[1] = {},
 ): ReturnType<typeof importDeviceBatchInternal> {
-  return withCanonicalInputWriteLock(input, importDeviceBatchInternal);
+  return withCanonicalWriteLock(input.vaultRoot, () =>
+    importDeviceBatchInternal(input, options),
+  );
 }
 
 export async function dedupeDeviceEventsByExternalRef(

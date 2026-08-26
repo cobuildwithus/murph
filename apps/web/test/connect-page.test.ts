@@ -3343,6 +3343,10 @@ test("connect source card design study renders the production action states", as
 
   assert.match(markup, /id="connect-source-card-actions"/u);
   assert.match(markup, /data-design-state="signed-out-source-actions"/u);
+  assert.doesNotMatch(
+    markup,
+    /Google authorization is handled through/u,
+  );
   assert.match(markup, /aria-label="Disconnect Garmin"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /aria-label="Connect Fitbit"/u);

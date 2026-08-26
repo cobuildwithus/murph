@@ -1,6 +1,6 @@
 # Hosted Core Member Plan
 
-Last verified: 2026-07-30
+Last verified: 2026-08-25
 Status: Implemented current-state contract
 
 ## Product Contract
@@ -28,6 +28,10 @@ reconciliation, stored data, and authorized group projections continue.
 quotes, Stripe mutations, allowance calculation, and reconciliation.
 `HostedGroupMember` is the canonical eligibility evidence. A qualifying row is
 current and either owner-shaped or has a confirmed `joinedAt`.
+
+The route owner receives that ordinary owner-shaped membership when a new Linq
+or Telegram group route is created, even when no join link has been minted.
+Observed roster participants remain ineligible until they join explicitly.
 
 Eligibility is checked when Core is displayed and again inside the member's
 billing mutation lock immediately before Stripe access. Losing the last

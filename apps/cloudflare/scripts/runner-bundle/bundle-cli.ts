@@ -157,11 +157,18 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // workout graph. None of these changes alter startup topology.
 // Experiment and Murph Age recovery metadata add another 8,772 B to the lazy
 // CLI graph. Core runtime and automation recovery metadata add 15,280 B to the
-// same lazy graph. Scheduled-log recovery adds 14,891 B to that graph. Compose
-// the measured deltas; neither changes entry or static-startup topology.
-// The recovery-boundary correction measured 9,552,878 B after that composition;
-// retain its existing 126 B headroom.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_553_004;
+// same lazy graph. Entry and static-startup limits remain unchanged.
+// Scheduled-log recovery adds 14,891 B to that same lazy CLI graph. Compose the
+// measured deltas; no change alters entry or static-startup topology.
+// The recovery-boundary correction measured 9,552,878 B on the reviewed PR
+// composition; retain its existing 126 B headroom.
+// Pass-local device-sync event-index reuse and phase telemetry extend the
+// existing lazy Core, Importers, Device Sync, and Assistant Runtime graph
+// without adding a package or changing entry/static-startup topology. The
+// production Linux assembly measured 9,539,530 B on 2026-08-26; ratchet from
+// that exact baseline while retaining the 32 KiB graph allowance and 8 KiB
+// production-overlay reserve.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_599_148;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
