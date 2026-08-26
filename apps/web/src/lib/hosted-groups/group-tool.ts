@@ -2360,6 +2360,7 @@ export async function reconcileHostedThreadContainerParticipants(input: {
           ${now},
           ${observationExpiresAt}
         FROM input_observation
+        ORDER BY input_observation.contact_lookup_key
         ON CONFLICT (contact_lookup_key)
         DO UPDATE SET
           first_observed_at = CASE

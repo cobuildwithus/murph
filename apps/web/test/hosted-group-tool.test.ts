@@ -4885,6 +4885,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       "INSERT INTO hosted_group_participant_observation",
     );
     expect(reconcileQuery.sql).toContain(
+      "ORDER BY input_observation.contact_lookup_key",
+    );
+    expect(reconcileQuery.sql).toContain(
       "input_participant(participant_member_id, handle_lookup_key)",
     );
     expect(reconcileQuery.sql).toContain(

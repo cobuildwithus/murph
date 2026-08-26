@@ -69,6 +69,10 @@ Updated: 2026-08-26
    Mitigation: Treat the evidence as non-authoritative group-derived analytics,
    omit it from user exports, and cap its lifetime at 14 days. The user
    explicitly chose bounded expiry over synchronous account-deletion coupling.
+6. Risk: Concurrent rosters share observation keys and acquire them in opposite
+   orders, aborting participant reconciliation with a database deadlock.
+   Mitigation: Order the existing observation input by its primary key inside
+   the same set-based statement.
 
 ## Tasks
 
@@ -88,6 +92,9 @@ Updated: 2026-08-26
 - Fourteen-day expiry is the complete lifecycle contract. Account deletion does
   not synchronously delete global roster observations or add lock coupling to
   participant reconciliation.
+- The observation upsert orders rows by the existing contact-key primary key.
+  This keeps concurrent writers deterministic without another lock, query,
+  transaction, retry, or owner.
 - Reuse the current group-to-private member marker and ops chart unchanged.
 - Do not add a participant-event side path: the existing roster reconciliation
   observes the complete current room after group activity and already owns the
@@ -101,17 +108,20 @@ Updated: 2026-08-26
 
 ## Verification
 
-- Passed: 343 focused deterministic Vitest tests covering observation SQL,
+- Passed: 506 focused deterministic Vitest tests covering observation SQL,
   group reconciliation, growth attribution, retention, migration, and hosted
   privacy schema guards.
-- Passed: two opt-in local PostgreSQL tests for set-based silent roster
-  observation, production writer-to-attributor composition, and idempotent
-  marking.
+- Passed: three opt-in local PostgreSQL tests for set-based silent roster
+  observation, production writer-to-attributor composition, idempotent marking,
+  and reversed-order concurrent reconciliation through two database connections.
 - Passed: Web typecheck, focused ESLint, and `git diff --check`.
 - Accepted the Ops-copy and composed-proof findings. The user rejected
   synchronous account-deletion cleanup in favor of the existing 14-day expiry.
   Removing that helper also removes round two's lock-order cycle; no replacement
   lock, retry, relation, queue, service, or lifecycle was added.
+- Accepted round three's independent roster-writer ordering finding. One SQL
+  `ORDER BY` plus a focused PostgreSQL proof resolves it without new production
+  machinery.
 - Expected outcomes: silent roster evidence attributes exactly once only after
   activation, invalid/self/removed inputs do not observe, message and roster
   evidence dedupe at the existing marker, expired evidence is boundedly

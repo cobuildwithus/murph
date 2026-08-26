@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
@@ -307,6 +309,121 @@ describe.skipIf(!runPostgresProof)(
       } finally {
         warn.mockRestore();
         await prisma.$disconnect();
+      }
+    });
+
+    it("orders shared observation rows across concurrent roster reconciliation", async () => {
+      const firstPrisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondPrisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const proofId = randomUUID();
+      const containerMemberIds: [string, string] = [
+        `member_roster_container_a_${proofId}`,
+        `member_roster_container_b_${proofId}`,
+      ];
+      const participantMemberId = `member_roster_participant_${proofId}`;
+      const memberIds = [...containerMemberIds, participantMemberId];
+      const firstHandle = `roster-a-${proofId}@example.com`;
+      const secondHandle = `roster-b-${proofId}@example.com`;
+      const firstLookupKey = requireLookupKey("email", firstHandle);
+      const secondLookupKey = requireLookupKey("email", secondHandle);
+      const lookupKeys = [firstLookupKey, secondLookupKey];
+      const firstObservedAt = new Date(Date.now() - 60_000);
+      const previousExpiresAt = new Date(Date.now() + 60_000);
+      const reconcile = (
+        prisma: typeof firstPrisma,
+        containerMemberId: string,
+        handles: readonly string[],
+      ) => reconcileHostedThreadContainerParticipants({
+        chatId: `chat_roster_${containerMemberId}`,
+        containerMemberId,
+        handles: handles.map((handle) => ({
+          handle,
+          isMe: false,
+          status: "active" as const,
+        })),
+        prisma,
+        resolvedParticipants: handles.map((handle) => ({
+          handle,
+          participantMemberId,
+        })),
+      });
+
+      try {
+        await firstPrisma.hostedMember.createMany({
+          data: memberIds.map((id) => ({ id })),
+        });
+        await firstPrisma.hostedThreadContainer.createMany({
+          data: containerMemberIds.map((memberId) => ({
+            memberId,
+            ownerMemberId: memberId,
+          })),
+        });
+        await firstPrisma.hostedGroupParticipantObservation.createMany({
+          data: lookupKeys.map((contactLookupKey) => ({
+            contactLookupKey,
+            expiresAt: previousExpiresAt,
+            firstObservedAt,
+          })),
+        });
+
+        await expect(Promise.all([
+          reconcile(firstPrisma, containerMemberIds[0], [firstHandle, secondHandle]),
+          reconcile(secondPrisma, containerMemberIds[1], [secondHandle, firstHandle]),
+        ])).resolves.toEqual([undefined, undefined]);
+        expect(warn).not.toHaveBeenCalled();
+
+        const participantRows = await firstPrisma
+          .hostedThreadContainerParticipant.findMany({
+            select: {
+              containerMemberId: true,
+              participantMemberId: true,
+              removedAt: true,
+            },
+            where: {
+              containerMemberId: { in: containerMemberIds },
+            },
+          });
+        expect(participantRows).toHaveLength(2);
+        expect(participantRows.every((row) => row.removedAt === null)).toBe(true);
+        expect(new Set(participantRows.map((row) => row.containerMemberId)))
+          .toEqual(new Set(containerMemberIds));
+        expect(participantRows.every((row) =>
+          row.participantMemberId === participantMemberId
+        )).toBe(true);
+
+        const observations = await firstPrisma
+          .hostedGroupParticipantObservation.findMany({
+            orderBy: { contactLookupKey: "asc" },
+            select: {
+              contactLookupKey: true,
+              expiresAt: true,
+              firstObservedAt: true,
+            },
+            where: { contactLookupKey: { in: lookupKeys } },
+          });
+        expect(observations.map((row) => row.contactLookupKey)).toEqual(
+          [...lookupKeys].sort(),
+        );
+        expect(observations.every((row) =>
+          row.firstObservedAt.getTime() === firstObservedAt.getTime()
+          && row.expiresAt.getTime() > previousExpiresAt.getTime()
+        )).toBe(true);
+      } finally {
+        warn.mockRestore();
+        await firstPrisma.hostedThreadContainer.deleteMany({
+          where: { memberId: { in: containerMemberIds } },
+        });
+        await firstPrisma.hostedMember.deleteMany({
+          where: { id: { in: memberIds } },
+        });
+        await firstPrisma.hostedGroupParticipantObservation.deleteMany({
+          where: { contactLookupKey: { in: lookupKeys } },
+        });
+        await Promise.all([
+          firstPrisma.$disconnect(),
+          secondPrisma.$disconnect(),
+        ]);
       }
     });
   },
