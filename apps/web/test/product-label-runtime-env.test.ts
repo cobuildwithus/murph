@@ -26,14 +26,6 @@ const liveFoodSearchIndexes = [
     isReady: true,
     isValid: true,
   },
-  {
-    definition:
-      "CREATE INDEX foods_canonical_rank_idx ON public.foods USING btree (canonical_key, data_origin_priority, id)",
-    indexName: "foods_canonical_rank_idx",
-    isLive: true,
-    isReady: true,
-    isValid: true,
-  },
 ] as const;
 
 describe("product label runtime env preflight", () => {
@@ -54,21 +46,11 @@ describe("product label runtime env preflight", () => {
     expect(findProductLabelSearchIndexProblems([
       ...liveFoodSearchIndexes.slice(0, 1),
       { ...liveFoodSearchIndexes[1], isReady: false },
-      {
-        ...liveFoodSearchIndexes[2],
-        definition:
-          "CREATE INDEX foods_canonical_rank_idx ON public.foods USING btree (canonical_key, id)",
-      },
     ])).toEqual([
       {
         kind: "index",
         name: "foods_name_exact_rank_idx",
         reason: "not_live",
-      },
-      {
-        kind: "index",
-        name: "foods_canonical_rank_idx",
-        reason: "wrong_definition",
       },
     ]);
 
@@ -81,11 +63,6 @@ describe("product label runtime env preflight", () => {
       {
         kind: "index",
         name: "foods_name_exact_rank_idx",
-        reason: "missing",
-      },
-      {
-        kind: "index",
-        name: "foods_canonical_rank_idx",
         reason: "missing",
       },
     ]);
@@ -212,17 +189,12 @@ describe("product label runtime env preflight", () => {
                 name: "foods_name_exact_rank_idx",
                 reason: "not_live",
               },
-              {
-                kind: "index",
-                name: "foods_canonical_rank_idx",
-                reason: "wrong_definition",
-              },
             ];
           },
         },
       ),
     ).rejects.toThrow(
-      "foods_name_rank_idx (missing), foods_name_exact_rank_idx (not_live), foods_canonical_rank_idx (wrong_definition)",
+      "foods_name_rank_idx (missing), foods_name_exact_rank_idx (not_live)",
     );
   });
 

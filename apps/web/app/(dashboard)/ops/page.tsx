@@ -19,6 +19,12 @@ export const metadata: Metadata = {
 const OPS_TOOLS = [
   {
     description:
+      "Ask one member's Murph for a private diagnostic or one direct message.",
+    href: "/ops/tasks",
+    label: "Murph tasks",
+  },
+  {
+    description:
       "Inspect per-member and group-container inbound message volume, AI usage, and safely reset current included usage.",
     href: "/ops/usage",
     label: "Usage",
