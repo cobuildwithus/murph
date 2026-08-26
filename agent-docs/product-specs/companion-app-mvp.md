@@ -75,26 +75,35 @@ current Privy session. The smallest honest implementation is:
    /api/device-sync/companion/imessage-mini-app/enrollment`. The server verifies
    the bounded request body, verifies the identity token, then serializes with
    account deletion on the hosted-member lock while re-checking active access
-   and launch consent. It returns a random 24-hour Messages-only bearer only
-   after atomically rotating one deterministic Messages-owned session row in
-   that same transaction. Repeated enrollment replaces the lookup hash and
-   invalidates the prior bearer while keeping storage bounded to one Messages
-   row per member and leaving ordinary device-agent rows untouched.
-4. The containing app writes only that derived bearer to an explicitly
+   and launch consent. It returns a renewable Messages-only lifecycle
+   credential plus a 24-hour action bearer only after atomically rotating one
+   deterministic Messages-owned session row in that same transaction. Repeated
+   enrollment replaces both domain-separated lookup hashes and invalidates the
+   prior lifecycle while keeping storage bounded to one Messages row per member
+   and leaving ordinary device-agent rows untouched.
+4. The containing app writes only that derived credential pair to an explicitly
    addressed shared Keychain access group. Privy's own access, refresh, and
-   identity tokens remain in Privy's host-app-private storage.
+   identity tokens remain in Privy's host-app-private storage. After this one
+   setup, the extension renews its action bearer directly; the containing app
+   does not need to be running or reopened for ordinary authenticated card use.
 5. The extension calls `POST
    /api/device-sync/companion/imessage-mini-app/member-actions` with the derived
-   bearer and a closed, bounded, versioned action envelope. The server derives
-   the member, re-checks active access and historical launch consent, and
-   appends the request to the existing encrypted mailbox before returning
-   `202 Accepted`. The runtime dispatches it directly to the existing domain
-   use case with no assistant turn. Workout is the first action family; future
+   action bearer and a closed, bounded, versioned action envelope. At expiry,
+   the extension calls the closed renewal route with the lifecycle bearer; the
+   server serializes concurrent renewals on the same member lock, re-checks
+   active access and historical launch consent, and returns one deterministic
+   replacement action bearer without consulting Privy. The member-action route
+   independently derives the member, repeats those authority checks, and
+   appends the request to the existing encrypted mailbox before returning `202
+   Accepted`. The runtime dispatches it directly to the existing domain use
+   case with no assistant turn. Workout is the first action family; future
    editors extend the closed union rather than gaining arbitrary patch or tool
    authority.
 6. Disabling the feature or signing out calls `DELETE
    /api/device-sync/companion/imessage-mini-app/enrollment` best-effort and
-   always clears the local derived bearer, even if the network revoke fails.
+   always clears the local derived credential pair, even if the network revoke
+   fails. Either exact bearer may revoke the current lifecycle, while stale or
+   replaced generations cannot revoke their replacement.
 
 Privy Swift 2.12.0 is intentionally absent from the extension target: its
 binary references app-only lifecycle APIs, is not marked app-extension-safe,

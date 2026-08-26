@@ -7,6 +7,8 @@ import { PrismaHostedAgentSessionStore } from "../src/lib/device-sync/prisma-sto
 import {
   IMessageMiniAppService,
   issueIMessageMiniAppEnrollment,
+  renewIMessageMiniAppCredential,
+  revokeIMessageMiniAppCredential,
 } from "../src/lib/imessage-mini-app/service";
 import {
   recordHostedLaunchRequiredConsent,
@@ -200,7 +202,7 @@ function defineEnrollmentDeletionSerializationSuite(): void {
       prisma,
       first.credential.token,
     );
-    const firstAuthenticatedSession = await firstCredentialService.requireCredential();
+    await firstCredentialService.requireCredential();
     const firstMessagesSession = await prisma.deviceAgentSession.findUniqueOrThrow({
       where: { id: expectedMessagesSessionId },
     });
@@ -221,15 +223,21 @@ function defineEnrollmentDeletionSerializationSuite(): void {
       createMessagesCredentialService(prisma, first.credential.token).requireCredential(),
     ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
     await expect(
-      firstCredentialService.revoke(firstAuthenticatedSession),
+      revokeIMessageMiniAppCredential({
+        prisma,
+        request: lifecycleCredentialRequest(first.credential.token),
+      }),
     ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
 
     const secondCredentialService = createMessagesCredentialService(
       prisma,
       second.credential.token,
     );
-    const secondAuthenticatedSession = await secondCredentialService.requireCredential();
-    await expect(secondCredentialService.revoke(secondAuthenticatedSession)).resolves.toEqual({
+    await secondCredentialService.requireCredential();
+    await expect(revokeIMessageMiniAppCredential({
+      prisma,
+      request: lifecycleCredentialRequest(second.credential.token),
+    })).resolves.toEqual({
       schemaVersion: 1,
       revoked: true,
     });
@@ -280,6 +288,48 @@ function defineEnrollmentDeletionSerializationSuite(): void {
     })).resolves.toEqual(ordinarySession);
   });
 
+  it("serializes concurrent extension renewals onto one action credential", async () => {
+    const prisma = requireObserver();
+    const first = await issueIMessageMiniAppEnrollment({ memberId, prisma });
+    const sessionId = `dsa_imessage_${createHash("sha256")
+      .update(`murph:imessage-mini-app:session:v1\0${memberId}`)
+      .digest("hex")}`;
+    const renewalTime = new Date(Date.parse(first.credential.expiresAt) + 1_000);
+
+    const firstRenewalClient = createTestPrismaClient("renewal-first");
+    const secondRenewalClient = createTestPrismaClient("renewal-second");
+    const renewalRequest = () => lifecycleCredentialRequest(first.credential.renewalToken);
+    const [firstRenewed, secondRenewed] = await Promise.all([
+      renewIMessageMiniAppCredential({
+        now: renewalTime,
+        prisma: firstRenewalClient,
+        request: renewalRequest(),
+      }),
+      renewIMessageMiniAppCredential({
+        now: renewalTime,
+        prisma: secondRenewalClient,
+        request: renewalRequest(),
+      }),
+    ]);
+
+    expect(firstRenewed).toEqual(secondRenewed);
+    expect(firstRenewed.credential).toMatchObject({
+      renewalToken: first.credential.renewalToken,
+      token: expect.stringMatching(/^hbds_imessage_/u),
+    });
+    expect(firstRenewed.credential.token).not.toBe(first.credential.token);
+    await expect(
+      createMessagesCredentialService(prisma, firstRenewed.credential.token)
+        .requireCredential(),
+    ).resolves.toMatchObject({ id: sessionId });
+    await expect(
+      createMessagesCredentialService(prisma, first.credential.token)
+        .requireCredential(),
+    ).rejects.toMatchObject({ code: "IMESSAGE_MINI_APP_AUTH_INVALID" });
+    await expect(prisma.deviceAgentSession.count({ where: { userId: memberId } }))
+      .resolves.toBe(1);
+  });
+
   function createTestPrismaClient(role: string): PrismaClient {
     const databaseUrl = new URL(requireTestDatabaseUrl());
     databaseUrl.searchParams.set("application_name", applicationName(role));
@@ -310,6 +360,13 @@ function createMessagesCredentialService(
     ),
     store: new PrismaHostedAgentSessionStore(prisma),
   });
+}
+
+function lifecycleCredentialRequest(token: string): Request {
+  return new Request(
+    "https://example.test/api/device-sync/companion/imessage-mini-app/renewal",
+    { headers: { authorization: `Bearer ${token}` } },
+  );
 }
 
 async function deleteMemberAndAgentSessionsTx(input: {
