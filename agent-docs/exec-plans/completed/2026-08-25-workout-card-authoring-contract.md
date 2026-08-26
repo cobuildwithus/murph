@@ -1,6 +1,6 @@
 # Workout card authoring contract
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -61,7 +61,7 @@ Updated: 2026-08-25
 3. [completed] Add focused first-call authoring and prompt regressions.
 4. [completed] Run focused verification, inspect provider-input size, and
    complete the Product UX walkthrough.
-5. [in_progress] Commit, push, open the PR, run the required specialist and final
+5. [completed] Commit, push, open the PR, run the required specialist and final
    gates, and require green exact-head CI.
 
 ## Decisions
@@ -106,8 +106,8 @@ Updated: 2026-08-25
   structured-workout branch, and the existing live-workout E2E inspects the
   model-authored fresh and update calls. The live assertion cannot execute in
   this shell because neither supported provider credential is present; all
-  deterministic boundary coverage passes. Ready subject to exact-head review
-  and CI.
+  deterministic boundary coverage passes. ReviewGPT round 2 passed the full
+  patch with no findings, and exact-head CI is green. Ready.
 
 ## Verification
 
@@ -143,5 +143,7 @@ Updated: 2026-08-25
   one-time contract-fingerprint rollout disclosure; both corrections are now
   represented in code, tests, and this plan. Merged current `origin/main` at
   `53ba33ce80` through two-parent merge `8aa1fa7470`; focused tests and all
-  affected package typechecks pass afterward. ReviewGPT round 2 and exact-head
-  CI remain pending.
+  affected package typechecks pass afterward. ReviewGPT round 2 passed the full
+  snapshot with no findings. Exact-head CI completed with 22 passing checks, 2
+  intentional skips, and no failures.
+Completed: 2026-08-25
