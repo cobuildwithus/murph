@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -25,6 +25,7 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import {
   listEntitySchema,
   showResultSchema,
@@ -325,6 +326,10 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 )
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
+)
+const HABITAT_VOICE_E2E_TSX_LOADER = path.resolve(
+  path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+  '../tsx/dist/loader.mjs',
 )
 const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.enabled=true',
@@ -826,7 +831,15 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
           materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
@@ -863,11 +876,8 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -886,6 +896,57 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
             ? [{ id: event.entityId, workout: parsed.data }]
             : []
         })
+        const observedExerciseNames = workouts.flatMap(({ workout }) =>
+          workout.exercises.map((exercise) => exercise.name.toLowerCase())
+        )
+        const hasUnexpectedDelivery =
+          (result.providerAuthoredFinalMessage ?? '').trim() !== ''
+          || result.responseCard === null
+          || result.runtimeIssueInputs.length > 0
+        const failedTurnActions =
+          workouts.length !== 1 || hasUnexpectedDelivery
+          ? readCapabilityRoutingActions(result.jsonEvents).map((action) =>
+            action.kind === 'command'
+              ? {
+                command: redactRealCodexDiagnosticText(action.command),
+                kind: action.kind,
+                outputHead: redactRealCodexDiagnosticText(action.output).slice(0, 1_500),
+                outputLength: action.output.length,
+                outputTail: redactRealCodexDiagnosticText(action.output).slice(-1_500),
+              }
+              : {
+                argumentsValue: action.argumentsValue,
+                kind: action.kind,
+                tool: action.tool,
+              }
+          )
+          : undefined
+        const failedRuntimeIssues =
+          workouts.length !== 1 || hasUnexpectedDelivery
+            ? result.runtimeIssueInputs.map((issue) => ({
+              component: issue.component,
+              details: issue.details,
+              errorCode: issue.errorCode,
+              issueKind: issue.issueKind,
+              operation: issue.operation,
+              phase: issue.phase,
+              summary: issue.summary,
+            }))
+            : undefined
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            exerciseNames: observedExerciseNames,
+            finalMessage: result.finalMessage,
+            providerAuthoredFinalMessage:
+              result.providerAuthoredFinalMessage ?? null,
+            responseCardKind: result.responseCard?.kind ?? null,
+            providerActionCount: result.providerActionCount,
+            runtimeIssueCount: result.runtimeIssueInputs.length,
+            runtimeIssues: failedRuntimeIssues,
+            scenario: 'clear-shared-head',
+            turnActions: failedTurnActions,
+          })}\n`,
+        )
 
         expect(workouts).toHaveLength(1)
         const workout = workouts[0]!
@@ -908,8 +969,12 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
           setCount: 2,
           setPlanIsFinite: true,
         })))
-        expect(result.finalMessage.trim()).toBe('')
-        expect(result.responseCard).toMatchObject({
+        const responseCard = result.responseCard
+        expect(responseCard).not.toBeNull()
+        if (responseCard === null) {
+          throw new Error('Expected the verified workout response card.')
+        }
+        expect(responseCard).toMatchObject({
           kind: 'compact_table',
           tracking: {
             entityId: workout.id,
@@ -919,6 +984,21 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
             state: 'active',
           },
         })
+        if (
+          responseCard.kind !== 'compact_table'
+          || !('workout' in responseCard)
+        ) {
+          throw new Error('Expected a structured workout compact table.')
+        }
+        expect(
+          responseCard.workout.exercises.flatMap((exercise) =>
+            exercise.sets.map((set) => set.target)
+          ),
+        ).toEqual(Array.from({ length: 6 }, () => '10 reps'))
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+        expect(result.finalMessage).toBe(
+          renderAssistantResponseCardText(responseCard),
+        )
         expectStructuredWorkoutAuthoringAttempt({
           entityId: workout.id,
           events: result.jsonEvents,
@@ -929,13 +1009,6 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
         const commands = await readFile(commandLogPath, 'utf8')
         expect(commands.match(/--exercise /gu)).toHaveLength(3)
         expect(commands).not.toContain('workout exercise add')
-        process.stdout.write(
-          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
-            exerciseNames: normalizedNames,
-            finalMessage: result.finalMessage,
-            scenario: 'clear-shared-head',
-          })}\n`,
-        )
 
         const commandCountBeforeAmbiguousTurn = commands
           .trim()
@@ -957,7 +1030,24 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
           .split('\n')
           .filter(Boolean)
           .slice(commandCountBeforeAmbiguousTurn)
+        const ambiguousMutationCommands = ambiguousTurnCommands.filter(
+          (command) =>
+            !command.includes('--help')
+            && /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u.test(
+              command,
+            ),
+        )
 
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            finalMessage: ambiguousResult.finalMessage,
+            mutationCommands: ambiguousMutationCommands,
+            providerAuthoredFinalMessage:
+              ambiguousResult.providerAuthoredFinalMessage ?? null,
+            scenario: 'ambiguous-quantity-allocation',
+            workoutCount: workoutsAfterAmbiguousTurn.length,
+          })}\n`,
+        )
         expect(workoutsAfterAmbiguousTurn).toHaveLength(1)
         expect(ambiguousResult.responseCard).toBeNull()
         expect(ambiguousResult.finalMessage.match(/\?/gu)).toHaveLength(1)
@@ -972,16 +1062,7 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
           /what (?:is|does).*standing|what (?:is|does).*seated|what.*cable press|which exercise (?:do you mean|is this)/iu,
         )
         expect(ambiguousResult.runtimeIssueInputs).toEqual([])
-        expect(ambiguousTurnCommands.join('\n')).not.toMatch(
-          /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u,
-        )
-        process.stdout.write(
-          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
-            finalMessage: ambiguousResult.finalMessage,
-            mutationCommands: ambiguousTurnCommands,
-            scenario: 'ambiguous-quantity-allocation',
-          })}\n`,
-        )
+        expect(ambiguousMutationCommands).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -1016,7 +1097,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
@@ -1090,11 +1179,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -10417,17 +10503,13 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const tsxLoaderPath = path.resolve(
-    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
-    '../tsx/dist/loader.mjs',
-  )
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
-      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
@@ -11585,12 +11667,22 @@ async function materializeAssistantSkill(input: {
   skillsRoot: string
   slug: AssistantSkillSlug
 }): Promise<void> {
-  const targetDirectory = path.join(input.skillsRoot, input.slug)
-  await mkdir(targetDirectory, { recursive: true })
+  await materializeAssistantSkillAsset({
+    relativePath: path.join(input.slug, 'SKILL.md'),
+    skillsRoot: input.skillsRoot,
+  })
+}
+
+async function materializeAssistantSkillAsset(input: {
+  relativePath: string
+  skillsRoot: string
+}): Promise<void> {
+  const targetPath = path.join(input.skillsRoot, input.relativePath)
+  await mkdir(path.dirname(targetPath), { recursive: true })
   await writeFile(
-    path.join(targetDirectory, 'SKILL.md'),
+    targetPath,
     await readFile(
-      path.join(resolveAssistantSkillsRoot(), input.slug, 'SKILL.md'),
+      path.join(resolveAssistantSkillsRoot(), input.relativePath),
       'utf8',
     ),
     'utf8',
@@ -12219,6 +12311,8 @@ async function materializeHabitatVoiceVaultCli(input: {
 
 async function materializeRealWorkoutVaultCli(input: {
   binDirectory: string
+  commandLogPath: string
+  vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -12226,11 +12320,9 @@ async function materializeRealWorkoutVaultCli(input: {
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_COMMAND_LOG" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
-      '  exit 70',
-      'fi',
-      'printf \'%s\\n\' "$*" >> "$WORKOUT_E2E_COMMAND_LOG"',
-      'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
@@ -13800,6 +13892,16 @@ function readCommandText(value: unknown): string {
   return Array.isArray(value)
     ? value.filter((part): part is string => typeof part === 'string').join(' ')
     : ''
+}
+
+function redactRealCodexDiagnosticText(value: string): string {
+  const redactedPaths = value
+    .replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')
+    .replace(/\/home\/[^/\s]+/gu, '<HOME_DIR>')
+  const localUser = path.basename(homedir()).trim()
+  return localUser.length >= 3
+    ? redactedPaths.replaceAll(localUser, '<REDACTED_USER>')
+    : redactedPaths
 }
 
 function readArgumentsRecord(value: unknown): Record<string, unknown> {

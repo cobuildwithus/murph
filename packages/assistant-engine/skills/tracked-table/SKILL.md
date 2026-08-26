@@ -9,6 +9,8 @@ description: Use when a private Murph member asks to start or update a live work
 
 Make workout logging easier than opening a dedicated tracker while keeping one canonical workout record that the member can inspect for months. Text is the write interface; a compact table is an immutable presentation snapshot.
 
+A single total set count shared by multiple exercises without a per-exercise allocation is not complete or unambiguous. Ask how many sets belong to each exercise and create nothing; never apply the total to every exercise or divide it yourself.
+
 A tracked `compact_table` may add structured `workout` detail for one open or just-finished strength workout. An ordinary `compact_table` remains the right surface for arbitrary tables, historical comparisons, or tracked data that is not one live workout.
 
 ## Core invariant
@@ -135,10 +137,11 @@ The legacy `workout edit` full-structure replacement remains available only for 
 
 1. Resolve the requested saved format when the member names one. If there is no reusable plan, preserve the complete ordered list of every distinct exercise the member named, including closely related variations; never collapse or omit one.
    Dictation and compact messages may omit punctuation. When ordinary coordinated position, angle, grip, stance, or equipment modifiers clearly share one exercise head, expand each modifier into one distinct exercise by carrying the shared exercise head across the list. For example, `standing seated and kneeling cable presses` names `standing cable press`, `seated cable press`, and `kneeling cable press`. Ask one narrow question only when the exercise identities remain genuinely ambiguous; do not ask what ordinary exercise modifiers mean merely because punctuation is absent.
-2. Run one `vault-cli workout start`, passing `--routine` for a saved format or one repeated `--exercise` specification per ad-hoc exercise. Never combine those inputs, and never create an empty workout followed by initial exercise mutations. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
+2. For a complete unambiguous new-workout request, run exactly one `vault-cli workout start`, passing `--routine` only for a saved format already resolved in step 1 or one repeated `--exercise` specification per ad-hoc exercise. Never pass an inline exercise plan as `--routine`, and never retry the start after a card or reply problem. Never combine routine and ad-hoc inputs, and never create an empty workout followed by initial exercise mutations. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
 3. Put each stated set count in that exercise's initial specification; the count is finite. When no count is stated, omit `sets` so creation supplies one targetless unlogged slot, not a claimed plan or completed set.
 4. Put `reps=<n>` in the initial specification only when the member assigns one exact integer repetition count to every set of that exercise. Use `workout exercise set-reps` only for a later change to that exercise-owned fact.
-5. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification. Read the format separately before presenting planned targets.
+5. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification and use its event id for the card immediately. Read the format separately before presenting planned targets.
+6. On a supported private card route, immediately attach exactly one structured workout card from that verified snapshot and end with no companion prose. For each returned exercise with `memberRepsPerSet`, copy `<n> reps` into every pending set's card target; never drop that canonical target from the widget. Never stop after the start command with a text-only acknowledgement or wait for another card request.
 
 Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session keeps targets in the format and actual performance in the event.
 

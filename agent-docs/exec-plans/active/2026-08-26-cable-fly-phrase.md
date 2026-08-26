@@ -97,8 +97,20 @@ Updated: 2026-08-26
   exercise as unambiguous, and asks only when the count conflicts, is inexact,
   or its allocation is unclear. The shared-head rule now owns exercise identity
   only, removing the conflicting duplicate quantity instruction.
-- The public changelog fragment remains on the draft PR but must not ship while
-  the Product UX journey is on Hold.
+- Live-path diagnosis found two fixture-only failures before product behavior
+  could be judged: the synthetic CLI used a sandbox-incompatible TypeScript IPC
+  path, then depended on per-turn environment values that a reused app server
+  did not retain. The fixture now invokes the reviewed loader directly and
+  embeds only its session-owned synthetic paths in its generated wrapper.
+- A live recovery attempt also exposed an avoidable command error: an ad-hoc
+  inline plan could be passed as a saved routine lookup before retrying with
+  exercises. The skill now reserves `--routine` for an already resolved saved
+  format and requires one repeated `--exercise` input per ad-hoc exercise.
+- Product UX is Ready after the focused journey passed under a separate
+  authenticated local subscription home. The synthetic clear case produced one
+  active workout, three ordered exercises, six pending 10-repetition targets,
+  one structured card, no companion prose, and no runtime issues. The ambiguous
+  follow-up asked one allocation question and made no canonical mutation.
 
 ## Verification
 
@@ -112,20 +124,15 @@ Updated: 2026-08-26
   - Corrected exact-head preliminary Product UX/prompt/coverage ReviewGPT pass
     completed with findings; every substantive finding was accepted and the
     code/test remediation was applied. Per the one-pass rule it is not rerun.
-- Hold:
   - `pnpm test:assistant:live -- --test "expands coordinated workout exercise modifiers"`
-    and the same command targeting `gpt-5.5` both stop at the subscription cache
-    probe with `ASSISTANT_CODEX_USAGE_LIMIT` before the assistant turn and with
-    zero provider actions.
-  - The supported provider-auth fallback also stops before the assistant turn
-    because no provider API credential is configured.
-  - The focused journey is committed and asserts the punctuation-free clear
-    case, exact canonical exercises and shared prescription, complete quiet
-    card response, ambiguous allocation question, exactly one question mark,
-    and no write or card on ambiguity. It prints both synthetic replies for
-    review when the provider becomes available.
+    passed with `gpt-5.6-terra` through a separate authenticated local
+    subscription home: one workout with the three expected exercises, two sets
+    and 10 repetitions per exercise, one complete quiet card, zero runtime
+    issues, and no mutation or card for the allocation-ambiguous follow-up.
+  - Focused prompt contracts after the live-path fixes: 78 tests passed across
+    tracked-workout, exercise-catalog, and resident-routing coverage.
+  - Assistant-engine package typecheck after the live-path fixes.
+  - `git diff --check` after the live-path fixes.
 - Remaining:
-  - Retry the focused live command after subscription capacity resets, review
-    both printed replies, and move Product UX from Hold to Ready only on pass.
-  - Update PR #2340 evidence, close this plan with `scripts/finish-task`, mark
-    the PR Ready, and require green exact-head GitHub checks.
+  - Commit and push the exact candidate, update PR #2340 evidence, run the final
+    PR review gate, mark the PR Ready, and require green exact-head checks.
