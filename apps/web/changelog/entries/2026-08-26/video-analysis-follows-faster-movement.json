@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "video-analysis-follows-faster-movement",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Video analysis can follow faster movement",
+    "summary": "For exercise form, quick action, or a brief moment, Murph can now look at more points in the video before answering.",
+    "details": "Ordinary video questions keep the lighter analysis. Every request still makes one pass, and visible form feedback stays observational rather than diagnostic.",
+    "relevanceTags": ["assistant", "video", "movement"],
+    "sourcePullRequests": [2373],
+    "tryIt": {
+      "label": "Ask about a video",
+      "prompt": "Check my form in this video and tell me what you can see in the movement."
+    }
+  }
+}

@@ -100,6 +100,8 @@ Updated: 2026-08-26
   --no-coverage apps/cloudflare/test/runner-egress-gemini.test.ts
   apps/cloudflare/test/runner-egress-intercept.test.ts`: 262 tests passed.
 - Assistant Engine, Hosted Execution, and Cloudflare package typechecks passed.
+- The focused changelog page test passed with 9 tests, and the Web typecheck
+  passed for the content-only release note.
 - The focused real-Codex journey compiled and started against the default local
   subscription, but the lane returned `ASSISTANT_CODEX_USAGE_LIMIT` before any
   provider action. Live reply review remains `Hold` until one authorized
