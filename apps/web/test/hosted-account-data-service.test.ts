@@ -420,7 +420,7 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.hosted_member",
 ] as const;
 
-const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 15;
+const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
@@ -1778,7 +1778,6 @@ describe("deleteHostedAccountData", () => {
       ),
       "prisma.hosted_group_join_outreach": 1_002,
       "prisma.hosted_group_join_outreach_delivery": 1_001,
-      "prisma.hosted_group_participant_observation": 1,
     });
 
     const referralOwnerIndex = operationOrder.indexOf(
@@ -1874,7 +1873,6 @@ describe("deleteHostedAccountData", () => {
       "findMany:hostedLinqDelivery",
       "updateMany:hostedLinqDailyState",
       "deleteMany:hostedGroupJoinOutreach",
-      "executeRaw",
       "queryRaw:owners",
       "queryRaw:member",
     ]);
@@ -2193,60 +2191,6 @@ describe("deleteHostedAccountData", () => {
         "prisma.hosted_group_join_outreach",
         "prisma.hosted_group_join_outreach_delivery",
       ]));
-  });
-
-  it("deletes matching roster observations before contact identity rows", async () => {
-    const operationOrder: string[] = [];
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const rawExecutionQueries: string[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => undefined,
-      operationOrder,
-      rawDeletionQueries,
-      rawExecutionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    const observationDelete = rawExecutionQueries.find((sql) => sql.includes(
-      "hosted-account-deletion:group-participant-observations",
-    ));
-    expect(observationDelete).toBeDefined();
-    const contactKeyIndex = observationDelete!.indexOf(
-      "target_contact_lookup_keys(contact_lookup_key) AS MATERIALIZED",
-    );
-    const observationDeleteIndex = observationDelete!.indexOf(
-      "DELETE FROM hosted_group_participant_observation AS observation",
-    );
-    const owners = requireHostedAccountDeletionRawQuery(
-      rawDeletionQueries,
-      "owners",
-    );
-    const emailDeleteIndex = owners.sql.indexOf(
-      "DELETE FROM hosted_member_email_authorization AS email_authorization",
-    );
-    const identityDeleteIndex = owners.sql.indexOf(
-      "DELETE FROM hosted_member_identity AS identity",
-    );
-
-    expect(contactKeyIndex).toBeGreaterThanOrEqual(0);
-    expect(observationDelete).toContain("identity.phone_lookup_key IS NOT NULL");
-    expect(observationDelete).toContain(
-      "email_authorization.verified_email_verified_at IS NOT NULL",
-    );
-    expect(observationDeleteIndex).toBeGreaterThan(contactKeyIndex);
-    expect(emailDeleteIndex).toBeGreaterThanOrEqual(0);
-    expect(identityDeleteIndex).toBeGreaterThanOrEqual(0);
-    expect(operationOrder.lastIndexOf("executeRaw")).toBeLessThan(
-      operationOrder.indexOf("delete-owner:owners"),
-    );
-    expect(result.deletedCounts[
-      "prisma.hosted_group_participant_observation"
-    ]).toBe(1);
   });
 
   it("deletes group grants, clarifications, and policies before their owners", async () => {
@@ -5795,7 +5739,6 @@ function createHostedAccountDeletionPrismaForTest(input: {
   rawDeletionCounts?: Record<string, bigint | number>;
   rawDeletionOwnerCalls?: string[];
   rawDeletionQueries?: HostedAccountDeletionRawQuery[];
-  rawExecutionQueries?: string[];
   sponsorshipCancellationError?: Error;
   terminalStatementCalls?: string[];
   productFeedbackRows?: Array<{
@@ -5937,9 +5880,6 @@ function createHostedAccountDeletionPrismaForTest(input: {
     $executeRaw: async (...args: unknown[]) => {
       recordTerminalStatement("executeRaw");
       input.operationOrder?.push("executeRaw");
-      input.rawExecutionQueries?.push(
-        readHostedAccountDeletionRawQueryText(args),
-      );
       const lockOwner = args.slice(1).find((value): value is string =>
         typeof value === "string" && value.includes(":")
       );

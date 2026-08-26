@@ -204,8 +204,8 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   {
     slug: "prisma.hosted_group_participant_observation",
     label: "Short-lived group roster attribution evidence",
-    deletion: "live-delete",
-    note: "Deletes blinded roster observations that match the member's phone or verified-email lookup key before identity rows. User exports omit this derived evidence and its lookup keys.",
+    deletion: "documented-retention",
+    note: "Global blinded roster evidence is not member-owned authority, is omitted from user exports, and expires no later than 14 days after its latest observation.",
   },
   {
     slug: "prisma.hosted_address_book_projection",
@@ -3023,40 +3023,6 @@ function mergeHostedAccountDeletionOwnerCounts(
   }
 }
 
-export async function deleteHostedGroupParticipantObservationsForAccountDeletionTx(
-  input: {
-    memberIds: readonly string[];
-    prisma: Prisma.TransactionClient;
-  },
-): Promise<number> {
-  const memberIdsSql = buildPostgresTextArray(uniqueStrings(input.memberIds));
-  return await input.prisma.$executeRaw(Prisma.sql`
-    /* hosted-account-deletion:group-participant-observations */
-    WITH target_members(id) AS (
-      SELECT unnest(${memberIdsSql})
-    ),
-    target_contact_lookup_keys(contact_lookup_key) AS MATERIALIZED (
-      SELECT identity.phone_lookup_key
-      FROM hosted_member_identity AS identity
-      WHERE identity.member_id IN (SELECT id FROM target_members)
-        AND identity.phone_lookup_key IS NOT NULL
-
-      UNION
-
-      SELECT email_authorization.verified_email_lookup_key
-      FROM hosted_member_email_authorization AS email_authorization
-      WHERE email_authorization.member_id IN (SELECT id FROM target_members)
-        AND email_authorization.verified_email_lookup_key IS NOT NULL
-        AND email_authorization.verified_email_verified_at IS NOT NULL
-    )
-    DELETE FROM hosted_group_participant_observation AS observation
-    WHERE observation.contact_lookup_key IN (
-      SELECT contact_lookup_key
-      FROM target_contact_lookup_keys
-    )
-  `);
-}
-
 async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
@@ -3489,11 +3455,6 @@ async function deleteHostedAccountPrismaRows(input: {
     groupJoinOutreachDeletion.outreachCount;
   counts["prisma.hosted_group_join_outreach_delivery"] =
     groupJoinOutreachDeletion.deliveryCount;
-  counts["prisma.hosted_group_participant_observation"] =
-    await deleteHostedGroupParticipantObservationsForAccountDeletionTx({
-      memberIds,
-      prisma: input.prisma,
-    });
 
   mergeHostedAccountDeletionOwnerCounts(
     counts,
