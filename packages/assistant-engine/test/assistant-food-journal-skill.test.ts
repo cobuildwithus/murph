@@ -169,6 +169,36 @@ describe('assistant food journal skill', () => {
       'concise truthful fallback. Never narrate individual safety, totals, estimation,\nor target-resolution mechanics.',
     )
     expect(skill).toContain(
+      '### Complete an interactive day before attaching its card',
+    )
+    expect(skill).toContain(
+      "compare every\nmetric's `mealCount` with the top-level `mealCount`",
+    )
+    expect(skill).toContain(
+      'List only that selected date, show the exact meals that lack\nnutrition',
+    )
+    expect(skill).toContain(
+      "A member's current statement that the\nmeal is equivalent to a specific prior meal is usable evidence.",
+    )
+    expect(skill).toContain(
+      'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',
+    )
+    expect(skill).toContain(
+      'edit and read\nback the exact existing meal, then rerun fresh same-date totals before any card',
+    )
+    expect(skill).toContain(
+      'ask one compact question for only\nthat missing detail and stop without a card',
+    )
+    expect(skill).toContain(
+      'Do not ask merely to\nenable numeric output for an intuitive-eating, eating-disorder-risk, or\nnumber-sensitive member.',
+    )
+    expect(skill).toContain(
+      'This generic recovery question is interactive-only.',
+    )
+    expect(skill).toContain(
+      'partial-card schema and\nrendering remain compatibility surfaces, not the normal interactive closeout.',
+    )
+    expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',
     )
     expect(skill).toContain('does not attach a goal-less card')

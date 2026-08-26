@@ -88,6 +88,36 @@ Treat a routine daily-card request, including a requested meal estimate needed
 for that card, as one fulfillment workflow. Reply once with the card or one
 concise truthful fallback. Never narrate individual safety, totals, estimation,
 or target-resolution mechanics.
+
+### Complete an interactive day before attaching its card
+
+After the fresh selected-date `vault-cli meal totals` read, compare every
+metric's `mealCount` with the top-level `mealCount`. When any metric has lower
+coverage, do not treat the normal interactive card workflow as finished with a
+partial card. List only that selected date, show the exact meals that lack
+nutrition, and try to complete those existing records from accepted current
+conversation context, their saved identity, ingredients, and amount, and a
+bounded matching prior meal when useful. A member's current statement that the
+meal is equivalent to a specific prior meal is usable evidence. A similar
+informal name alone is not: require matching saved ingredients and portion
+evidence or ask instead of copying nutrition.
+
+Apply the estimation-eligibility and label/database grounding rules below. If
+the available evidence supports a meaningful bounded estimate, edit and read
+back the exact existing meal, then rerun fresh same-date totals before any card.
+Never add a replacement meal or calculate around the incomplete record. If
+identity or amount remains too indeterminate, ask one compact question for only
+that missing detail and stop without a card. The answer resumes the exact-meal
+edit, read-back, fresh-totals, and eligible-card workflow. Do not ask merely to
+enable numeric output for an intuitive-eating, eating-disorder-risk, or
+number-sensitive member.
+
+This generic recovery question is interactive-only. Scheduled automatic
+closeout keeps the narrower question authority in `automatic-meal-capture`.
+Attach a partial card only when the member explicitly asks to see the currently
+available partial data after the limitation is clear; partial-card schema and
+rendering remain compatibility surfaces, not the normal interactive closeout.
+
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
 pending explicit card request in that next response after the known-context

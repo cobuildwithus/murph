@@ -9263,6 +9263,114 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
 
 describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () => {
   it(
+    'reuses canonical nutrition suitability without repeating established screening',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealNumericSuitabilityMemoryRecovery({ config })
+        process.stdout.write(
+          `[numeric-suitability-memory-recovery-e2e] ${JSON.stringify({
+            commands: result.commands,
+            message: result.message,
+            providerActionCount: result.providerActionCount,
+          })}\n`,
+        )
+        expect(result.commands.filter(
+          (command) => command === 'memory show --format json',
+        )).toHaveLength(1)
+        expect(result.commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(
+            /^(?:condition|regimen|measurement|event) (?:list|entry list)\b/u,
+          ),
+        ]))
+        expect(result.commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(/^(?:commons|knowledge)\b/u),
+        ]))
+        expect(result.commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(/^goal (?:save|import-json)\b/u),
+        ]))
+        expect(result.message).not.toMatch(/\?/u)
+        expect(result.message).toMatch(/saved|already|context|clear/iu)
+        expect(result.message).toMatch(/protein|target/iu)
+        expect(result.message).not.toMatch(
+          /pregnan|breastfeed|eating disorder|kidney|liver|bariatric/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'repairs an incomplete manual meal from an explicitly equivalent prior meal',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealPriorMealNutritionRecovery({ config })
+        process.stdout.write(
+          `[prior-meal-nutrition-recovery-e2e] ${JSON.stringify({
+            cardAttached: result.card !== null,
+            commands: result.commands,
+            message: result.message,
+            providerActionCount: result.providerActionCount,
+          })}\n`,
+        )
+        const editIndexes = result.commands.flatMap((command, index) =>
+          command.startsWith(`meal edit ${result.currentMealId} `)
+            ? [index]
+            : [],
+        )
+        expect(editIndexes).toHaveLength(1)
+        const editIndex = editIndexes[0] ?? -1
+        const readbackIndex = result.commands.findIndex(
+          (command, index) =>
+            index > editIndex
+            && command === `meal show ${result.currentMealId} --format json`,
+        )
+        const totalsIndex = result.commands.findIndex(
+          (command, index) =>
+            index > readbackIndex
+            && command.startsWith(
+              'meal totals --from 2026-08-21 --to 2026-08-21',
+            ),
+        )
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'show', result.priorMealId],
+        )).toBe(true)
+        expect(editIndex).toBeGreaterThanOrEqual(0)
+        expect(readbackIndex).toBeGreaterThan(editIndex)
+        expect(totalsIndex).toBeGreaterThan(readbackIndex)
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'add'],
+        )).toBe(false)
+        expect(result.savedCalories).toBe(430)
+        expect(result.card).toMatchObject({
+          kind: 'daily_nutrition',
+          localDate: '2026-08-21',
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 430 },
+            carbsGrams: { mealCount: 1, total: 48 },
+            fatGrams: { mealCount: 1, total: 14 },
+            fiberGrams: { mealCount: 1, total: 8 },
+            proteinGrams: { mealCount: 1, total: 31 },
+          },
+          version: 2,
+        })
+        expect(result.message).not.toMatch(/\?/u)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
     'recovers a tombstoned device meal before attaching the requested card',
     { timeout: 1_800_000 },
     async () => {
@@ -9636,6 +9744,277 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
       followupMessage: followup.finalMessage,
       followupProviderActionCount: followup.providerActionCount,
       mealId: meal.mealId,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function runRealNumericSuitabilityMemoryRecovery(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  commands: string[]
+  message: string
+  providerActionCount: number
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-numeric-suitability-memory-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await Promise.all([
+      mkdir(vaultRoot, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+    await materializeNumericSuitabilityVaultCli({
+      binDirectory,
+      commandLog,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'I am considering a daily protein target of 135 grams.',
+        'Before changing anything, use my saved context to tell me whether numeric self-directed targets are suitable.',
+        'Do not modify a goal yet.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+
+    return {
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function materializeNumericSuitabilityVaultCli(input: {
+  binDirectory: string
+  commandLog: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const emptyGoals = {
+    count: 0,
+    items: [],
+    nextCursor: null,
+    vault: 'synthetic-vault',
+  }
+  const memory = {
+    document: {
+      records: [
+        {
+          id: 'memory_adult',
+          section: 'Identity',
+          text: 'Adult.',
+          updatedAt: '2026-08-20T15:00:00.000Z',
+        },
+        {
+          id: 'memory_numeric_suitability',
+          section: 'Context',
+          text: 'Current nutrition suitability review is complete. No pregnancy or breastfeeding, number-sensitive tracking, underweight or frailty, nutrition-target-changing medication, relevant kidney, liver, heart, or endocrine disease, bariatric care, or clinician-managed nutrition constraint applies.',
+          updatedAt: '2026-08-20T15:00:00.000Z',
+        },
+      ],
+    },
+    memory: null,
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      'case "$*" in',
+      `  "memory show --format json") ${emit(memory)} ;;`,
+      `  "goal list --status active --limit 200 --format json") ${emit(emptyGoals)} ;;`,
+      `  "goal list --limit 200 --format json") ${emit(emptyGoals)} ;;`,
+      '  goal\\ save*|goal\\ import-json*) printf \'%s\\n\' \'Goal mutation forbidden in this fixture\' >&2; exit 17 ;;',
+      '  *) printf \'unsupported suitability fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function runRealPriorMealNutritionRecovery(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  card: unknown
+  commands: string[]
+  currentMealId: string
+  message: string
+  priorMealId: string
+  providerActionCount: number
+  savedCalories: number | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-prior-meal-nutrition-recovery-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+    const priorMeal = await addMeal({
+      ingredients: ['rolled oats', 'plain yogurt', 'pear', 'almond butter'],
+      note: 'Breakfast bowl, one medium serving.',
+      nutrition: {
+        provenance: {
+          confidence: 'high',
+          source: 'label',
+          sourceDetail: 'Saved package labels and measured serving.',
+        },
+        totals: {
+          calories: 430,
+          carbsGrams: 48,
+          fatGrams: 14,
+          fiberGrams: 8,
+          proteinGrams: 31,
+        },
+      },
+      occurredAt: '2026-08-19T12:15:00.000Z',
+      source: 'manual',
+      vaultRoot,
+    })
+    const currentMeal = await addMeal({
+      ingredients: ['rolled oats', 'plain yogurt', 'pear', 'almond butter'],
+      note: 'Breakfast bowl, one medium serving.',
+      occurredAt: '2026-08-21T12:10:00.000Z',
+      source: 'manual',
+      vaultRoot,
+    })
+    const pointTarget = (
+      targetId: string,
+      metricKey: string,
+      unit: string,
+      value: number,
+    ) => goalMetricTargetSchema.parse({
+      comparator: 'between',
+      evaluation: { kind: 'selected-value' },
+      highValue: value,
+      kind: 'metric',
+      metricKey,
+      targetId,
+      unit,
+      value,
+    })
+    await upsertGoal({
+      domains: ['nutrition'],
+      metricTargets: [
+        pointTarget('synthetic-calories', 'dietary-calories', 'kcal', 2_100),
+        pointTarget('synthetic-protein', 'protein-grams', 'g', 135),
+        pointTarget('synthetic-carbs', 'carbs-grams', 'g', 250),
+        pointTarget('synthetic-fat', 'fat-grams', 'g', 70),
+        pointTarget('synthetic-fiber', 'fiber-grams', 'g', 30),
+      ],
+      status: 'active',
+      title: 'Daily nutrition targets',
+      vaultRoot,
+      window: { startAt: '2026-08-01' },
+    })
+    await materializeAutomaticMealClarificationVaultCli({
+      binDirectory,
+      commandLog,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'Send my daily nutrition card for August 21.',
+        'The breakfast bowl saved that day had exactly the same ingredients and portion as the saved breakfast bowl from August 19.',
+        'Update the existing August 21 meal rather than adding another meal.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const commands = commandText === '' ? [] : commandText.split('\n')
+    const state = await readAutomaticMealClarificationState({
+      mealId: currentMeal.mealId,
+      vaultRoot,
+    })
+
+    return {
+      card: result.responseCard,
+      commands,
+      currentMealId: currentMeal.mealId,
+      message: result.finalMessage,
+      priorMealId: priorMeal.mealId,
+      providerActionCount: result.providerActionCount,
+      savedCalories: state.savedCalories,
     }
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)

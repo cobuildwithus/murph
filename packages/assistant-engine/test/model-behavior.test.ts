@@ -2447,6 +2447,9 @@ describe('assistant experiment onboarding guidance', () => {
       '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
     )
     expect(prompt).toContain('run one `vault-cli commons knowledge search')
+    expect(prompt).toContain(
+      'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
+    )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
