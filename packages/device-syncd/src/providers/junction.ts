@@ -4713,6 +4713,9 @@ export function createJunctionDeviceSyncProvider(
       } else {
         try {
           await importJunctionTimeseriesResourceSnapshot({
+            collectionWorkLimit: resource === "electrocardiogram_voltage"
+              ? JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT
+              : undefined,
             context,
             dateQueryFormat: "date",
             resource,
@@ -6117,7 +6120,7 @@ async function fetchJunctionElectrocardiogramVoltageFeatures(
     });
   }
 
-  const records: unknown[] = [];
+  const features: unknown[] = [];
   for (const candidate of candidates) {
     if (candidate.voltageSampleCount === 0) {
       continue;
@@ -6134,23 +6137,35 @@ async function fetchJunctionElectrocardiogramVoltageFeatures(
       windowEnd: candidate.sessionEnd,
       windowStart: candidate.sessionStart,
     });
-    if (samples.length !== candidate.voltageSampleCount) {
+    let candidateFeatures: Record<string, unknown>[];
+    try {
+      candidateFeatures = reduceJunctionElectrocardiogramVoltageRecords(
+        samples,
+        { maxRecordings: 1, maxSamples: limits.maxSamples },
+      );
+    } catch (error) {
+      if (isDeviceSyncError(error)) {
+        throw error;
+      }
+      throw junctionElectrocardiogramBindingError("sample_normalization_invalid");
+    }
+    const feature = candidateFeatures[0];
+    if (!feature || candidateFeatures.length !== 1) {
+      throw junctionElectrocardiogramBindingError("feature_cardinality_mismatch", {
+        actualRecordingCount: candidateFeatures.length,
+        expectedRecordingCount: 1,
+      });
+    }
+    const actualSampleCount = readJunctionElectrocardiogramSampleCount(feature);
+    if (actualSampleCount !== candidate.voltageSampleCount) {
       throw junctionElectrocardiogramBindingError("sample_count_mismatch", {
-        actualSampleCount: samples.length,
+        actualSampleCount: actualSampleCount ?? 0,
         expectedSampleCount: candidate.voltageSampleCount,
       });
     }
-    records.push(...samples);
+    features.push(feature);
   }
-
-  try {
-    return reduceJunctionElectrocardiogramVoltageRecords(records, limits);
-  } catch (error) {
-    if (isDeviceSyncError(error)) {
-      throw error;
-    }
-    throw junctionElectrocardiogramBindingError("sample_normalization_invalid");
-  }
+  return features;
 }
 
 function selectJunctionElectrocardiogramRecordingCandidates(
