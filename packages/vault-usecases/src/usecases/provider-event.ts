@@ -906,7 +906,7 @@ const SAMPLE_CANONICAL_UNITS: Readonly<Record<string, string>> = Object.freeze({
   temperature: 'celsius',
 })
 
-function sampleImportIssue(field: string, stream: string): {
+export function sampleImportIssue(field: string, stream: string): {
   code: 'invalid_type'
   expected: 'number' | 'object' | 'string'
   hint?: string

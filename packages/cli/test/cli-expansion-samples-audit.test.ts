@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { initializeVault } from '@murphai/core'
@@ -319,6 +319,175 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     assert.equal(wideHeaderResult.error.message, valueMessage)
     assertNoEcho(wideHeaderResult, wideHeaders)
     assert.ok(JSON.stringify(wideHeaderResult.error).length < 1_000)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('sample CSV semantic failures retain fixed repair hints without writes or value echo', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-semantics-'))
+  const countAuditRecords = async () => {
+    const auditRoot = path.join(vaultRoot, 'audit')
+    let entries: string[]
+    try {
+      entries = await readdir(auditRoot, { recursive: true })
+    } catch (error) {
+      if (
+        typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && error.code === 'ENOENT'
+      ) {
+        return 0
+      }
+      throw error
+    }
+    const counts = await Promise.all(entries
+      .filter((entry) => entry.endsWith('.jsonl'))
+      .map(async (entry) => {
+        const content = await readFile(path.join(auditRoot, entry), 'utf8')
+        return content.split('\n').filter(Boolean).length
+      }))
+    return counts.reduce((total, count) => total + count, 0)
+  }
+  const cases = [
+    {
+      command: ['samples', 'import-csv'] as const,
+      fileName: 'negative-heart-rate.csv',
+      content: 'timestamp,spo2,heart_rate\n2026-03-12T08:00:00Z,private-spo2-cell,-17\n',
+      options: [] as const,
+      path: 'imports.1.samples',
+      hint: 'Use a non-negative integer.',
+      sentinels: ['private-spo2-cell', '-17'],
+    },
+    {
+      command: ['samples', 'csv', 'import'] as const,
+      fileName: 'fractional-heart-rate.csv',
+      content: 'timestamp,heart_rate\n2026-03-12T08:00:00Z,61.5\n',
+      options: [
+        '--stream', 'heart_rate',
+        '--ts-column', 'timestamp',
+        '--value-column', 'heart_rate',
+        '--unit', 'bpm',
+      ] as const,
+      path: 'imports.0.samples',
+      hint: 'Use a non-negative integer.',
+      sentinels: ['61.5'],
+    },
+    {
+      command: ['samples', 'import-csv'] as const,
+      fileName: 'incompatible-unit.csv',
+      content: 'timestamp,heart_rate\n2026-03-12T08:00:00Z,62\n',
+      options: [
+        '--stream', 'heart_rate',
+        '--ts-column', 'timestamp',
+        '--value-column', 'heart_rate',
+        '--unit', 'private-heart-rate-unit',
+      ] as const,
+      path: 'imports.0.samples',
+      hint: 'Use "bpm" for heart_rate.',
+      sentinels: ['private-heart-rate-unit'],
+    },
+  ]
+
+  try {
+    await initializeVault({ vaultRoot })
+    const initialAuditCount = await countAuditRecords()
+
+    for (const semanticCase of cases) {
+      const csvPath = path.join(vaultRoot, semanticCase.fileName)
+      await writeFile(
+        csvPath,
+        semanticCase.content,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        ...semanticCase.command,
+        csvPath,
+        '--vault',
+        vaultRoot,
+        ...semanticCase.options,
+      ])
+      const serialized = JSON.stringify(result)
+
+      assert.equal(result.ok, false, semanticCase.fileName)
+      assert.equal(result.meta.command, semanticCase.command.join(' '), semanticCase.fileName)
+      assert.equal(result.error.code, 'invalid_payload', semanticCase.fileName)
+      assert.equal(result.error.stage, 'validation', semanticCase.fileName)
+      assert.equal(result.error.fieldErrors?.[0]?.path, semanticCase.path, semanticCase.fileName)
+      assert.equal(result.error.hint, semanticCase.hint, semanticCase.fileName)
+      for (const sentinel of semanticCase.sentinels) {
+        assert.equal(serialized.includes(sentinel), false, semanticCase.fileName)
+      }
+
+      const samples = await runSliceCli<{ count: number }>([
+        'samples',
+        'list',
+        '--stream',
+        'heart_rate',
+        '--vault',
+        vaultRoot,
+      ])
+      const batches = await runSliceCli<{ items: unknown[] }>([
+        'samples',
+        'batch',
+        'list',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(requireData(samples).count, 0, semanticCase.fileName)
+      assert.equal(requireData(batches).items.length, 0, semanticCase.fileName)
+      assert.equal(await countAuditRecords(), initialAuditCount, semanticCase.fileName)
+    }
+
+    for (const [index, command] of [
+      ['samples', 'import-csv'],
+      ['samples', 'csv', 'import'],
+    ].entries()) {
+      const csvPath = path.join(vaultRoot, `valid-heart-rate-${index}.csv`)
+      await writeFile(
+        csvPath,
+        `timestamp,heart_rate\n2026-03-12T08:0${index}:00Z,${62 + index}\n`,
+        'utf8',
+      )
+      const result = await runSliceCli<{ importedCount: number }>([
+        ...command,
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--stream',
+        'heart_rate',
+        '--ts-column',
+        'timestamp',
+        '--value-column',
+        'heart_rate',
+        '--unit',
+        'bpm',
+      ])
+
+      assert.equal(result.ok, true, command.join(' '))
+      assert.equal(result.meta.command, command.join(' '), command.join(' '))
+      assert.equal(requireData(result).importedCount, 1, command.join(' '))
+    }
+
+    const samples = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    const batches = await runSliceCli<{ items: unknown[] }>([
+      'samples',
+      'batch',
+      'list',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(requireData(samples).count, 2)
+    assert.equal(requireData(batches).items.length, 2)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

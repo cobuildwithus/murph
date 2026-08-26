@@ -42,6 +42,16 @@ shared error projector and no partial writes or submitted-value echo.
   probe boundary now uses a finite 120-second behavioral timeout and reports a
   bounded timeout/error code, signal, and configured limit instead of generic
   `spawn_error`; the canonical rerun then passed every probe.
+- Round four found that semantic CSV failures crossed Core without retaining the
+  existing finite, value-free sample constraint. The accepted correction keeps
+  the importer as the single CSV failure owner: it carries only the safe import
+  index, canonical stream, and finite sample field, then reuses the existing
+  Vault-usecase sample mapper rather than adding a second constraint table.
+- Both mutating CSV command leaves now return `invalid_payload`, validation
+  stage, `imports.<index>.samples`, and the fixed owner hint for negative or
+  fractional heart rate and incompatible units. Focused proof covers a later
+  import index, non-echo, zero samples/batches/audits, and the unchanged success
+  path; importer, Vault-usecase, and CLI tests and typechecks pass.
 
 ## Design
 
@@ -62,5 +72,6 @@ shared error projector and no partial writes or submitted-value echo.
 3. [done] Run focused tests, affected typechecks, prepared/package-shape checks, docs
    gates, and production runner bundle/parity proof.
 4. Push the exact candidate, update the PR contract, and run the sensitive
-   post-integration ReviewGPT round with the prior finding ledger.
+   post-integration ReviewGPT round with the prior finding ledger. [done through
+   the round-four finding and local correction]
 5. Resolve any accepted finding, close the plan, admit the PR to CI, and merge.

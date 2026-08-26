@@ -57,6 +57,8 @@ export interface CsvSampleImportRepairField {
   message: string;
   expected?: string;
   missing?: boolean;
+  sampleField?: string;
+  stream?: SampleStream;
 }
 
 export interface CsvSampleImportRepair {

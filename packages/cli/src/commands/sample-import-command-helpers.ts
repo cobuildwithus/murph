@@ -2,6 +2,7 @@ import {
   createRuntimeUnavailableError,
   loadRuntimeModule,
 } from '@murphai/vault-usecases/runtime'
+import { sampleImportIssue } from '@murphai/vault-usecases/records'
 import {
   VaultCliError,
 } from '@murphai/operator-config/vault-cli-errors'
@@ -234,6 +235,7 @@ async function loadImportersRuntimeForCommand(
 }
 
 const CSV_SAMPLE_REPAIR_CODES = new Set([
+  'invalid_sample',
   'no_importable_rows',
   'timestamp_column_inference_failed',
   'value_column_inference_failed',
@@ -255,6 +257,10 @@ function toCsvSampleCliError(error: unknown): unknown {
     return error
   }
 
+  if (code === 'invalid_sample') {
+    return toCsvSampleSemanticCliError(repair.fields) ?? error
+  }
+
   const issues = repair.fields.flatMap(toCsvSampleIssues)
   const message = createCsvSampleErrorMessage(code, repair.fields)
   if (issues.length === 0 || !message) {
@@ -265,6 +271,40 @@ function toCsvSampleCliError(error: unknown): unknown {
     'invalid_payload',
     message,
     { issues, stage: 'validation' },
+  )
+}
+
+function toCsvSampleSemanticCliError(
+  fields: readonly unknown[],
+): VaultCliError | null {
+  if (fields.length !== 1 || !isRecord(fields[0])) {
+    return null
+  }
+
+  const field = fields[0]
+  const publicPath = toCsvSamplesIssuePath(field.path)
+  if (
+    !publicPath
+    || typeof field.sampleField !== 'string'
+    || typeof field.stream !== 'string'
+  ) {
+    return null
+  }
+
+  const issue = sampleImportIssue(field.sampleField, field.stream)
+  if (!issue) {
+    return null
+  }
+
+  const { hint, ...fieldIssue } = issue
+  return new VaultCliError(
+    'invalid_payload',
+    'Sample CSV contains an invalid sample field.',
+    {
+      issues: [{ publicPath, ...fieldIssue }],
+      stage: 'validation',
+      ...(hint ? { hint } : {}),
+    },
   )
 }
 
