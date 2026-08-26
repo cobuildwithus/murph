@@ -374,24 +374,6 @@ async function refreshHostedMemberForPhoneTx(input: {
   return input.member;
 }
 
-export async function ensureHostedMemberForPrivyIdentity(input: {
-  allowVerifiedEmailRebinding?: boolean;
-  authMethod?: HostedPrivyAuthMethod;
-  identity: HostedPrivyIdentity;
-  now: Date;
-  prisma?: PrismaClient;
-}): Promise<HostedMemberCoreState> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return prisma.$transaction((tx) => ensureHostedMemberForPrivyIdentityTx({
-    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
-    authMethod: input.authMethod,
-    identity: input.identity,
-    now: input.now,
-    prisma: tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
 export async function reconcileHostedPrivyIdentityOnMember(input: {
   allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
