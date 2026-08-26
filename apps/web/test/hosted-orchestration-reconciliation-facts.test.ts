@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
 } from "@murphai/hosted-execution/orchestration-control";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1666,7 +1667,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
 
     const response = await reconciliationRoute.GET(
-      requestForFacts(),
+      requestForFacts(HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH),
       routeContext(),
     );
     const facts = await response.json();
@@ -1711,11 +1712,11 @@ describe("hosted orchestration reconciliation facts", () => {
   });
 });
 
-function requestForFacts(): Request {
+function requestForFacts(search = ""): Request {
   return new Request(
     `https://join.example.test/api/internal/hosted-orchestration/users/${
       encodeURIComponent(MEMBER_ID)
-    }/reconciliation-facts`,
+    }/reconciliation-facts${search}`,
     { method: "GET" },
   );
 }
