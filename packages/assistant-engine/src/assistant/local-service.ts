@@ -2088,16 +2088,10 @@ export async function sendAssistantMessageLocal(
           const draftWindowOutcome = await turnInputController.finishDraftWindow({
             signal: currentInput.abortSignal,
           })
-          // Context zero includes every pre-provider input. Any later context
-          // proves that group input joined while request zero was running or
-          // during its draft window, so its result is only a draft.
-          if (
-            draftWindowOutcome.kind === 'review'
-            || replyDeliveryContexts.length > 1
-          ) {
+          if (draftWindowOutcome.kind === 'review') {
             providerRequestOrdinal = 1
             try {
-              if (draftWindowOutcome.kind === 'review') {
+              if (draftWindowOutcome.acceptedInput) {
                 const accepted = await acceptActiveTurnInput({
                   activeTurnInput: draftWindowOutcome.acceptedInput,
                   providerRequestAcceptedInputIds,

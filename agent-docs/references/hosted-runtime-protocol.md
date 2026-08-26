@@ -2755,8 +2755,10 @@ further steer, but retains the existing provider-turn correlation until the one
 steer already started under that exact key settles; a rejected steer is not
 acknowledged and its input remains pending. In the exception, request 0 pauses
 provider steering but keeps conversation admission registered until an atomic
-quiet cutoff or one reconsideration admission; request 1 closes at its first
-completed response. Missing input, a causal gap, a boundary change, capacity
+quiet cutoff or one reconsideration admission. A successfully committed live
+steer during request 0 also selects reconsideration and keeps registration open
+through request 1, which closes at its first completed response. Missing input,
+a causal gap, a boundary change, capacity
 overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and

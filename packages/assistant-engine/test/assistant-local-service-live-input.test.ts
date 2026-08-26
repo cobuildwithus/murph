@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { expect, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { createAssistantUsageId } from '@murphai/hosted-execution/assistant-usage'
 import {
   readAssistantAcceptedTurnInputJournal,
@@ -41,6 +42,15 @@ import {
   tempRoots,
   type Deferred,
 } from './assistant-local-service-runtime.harness.ts'
+import {
+  asRecord,
+  codexMocks,
+  jsonLine,
+  MockChildProcess,
+  mockProcessGroupSignalsForChildren,
+  waitForRpcMethod,
+} from './assistant-codex-runtime.harness.ts'
+import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
 
 test('sendAssistantMessageLocal live-steers same-conversation input without provider replay', async () => {
   const progressDeliveryDependencies = {
@@ -4317,6 +4327,10 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     })
     const providerStarted = createDeferred<void>()
     const providerRelease = createDeferred<void>()
+    const reconsiderationStarted = createDeferred<void>()
+    const reconsiderationRelease = createDeferred<void>()
+    const reconsiderationAdmissionClosed = createDeferred<void>()
+    const reconsiderationFinish = createDeferred<void>()
     const liveSteeredPrompts: string[] = []
 
     mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
@@ -4361,18 +4375,34 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
           providerAttemptId: 'attempt-live-1',
           codexContinuation: { kind: 'explicit-structured-history' },
         })
+        const releaseLiveTurn =
+          providerInput.activeTurnSteering?.registerLiveProviderTurn({
+            interrupt: async () => undefined,
+            codexThreadId: 'provider-thread-group-live-draft',
+            providerTurnId: 'provider-turn-group-live-draft-1',
+            sessionId: session.sessionId,
+            steer: async (steerInput) => {
+              liveSteeredPrompts.push(steerInput.prompt)
+            },
+            turnId: 'turn-1',
+          })
+        reconsiderationStarted.resolve()
+        await reconsiderationRelease.promise
         providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+        reconsiderationAdmissionClosed.resolve()
+        await reconsiderationFinish.promise
+        releaseLiveTurn?.()
         return {
           kind: 'succeeded',
           providerTurn: {
             onboardingGuidanceInjected: true,
             codexContinuation: { kind: 'explicit-structured-history' },
             codexThreadId: 'provider-thread-group-live-draft',
-            response: 'One final answer covering both requests.',
-            responseDeliveryContextOrdinal: 0,
+            response: 'One final answer covering all three requests.',
+            responseDeliveryContextOrdinal: 1,
             route: { routeId: 'route-group-live-draft' },
             session,
-            transcriptResponse: 'One final answer covering both requests.',
+            transcriptResponse: 'One final answer covering all three requests.',
           },
         }
       },
@@ -4415,15 +4445,53 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
       expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledOnce()
     })
     await vi.advanceTimersByTimeAsync(4_000)
-    const [initialOutcome, followUpOutcome] = await Promise.all([
+    await reconsiderationStarted.promise
+    const reconsiderationFollowUp = steerAssistantActiveTurnInputWithStatus({
+      conversation: {
+        channel: 'telegram',
+        directness: 'group',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-1',
+      prompt: 'Third group request',
+      vault: '/vaults/test',
+    })
+    assert.equal(reconsiderationFollowUp.kind, 'queued')
+    await vi.waitFor(() => {
+      expect(liveSteeredPrompts).toEqual([
+        'Second group request',
+        'Third group request',
+      ])
+    })
+    reconsiderationRelease.resolve()
+    await reconsiderationAdmissionClosed.promise
+    expect(steerAssistantActiveTurnInputWithStatus({
+      conversation: {
+        channel: 'telegram',
+        directness: 'group',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-1',
+      prompt: 'Input after the final cutoff',
+      vault: '/vaults/test',
+    })).toEqual({ kind: 'no-active-turn' })
+    reconsiderationFinish.resolve()
+    const [initialOutcome, followUpOutcome, reconsiderationFollowUpOutcome] = await Promise.all([
       initialResult,
       followUp.completion,
+      reconsiderationFollowUp.completion,
     ])
 
-    for (const outcome of [initialOutcome, followUpOutcome]) {
+    for (const outcome of [
+      initialOutcome,
+      followUpOutcome,
+      reconsiderationFollowUpOutcome,
+    ]) {
       expect(outcome).toMatchObject({
-        prompt: 'First group request\n\nSecond group request',
-        response: 'One final answer covering both requests.',
+        prompt: 'First group request\n\nSecond group request\n\nThird group request',
+        response: 'One final answer covering all three requests.',
       })
     }
     expect(
@@ -4441,7 +4509,7 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     })
     expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
     expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
-      'One final answer covering both requests.',
+      'One final answer covering all three requests.',
     )
     expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
       expect.objectContaining({ segments: [] }),
@@ -4457,3 +4525,301 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     vi.useRealTimers()
   }
 })
+
+test('sendAssistantMessageLocal composes group reconsideration through the real app-server wire', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    session,
+  })
+  const requestZeroLive = createDeferred<void>()
+  const requestOneLive = createDeferred<void>()
+  const providerConfig = normalizeAssistantProviderConfig({
+    approvalPolicy: 'never',
+    model: 'gpt-5.6-terra',
+    modelProvider: 'openai',
+    provider: 'codex-cli',
+    sandbox: 'workspace-write',
+  })
+  const providerChildren: MockChildProcess[] = []
+  let nextProviderRequestOrdinal = 0
+  mockProcessGroupSignalsForChildren(providerChildren)
+
+  codexMocks.spawn.mockImplementation(() => {
+    const providerRequestOrdinal = nextProviderRequestOrdinal
+    nextProviderRequestOrdinal += 1
+    const child = new MockChildProcess()
+    child.pid = 45_000 + providerRequestOrdinal
+    providerChildren.push(child)
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+        if (providerRequestOrdinal === 0) {
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: { id: 'provider-thread-group-composed' },
+            },
+          }))
+        } else {
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          const resumeParams = asRecord(threadResume.params)
+          expect(resumeParams.threadId).toBe(
+            'provider-thread-group-composed',
+          )
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              approvalPolicy: resumeParams.approvalPolicy,
+              cwd: resumeParams.cwd,
+              modelProvider: resumeParams.modelProvider,
+              sandbox: { type: 'workspaceWrite' },
+              thread: { id: 'provider-thread-group-composed' },
+            },
+          }))
+        }
+
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        if (providerRequestOrdinal === 1) {
+          const requestOneInput = JSON.stringify(turnStart.params)
+          expect(requestOneInput).toContain('First group request')
+          expect(requestOneInput).toContain('Second group request')
+          expect(requestOneInput).toContain(
+            'The unsent draft neither answers a request',
+          )
+        }
+        const providerTurnId = `provider-turn-group-composed-${providerRequestOrdinal}`
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: { turn: { id: providerTurnId } },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: { turn: { id: providerTurnId } },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              content: [{
+                text: providerRequestOrdinal === 0
+                  ? 'First group request'
+                  : 'First and second group requests for reconsideration',
+                type: 'text',
+              }],
+              id: `provider-user-initial-group-composed-${providerRequestOrdinal}`,
+              type: 'userMessage',
+            },
+            threadId: 'provider-thread-group-composed',
+            turnId: providerTurnId,
+          },
+        }))
+
+        const steerRequest = await waitForRpcMethod(child, 'turn/steer')
+        const expectedSteerText = providerRequestOrdinal === 0
+          ? 'Second group request'
+          : 'Third group request'
+        expect(asRecord(steerRequest.params).input).toEqual([
+          { text: expectedSteerText, type: 'text' },
+        ])
+        child.stdout.write(jsonLine({ id: steerRequest.id, result: {} }))
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              content: [{ text: expectedSteerText, type: 'text' }],
+              id: `provider-user-group-composed-${providerRequestOrdinal}`,
+              type: 'userMessage',
+            },
+            threadId: 'provider-thread-group-composed',
+            turnId: providerTurnId,
+          },
+        }))
+        const response = providerRequestOrdinal === 0
+          ? 'Provisional response to only the second request.'
+          : 'One final response covering all three requests.'
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: `provider-assistant-group-composed-${providerRequestOrdinal}`,
+              text: response,
+              type: 'agentMessage',
+            },
+            threadId: 'provider-thread-group-composed',
+            turnId: providerTurnId,
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: { id: providerTurnId, status: 'completed' },
+          },
+        }))
+      })()
+    })
+    return child
+  })
+
+  mocks.executeCodexTurnWithRecovery.mockImplementation(
+    async (providerInput) => {
+      const providerRequestOrdinal = providerInput.providerRequestOrdinal
+      assert.ok(
+        providerRequestOrdinal === 0 || providerRequestOrdinal === 1,
+      )
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: `attempt-composed-${providerRequestOrdinal}`,
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      const activeTurnSteering = providerInput.activeTurnSteering
+      assert.ok(activeTurnSteering)
+      const attempt = await executeCodexAssistantTurnAttempt({
+        activeTurnId: 'turn-1',
+        activeTurnSessionId: session.sessionId,
+        activeTurnSteering: {
+          ...activeTurnSteering,
+          registerLiveProviderTurn: (turn) => {
+            const release = activeTurnSteering.registerLiveProviderTurn(turn)
+            const liveSignal = providerRequestOrdinal === 0
+              ? requestZeroLive
+              : requestOneLive
+            liveSignal.resolve()
+            return release
+          },
+        },
+        dynamicTools: [],
+        groupConversation: true,
+        processLifetime: 'one-shot',
+        providerConfig,
+        providerRequestOrdinal,
+        ...(providerRequestOrdinal === 1
+          ? {
+              resume: {
+                codexThreadId:
+                  providerInput.resolvedSession.resumeState?.threadId
+                  ?? 'missing-provider-thread',
+              },
+            }
+          : {}),
+        turnContextPrompt: providerInput.input.turnContext,
+        userMessageContent: providerInput.input.userMessageContent,
+        userPrompt: providerInput.input.prompt,
+        workingDirectory: process.cwd(),
+      })
+      if (!attempt.ok) {
+        throw attempt.error
+      }
+      expect(attempt.result.responseDeliveryContextOrdinal).toBe(1)
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          ...attempt.result,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          onboardingGuidanceInjected: true,
+          route: { routeId: 'route-group-composed' },
+          session: providerInput.resolvedSession,
+        },
+      }
+    },
+  )
+
+  const initialResult = sendAssistantMessageLocal({
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: {
+      channel: 'telegram',
+      directness: 'group',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliverResponse: true,
+    prompt: 'First group request',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+  await requestZeroLive.promise
+  const { steerAssistantActiveTurnInputWithStatus } = await import(
+    '../src/assistant/active-turn-input-controller.ts'
+  )
+  const requestZeroFollowUp = steerAssistantActiveTurnInputWithStatus({
+    conversation: {
+      channel: 'telegram',
+      directness: 'group',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Second group request',
+    vault: '/vaults/test',
+  })
+  assert.equal(requestZeroFollowUp.kind, 'queued')
+  await requestOneLive.promise
+  const requestOneFollowUp = steerAssistantActiveTurnInputWithStatus({
+    conversation: {
+      channel: 'telegram',
+      directness: 'group',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Third group request',
+    vault: '/vaults/test',
+  })
+  assert.equal(requestOneFollowUp.kind, 'queued')
+
+  const settledOutcomes = await Promise.allSettled([
+    initialResult,
+    requestZeroFollowUp.completion,
+    requestOneFollowUp.completion,
+  ])
+  expect(settledOutcomes.map((outcome) => outcome.status)).toEqual([
+    'fulfilled',
+    'fulfilled',
+    'fulfilled',
+  ])
+  const outcomes = settledOutcomes.flatMap((outcome) =>
+    outcome.status === 'fulfilled' ? [outcome.value] : [],
+  )
+  for (const outcome of outcomes) {
+    expect(outcome).toMatchObject({
+      prompt: 'First group request\n\nSecond group request\n\nThird group request',
+      response: 'One final response covering all three requests.',
+    })
+  }
+  expect(providerChildren).toHaveLength(2)
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls.map(
+      ([providerInput]) => providerInput.providerRequestOrdinal,
+    ),
+  ).toEqual([0, 1])
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
+    'One final response covering all three requests.',
+  )
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
+    expect.objectContaining({ segments: [] }),
+  )
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResult: expect.objectContaining({
+        responseDeliveryContextOrdinal: 2,
+      }),
+      providerResumeStateAction: 'clear',
+    }),
+  )
+}, 30_000)
