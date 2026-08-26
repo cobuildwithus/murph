@@ -199,11 +199,15 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain(
       '`targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load',
     )
-    expect(skill).toContain('An explicit unit in the current request wins.')
     expect(skill).toContain(
-      'read `vault-cli workout units show --format json` and use the saved strength unit',
+      'Use an explicit lb/kg unit from the current request when present.',
     )
-    expect(skill).toContain('when no preference exists, ask which unit they mean')
+    expect(skill).toContain(
+      'Otherwise read `vault-cli workout units show --format json` once and use the saved strength unit.',
+    )
+    expect(skill).toContain(
+      'If neither exists, ask whether the member means lb or kg',
+    )
     expect(skill).toContain(
       'Never put a resistance-unit hint on an unloaded `bodyweight` exercise.',
     )
