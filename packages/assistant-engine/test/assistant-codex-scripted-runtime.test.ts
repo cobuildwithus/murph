@@ -119,8 +119,8 @@ import {
 // against a local scripted Responses API stub. Deterministic and free: this is
 // the default-on protocol-contract lane that replaces the deleted
 // MockChildProcess happy-path fakes. Adversarial process behavior (malformed
-// events, stale ids, poisoning) stays in assistant-codex-runtime.test.ts where
-// a scriptable fake child process is the right tool.
+// events, stale ids, poisoning) stays in the assistant-codex-runtime-*.test.ts
+// behavior files where a scriptable fake child process is the right tool.
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 const SCRIPTED_MODEL = 'gpt-5.6-terra'
