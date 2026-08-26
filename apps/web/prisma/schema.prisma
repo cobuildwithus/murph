@@ -81,6 +81,16 @@ model DeviceConnectionSource {
   @@map("device_connection_source")
 }
 
+model DeviceSourceNoDataOutreachPreference {
+  userId             String   @map("user_id")
+  sourceProviderSlug String   @map("source_provider_slug")
+  reminderAfterDays  Int?     @map("reminder_after_days")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@id([userId, sourceProviderSlug])
+  @@map("device_source_no_data_outreach_preference")
+}
+
 model DeviceTokenAudit {
   id                   Int              @id @default(autoincrement())
   userId               String           @map("user_id")
@@ -2391,28 +2401,30 @@ model HostedOpsUsageResetReceipt {
 }
 
 model HostedAssistantRuntimeIssue {
-  id          String   @id
-  occurredAt  DateTime @map("occurred_at")
-  expiresAt   DateTime @map("expires_at")
-  environment String
-  surface     String?
-  phase       String
-  severity    String
-  issueKind   String   @map("issue_kind")
-  component   String
-  operation   String?
-  errorCode   String?  @map("error_code")
-  summary     String
-  fingerprint String
-  detailsJson Json     @map("details_json")
-  releaseSha  String?  @map("release_sha")
-  runtimeName String?  @map("runtime_name")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id               String   @id
+  occurredAt       DateTime @map("occurred_at")
+  expiresAt        DateTime @map("expires_at")
+  environment      String
+  surface          String?
+  phase            String
+  severity         String
+  issueKind        String   @map("issue_kind")
+  component        String
+  operation        String?
+  errorCode        String?  @map("error_code")
+  summary          String
+  fingerprint      String
+  detailsJson      Json     @map("details_json")
+  releaseSha       String?  @map("release_sha")
+  runtimeAttemptId String? @map("runtime_attempt_id")
+  runtimeName      String?  @map("runtime_name")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@index([fingerprint, occurredAt])
   @@index([severity, occurredAt])
   @@index([issueKind, occurredAt])
+  @@index([runtimeAttemptId, occurredAt])
   @@index([expiresAt])
   @@map("hosted_assistant_runtime_issue")
 }

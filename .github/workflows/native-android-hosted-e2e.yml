@@ -62,20 +62,27 @@ jobs:
           changed_files="$(jq -r '.changed_files' <<<"${pr}")"
           [[ "${changed_files}" =~ ^[0-9]+$ ]] || { echo "::error::PR changed-file count was invalid."; exit 1; }
 
+          # Both native journeys exercise the same companion APIs. Select the
+          # stable Web owner boundaries: top-level config/build entrypoints,
+          # scripts, Prisma, runtime libraries, and the companion route tree.
+          # Nested UI, content, and tests do not buy a live run.
           selected=false
           if (( changed_files > 3000 )); then
             selected=true
           else
             while IFS= read -r file; do
+              if [[ "${file}" =~ ^apps/web/[^/]+$ ]]; then
+                selected=true
+                break
+              fi
               case "${file}" in
-                apps/web/*|\
-                packages/assistant-runtime/*|packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|\
-                packages/device-syncd/*|packages/gateway-core/*|packages/health-commons/*|packages/health-metrics/*|\
-                packages/hosted-execution/*|packages/importers/*|packages/inboxd/*|packages/messaging-ingress/*|packages/parsers/*|packages/query/*|packages/runtime-state/*|\
-                prisma/*|scripts/native-ios-hosted-e2e*|scripts/native-android-hosted-e2e*|\
+                apps/web/app/api/device-sync/companion/*|apps/web/prisma/*|apps/web/scripts/*|apps/web/src/lib/*|\
+                packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|packages/device-syncd/*|\
+                packages/gateway-core/*|packages/health-metrics/*|packages/hosted-execution/*|packages/importers/*|packages/messaging-ingress/*|packages/runtime-state/*|\
+                scripts/native-ios-hosted-e2e*|scripts/native-android-hosted-e2e*|\
                 .github/workflows/native-ios-hosted-e2e.yml|.github/workflows/native-android-hosted-e2e.yml|.github/workflows/repo-hygiene.yml|\
                 agent-docs/operations/native-android-hosted-e2e.md|\
-                config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json)
+                config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json|tsconfig.json)
                   selected=true
                   break
                   ;;

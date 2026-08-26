@@ -306,6 +306,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_consent_grant",
   "prisma.hosted_vault_share",
   "prisma.device_connection",
+  "prisma.device_source_no_data_outreach_preference",
   "prisma.device_provider_application",
   "prisma.device_sync_companion_capture_receipt",
   "prisma.device_sync_dirty_connection",
@@ -374,6 +375,7 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.hosted_group_disclosure_permission",
   "prisma.hosted_group_member",
   "prisma.clinical_record_retrieval_run",
+  "prisma.device_source_no_data_outreach_preference",
   "prisma.device_connection",
   "prisma.hosted_usage_referral",
   "prisma.hosted_usage_credit_purchase",
@@ -3586,9 +3588,11 @@ describe("deleteHostedAccountData", () => {
 
   it("deletes device dirty state before signals and connection rows to avoid cascade lock inversion", async () => {
     const operationOrder: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => undefined,
       operationOrder,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -3619,6 +3623,18 @@ describe("deleteHostedAccountData", () => {
     expect(signalIndex).toBeGreaterThan(dirtyStateIndex);
     expect(connectionIndex).toBeGreaterThan(signalIndex);
     expect(providerApplicationIndex).toBeGreaterThan(connectionIndex);
+    expect(result.deletedCounts["prisma.device_source_no_data_outreach_preference"])
+      .toBe(1);
+    const intermediate = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "intermediate",
+    );
+    expect(intermediate.sql).toContain(
+      "DELETE FROM device_source_no_data_outreach_preference AS preference",
+    );
+    expect(intermediate.sql).toContain(
+      "preference.user_id IN (SELECT id FROM target_members)",
+    );
     expect(result.deletedCounts["prisma.device_provider_application"]).toBe(1);
   });
 

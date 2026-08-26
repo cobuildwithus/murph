@@ -46,6 +46,25 @@ export function filterConnectSourcesForSearch(
   );
 }
 
+export function resolveConnectSourceIdFromHash(
+  hash: string | undefined,
+  sources: readonly Pick<ConnectSource, "id">[],
+): string | null {
+  const sourceId = hash?.startsWith("#") ? hash.slice(1) : (hash ?? "");
+
+  return sources.some((source) => source.id === sourceId) ? sourceId : null;
+}
+
+export function stripConnectSourceHash() {
+  if (typeof window === "undefined" || typeof window.location.href !== "string") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.hash = "";
+  window.history?.replaceState?.(window.history.state, "", url.toString());
+}
+
 export function isHostedDeviceConnectIntentUnavailableError(
   error: unknown,
 ): error is HostedOnboardingApiError {

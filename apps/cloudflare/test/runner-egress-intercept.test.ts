@@ -50,6 +50,7 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
 import {
+  HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -427,7 +428,7 @@ describe("hostedRunnerIntercept", () => {
         revision: 7,
         schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
       },
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
@@ -570,6 +571,113 @@ describe("hostedRunnerIntercept", () => {
       error: { code: "HOSTED_PLATFORM_AI_USAGE_DENIED" },
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      expectedStatus: 200,
+      label: "an explicit denial",
+      respond: async () => Response.json({
+        platformAiUsageAllowedAfter: false,
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      expectedStatus: 200,
+      label: "a malformed successful response",
+      respond: async () => Response.json({
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      expectedStatus: 503,
+      label: "a non-success response",
+      respond: async () => Response.json(
+        { error: "usage settlement unavailable" },
+        { status: 503 },
+      ),
+    },
+    {
+      expectedStatus: null,
+      label: "a transport failure",
+      respond: async (): Promise<Response> => {
+        throw new Error("usage settlement transport failed");
+      },
+    },
+  ])("revokes the warm invocation after $label before another paid call", async ({
+    expectedStatus,
+    respond,
+  }) => {
+    let platformAiUsageAllowed = true;
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => {
+      platformAiUsageAllowed = false;
+      return true;
+    });
+    const fetchMock = vi.fn<typeof fetch>(respond);
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "synthetic-platform-secret",
+      revokeActiveRuntimePlatformAiUsage,
+      validateRuntimeProviderEgressToken: vi.fn(async (input) => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "7",
+        owns: true,
+        platformAiUsageAllowed,
+        userId: input.userId,
+        workspaceVersion: "4",
+      })),
+      validateRuntimeWriteFence: vi.fn(async () => true),
+    });
+
+    const settlementPromise = hostedRunnerIntercept(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
+        body: JSON.stringify({ usage: { usageId: "usage_1" } }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    if (expectedStatus === null) {
+      await expect(settlementPromise).rejects.toThrow(
+        "usage settlement transport failed",
+      );
+    } else {
+      await expect(settlementPromise.then((response) => response.status))
+        .resolves.toBe(expectedStatus);
+    }
+    expect(revokeActiveRuntimePlatformAiUsage).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+
+    const deniedResponse = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "automatic retry",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(deniedResponse.status).toBe(402);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
   });
 
   it("preserves runtime write-fence headers for internal intercepted requests", async () => {
@@ -1520,7 +1628,11 @@ describe("hostedRunnerIntercept", () => {
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
-        return Response.json({ recorded: true, usageId: "usage_1" });
+        return Response.json({
+          platformAiUsageAllowedAfter: true,
+          recorded: true,
+          usageId: "usage_1",
+        });
       }
 
       return new Response(new Uint8Array([1, 2, 3]), {
@@ -2034,7 +2146,11 @@ describe("hostedRunnerIntercept", () => {
         const usage = (JSON.parse(String(init?.body)) as {
           usage: { usageId: string };
         }).usage;
-        return Response.json({ recorded: true, usageId: usage.usageId });
+        return Response.json({
+          platformAiUsageAllowedAfter: true,
+          recorded: true,
+          usageId: usage.usageId,
+        });
       }
       return Response.json(upstreamPayload, {
         headers: { "x-goog-request-id": "gemini-req-1" },
@@ -2124,7 +2240,11 @@ describe("hostedRunnerIntercept", () => {
     };
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
-        return Response.json({ recorded: false, usageId: "usage_rejected" });
+        return Response.json({
+          platformAiUsageAllowedAfter: true,
+          recorded: false,
+          usageId: "usage_rejected",
+        });
       }
       return Response.json(upstreamPayload);
     });
@@ -2235,7 +2355,11 @@ describe("hostedRunnerIntercept", () => {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
       }
-      finishAccounting?.(Response.json({ recorded: true, usageId: "usage_1" }));
+      finishAccounting?.(Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     }
   });
 
@@ -2417,7 +2541,11 @@ describe("hostedRunnerIntercept", () => {
     };
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
-        return Response.json({ recorded: true, usageId: "usage_1" });
+        return Response.json({
+          platformAiUsageAllowedAfter: true,
+          recorded: true,
+          usageId: "usage_1",
+        });
       }
       return Response.json(upstreamPayload, {
         headers: { "x-request-id": "xai-req-1" },
@@ -2560,7 +2688,11 @@ describe("hostedRunnerIntercept", () => {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
       }
-      finishAccounting?.(Response.json({ recorded: true, usageId: "usage_1" }));
+      finishAccounting?.(Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     }
   });
 
@@ -2670,7 +2802,11 @@ describe("hostedRunnerIntercept", () => {
   it("still records xAI usage when the completed response omits the usage object", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
-        return Response.json({ recorded: true, usageId: "usage_1" });
+        return Response.json({
+          platformAiUsageAllowedAfter: true,
+          recorded: true,
+          usageId: "usage_1",
+        });
       }
       return Response.json({ output: [] });
     });
@@ -6257,6 +6393,7 @@ describe("hostedRunnerIntercept", () => {
             status: 200,
           })
         : Response.json({
+            platformAiUsageAllowedAfter: true,
             recorded: true,
             usageId: "usage_memory_1",
           });
@@ -6357,7 +6494,11 @@ describe("hostedRunnerIntercept", () => {
         });
       }
       if (url.endsWith("/api/internal/hosted-execution/usage/record")) {
-        return Response.json({ recorded: true, usageId: "usage_venice_memory_1" });
+        return Response.json({
+          platformAiUsageAllowedAfter: true,
+          recorded: true,
+          usageId: "usage_venice_memory_1",
+        });
       }
       return Response.json({ loggedCount: 1 });
     });
@@ -6461,7 +6602,11 @@ describe("hostedRunnerIntercept", () => {
       const url = request instanceof Request ? request.url : String(request);
       return url.startsWith("https://api.openai.com/")
         ? new Response(completedEvent, { status: 200 })
-        : Response.json({ recorded: true, usageId: "unexpected_usage" });
+        : Response.json({
+            platformAiUsageAllowedAfter: true,
+            recorded: true,
+            usageId: "unexpected_usage",
+          });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -6508,7 +6653,11 @@ describe("hostedRunnerIntercept", () => {
       const url = request instanceof Request ? request.url : String(request);
       return url.startsWith("https://api.openai.com/")
         ? new Response(completedEvent, { status: 200 })
-        : Response.json({ recorded: true, usageId: "unexpected_usage" });
+        : Response.json({
+            platformAiUsageAllowedAfter: true,
+            recorded: true,
+            usageId: "unexpected_usage",
+          });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -9281,8 +9430,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   it("authorizes via a runner-scoped provider credential and maps Workers AI output to the transcript payload", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ recorded: true, usageId: "usage_1" }));
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({
+      platformAiUsageAllowedAfter: true,
+      recorded: true,
+      usageId: "usage_1",
+    }));
     vi.stubGlobal("fetch", fetchMock);
     const aiRun = vi.fn(async (model: string, payload: Record<string, unknown>) => {
       expect(model).toBe("@cf/openai/whisper-large-v3-turbo");
@@ -9430,8 +9582,13 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
   it("awaits usage recording before responding when the context lacks waitUntil", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ recorded: true, usageId: "usage_1" }));
+      Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     vi.stubGlobal("fetch", fetchMock);
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({
@@ -9445,6 +9602,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
             transcription_info: { duration: 2.94, language: "en" },
           })),
         },
+        revokeActiveRuntimePlatformAiUsage,
       }),
       // Production containers proxy through a ctx without waitUntil; a
       // floating recording promise would be canceled with the invocation.
@@ -9456,6 +9614,100 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       "https://web.example.test/api/internal/hosted-execution/usage/record",
     );
+    expect(revokeActiveRuntimePlatformAiUsage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "an explicit denial",
+      respond: async () => Response.json({
+        platformAiUsageAllowedAfter: false,
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      label: "a malformed successful response",
+      respond: async () => Response.json({
+        recorded: true,
+        usageId: "usage_1",
+      }),
+    },
+    {
+      label: "a non-success response",
+      respond: async () => new Response("usage settlement unavailable", { status: 503 }),
+    },
+    {
+      label: "a transport failure",
+      respond: async (): Promise<Response> => {
+        throw new Error("usage settlement transport failed");
+      },
+    },
+  ])("revokes direct transcription usage after $label before another paid call", async ({
+    respond,
+  }) => {
+    let platformAiUsageAllowed = true;
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => {
+      platformAiUsageAllowed = false;
+      return true;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async () => await respond());
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createTranscribeInterceptEnv({
+      AI: {
+        run: vi.fn(async () => ({
+          text: "transcript",
+          transcription_info: { duration: 2.94, language: "en" },
+        })),
+      },
+      OPENAI_API_KEY: "synthetic-platform-secret",
+      revokeActiveRuntimePlatformAiUsage,
+      validateRuntimeProviderEgressCredential: vi.fn(async (input) => ({
+        ...createProviderEgressCredentialValidationResult(input),
+        platformAiUsageAllowed,
+      })),
+      validateRuntimeProviderEgressToken: vi.fn(async (input) => ({
+        ...createProviderEgressTokenValidationResult(input),
+        platformAiUsageAllowed,
+      })),
+    });
+
+    const transcriptResponse = await hostedRunnerIntercept(
+      await createAuthorizedTranscribeRequest({
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(transcriptResponse.status).toBe(200);
+    expect(revokeActiveRuntimePlatformAiUsage).toHaveBeenCalledExactlyOnceWith({
+      attemptId: "attempt_provider_egress_credential",
+      generation: "7",
+      userId: "member_123",
+    });
+
+    const deniedResponse = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "automatic retry",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(deniedResponse.status).toBe(402);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
   });
 
   it("rejects unknown transcribe paths and non-POST methods before authorization", async () => {
@@ -9539,7 +9791,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     // Rejected requests and thrown ai.run calls never complete a billed run,
     // so any usage POST attempt would show up on this stub.
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ recorded: true, usageId: "usage_1" }));
+      Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     vi.stubGlobal("fetch", fetchMock);
     const waitUntilPromises: Promise<unknown>[] = [];
     const waitUntil = (promise: Promise<unknown>): void => {
@@ -9599,7 +9855,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   it("falls back to an empty segment list and drops malformed segments", async () => {
     // Keep the fire-and-forget usage recording off the real network.
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ recorded: true, usageId: "usage_1" }));
+      Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     vi.stubGlobal("fetch", fetchMock);
     const waitUntilPromises: Promise<unknown>[] = [];
     const waitUntil = (promise: Promise<unknown>): void => {
@@ -9688,7 +9948,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
   it("meters transcription duration from all provider segments while capping response segments", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ recorded: true, usageId: "usage_1" }));
+      Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     vi.stubGlobal("fetch", fetchMock);
     const waitUntilPromises: Promise<unknown>[] = [];
     const waitUntil = (promise: Promise<unknown>): void => {
@@ -9739,7 +10003,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     // still meter usage even though the transcript response is a non-retryable
     // 422. Only requests rejected before ai.run record nothing.
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ recorded: true, usageId: "usage_1" }));
+      Response.json({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "usage_1",
+      }));
     vi.stubGlobal("fetch", fetchMock);
     const waitUntilPromises: Promise<unknown>[] = [];
     const waitUntil = (promise: Promise<unknown>): void => {
@@ -9824,6 +10092,11 @@ function createInterceptEnv(input: {
     active: boolean;
     model?: string;
   }>;
+  revokeActiveRuntimePlatformAiUsage?: (input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }) => Promise<boolean>;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
@@ -9904,6 +10177,8 @@ function createInterceptEnv(input: {
     XAI_API_KEY: input.XAI_API_KEY,
     USER_RUNNER: {
       getByName: () => ({
+        revokeActiveRuntimePlatformAiUsage:
+          input.revokeActiveRuntimePlatformAiUsage ?? (async () => true),
         validateRuntimeProviderEgressCredential:
           input.validateRuntimeProviderEgressCredential ?? (async () => ({ owns: false })),
         validateRuntimeProviderEgressToken:

@@ -626,7 +626,7 @@ async function upsertRegimenWithLatestRegistry(
   const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
   if (input.rejectExistingSlug === true && !normalizedRegimenId && requestedSlug && existingRecord) {
     throw new VaultError(
-      "VAULT_REGIMEN_CONFLICT",
+      "VAULT_REGIMEN_SLUG_EXISTS",
       "regimen slug already exists; include regimenId or choose a different slug.",
     );
   }

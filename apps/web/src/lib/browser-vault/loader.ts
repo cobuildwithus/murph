@@ -90,6 +90,7 @@ export interface LoadBrowserVaultReplicaInput {
   knownShards?: readonly BrowserVaultReplicaShard[];
   knownReplicaRef: HostedBrowserVaultReplicaRef | null;
   preferLegacyTransport?: boolean;
+  refreshObservationOnly?: boolean;
   requestedShards?: readonly BrowserVaultReplicaShard[];
   requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
   requestRefresh?: boolean;
@@ -120,6 +121,7 @@ export async function loadBrowserVaultReplica({
   knownShards = [],
   knownReplicaRef,
   preferLegacyTransport = false,
+  refreshObservationOnly = false,
   requestedShards = BROWSER_VAULT_REPLICA_SHARDS,
   requestedMetricBuckets = [],
   requestRefresh = false,
@@ -151,6 +153,7 @@ export async function loadBrowserVaultReplica({
       ...(acceptsCompressedShards && requestedMetricBuckets.length > 0
         ? { knownMetricBuckets, requestedMetricBuckets }
         : {}),
+      ...(refreshObservationOnly ? { refreshObservationOnly: true } : {}),
       ...(requestRefresh ? { requestRefresh: true } : {}),
     }),
     credentials: "same-origin",
@@ -245,6 +248,7 @@ export async function loadBrowserVaultReplica({
         preferLegacyTransport: true,
         requestedMetricBuckets,
         requestedShards,
+        refreshObservationOnly,
         requestRefresh,
         signal,
       });

@@ -100,22 +100,36 @@ test("push-primary staleness ignores pull-capable sources and non-connected rows
   );
 });
 
-test("Garmin recovery notices start after 72 hours of established delivery silence", () => {
+test("Garmin recovery notices start after five days of established delivery silence", () => {
   assert.deepEqual(readPushPrimarySourceRecoveryNoticePolicy("GARMIN"), {
     companionAppName: "Garmin Connect",
     deviceDisplayName: "Garmin device",
     providerDisplayName: "Garmin",
-    silentHours: 72,
+    silentHours: 120,
   });
   assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
-    lastDataAt: "2026-07-21T00:00:00.001Z",
+    lastDataAt: "2026-07-19T00:00:00.001Z",
     now: "2026-07-24T00:00:00.000Z",
     sourceProviderSlug: "garmin",
     status: CONNECTED,
   }), false);
   assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
-    lastDataAt: "2026-07-21T00:00:00.000Z",
+    lastDataAt: "2026-07-19T00:00:00.000Z",
     now: "2026-07-24T00:00:00.000Z",
+    sourceProviderSlug: "garmin",
+    status: CONNECTED,
+  }), true);
+  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    lastDataAt: "2026-07-14T00:00:00.001Z",
+    now: "2026-07-24T00:00:00.000Z",
+    silentHours: 10 * 24,
+    sourceProviderSlug: "garmin",
+    status: CONNECTED,
+  }), false);
+  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    lastDataAt: "2026-07-14T00:00:00.000Z",
+    now: "2026-07-24T00:00:00.000Z",
+    silentHours: 10 * 24,
     sourceProviderSlug: "garmin",
     status: CONNECTED,
   }), true);

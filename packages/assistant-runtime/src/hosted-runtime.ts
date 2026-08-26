@@ -235,6 +235,7 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
+  assertNever,
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 import {
@@ -771,6 +772,10 @@ export interface HostedWorkspaceRuntimeJobOptions {
     observation: Exclude<HostedConversationActivityObservation, "not_observed">,
   ) => void;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
+  runtimeIssueProvenance?: {
+    releaseSha: string | null;
+    runtimeName: string;
+  } | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   /**
    * Fires when the container has been told to exit (for example a deploy
@@ -1085,7 +1090,11 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
 function hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): boolean {
-  return preparation !== null && preparation.status !== "preempted";
+  if (!preparation || preparation.status === "preempted") {
+    return false;
+  }
+  return preparation.status !== "recording"
+    || preparation.checkpointRequired;
 }
 
 function readHostedSystemMailboxCheckpointPreparationRecordItem(
@@ -1208,6 +1217,27 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
 }
 
 export async function runHostedWorkspaceRuntimeJobInProcess(
+  input: HostedAssistantWorkspaceRuntimeJobInput,
+  options: HostedWorkspaceRuntimeJobOptions,
+): Promise<HostedWorkspaceInvocationResult> {
+  const result = await runHostedWorkspaceRuntimeJobInProcessImpl(input, options);
+  void writeHostedRuntimeLogBestEffort({
+    entry: {
+      attemptId: input.request.attemptId,
+      component: "runtime",
+      eventCode: "runtime.invocation_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        processingMode: input.request.processingMode ?? "default",
+      },
+    },
+    platform: options.platform,
+  });
+  return result;
+}
+
+async function runHostedWorkspaceRuntimeJobInProcessImpl(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
 ): Promise<HostedWorkspaceInvocationResult> {
@@ -2931,13 +2961,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           const projectedWake = await resolveCurrentSystemMailboxModeWake(
             preparationWake ? [preparationWake] : [],
           );
+          const resumedBrowserVaultOnlyRecording =
+            preparation?.status === "recording"
+            && !preparation.checkpointRequired;
           const mustCheckpoint = importOrStartupCheckpointPending
             || hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(preparation)
-            || hostedSystemMailboxWakeChangedFromWorkspace({
-              nextWakeAt: projectedWake.nextWakeAt,
-              nextWakeReason: projectedWake.nextWakeReason,
-              workspace: activeWorkspace,
-            });
+            || (
+              !resumedBrowserVaultOnlyRecording
+              && hostedSystemMailboxWakeChangedFromWorkspace({
+                nextWakeAt: projectedWake.nextWakeAt,
+                nextWakeReason: projectedWake.nextWakeReason,
+                workspace: activeWorkspace,
+              })
+            );
           if (mustCheckpoint) {
             await checkpointSystemMailboxMode(
               `${inputItem.stagePrefix}.checkpoint.prepare`,
@@ -3205,15 +3241,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             });
             throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
           }
-          if (hostedBrowserVaultReplicaRefreshRequiresRetry(refresh)) {
+          const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(
+            refresh,
+          );
+          if (refreshDisposition.action === "preempt") {
             if (refresh.status === "deferred_runtime_wake") {
               foregroundWakeObserved = true;
             }
-            const shouldYield = shouldYieldSystemMailboxWork();
-            return {
-              preempted: shouldYield || hostAbortObserved,
-              prepared: true,
-            };
+            return { preempted: true, prepared: true };
           }
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
@@ -3578,6 +3613,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 request: input.request,
                 restored,
                 runtime: phaseRuntime,
+                runtimeIssueProvenance: options.runtimeIssueProvenance ?? null,
                 runtimeEnv: {
                   ...runtimeEnv,
                   ...(confirmedAssistantTargetEnv ?? {}),
@@ -3852,6 +3888,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             executionContext: {
               hosted: {
                 memberId: input.request.userId,
+                releaseSha: options.runtimeIssueProvenance?.releaseSha ?? null,
+                runtimeAttemptId: input.request.attemptId,
+                runtimeName: options.runtimeIssueProvenance?.runtimeName ?? null,
                 userEnvKeys: Object.keys(runtime.userEnv),
               },
             },
@@ -4962,8 +5001,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const shouldContinueForegroundCausalPass = (
           passResult: HostedWorkspaceRunnerResult,
         ): boolean =>
-          wakeInput.foregroundCausalOnly === true
-          && passResult.assistantPhaseResult?.progressed === true
+          (
+            passResult.pendingEffectsContinuationWakeAt !== null
+            || (
+              wakeInput.foregroundCausalOnly === true
+              && passResult.assistantPhaseResult?.progressed === true
+            )
+          )
           && !mailboxBudgetExhausted()
           && readHostedWorkspaceInvocationRedactedNumber(
             buildHostedWorkspaceRunnerRedactedStatus(passResult),
@@ -5037,12 +5081,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
         ) {
+          const projectedPendingEffectsContinuationWakeKey =
+            rerunAssistantInputBatch === null
+            && continueForegroundCausalPass
+            && passResult.pendingEffectsContinuationWakeAt !== null
+              ? buildHostedRuntimeWakeKey({
+                  nextWakeAt: passResult.pendingEffectsContinuationWakeAt,
+                  nextWakeReason: "assistant",
+                })
+              : null;
           // The mailbox-import boundary belongs only to the first foreground
           // pass. A rerun is a new causal pass and must not inherit that tick.
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
-              && wakeInput.foregroundCausalOnly === true,
+              && continueForegroundCausalPass,
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext:
@@ -5054,6 +5107,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   }
                 : null,
             latencySeed: wakeInput.latencySeed ?? null,
+            projectedAssistantWakeKey: projectedPendingEffectsContinuationWakeKey,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
           });
@@ -6738,15 +6792,28 @@ function buildHostedBrowserVaultRefreshLogDetails(
   };
 }
 
-function hostedBrowserVaultReplicaRefreshRequiresRetry(
+function classifyHostedBrowserVaultReplicaRefresh(
   refresh: HostedBrowserVaultReplicaRefreshResult,
-): boolean {
-  return refresh.status === "deferred_aborted"
-    || refresh.status === "deferred_runtime_wake"
-    || refresh.status === "deferred_source_changed"
-    || refresh.status === "deferred_timeout"
-    || refresh.status === "publish_conflict"
-    || refresh.status === "refresh_failed";
+):
+  | { action: "complete" }
+  | { action: "preempt" } {
+  switch (refresh.status) {
+    case "published":
+    case "skipped_current":
+    case "skipped_no_port":
+    case "workspace_missing":
+    case "deferred_source_changed":
+    case "deferred_timeout":
+    case "publish_conflict":
+    case "refresh_failed":
+    case "refresh_failed_too_large":
+      return { action: "complete" };
+    case "deferred_aborted":
+    case "deferred_runtime_wake":
+      return { action: "preempt" };
+    default:
+      return assertNever(refresh);
+  }
 }
 
 function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {
@@ -7881,6 +7948,14 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
             createConnectLink: (connectInput) =>
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
+            ...(platform.deviceSyncPort.configureNoDataOutreach
+              ? {
+                  configureNoDataOutreach: (configureInput) =>
+                    guard(() =>
+                      platform.deviceSyncPort!.configureNoDataOutreach!(configureInput)
+                    ),
+                }
+              : {}),
             ...(platform.deviceSyncPort.completeFitbitMigration
               ? {
                   completeFitbitMigration: (cutoverInput) =>

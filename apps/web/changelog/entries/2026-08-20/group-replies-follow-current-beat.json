@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 120,
+  "item": {
+    "id": "group-replies-follow-current-beat",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Group replies follow the current beat",
+    "summary": "In active iMessage and Telegram groups, Murph now combines rapid still-relevant requests into one complete reply.",
+    "details": "A clear correction replaces only what it changes; if the room has moved on, Murph can stay quiet. Completed actions are not repeated.",
+    "relevanceTags": ["assistant", "groups", "messaging"],
+    "sourcePullRequests": [2107, 2232, 2264]
+  }
+}

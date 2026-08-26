@@ -403,7 +403,6 @@ export function parseProviderPayload(value: unknown) {
     throw new VaultCliError(
       'contract_invalid',
       'Provider payload is invalid.',
-      { errors: result.error.flatten() },
     )
   }
 

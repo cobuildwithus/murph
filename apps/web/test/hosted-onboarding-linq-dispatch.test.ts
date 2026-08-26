@@ -6692,6 +6692,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("accepts a Family invite token from an existing saved home chat with sparse line metadata", async () => {
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberActivated: (result: {
+        activated: boolean;
+        hostedExecutionEventId: string | null;
+        hostedExecutionMailboxItemId: string | null;
+        memberId: string;
+      }) => Promise<void> | void;
       onAcceptedMemberLocked: (result: {
         acceptedMemberId: string;
         invite: { id: string };
@@ -6700,6 +6706,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       await input.onAcceptedMemberLocked({
         acceptedMemberId: "member_123",
         invite: { id: "family_invite" },
+      });
+      await input.onAcceptedMemberActivated({
+        activated: false,
+        hostedExecutionEventId: "runtime-control:access-restored:linq",
+        hostedExecutionMailboxItemId: "mailbox_access_restored",
+        memberId: "member_123",
       });
       return {
         groupId: "group_family",
@@ -6799,6 +6811,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_access_restored",
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_home",
       idempotencyKey: "linq-message:evt_family_sparse_saved_home",

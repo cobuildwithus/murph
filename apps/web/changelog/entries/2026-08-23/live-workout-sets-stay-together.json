@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-23",
+  "order": 200,
+  "item": {
+    "id": "live-workout-sets-stay-together",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Live workout sets stay together",
+    "summary": "Set confirmations during a live workout now keep updating one canonical workout, even when a message is short or describes a repeated routine.",
+    "details": "Murph refreshes the same verified workout card after each accepted set. If no exact workout or separate routine owner is available, Murph asks one question and records nothing.",
+    "relevanceTags": ["assistant", "reliability", "workouts"],
+    "sourcePullRequests": [2195, 2254]
+  }
+}

@@ -39,7 +39,6 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
         error={browserVault.error}
         loading={browserVault.status === "loading"
           || (browserVault.status === "ready" && !metricBucketsLoaded)}
-        onRetry={browserVault.refresh}
       />
     );
   }
@@ -47,7 +46,6 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
   return (
     <PrivateRunResultsView
       error={browserVault.error}
-      onRetry={browserVault.refresh}
       privateRun={privateRun}
       status={browserVault.status}
     />
@@ -56,12 +54,10 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
 
 export function PrivateRunResultsView({
   error,
-  onRetry,
   privateRun,
   status,
 }: {
   error: string | null;
-  onRetry: () => Promise<void>;
   privateRun: NonNullable<ReturnType<typeof resolveBrowserVaultExperimentRunById>>;
   status: BrowserVaultStatus;
 }) {
@@ -113,7 +109,6 @@ export function PrivateRunResultsView({
 
       <ResultsTab
         experiment={experiment}
-        onPrivateRunRetry={onRetry}
         privateRunError={error}
         privateRunStatus={status}
         showFinishedOutcomeSummary={false}
@@ -126,11 +121,9 @@ export function PrivateRunResultsView({
 export function PrivateRunRouteState({
   error,
   loading,
-  onRetry,
 }: {
   error: string | null;
   loading: boolean;
-  onRetry: () => Promise<void>;
 }) {
   if (loading) {
     return (
@@ -160,11 +153,6 @@ export function PrivateRunRouteState({
           : "This private run is not available in the current vault snapshot."}
       </p>
       <div className="flex flex-wrap gap-3">
-        {error ? (
-          <Button variant="outline" onClick={() => void onRetry()}>
-            Retry
-          </Button>
-        ) : null}
         <Button render={<Link href="/home" />} nativeButton={false}>
           Back to home
         </Button>

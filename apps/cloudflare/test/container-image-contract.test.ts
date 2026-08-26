@@ -35,7 +35,7 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
     await removeHostedRunnerFinalImageBestEffort();
   }`;
 
-const hostedRunnerFlexModelSlugs = [
+const hostedRunnerProductModelSlugs = [
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -444,7 +444,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.147.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.149.1");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -579,14 +579,14 @@ describe("hosted runner container image contract", () => {
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
-    for (const slug of hostedRunnerFlexModelSlugs) {
+    for (const slug of hostedRunnerProductModelSlugs) {
       expect(finalDockerfile).toContain(`"${slug}"`);
     }
     expect(finalDockerfile).not.toContain("ensure_future_gpt_model");
     expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))\'',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort)',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -667,7 +667,7 @@ describe("hosted runner container image contract", () => {
     expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
   });
 
-  it("adds Flex to native Codex GPT-5.6 models without replacing their metadata", async () => {
+  it("publishes exactly the product Codex models with Flex without replacing their metadata", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -707,18 +707,10 @@ describe("hosted runner container image contract", () => {
     const patchedCatalogJson = runJqFilter(patchFilter, stockCatalogWithoutFlex);
     const patchedCatalog = parseCodexModelCatalogJson(patchedCatalogJson);
 
-    expect(readCodexModelSlugs(patchedCatalog)).toEqual([
-      "gpt-5.5",
-      "gpt-5.4-mini",
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-5.6-luna",
-    ]);
-    for (const slug of hostedRunnerFlexModelSlugs) {
+    expect(readCodexModelSlugs(patchedCatalog)).toEqual(hostedRunnerProductModelSlugs);
+    for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
     }
-    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
-    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["priority"]);
     expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
       description: "Flagship agentic coding model for complex professional work.",
       display_name: "GPT-5.6-Sol",
@@ -748,13 +740,19 @@ describe("hosted runner container image contract", () => {
     );
 
     expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(1);
-    for (const slug of hostedRunnerFlexModelSlugs) {
+    for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(twicePatchedCatalog, slug).filter((tierId) => tierId === "flex"))
         .toHaveLength(1);
     }
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
     expect(runJqFilter(validationFilter, {
       models: patchedCatalog.models.filter((model) => model.slug !== "gpt-5.6-terra"),
+    }, { slurp: true }).trim()).toBe("false");
+    expect(runJqFilter(validationFilter, {
+      models: [
+        ...patchedCatalog.models,
+        { slug: "gpt-5.5", service_tiers: [{ id: "priority", name: "Priority" }] },
+      ],
     }, { slurp: true }).trim()).toBe("false");
   });
 

@@ -396,6 +396,20 @@ export class HostedBillingBrowserDriver {
     });
   }
 
+  async assertSettingsAvailableUsage(
+    actor: HostedBillingBrowserActor,
+    label: string,
+  ): Promise<void> {
+    await this.runStep("settings-projection", "murph-settings", async () => {
+      await this.openSettings(actor);
+      const usage = actor.page.getByLabel(label, { exact: true });
+      await usage.waitFor();
+      await usage.getByRole("progressbar", {
+        name: /\b(?:[1-9]\d?|100)% remaining$/u,
+      }).waitFor();
+    });
+  }
+
   async assertSettingsPlanState(
     actor: HostedBillingBrowserActor,
     input: {

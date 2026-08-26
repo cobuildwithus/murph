@@ -3572,7 +3572,14 @@
                                 "status": {
                                   "description": "Optional Health Commons page status filter: draft, field-testing, reviewed, deprecated, community. Use * for all.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "draft",
+                                    "field-testing",
+                                    "reviewed",
+                                    "deprecated",
+                                    "community",
+                                    "*"
+                                  ]
                                 },
                                 "category": {
                                   "description": "Optional protocol category filter. Repeat --category for multiple values.",
@@ -5367,8 +5374,7 @@
                         "timeZone": {
                           "description": "Replace the explicit IANA time zone, such as America/New_York.",
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 80
+                          "minLength": 3
                         },
                         "dayKey": {
                           "description": "Set the explicit local day key in YYYY-MM-DD form.",

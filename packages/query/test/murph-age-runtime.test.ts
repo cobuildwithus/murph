@@ -1770,6 +1770,7 @@ test("calculateMurphAgeFromVaultInputBundle rejects local artifacts that add una
     const loaded = await loadMurphAgeLocalModelCardArtifacts({ vaultRoot });
     assert.equal(loaded.models.lab9_bp_body_10y_acm_research, undefined);
     assert.equal(loaded.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+    assert.equal(loaded.warnings.every((warning) => warning.artifactIssue === "policy_violation"), true);
 
     const output = await calculateMurphAgeFromVaultInputBundle({
       asOf: "2026-05-10T00:00:00.000Z",
@@ -1810,6 +1811,10 @@ test("loadMurphAgeLocalModelCardArtifacts skips missing and malformed local arti
     assert.equal(loaded.models.lab9_bp_body_10y_acm_research?.modelId, "fixture-lab9-research-model");
     assert.equal(loaded.warnings.length, 2);
     assert.equal(loaded.warnings.every((warning) => warning.code === "INVALID_INPUT"), true);
+    assert.deepEqual(
+      loaded.warnings.map((warning) => warning.artifactIssue),
+      ["invalid_json", "invalid_schema"],
+    );
     assert.equal(loaded.warnings.some((warning) => warning.message.includes("not valid JSON")), true);
     assert.equal(loaded.warnings.some((warning) => warning.message.includes("expected schema")), true);
   } finally {

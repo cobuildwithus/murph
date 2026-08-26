@@ -1188,7 +1188,6 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       throw new VaultCliError(
         'invalid_payload',
         'Experiment plan does not produce valid experiment frontmatter.',
-        { errors: preflight.errors },
       )
     }
 
@@ -1230,6 +1229,22 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
         updated: true as const,
       },
     }
+  }).catch((error: unknown) => {
+    throw toVaultCliError(error, {
+      VAULT_EXPERIMENT_CONFLICT: {
+        code: 'conflict',
+        message: 'An experiment with this slug already exists with different plan data.',
+        preserveDetails: false,
+        details: {
+          issues: [{
+            code: 'custom',
+            publicPath: ['experiment', 'slug'],
+          }],
+          retryable: false,
+          stage: 'write',
+        },
+      },
+    })
   })
 }
 

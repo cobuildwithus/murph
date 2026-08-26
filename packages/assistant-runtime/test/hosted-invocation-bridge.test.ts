@@ -47,8 +47,12 @@ import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  initializeVault,
   withCanonicalWriteLock,
 } from "@murphai/core";
+import {
+  persistCanonicalInboxCapture,
+} from "@murphai/inboxd";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "@murphai/runtime-state/assistant-generated-deliveries";
@@ -1498,6 +1502,70 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
   });
 
+  it("excludes transient inbox videos from v2 snapshots without deleting live bytes", async () => {
+    const vaultRoot = await createVaultRoot();
+    const now = "2026-06-10T00:00:00.000Z";
+    await initializeVault({ createdAt: now, vaultRoot });
+    const persisted = await persistCanonicalInboxCapture({
+      captureId: "cap_snapshot_transient_video",
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VK",
+      input: {
+        actor: { isSelf: false },
+        attachments: [
+          {
+            data: Buffer.from("synthetic-video-bytes"),
+            fileName: "clip.mp4",
+            kind: "video",
+            mime: "video/mp4",
+          },
+          {
+            data: Buffer.from("synthetic-audio-bytes"),
+            fileName: "voice.mp3",
+            kind: "audio",
+            mime: "audio/mpeg",
+          },
+        ],
+        externalId: "msg-snapshot-transient-video",
+        occurredAt: now,
+        raw: {},
+        receivedAt: now,
+        source: "telegram",
+        text: "synthetic mixed media",
+        thread: {
+          id: "thread-snapshot-transient-video",
+          isDirect: true,
+        },
+      },
+      storedAt: now,
+      vaultRoot,
+    });
+    const videoPath = persisted.stored.attachments[0]?.storedPath ?? "";
+    const audioPath = persisted.stored.attachments[1]?.storedPath ?? "";
+    expect(videoPath).not.toBe("");
+    expect(audioPath).not.toBe("");
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint(now),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) =>
+      entry.root === "vault" && entry.relativePath === videoPath
+    )).toBe(false);
+    expect(archiveEntries.some((entry) =>
+      entry.root === "vault" && entry.relativePath === audioPath
+    )).toBe(true);
+    await expectPresent(path.join(vaultRoot, videoPath));
+  });
+
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();
@@ -1561,12 +1629,17 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const orphanContents = Buffer.from("unreferenced generated delivery\n");
     const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
     const activeContents = Buffer.from("active generated delivery\n");
+    const nestedRef =
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/legacy/report.zip`;
+    const nestedContents = Buffer.from("legacy nested generated delivery\n");
     const legacyRef = "exports/assistant-deliveries/base-era.pdf";
     const legacyContents = Buffer.from("ordinary pre-existing vault file\n");
     await mkdir(path.dirname(path.join(vaultRoot, orphanRef)), { recursive: true });
     await mkdir(path.dirname(path.join(vaultRoot, legacyRef)), { recursive: true });
     await writeFile(path.join(vaultRoot, orphanRef), orphanContents);
     await writeFile(path.join(vaultRoot, activeRef), activeContents);
+    await mkdir(path.dirname(path.join(vaultRoot, nestedRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, nestedRef), nestedContents);
     await writeFile(path.join(vaultRoot, legacyRef), legacyContents);
     await createAssistantOutboxIntent({
       channel: "linq",
@@ -1602,9 +1675,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         .archiveEntries ?? [];
     expect(archiveEntries.some((entry) => entry.relativePath === orphanRef)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === activeRef)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === nestedRef)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === legacyRef)).toBe(true);
     await expectMissing(path.join(vaultRoot, orphanRef));
     await expectPresent(path.join(vaultRoot, activeRef));
+    await expectPresent(path.join(vaultRoot, nestedRef));
     await expectPresent(path.join(vaultRoot, legacyRef));
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
@@ -1612,6 +1687,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
       && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
         === orphanContents.byteLength
+      && entry.redactedJson
+        ?.assistantRuntimeGeneratedDeliveryNestedEntriesRetained === 1
     )).toBe(true);
   });
 
@@ -1883,10 +1960,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     )).toBe(true);
   });
 
-  it("continues checkpoint publication when generated-delivery cleanup fails", async () => {
+  it("prunes unrelated generated deliveries when an active delivery file is missing", async () => {
     const vaultRoot = await createVaultRoot();
     const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing.pdf`;
+    const orphanRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/orphan.pdf`;
     const activeContents = Buffer.from("missing active generated delivery\n");
+    const orphanContents = Buffer.from("orphan generated delivery\n");
     await createAssistantOutboxIntent({
       channel: "linq",
       identityId: "identity-missing-generated-delivery",
@@ -1907,6 +1986,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       turnId: "turn-missing-generated-delivery",
       vault: vaultRoot,
     });
+    await mkdir(path.dirname(path.join(vaultRoot, orphanRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, orphanRef), orphanContents);
     const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
     const options = createBridgeOptions({
@@ -1921,11 +2002,48 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await expectMissing(path.join(vaultRoot, orphanRef));
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryActiveFilesMissing === 1
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryFilesScanned === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === orphanContents.byteLength
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed !== true
+    )).toBe(true);
+  });
+
+  it("records a closed diagnostic code when generated-delivery cleanup fails", async () => {
+    const vaultRoot = await createVaultRoot();
+    const generatedDeliveryRoot = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+    );
+    await mkdir(path.dirname(generatedDeliveryRoot), { recursive: true });
+    await writeFile(generatedDeliveryRoot, "invalid generated-delivery root\n");
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.eventCode === "checkpoint.snapshot_finished"
       && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed === true
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneErrorCode
+        === "root_not_directory"
     )).toBe(true);
   });
 

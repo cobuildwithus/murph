@@ -360,9 +360,11 @@ const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
+const HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS = 32;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
+  "deviceSyncJobTimingSummaries",
 ]);
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
@@ -884,6 +886,10 @@ export function parseHostedRuntimeUsageRecordResponse(
   const record = requireObject(value, "Hosted runtime usage record response");
 
   return {
+    platformAiUsageAllowedAfter: requireBoolean(
+      record.platformAiUsageAllowedAfter,
+      "Hosted runtime usage record response platformAiUsageAllowedAfter",
+    ),
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
   };
@@ -6709,6 +6715,13 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
         record.platformAiUsageAllowed,
         "Hosted workspace read response platformAiUsageAllowed",
       );
+  const hostedAssistantSubagentModelOverridesAllowed =
+    record.hostedAssistantSubagentModelOverridesAllowed === undefined
+      ? null
+      : requireBoolean(
+          record.hostedAssistantSubagentModelOverridesAllowed,
+          "Hosted workspace read response hostedAssistantSubagentModelOverridesAllowed",
+        );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
@@ -6724,6 +6737,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
+    ...(hostedAssistantSubagentModelOverridesAllowed === null
+      ? {}
+      : { hostedAssistantSubagentModelOverridesAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
@@ -7779,7 +7795,13 @@ function parseHostedRuntimeRedactedValue(
       }
 
       return value.map((entry, index) =>
-        parseHostedRuntimeRedactedObject(entry, `${label}[${index}]`));
+        parseHostedRuntimeRedactedObject(
+          entry,
+          `${label}[${index}]`,
+          key === "deviceSyncJobTimingSummaries"
+            ? HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS
+            : HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS,
+        ));
     }
 
     return value.map((entry, index) =>
@@ -7850,15 +7872,16 @@ function parseHostedRuntimeRedactedReasoningEffort(
 function parseHostedRuntimeRedactedObject(
   value: unknown,
   label: string,
+  maxKeys = HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS,
 ): HostedRuntimeRedactedObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be a redacted object.`);
   }
 
   const entries = Object.entries(value);
-  if (entries.length > HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS) {
+  if (entries.length > maxKeys) {
     throw new TypeError(
-      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS} fields.`,
+      `${label} must contain at most ${maxKeys} fields.`,
     );
   }
 

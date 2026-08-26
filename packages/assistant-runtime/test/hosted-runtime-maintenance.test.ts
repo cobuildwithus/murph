@@ -2308,7 +2308,8 @@ describe("runHostedDeviceSyncPass", () => {
     });
   });
 
-  it("hydrates Junction provider config from hosted runtime platform env", async () => {
+  it("hydrates Junction provider config without emitting retired environment telemetry", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
@@ -2364,8 +2365,17 @@ describe("runHostedDeviceSyncPass", () => {
       45_000,
       {
         platformEnv,
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              return { loggedCount: request.entries.length };
+            },
+          },
+        },
       },
     );
+    await drainHostedRuntimeLogWritesBestEffort();
 
     assert.deepEqual(result, {
       nextWakeAt: null,
@@ -2383,91 +2393,10 @@ describe("runHostedDeviceSyncPass", () => {
         registry: expect.anything(),
       }),
     );
+    expect(
+      logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode),
+    ).not.toContain("device-sync.legacy_platform_env_present");
     expect(close).toHaveBeenCalledTimes(1);
-  });
-
-  it("logs redacted legacy Junction platform env usage when consumed", async () => {
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const close = vi.fn();
-    const runSchedulerOnce = vi.fn(async () => undefined);
-    const drainWorker = vi.fn(async () => 0);
-    const platformEnv = {
-      JUNCTION_API_KEY: "junction-api-key",
-      JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
-      JUNCTION_ENV: "sandbox",
-      JUNCTION_REGION: "us",
-    };
-    const junctionConfig = {
-      apiKey: "junction-api-key",
-      clientUserIdSecret: "junction-client-user-id-secret",
-      environment: "sandbox",
-      region: "us",
-    };
-
-    mocks.readConfiguredJunctionDeviceSyncProviderConfig.mockReturnValue(junctionConfig);
-    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["junction"]);
-    mocks.createDeviceSyncRegistry.mockReturnValue({
-      list: () => ["junction"],
-    });
-    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
-      close,
-      drainWorker,
-      getNextJobWakeAt: () => null,
-      getNextWakeAt: () => null,
-      listJobFailureDiagnostics: vi.fn(() => []),
-      listAccounts: vi.fn(() => []),
-      runSchedulerOnce,
-    });
-
-    await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_junction_platform_env_log",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      {
-        providerConfigs: {
-          junction: {
-            environment: "sandbox",
-            region: "us",
-          },
-        },
-        publicBaseUrl: "https://device-sync.example.test",
-        secret: "secret_123",
-      },
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-      {
-        platformEnv,
-        runtimeLogPlatform: {
-          logPort: {
-            async write(request) {
-              logRequests.push(request);
-              return {
-                loggedCount: request.entries.length,
-              };
-            },
-          },
-        },
-      },
-    );
-
-    assert.equal(logRequests.length, 1);
-    const entry = logRequests[0]?.entries[0];
-    assert.ok(entry);
-    assert.equal(entry.component, "device-sync");
-    assert.equal(entry.eventCode, "device-sync.legacy_platform_env_present");
-    assert.equal(entry.level, "info");
-    assert.equal(entry.phase, "invoke");
-    assert.deepEqual(entry.redactedJson, {
-      junctionPlatformEnvPresent: true,
-      legacyPlatformEnvKeyCount: 4,
-    });
-    assert.equal(JSON.stringify(entry).includes("junction-api-key"), false);
-    assert.equal(JSON.stringify(entry).includes("junction-client-user-id-secret"), false);
   });
 
   it("skips device sync when the hosted runtime resolved config disables device sync", async () => {
@@ -2647,7 +2576,11 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(100, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledWith(
+      100,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -3754,16 +3687,69 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("caps the yield-aware device-sync drain path at 100 single-job checks", async () => {
+  it("reports completed rows before a later bounded drain failure", async () => {
+    const close = vi.fn();
+    const observedProgress: number[] = [];
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async (
+      _limit: number,
+      _accountId?: string,
+      options?: { onProcessedJobRows?: (processedJobRows: number) => void },
+    ) => {
+      options?.onProcessedJobRows?.(1);
+      throw new Error("synthetic bounded drain failure");
+    });
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce,
+    });
+
+    await expect(runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_partial_progress_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        onProcessedJobs: (processedJobs) => observedProgress.push(processedJobs),
+      },
+    )).rejects.toThrow("synthetic bounded drain failure");
+
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
+    expect(observedProgress).toEqual([1]);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps the yield-aware device-sync drain path in one bounded service call", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
-    const drainWorker = vi.fn(async () => 1);
+    const drainWorker = vi.fn(async () => HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
     const shouldYield = vi.fn(() => false);
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
@@ -3800,8 +3786,12 @@ describe("runHostedDeviceSyncPass", () => {
       skipped: false,
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledTimes(100);
-    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
@@ -4358,6 +4348,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(drainWorker).toHaveBeenCalledWith(
       HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
       "local_scheduled_account",
+      expect.any(Object),
     );
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -6389,6 +6380,34 @@ describe("runHostedDeviceSyncWakeLane", () => {
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
       listAccounts: vi.fn(() => []),
       listJobFailureDiagnostics: vi.fn(() => []),
+      listJobTimingDiagnostics: vi.fn(() => [{
+        at: "2026-04-08T00:00:45.000Z",
+        attempts: 1,
+        connectionSourceReadCount: 1,
+        connectionSourceReadElapsedMs: 250,
+        credentialRefreshCount: 0,
+        credentialRefreshElapsedMs: 0,
+        durableProgressCommitted: false,
+        elapsedMs: 45_000,
+        jobCount: 1,
+        jobKind: "resource",
+        outcome: "yielded",
+        provider: "junction",
+        providerExecutionElapsedMs: 44_900,
+        providerInventoryRequestCount: 1,
+        providerInventoryRequestElapsedMs: 34_000,
+        providerResourceRequestCount: 1,
+        providerResourceRequestElapsedMs: 6_000,
+        providerUnattributedElapsedMs: 4_650,
+        resource: "sleep",
+        snapshotImportCount: 0,
+        snapshotImportElapsedMs: 0,
+        snapshotCanonicalCoreElapsedMs: 0,
+        snapshotCanonicalWriteElapsedMs: 0,
+        snapshotEventIdentityIndexCacheHitCount: 0,
+        snapshotEventIdentityIndexElapsedMs: 0,
+        snapshotNormalizationElapsedMs: 0,
+      }]),
       runSchedulerOnce: vi.fn(async () => undefined),
     });
     const shouldYieldDeviceSync = vi.fn(() => false);
@@ -6444,7 +6463,11 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
-    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+      expect.any(Object),
+    );
     expect(listPendingJobsForAccount).toHaveBeenNthCalledWith(
       1,
       "local_scheduled_account",
@@ -6482,6 +6505,36 @@ describe("runHostedDeviceSyncWakeLane", () => {
           passStage: "completed",
           postCheckpointRecordPresent: false,
           processedJobs: 1,
+          deviceSyncJobTimingCount: 1,
+          deviceSyncJobTimingSampleLimit: 16,
+          deviceSyncJobTimingSummaries: [{
+            attempts: 1,
+            connectionSourceReadCount: 1,
+            connectionSourceReadElapsedMs: 250,
+            credentialRefreshCount: 0,
+            credentialRefreshElapsedMs: 0,
+            durableProgressCommitted: false,
+            elapsedMs: 45_000,
+            jobCount: 1,
+            jobKind: "resource",
+            outcome: "yielded",
+            provider: "junction",
+            providerExecutionElapsedMs: 44_900,
+            providerInventoryRequestCount: 1,
+            providerInventoryRequestElapsedMs: 34_000,
+            providerResourceRequestCount: 1,
+            providerResourceRequestElapsedMs: 6_000,
+            providerUnattributedElapsedMs: 4_650,
+            resource: "sleep",
+            snapshotImportCount: 0,
+            snapshotImportElapsedMs: 0,
+            snapshotCanonicalCoreElapsedMs: 0,
+            snapshotCanonicalWriteElapsedMs: 0,
+            snapshotEventIdentityIndexCacheHitCount: 0,
+            snapshotEventIdentityIndexElapsedMs: 0,
+            snapshotNormalizationElapsedMs: 0,
+          }],
+          deviceSyncJobTimingTruncated: false,
           pendingJobCountAfter: 1,
           pendingJobCountAfterTruncated: false,
           pendingJobCountBefore: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
@@ -6514,6 +6567,125 @@ describe("runHostedDeviceSyncWakeLane", () => {
         workspaceVersion: "8",
       }),
     ]);
+  });
+
+  it("emits only the 16 slowest device-sync job timings in descending order", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const elapsedMsByClaim = [
+      3_000,
+      18_000,
+      1_000,
+      17_000,
+      5_000,
+      16_000,
+      7_000,
+      15_000,
+      9_000,
+      14_000,
+      11_000,
+      13_000,
+      2_000,
+      12_000,
+      4_000,
+      10_000,
+      6_000,
+      8_000,
+    ];
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount: vi.fn(() => []),
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker: vi.fn().mockResolvedValue(0),
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z",
+      getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listJobTimingDiagnostics: vi.fn(() => elapsedMsByClaim.map((elapsedMs) => ({
+        at: "2026-04-08T00:00:45.000Z",
+        attempts: 1,
+        connectionSourceReadCount: 0,
+        connectionSourceReadElapsedMs: 0,
+        credentialRefreshCount: 0,
+        credentialRefreshElapsedMs: 0,
+        durableProgressCommitted: true,
+        elapsedMs,
+        jobCount: 1,
+        jobKind: "resource",
+        outcome: "completed",
+        provider: "junction",
+        providerExecutionElapsedMs: elapsedMs,
+        providerInventoryRequestCount: 0,
+        providerInventoryRequestElapsedMs: 0,
+        providerResourceRequestCount: 0,
+        providerResourceRequestElapsedMs: 0,
+        providerUnattributedElapsedMs: elapsedMs,
+        resource: "sleep",
+        snapshotImportCount: 0,
+        snapshotImportElapsedMs: 0,
+        snapshotCanonicalCoreElapsedMs: 0,
+        snapshotCanonicalWriteElapsedMs: 0,
+        snapshotEventIdentityIndexCacheHitCount: 0,
+        snapshotEventIdentityIndexElapsedMs: 0,
+        snapshotNormalizationElapsedMs: 0,
+      }))),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+
+    await runHostedDeviceSyncWakeLane({
+      deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: {
+        deviceSync: DEVICE_SYNC_CONFIG,
+      },
+      runtimeLogPlatform: {
+        logPort: {
+          async write(request) {
+            const parsed = parseHostedRuntimeLogRequest(request);
+            logRequests.push(parsed);
+            return { loggedCount: parsed.entries.length };
+          },
+        },
+      },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_device_sync_timing_sample",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "reconcile_due",
+        userId: "member_123",
+      },
+    });
+    await drainHostedRuntimeLogWritesBestEffort();
+
+    const finishedEntry = logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "device-sync.pass_finished");
+    const timingSummaries = finishedEntry?.redactedJson
+      ?.deviceSyncJobTimingSummaries;
+    assert(finishedEntry);
+    assert(Array.isArray(timingSummaries));
+    const timingSummaryObjects = timingSummaries as Array<
+      Record<string, boolean | number | string | null>
+    >;
+    expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
+      deviceSyncJobTimingCount: 18,
+      deviceSyncJobTimingSampleLimit: 16,
+      deviceSyncJobTimingTruncated: true,
+    }));
+    expect(timingSummaryObjects).toHaveLength(16);
+    expect(timingSummaryObjects.map((summary) => summary.elapsedMs)).toEqual(
+      Array.from({ length: 16 }, (_, index) => 18_000 - index * 1_000),
+    );
+    expect(timingSummaryObjects).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ elapsedMs: 1_000 }),
+        expect.objectContaining({ elapsedMs: 2_000 }),
+      ]),
+    );
+    expect(() => parseHostedRuntimeLogRequest({
+      entries: [finishedEntry],
+    })).not.toThrow();
   });
 
   it("retains queue snapshots when the worker drain yields to its timeout", async () => {
