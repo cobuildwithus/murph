@@ -1,6 +1,6 @@
 # Product feedback 5,000-character recovery
 
-Status: final-review remediation verification active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -133,6 +133,20 @@ Results so far:
   matched exactly. A deterministic current-versus-first-reviewed replay
   reconstructed the changed provider-visible fields, and all temporary
   instrumentation was removed.
+- Final ReviewGPT round 2 found two obsolete exact-string assertions that still
+  required the deleted no-retry wording. The accepted non-production correction
+  deleted those six lines; its direct/group test passes 2 assertions and the
+  package typecheck remains green. A subsequent complete package test command
+  stayed alive without output for roughly 12 minutes and was interrupted by
+  this session, so it is recorded as incomplete rather than passed; the prior
+  focused Assistant Engine run remains green at 107 assertions.
+- Final round 3 required the mandatory requirement-level retrospective. The
+  recorded decision below continues with the deletion-based single-owner
+  architecture. Final round 4 audited the full exact-head snapshot, verified
+  every prior correction, and returned `ROUND_OUTCOME: PASS` with no qualifying
+  finding. Exact-head PR evidence is green, and the parent final diff/call-path
+  review, `git diff --check`, and identifier/privacy scan found no remaining
+  issue.
 
 ## Review round 3 retrospective
 
@@ -174,8 +188,11 @@ Results so far:
 ## Deployment
 
 The shared constant and runner-visible recovery prompt span Hosted Execution,
-Assistant Engine, the Cloudflare runner bundle, and Web validation. Old and new
-components both reject summaries above their local bound, so mixed rollout is
-fail-closed rather than corrupting state. The candidate review will determine
-the safest deployment order and required convergence checks from the final
-diff.
+Assistant Engine, the Cloudflare runner bundle, and Web validation. Deploy Web
+first, then the Cloudflare Worker/runner: an old runner remains inside the new
+Web bound, while a new runner can author a 2,001–5,000-character summary that an
+old Web deploy rejects. Mixed versions fail closed rather than corrupting
+state. Roll back the Worker/runner first and retain the expanded Web validator
+until convergence. Post-deploy, verify an exact-bound support escalation is
+accepted and a corrected validation call records one durable escalation.
+Completed: 2026-08-26
