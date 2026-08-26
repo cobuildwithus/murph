@@ -3834,7 +3834,11 @@ V1 and V2 cards use the same bounded fragment and image-path family without a
 tracking field. The card remains offline, read-only presentation. For an active
 V6 workout only, the
 Messages extension may use the separately enrolled Messages-scoped credential
-to submit a bounded member action derived from the visible snapshot. The URL
+to submit a bounded member action derived from the visible snapshot. That
+closed action may rename an existing exercise while retaining its original name
+as the optimistic coordinate for same-batch set edits; the canonical workout
+owner applies the rename last in the same write and rejects ambiguous resulting
+coordinates. The URL
 still carries no identity, canonical id, credential, or authority, and all other
 card kinds remain local presentation. This adds no mutable card state, card
 database, background synchronization owner, queue, or model turn. V4 workout
