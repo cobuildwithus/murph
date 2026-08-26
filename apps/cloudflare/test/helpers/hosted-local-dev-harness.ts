@@ -91,7 +91,7 @@ export interface HostedLocalDevHarness {
   ): Promise<{ ok: true }>;
   readShutdownCheckpointPublicationBarrierForTest(
     userId: string,
-  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  ): Promise<{ state: "aborted" | "armed" | "entered" | "unarmed" }>;
   releaseShutdownCheckpointPublicationBarrierForTest(
     userId: string,
   ): Promise<{ ok: true; released: boolean }>;
@@ -881,10 +881,10 @@ export async function startHostedLocalDevHarness(input: {
 
   async function readShutdownCheckpointPublicationBarrierForTest(
     userId: string,
-  ): Promise<{ state: "armed" | "entered" | "unarmed" }> {
+  ): Promise<{ state: "aborted" | "armed" | "entered" | "unarmed" }> {
     assertHostedLocalTestControlsAvailable("readShutdownCheckpointPublicationBarrierForTest");
     return await requestShutdownCheckpointPublicationBarrierForTest<{
-      state: "armed" | "entered" | "unarmed";
+      state: "aborted" | "armed" | "entered" | "unarmed";
     }>(userId, "status");
   }
 

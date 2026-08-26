@@ -251,12 +251,14 @@ const canonicalCheckpointLostAckUserIds = new Set<string>();
 const snapshotPublicationCorruptionUserIds = new Set<string>();
 
 export type HostedLocalShutdownCheckpointPublicationBarrierState =
+  | "aborted"
   | "armed"
   | "entered"
   | "unarmed";
 
 interface HostedLocalShutdownCheckpointPublicationBarrier {
-  entered: boolean;
+  abortAware: boolean;
+  state: Exclude<HostedLocalShutdownCheckpointPublicationBarrierState, "unarmed">;
   target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start";
   release(): void;
   released: Promise<void>;
@@ -398,7 +400,11 @@ function armCheckpointPublicationBarrier(
     release = resolve;
   });
   shutdownCheckpointPublicationBarriers.set(normalizedUserId, {
-    entered: false,
+    // Canonical publication is the production cancellation seam used by the
+    // foreground-preemption E2E. Shutdown and snapshot-start controls retain
+    // their explicit-release behavior for rollout and idle-boundary proofs.
+    abortAware: target === "canonical_runtime_commit",
+    state: "armed",
     target,
     release,
     released,
@@ -411,10 +417,7 @@ export function readShutdownCheckpointPublicationBarrierState(
   const barrier = shutdownCheckpointPublicationBarriers.get(
     normalizeShutdownCheckpointPublicationBarrierUserId(userId),
   );
-  if (!barrier) {
-    return "unarmed";
-  }
-  return barrier.entered ? "entered" : "armed";
+  return barrier?.state ?? "unarmed";
 }
 
 export function releaseShutdownCheckpointPublicationBarrier(userId: string): boolean {
@@ -439,6 +442,7 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       : null;
     if (
       !barrier
+      || barrier.state === "aborted"
       || !await isCheckpointPublicationRequestForReason(
         request,
         barrier.target,
@@ -447,7 +451,7 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       return await handler(request, env, ctx);
     }
 
-    barrier.entered = true;
+    barrier.state = "entered";
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
@@ -458,17 +462,66 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       phase: "checkpoint",
       userId,
     });
-    await barrier.released;
+    const outcome = await waitForCheckpointPublicationBarrier(
+      barrier,
+      request.signal,
+    );
+    if (outcome === "aborted") {
+      if (shutdownCheckpointPublicationBarriers.get(userId) === barrier) {
+        // Keep the control observable until the E2E explicitly reconciles it.
+        // A replacement invocation bypasses this already-aborted one-shot seam.
+        barrier.state = "aborted";
+      }
+      throw readCheckpointPublicationAbortReason(request.signal);
+    }
     if (request.signal.aborted) {
-      throw request.signal.reason instanceof Error
-        ? request.signal.reason
-        : new DOMException(
-            "Hosted-local shutdown checkpoint publication was interrupted.",
-            "AbortError",
-          );
+      throw readCheckpointPublicationAbortReason(request.signal);
     }
     return await handler(request, env, ctx);
   };
+}
+
+async function waitForCheckpointPublicationBarrier(
+  barrier: HostedLocalShutdownCheckpointPublicationBarrier,
+  signal: AbortSignal,
+): Promise<"aborted" | "released"> {
+  if (!barrier.abortAware) {
+    await barrier.released;
+    return "released";
+  }
+  if (signal.aborted) {
+    return "aborted";
+  }
+
+  return await new Promise<"aborted" | "released">((resolve) => {
+    let settled = false;
+    const settle = (outcome: "aborted" | "released"): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(outcome);
+    };
+    const onAbort = (): void => settle("aborted");
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Close the check-then-subscribe race when cancellation lands between the
+    // fast-path observation above and listener registration.
+    if (signal.aborted) {
+      settle("aborted");
+      return;
+    }
+    void barrier.released.then(() => settle("released"));
+  });
+}
+
+function readCheckpointPublicationAbortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException(
+        "Hosted-local shutdown checkpoint publication was interrupted.",
+        "AbortError",
+      );
 }
 
 async function isCheckpointPublicationRequestForReason(
