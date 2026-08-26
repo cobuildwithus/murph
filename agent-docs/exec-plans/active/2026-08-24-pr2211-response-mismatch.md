@@ -68,3 +68,10 @@ caller cancellation cannot be mistaken for a retryable timeout.
   9,520,965 / 9,527,848 bytes with an 805-byte entry and 25,155-byte static
   closure; the runner is 11,352,549 / 11,393,617 bytes with a 1,751,100-byte
   entry and 8,659,263-byte static closure. All eight parity probes pass.
+- Parent review accepted two owner-local corrections before remediation: keep
+  cancellation terminal when it arrives during optional elevation sampling,
+  and move the production device-port proof into current main's split
+  device-sync test instead of retaining the deleted test monolith.
+- The corrections add one explicit cancellation rethrow and relocate existing
+  test proof; they add no runtime abstraction, state, compatibility layer, or
+  duplicate error map.

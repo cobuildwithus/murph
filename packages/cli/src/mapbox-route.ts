@@ -106,7 +106,8 @@ export async function estimateMapboxRoute(
       } catch (error) {
         if (
           !(error instanceof VaultCliError) ||
-          !error.code.startsWith('route_mapbox_')
+          !error.code.startsWith('route_mapbox_') ||
+          error.code === 'route_mapbox_cancelled'
         ) {
           throw error
         }

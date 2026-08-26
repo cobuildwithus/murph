@@ -26,6 +26,411 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime latency PostgreSQL set writes",
   () => {
+    it("locks ordinary runtime milestones in trace-id order", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `hbm_latency_lock_order_${suffix}`;
+      const runtimeAttemptId = `runtime_latency_lock_order_${suffix}`;
+      const lowerTraceId = `hil_latency_lock_order_a_${suffix}`;
+      const higherTraceId = `hil_latency_lock_order_z_${suffix}`;
+      const applicationName = `latency_lock_order_${suffix.slice(0, 8)}`;
+      const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({
+        databaseUrl: withPostgresLockOrderProbe(
+          databaseUrl,
+          applicationName,
+        ),
+        poolMax: 1,
+      });
+      let releaseLowerTraceLock!: () => void;
+      const lowerTraceLockRelease = new Promise<void>((resolve) => {
+        releaseLowerTraceLock = resolve;
+      });
+      let lowerTraceLockAcquired!: () => void;
+      const lowerTraceLockReady = new Promise<void>((resolve) => {
+        lowerTraceLockAcquired = resolve;
+      });
+      const inFlight: Promise<unknown>[] = [];
+
+      try {
+        await blocker.hostedMember.create({ data: { id: memberId } });
+        await blocker.hostedMailboxItem.createMany({
+          data: [higherTraceId, lowerTraceId].map((traceId, index) => ({
+            dedupeKey: `latency-lock-order:${index}:${suffix}`,
+            id: `hmi_${traceId}`,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: BigInt(index + 1),
+            occurredAt: new Date("2026-08-09T12:00:00.000Z"),
+            payloadSchema: "murph.hosted-execution.conversation-message.v1",
+            userId: memberId,
+          })),
+        });
+        // Insert the higher trace ID first so the old unordered UPDATE takes it
+        // before blocking on the lower ID under the forced sequential plan.
+        await blocker.hostedIngressLatencyTrace.createMany({
+          data: [higherTraceId, lowerTraceId].map((traceId, index) => ({
+            acceptedAt: new Date(`2026-08-09T12:00:0${index}.000Z`),
+            assistantInputId: `assistant_input_${traceId}`,
+            id: traceId,
+            mailboxItemId: `hmi_${traceId}`,
+            mailboxLane: "conversation",
+            mailboxLaneSeq: BigInt(index + 1),
+            runtimeAttemptId,
+            source: "linq",
+            userId: memberId,
+          })),
+        });
+
+        const blockerPromise = blocker.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_ingress_latency_trace
+            WHERE id = ${lowerTraceId}
+            FOR UPDATE
+          `;
+          lowerTraceLockAcquired();
+          await lowerTraceLockRelease;
+        });
+        inFlight.push(blockerPromise);
+        await lowerTraceLockReady;
+
+        const milestoneAt = new Date("2026-08-09T12:00:10.000Z");
+        const writerPromise = recordHostedIngressRuntimeMilestone({
+          at: milestoneAt,
+          authenticatedUserId: memberId,
+          milestone: "mailbox_import_done",
+          prisma: writer,
+          runtimeAttemptId,
+          runtimeLeaseGeneration: "1",
+          source: "linq",
+        });
+        inFlight.push(writerPromise);
+        await waitForPostgresLock({ applicationName, observer });
+
+        await expect(observer.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_ingress_latency_trace
+            WHERE id = ${higherTraceId}
+            FOR UPDATE NOWAIT
+          `;
+        })).resolves.toBeUndefined();
+
+        releaseLowerTraceLock();
+        await blockerPromise;
+        await expect(writerPromise).resolves.toEqual({
+          matchedCount: 2,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+        await expect(observer.hostedIngressLatencyTrace.findMany({
+          orderBy: { id: "asc" },
+          select: { mailboxImportDoneAt: true },
+          where: { id: { in: [lowerTraceId, higherTraceId] } },
+        })).resolves.toEqual([
+          { mailboxImportDoneAt: milestoneAt },
+          { mailboxImportDoneAt: milestoneAt },
+        ]);
+      } finally {
+        releaseLowerTraceLock();
+        await Promise.allSettled(inFlight);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await Promise.all([
+          blocker.$disconnect(),
+          observer.$disconnect(),
+          writer.$disconnect(),
+        ]);
+      }
+    });
+
+    it("does not let an older checkpoint lease overwrite a newer lease after waiting", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `hbm_latency_lease_race_${suffix}`;
+      const lowerTraceId = `hil_latency_lease_race_a_${suffix}`;
+      const higherTraceId = `hil_latency_lease_race_z_${suffix}`;
+      const originalRuntimeAttemptId = `runtime_latency_lease_original_${suffix}`;
+      const newerRuntimeAttemptId = `runtime_latency_lease_newer_${suffix}`;
+      const olderRuntimeAttemptId = `runtime_latency_lease_older_${suffix}`;
+      const newerApplicationName = `latency_lease_newer_${suffix.slice(0, 8)}`;
+      const olderApplicationName = `latency_lease_older_${suffix.slice(0, 8)}`;
+      const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const newerWriter = createPrismaClient({
+        databaseUrl: withPostgresLockOrderProbe(
+          databaseUrl,
+          newerApplicationName,
+        ),
+        poolMax: 1,
+      });
+      const olderWriter = createPrismaClient({
+        databaseUrl: withPostgresLockOrderProbe(
+          databaseUrl,
+          olderApplicationName,
+        ),
+        poolMax: 1,
+      });
+      let releaseHigherTraceLock!: () => void;
+      const higherTraceLockRelease = new Promise<void>((resolve) => {
+        releaseHigherTraceLock = resolve;
+      });
+      let higherTraceLockAcquired!: () => void;
+      const higherTraceLockReady = new Promise<void>((resolve) => {
+        higherTraceLockAcquired = resolve;
+      });
+      const inFlight: Promise<unknown>[] = [];
+
+      try {
+        const acceptedAt = new Date("2026-08-09T12:30:00.000Z");
+        await blocker.hostedMember.create({ data: { id: memberId } });
+        await blocker.hostedMailboxItem.createMany({
+          data: [lowerTraceId, higherTraceId].map((traceId, index) => ({
+            dedupeKey: `latency-lease-race:${index}:${suffix}`,
+            id: `hmi_${traceId}`,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: BigInt(index + 1),
+            occurredAt: acceptedAt,
+            payloadSchema: "murph.hosted-execution.conversation-message.v1",
+            userId: memberId,
+          })),
+        });
+        await blocker.hostedIngressLatencyTrace.createMany({
+          data: [lowerTraceId, higherTraceId].map((traceId, index) => ({
+            acceptedAt: new Date(acceptedAt.getTime() + index * 1_000),
+            assistantInputId: `assistant_input_${traceId}`,
+            id: traceId,
+            mailboxItemId: `hmi_${traceId}`,
+            mailboxLane: "conversation",
+            mailboxLaneSeq: BigInt(index + 1),
+            phaseBreakdownJson: {
+              assistant: {
+                runtimeLeaseGeneration: "1",
+                terminalNonReplyCommittedAtEpochMs: acceptedAt.getTime(),
+              },
+              schemaVersion: 1,
+            },
+            runtimeAttemptId: originalRuntimeAttemptId,
+            source: "linq",
+            userId: memberId,
+          })),
+        });
+
+        const blockerPromise = blocker.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_ingress_latency_trace
+            WHERE id = ${higherTraceId}
+            FOR UPDATE
+          `;
+          higherTraceLockAcquired();
+          await higherTraceLockRelease;
+        });
+        inFlight.push(blockerPromise);
+        await higherTraceLockReady;
+
+        const newerExpectedBy = new Date("2026-08-09T12:40:00.000Z");
+        const newerWriterPromise = recordHostedIngressRuntimeMilestone({
+          at: newerExpectedBy,
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma: newerWriter,
+          runtimeAttemptId: newerRuntimeAttemptId,
+          runtimeLeaseGeneration: "3",
+          source: "linq",
+        });
+        inFlight.push(newerWriterPromise);
+        await waitForPostgresLock({
+          applicationName: newerApplicationName,
+          observer,
+        });
+
+        const olderWriterPromise = recordHostedIngressRuntimeMilestone({
+          at: new Date("2026-08-09T12:50:00.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma: olderWriter,
+          runtimeAttemptId: olderRuntimeAttemptId,
+          runtimeLeaseGeneration: "2",
+          source: "linq",
+        });
+        inFlight.push(olderWriterPromise);
+        await waitForPostgresLock({
+          applicationName: olderApplicationName,
+          observer,
+        });
+
+        releaseHigherTraceLock();
+        await blockerPromise;
+        await expect(newerWriterPromise).resolves.toEqual({
+          matchedCount: 2,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+        await expect(olderWriterPromise).resolves.toEqual({
+          matchedCount: 0,
+          recorded: false,
+          unmatchedCount: 0,
+        });
+
+        const rows = await observer.hostedIngressLatencyTrace.findMany({
+          orderBy: { id: "asc" },
+          select: { phaseBreakdownJson: true, runtimeAttemptId: true },
+          where: { id: { in: [lowerTraceId, higherTraceId] } },
+        });
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+          expect(row.runtimeAttemptId).toBe(newerRuntimeAttemptId);
+          expect(
+            requireJsonRecord(
+              requireJsonRecord(row.phaseBreakdownJson).assistant,
+            ),
+          ).toMatchObject({
+            checkpointPublicationExpectedByEpochMs: newerExpectedBy.getTime(),
+            runtimeLeaseGeneration: "3",
+          });
+        }
+      } finally {
+        releaseHigherTraceLock();
+        await Promise.allSettled(inFlight);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await Promise.all([
+          blocker.$disconnect(),
+          newerWriter.$disconnect(),
+          observer.$disconnect(),
+          olderWriter.$disconnect(),
+        ]);
+      }
+    });
+
+    it("updates only the newest 250 checkpoint traces and keeps replay a no-op", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `hbm_latency_boundary_${suffix}`;
+      const priorRuntimeAttemptId = `runtime_latency_boundary_old_${suffix}`;
+      const nextRuntimeAttemptId = `runtime_latency_boundary_new_${suffix}`;
+      const acceptedAt = new Date("2026-08-09T13:00:00.000Z");
+      const checkpointExpectedBy = new Date("2026-08-09T14:00:00.000Z");
+      const rowCount = 252;
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.hostedMailboxItem.createMany({
+          data: Array.from({ length: rowCount }, (_, index) => {
+            const ordinal = index.toString().padStart(3, "0");
+            return {
+              dedupeKey: `latency-boundary:${ordinal}:${suffix}`,
+              id: `hmi_latency_boundary_${ordinal}_${suffix}`,
+              kind: "conversation.message",
+              lane: "conversation",
+              laneSeq: BigInt(index + 1),
+              occurredAt: acceptedAt,
+              payloadSchema: "murph.hosted-execution.conversation-message.v1",
+              userId: memberId,
+            };
+          }),
+        });
+        await prisma.hostedIngressLatencyTrace.createMany({
+          data: Array.from({ length: rowCount }, (_, index) => {
+            const ordinal = index.toString().padStart(3, "0");
+            return {
+              acceptedAt: new Date(acceptedAt.getTime() + index * 1_000),
+              assistantInputId:
+                `assistant_input_latency_boundary_${ordinal}_${suffix}`,
+              id: `hil_latency_boundary_${ordinal}_${suffix}`,
+              mailboxItemId: `hmi_latency_boundary_${ordinal}_${suffix}`,
+              mailboxLane: "conversation",
+              mailboxLaneSeq: BigInt(index + 1),
+              phaseBreakdownJson: {
+                assistant: {
+                  runtimeLeaseGeneration: "1",
+                  terminalNonReplyCommittedAtEpochMs: acceptedAt.getTime(),
+                },
+                schemaVersion: 1,
+              },
+              runtimeAttemptId: priorRuntimeAttemptId,
+              source: "linq",
+              userId: memberId,
+            };
+          }),
+        });
+
+        await expect(recordHostedIngressRuntimeMilestone({
+          at: checkpointExpectedBy,
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma,
+          runtimeAttemptId: nextRuntimeAttemptId,
+          runtimeLeaseGeneration: "2",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 250,
+          recorded: true,
+          truncated: true,
+          unmatchedCount: 0,
+        });
+
+        const selectedRows = await prisma.hostedIngressLatencyTrace.findMany({
+          orderBy: { acceptedAt: "asc" },
+          select: {
+            phaseBreakdownJson: true,
+            runtimeAttemptId: true,
+          },
+          where: { userId: memberId },
+        });
+        expect(selectedRows).toHaveLength(rowCount);
+        for (const [index, row] of selectedRows.entries()) {
+          const assistant = requireJsonRecord(
+            requireJsonRecord(row.phaseBreakdownJson).assistant,
+          );
+          if (index < 2) {
+            expect(row.runtimeAttemptId).toBe(priorRuntimeAttemptId);
+            expect(assistant).toEqual({
+              runtimeLeaseGeneration: "1",
+              terminalNonReplyCommittedAtEpochMs: acceptedAt.getTime(),
+            });
+          } else {
+            expect(row.runtimeAttemptId).toBe(nextRuntimeAttemptId);
+            expect(assistant).toEqual({
+              checkpointPublicationExpectedByEpochMs:
+                checkpointExpectedBy.getTime(),
+              runtimeLeaseGeneration: "2",
+              terminalNonReplyCommittedAtEpochMs: acceptedAt.getTime(),
+            });
+          }
+        }
+
+        const replayNoOpMarker = new Date("2026-08-09T14:00:01.000Z");
+        await prisma.hostedIngressLatencyTrace.updateMany({
+          data: { updatedAt: replayNoOpMarker },
+          where: { userId: memberId },
+        });
+        await expect(recordHostedIngressRuntimeMilestone({
+          at: new Date("2026-08-09T13:59:00.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma,
+          runtimeAttemptId: nextRuntimeAttemptId,
+          runtimeLeaseGeneration: "2",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 250,
+          recorded: true,
+          truncated: true,
+          unmatchedCount: 0,
+        });
+        await expect(prisma.hostedIngressLatencyTrace.count({
+          where: {
+            updatedAt: replayNoOpMarker,
+            userId: memberId,
+          },
+        })).resolves.toBe(rowCount);
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it("preserves atomic merge, authority, sanitization, and UTC behavior under overlap", async () => {
       const timezoneDatabaseUrl = withPostgresSessionTimeZone(
         databaseUrl,
@@ -460,6 +865,49 @@ describe.skipIf(!runPostgresProof)(
           ]).toContain(assistant.checkpointPublicationExpectedByEpochMs);
         }
 
+        await expect(Promise.all([
+          recordHostedIngressRuntimeMilestone({
+            at: new Date("2026-08-09T12:08:30.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "checkpoint_publication_expected_by",
+            prisma: observer,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+          recordHostedIngressProviderStarted({
+            assistantInputIds: [...assistantInputIds].reverse(),
+            at: new Date("2026-08-09T12:00:04.000Z"),
+            authenticatedUserId: memberId,
+            prisma: challenger,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            source: "linq",
+          }),
+        ])).resolves.toHaveLength(2);
+
+        await expect(Promise.all([
+          recordHostedIngressRuntimeMilestone({
+            at: new Date("2026-08-09T12:08:20.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "checkpoint_publication_expected_by",
+            prisma: observer,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+          recordHostedIngressAssistantMilestone({
+            assistantInputIds: [...assistantInputIds].reverse(),
+            at: new Date("2026-08-09T12:08:10.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "first_codex_text_observed",
+            prisma: challenger,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+        ])).resolves.toHaveLength(2);
+
         await observer.hostedMailboxItem.update({
           data: { consumedAt: new Date("2026-08-09T12:06:30.000Z") },
           where: { id: `hmi_latency_set_0_${suffix}` },
@@ -528,7 +976,7 @@ async function createLatencySetWriteFixture(
   });
   await prisma.hostedIngressLatencyTrace.createMany({
     data: tracedAssistantInputIds.map((assistantInputId, index) => ({
-      acceptedAt: input.acceptedAt,
+      acceptedAt: new Date(input.acceptedAt.getTime() + index * 1_000),
       assistantInputId,
       id: `hil_latency_set_${index}_${input.suffix}`,
       mailboxItemId: `hmi_latency_set_${index}_${input.suffix}`,
@@ -581,6 +1029,38 @@ function withPostgresSessionTimeZone(value: string, timeZone: string): string {
   const url = new URL(value);
   url.searchParams.set("options", `-c timezone=${timeZone}`);
   return url.toString();
+}
+
+function withPostgresLockOrderProbe(value: string, applicationName: string): string {
+  const url = new URL(value);
+  url.searchParams.set("application_name", applicationName);
+  url.searchParams.set(
+    "options",
+    "-c enable_indexscan=off -c enable_bitmapscan=off",
+  );
+  return url.toString();
+}
+
+async function waitForPostgresLock(input: {
+  applicationName: string;
+  observer: ReturnType<typeof createPrismaClient>;
+}): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const [activity] = await input.observer.$queryRaw<
+      Array<{ waitEventType: string | null }>
+    >`
+      SELECT wait_event_type AS "waitEventType"
+      FROM pg_stat_activity
+      WHERE application_name = ${input.applicationName}
+        AND state = 'active'
+    `;
+    if (activity?.waitEventType === "Lock") {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Expected the latency writer to wait on a row lock.");
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {

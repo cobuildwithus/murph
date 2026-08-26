@@ -3490,6 +3490,16 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     })
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
+    ).toContain(
+      'If the latest accepted message gives another human the floor, finish without a reply.',
+    )
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
+    ).toContain(
+      'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result.',
+    )
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
     ).not.toContain('previous response was held')
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession

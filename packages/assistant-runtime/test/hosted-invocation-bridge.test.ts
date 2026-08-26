@@ -1629,12 +1629,17 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const orphanContents = Buffer.from("unreferenced generated delivery\n");
     const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
     const activeContents = Buffer.from("active generated delivery\n");
+    const nestedRef =
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/legacy/report.zip`;
+    const nestedContents = Buffer.from("legacy nested generated delivery\n");
     const legacyRef = "exports/assistant-deliveries/base-era.pdf";
     const legacyContents = Buffer.from("ordinary pre-existing vault file\n");
     await mkdir(path.dirname(path.join(vaultRoot, orphanRef)), { recursive: true });
     await mkdir(path.dirname(path.join(vaultRoot, legacyRef)), { recursive: true });
     await writeFile(path.join(vaultRoot, orphanRef), orphanContents);
     await writeFile(path.join(vaultRoot, activeRef), activeContents);
+    await mkdir(path.dirname(path.join(vaultRoot, nestedRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, nestedRef), nestedContents);
     await writeFile(path.join(vaultRoot, legacyRef), legacyContents);
     await createAssistantOutboxIntent({
       channel: "linq",
@@ -1670,9 +1675,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         .archiveEntries ?? [];
     expect(archiveEntries.some((entry) => entry.relativePath === orphanRef)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === activeRef)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === nestedRef)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === legacyRef)).toBe(true);
     await expectMissing(path.join(vaultRoot, orphanRef));
     await expectPresent(path.join(vaultRoot, activeRef));
+    await expectPresent(path.join(vaultRoot, nestedRef));
     await expectPresent(path.join(vaultRoot, legacyRef));
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
@@ -1680,6 +1687,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
       && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
         === orphanContents.byteLength
+      && entry.redactedJson
+        ?.assistantRuntimeGeneratedDeliveryNestedEntriesRetained === 1
     )).toBe(true);
   });
 

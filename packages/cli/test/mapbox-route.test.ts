@@ -847,6 +847,57 @@ describe('estimateMapboxRoute', () => {
     })
   }
 
+  it('keeps caller cancellation terminal after directions succeed', async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = toUrl(input)
+
+      if (url.pathname.startsWith('/directions/v5/mapbox/walking/')) {
+        return jsonResponse({
+          code: 'Ok',
+          routes: [
+            {
+              distance: 1800,
+              duration: 1200,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [0, 0],
+                  [0.01, 0],
+                ],
+              },
+            },
+          ],
+        })
+      }
+
+      if (url.pathname.startsWith('/v4/mapbox.mapbox-terrain-v2/tilequery/')) {
+        throw new DOMException('private-elevation-cancellation', 'AbortError')
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(
+      estimateMapboxRoute({
+        origin: '0,0',
+        destination: '0.01,0',
+        includeElevation: true,
+        maxElevationSamples: 2,
+      }, {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      code: 'route_mapbox_cancelled',
+      context: {
+        retryable: false,
+        stage: 'transport',
+      },
+    } satisfies Partial<VaultCliError>)
+  })
+
   it('uses Search Box for free-text POI queries even outside the walking profile', async () => {
     const requests: URL[] = []
 
