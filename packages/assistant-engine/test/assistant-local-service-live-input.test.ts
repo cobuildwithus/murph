@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 
 import { expect, test, vi } from 'vitest'
 
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { createAssistantUsageId } from '@murphai/hosted-execution/assistant-usage'
 import {
   readAssistantAcceptedTurnInputJournal,
@@ -3228,6 +3229,8 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.appendAssistantTranscriptEntries.mockClear()
     mocks.appendAssistantTranscriptEntriesWithRefs.mockClear()
     mocks.appendAssistantTurnReceiptEvent.mockClear()
+    mocks.applyAssistantSessionCodexResumeStateAction.mockClear()
+    mocks.clearAssistantSessionCodexResumeState.mockClear()
     mocks.executeCodexTurnWithRecovery.mockReset()
     mocks.deliverAssistantPrecedingReplies.mockClear()
     mocks.deliverAssistantProgressUpdate.mockClear()
@@ -3235,9 +3238,11 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.dispatchAssistantReply.mockClear()
     mocks.finalizeAssistantTurnArtifacts.mockClear()
     mocks.finalizeAssistantTurnReceipt.mockClear()
+    mocks.persistFailedAssistantPromptAttempt.mockClear()
     mocks.recordAdditionalAssistantUsageEvents.mockClear()
     mocks.recordAssistantUsageEvent.mockClear()
     mocks.resolveAssistantAcceptedMessageTarget.mockClear()
+    mocks.saveAssistantSession.mockClear()
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mockClear()
     mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs.mockClear()
   }
@@ -3461,8 +3466,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       assert.equal(outcome.status, 'fulfilled')
       expect(outcome.result).toMatchObject({
         prompt: scenario.liveSteer
-          ? 'One more group detail.'
-          : 'Actually, plans changed.',
+          ? [
+              'Initial group message',
+              'Actually, plans changed.',
+              'One more group detail.',
+            ].join('\n\n')
+          : 'Initial group message\n\nActually, plans changed.',
         response: scenario.finalResponse,
       })
     }
@@ -3474,9 +3483,9 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
     ).toMatchObject({
-      prompt: 'Actually, plans changed.',
+      prompt: 'Initial group message\n\nActually, plans changed.',
       turnContext: expect.stringContaining(
-        'Re-evaluate all accepted messages under the group turn rules and return one final result.',
+        'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
       ),
     })
     expect(
@@ -3493,6 +3502,18 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       expect.objectContaining({ providerRequestOrdinal: 1 }),
     )
     expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledOnce()
+    expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+      session: expect.objectContaining({
+        sessionId: session.sessionId,
+      }),
+      vault: '/vaults/test',
+    })
+    expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        precedingAssistantTranscriptTexts: [],
+        providerResumeStateAction: 'clear',
+      }),
+    )
     expect(
       mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
     ).toMatchObject({
@@ -3607,6 +3628,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect.objectContaining({ segments: [] }),
   )
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.clearAssistantSessionCodexResumeState).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'persist-from-provider-turn',
+    }),
+  )
 
   resetScenario()
   const silenceDraftReady = createDeferred<void>()
@@ -3939,6 +3966,19 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     assert.equal(outcome.error, terminalError)
   }
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.applyAssistantSessionCodexResumeStateAction,
+  ).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action: 'preserve-existing',
+      codexThreadId: 'provider-thread-group-failure',
+      session: expect.objectContaining({ sessionId: session.sessionId }),
+    }),
+  )
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: expect.objectContaining({ sessionId: session.sessionId }),
+    vault: '/vaults/test',
+  })
   expect(failedNoReplyAccepted).not.toHaveBeenCalled()
   expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
@@ -3957,6 +3997,216 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   expect(mocks.finalizeAssistantTurnReceipt).toHaveBeenCalledWith(
     expect.objectContaining({ response: null, status: 'failed' }),
   )
+
+  resetScenario()
+  const checkpointDraftReady = createDeferred<void>()
+  const checkpointError = new Error(
+    'reconsideration checkpoint rejected after the draft',
+  )
+  const warmResumeState = {
+    routeFingerprint: 'route-group-checkpoint-failure',
+    threadId: 'provider-thread-group-checkpoint-failure',
+  }
+  const warmSession: AssistantSession = {
+    ...session,
+    codexResume: warmResumeState,
+    resumeState: warmResumeState,
+  }
+  const rejectingCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => {
+      throw checkpointError
+    },
+  )
+  mocks.clearAssistantSessionCodexResumeState.mockImplementationOnce(
+    async (clearInput) => {
+      const clearedSession = {
+        ...clearInput.session,
+        codexResume: null,
+        resumeState: null,
+      }
+      await mocks.saveAssistantSession(clearInput.vault, clearedSession)
+      return clearedSession
+    },
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      checkpointDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          attemptCount: 1,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: warmResumeState.threadId,
+          provider: 'codex-cli',
+          providerOptions: session.providerOptions,
+          response: 'The checkpoint draft.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: warmResumeState.routeFingerprint },
+          session: warmSession,
+          transcriptResponse: 'The checkpoint draft.',
+          usage: createProviderUsage({ providerRequestId: 'request-0' }),
+        },
+      }
+    },
+  )
+  const checkpointTurn = await startHeldTurn({
+    activeTurnCheckpoint: rejectingCheckpoint,
+    firstDraftReady: checkpointDraftReady,
+    latePrompt: 'New group input before checkpoint',
+  })
+  const checkpointOutcomes = await Promise.all([
+    checkpointTurn.initial,
+    checkpointTurn.late,
+  ])
+  expect(
+    checkpointOutcomes.every((outcome) => outcome.status === 'rejected'),
+  ).toBe(true)
+  for (const outcome of checkpointOutcomes) {
+    assert.equal(outcome.status, 'rejected')
+    assert.equal(outcome.error, checkpointError)
+  }
+  expect(rejectingCheckpoint).toHaveBeenCalledWith(
+    expect.objectContaining({ providerRequestOrdinal: 1 }),
+  )
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: expect.objectContaining({
+      codexResume: null,
+      resumeState: null,
+    }),
+    vault: '/vaults/test',
+  })
+  expect(mocks.saveAssistantSession.mock.calls.at(-1)?.[1]).toMatchObject({
+    codexResume: null,
+    resumeState: null,
+  })
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session,
+  ).toMatchObject({
+    codexResume: null,
+    resumeState: null,
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+
+  resetScenario()
+  const postProgressDraftReady = createDeferred<void>()
+  const postProgressError = new Error(
+    'reconsideration usage recording failed after progress',
+  )
+  const postProgressClearError = new Error(
+    'reconsideration durable clear failed',
+  )
+  addFirstDraft(
+    postProgressDraftReady,
+    'provider-thread-group-post-progress-failure',
+  )
+  mocks.recordAssistantUsageEvent
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(postProgressError)
+  mocks.deliverAssistantProgressUpdate.mockImplementationOnce(
+    async (progressInput) => ({
+      ...progressInput.session,
+      updatedAt: '2026-08-20T20:00:04.000Z',
+    }),
+  )
+  mocks.clearAssistantSessionCodexResumeState.mockRejectedValueOnce(
+    postProgressClearError,
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.progressDelivery?.send(
+        'Working through the accepted group messages.',
+        {
+          deliveryContextOrdinal: 0,
+          required: true,
+          source: 'system',
+          targetInputId: 'manual-1',
+        },
+      )
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          attemptCount: 1,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-post-progress-failure',
+          provider: 'codex-cli',
+          providerOptions: session.providerOptions,
+          response: 'This response must not be finalized.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session: providerInput.resolvedSession,
+          transcriptResponse: 'This response must not be finalized.',
+          usage: createProviderUsage({ providerRequestId: 'request-1' }),
+        },
+      }
+    },
+  )
+  const postProgressTurn = await startHeldTurn({
+    firstDraftReady: postProgressDraftReady,
+    latePrompt: 'New group input before delivery',
+  })
+  const postProgressOutcomes = await Promise.all([
+    postProgressTurn.initial,
+    postProgressTurn.late,
+  ])
+  expect(
+    postProgressOutcomes.every((outcome) => outcome.status === 'rejected'),
+  ).toBe(true)
+  for (const outcome of postProgressOutcomes) {
+    assert.equal(outcome.status, 'rejected')
+    assert.equal(outcome.error, postProgressError)
+  }
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledOnce()
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: expect.objectContaining({
+      codexResume: null,
+      resumeState: null,
+      updatedAt: '2026-08-20T20:00:04.000Z',
+    }),
+    vault: '/vaults/test',
+  })
+  const savedPostProgressSession =
+    mocks.saveAssistantSession.mock.calls.at(-1)?.[1]
+  expect(savedPostProgressSession).toMatchObject({
+    codexResume: null,
+    resumeState: null,
+  })
+  expect(
+    mocks.saveAssistantSession.mock.calls.every(([, savedSession]) =>
+      savedSession.codexResume === null && savedSession.resumeState === null
+    ),
+  ).toBe(true)
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session,
+  ).toMatchObject({
+    codexResume: null,
+    resumeState: null,
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
 
   resetScenario()
   const retryDraftReady = createDeferred<void>()

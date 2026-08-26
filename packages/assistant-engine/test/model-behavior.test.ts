@@ -144,6 +144,7 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt).toContain(
       'A clear correction or replacement supersedes only what it changes',
     )
+    expect(groupPrompt).not.toContain('Treat a request as resolved only when')
     expect(groupPrompt).toContain('do not repeat completed effects')
     expect(groupPrompt).toContain(scopedSafety)
     expect(directPrompt).toContain(scopedSafety)
