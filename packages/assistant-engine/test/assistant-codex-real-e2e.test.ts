@@ -971,7 +971,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 
   it(
-    'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
+    'requires typed modes and units while keeping live and reminder sets canonical',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -1083,6 +1083,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           prompt: [
             'Start a live workout named Durable repetition proof.',
             'Add Seated cable curl with exactly eight finite sets.',
+            'I use pounds for resistance exercises.',
             'Every set of that exercise is exactly 9 reps; persist that exercise-wide member count.',
             'Do not log a set yet and do not turn any target or suggestion into an actual result.',
           ].join(' '),
@@ -1124,8 +1125,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         }])
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
+          mode: 'weight_reps',
           name: 'Seated cable curl',
           setPlanIsFinite: true,
+          unitOverride: 'lb',
         })
         expect(finiteWorkout.workout.exercises[0]?.sets).toHaveLength(8)
         expect(

@@ -378,6 +378,11 @@ test('ad-hoc workout exercises require explicit editor modes and weight units', 
         '--exercise', 'name=Chest-supported row;sets=3;mode=weight_reps',
         '--vault', vaultRoot,
       ]),
+      run<WorkoutResult>(cli, [
+        'workout', 'start', 'Contradictory unit',
+        '--exercise', 'name=Push-up;sets=3;mode=bodyweight;unitOverride=lb',
+        '--vault', vaultRoot,
+      ]),
     ]),
   )
 
@@ -399,6 +404,12 @@ test('ad-hoc workout exercises require explicit editor modes and weight units', 
       ? ''
       : rejectedStarts[1]!.envelope.error.message ?? '',
     /unitOverride is required/u,
+  )
+  assert.match(
+    rejectedStarts[2]!.envelope.ok
+      ? ''
+      : rejectedStarts[2]!.envelope.error.message ?? '',
+    /unitOverride is not allowed for bodyweight/u,
   )
   assert.equal(persisted.length, 0)
 
@@ -448,6 +459,34 @@ test('ad-hoc workout exercises require explicit editor modes and weight units', 
   }
   assert.equal(missingAddedUnit.envelope.error.code, 'invalid_option')
   assert.match(missingAddedUnit.envelope.error.message ?? '', /--unit-override is required/u)
+
+  const addedPersistence: HostedCanonicalWritePersistenceInput[] = []
+  const contradictoryAddedUnit = await withHostedCanonicalWritePort(
+    {
+      async persistCanonicalWrite(input) {
+        addedPersistence.push(input)
+      },
+    },
+    async () => run<ShowResult>(cli, [
+      'workout', 'exercise', 'add', 'Push-up',
+      '--workout-id', started.eventId,
+      '--order', '3',
+      '--mode', 'bodyweight',
+      '--unit-override', 'lb',
+      '--sets', '2',
+      '--vault', vaultRoot,
+    ]),
+  )
+  assert.equal(contradictoryAddedUnit.envelope.ok, false)
+  if (contradictoryAddedUnit.envelope.ok) {
+    throw new Error('Expected a bodyweight addition with a unit to fail.')
+  }
+  assert.equal(contradictoryAddedUnit.envelope.error.code, 'invalid_option')
+  assert.match(
+    contradictoryAddedUnit.envelope.error.message ?? '',
+    /--unit-override is not allowed when --mode is bodyweight/u,
+  )
+  assert.equal(addedPersistence.length, 0)
 })
 
 test('workout start writes one complete ordered exercise batch in one canonical creation', async () => {
