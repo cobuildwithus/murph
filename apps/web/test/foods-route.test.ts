@@ -663,7 +663,10 @@ describe("foods API route", () => {
 
   it("returns a safe failure payload when the query layer throws", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mocks.searchFoods.mockRejectedValue(new Error("database unavailable"));
+    mocks.searchFoods.mockRejectedValue(Object.assign(
+      new Error("private query must not be logged"),
+      { code: "57014" },
+    ));
 
     const response = await foodsRoute.GET(
       new Request("https://web.example.test/api/foods?q=yogurt", {
@@ -678,10 +681,20 @@ describe("foods API route", () => {
       error: "foods_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("foods_api_failed", {
+      databaseErrorCode: "57014",
+      durationMs: expect.any(Number),
       errorCode: "foods_api_failed",
-      errorMessage: "database unavailable",
       errorType: "Error",
+      genericOnly: false,
+      includeOffMarket: false,
+      limit: 1,
+      method: "GET",
+      nutritionOnly: false,
+      operation: "search",
+      queryLength: 6,
     });
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("private query");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("yogurt");
   });
 
   it("returns an unconfigured error when contaminant schema is missing", async () => {
@@ -1519,9 +1532,19 @@ describe("foods API route", () => {
       error: "foods_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("foods_api_failed", {
+      batchConcurrency: 3,
+      durationMs: expect.any(Number),
       errorCode: "foods_api_failed",
-      errorMessage: "database unavailable",
       errorType: "Error",
+      genericOnly: false,
+      includeOffMarket: false,
+      limit: 1,
+      maxQueryLength: 6,
+      method: "POST",
+      nutritionOnly: false,
+      operation: "batch_search",
+      queryCount: 1,
+      uniqueQueryCount: 1,
     });
   });
 });

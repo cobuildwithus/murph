@@ -4992,8 +4992,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const shouldContinueForegroundCausalPass = (
           passResult: HostedWorkspaceRunnerResult,
         ): boolean =>
-          wakeInput.foregroundCausalOnly === true
-          && passResult.assistantPhaseResult?.progressed === true
+          (
+            passResult.pendingEffectsContinuationWakeAt !== null
+            || (
+              wakeInput.foregroundCausalOnly === true
+              && passResult.assistantPhaseResult?.progressed === true
+            )
+          )
           && !mailboxBudgetExhausted()
           && readHostedWorkspaceInvocationRedactedNumber(
             buildHostedWorkspaceRunnerRedactedStatus(passResult),
@@ -5067,12 +5072,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
         ) {
+          const projectedPendingEffectsContinuationWakeKey =
+            rerunAssistantInputBatch === null
+            && continueForegroundCausalPass
+            && passResult.pendingEffectsContinuationWakeAt !== null
+              ? buildHostedRuntimeWakeKey({
+                  nextWakeAt: passResult.pendingEffectsContinuationWakeAt,
+                  nextWakeReason: "assistant",
+                })
+              : null;
           // The mailbox-import boundary belongs only to the first foreground
           // pass. A rerun is a new causal pass and must not inherit that tick.
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
-              && wakeInput.foregroundCausalOnly === true,
+              && continueForegroundCausalPass,
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext:
@@ -5084,6 +5098,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   }
                 : null,
             latencySeed: wakeInput.latencySeed ?? null,
+            projectedAssistantWakeKey: projectedPendingEffectsContinuationWakeKey,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
           });

@@ -603,7 +603,10 @@ Last verified: 2026-08-23
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately. Metric families are normalized
-  independently: an absent or structurally unusable family remains unknown,
+  independently: primary-only Postgres and PgBouncer families require an
+  explicit `planetscale_role="primary"` label, while the edge connection-error
+  family remains role-less by provider contract. An absent or structurally
+  unusable family remains unknown,
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
   A collection that fails before producing a usable observation, including a
@@ -1594,8 +1597,17 @@ Last verified: 2026-08-23
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
-  owner. One admitted workout index yields serial exact-workout SDK reads; each
-  response has an 8 MiB cap and reduces before import to one compact overall
+  owner. Before the workout index, the existing control-plane current-import
+  admission predicate intersects with the current Junction provider inventory
+  so disconnect-fenced sources stay blocked while non-disconnected recovery
+  states can use currently advertised workout-stream capability. No eligible
+  source completes this optional resource without index or stream egress;
+  mixed-source indexes discard ineligible or unattributed workouts before
+  candidate progress is computed. An exact clear-unsupported HTTP 400 skips
+  only that candidate; ambiguous or request-shape HTTP 400s remain terminal.
+  Existing optional HTTP 404/422 candidate handling is unchanged. One admitted
+  workout index yields serial exact-workout SDK reads; each response
+  has an 8 MiB cap and reduces before import to one compact overall
   feature plus at most 64 fixed-distance splits. The stable workout/source
   identity and source update version form one authoritative facet set, so a
   newer correction withdraws omitted splits. Only reduced duration, distance,
@@ -2453,8 +2465,20 @@ Last verified: 2026-08-23
   serialization while the write preserves attempt and monotonic
   lease-generation authority, max-merges the publication deadline, sanitizes
   stored diagnostic JSON, and changes `updated_at` only when state changes. It
-  must not select trace ids into the application, lock an unbounded collection,
-  or open one transaction per trace.
+  selects at most 251 of the newest checkpoint candidates and locks those trace
+  rows in deterministic trace-id order inside one bounded `READ COMMITTED`
+  transaction. A second statement takes a fresh command snapshot, rechecks
+  current mailbox and lease eligibility, and updates at most the newest 250.
+  Provider, assistant, and ordinary runtime multi-row writers use the same
+  trace-id lock order. This common order prevents cross-writer row-lock cycles,
+  while the fresh checkpoint snapshot prevents an older waiting lease from
+  overwriting a newer one, without a broad transaction retry.
+  Persistence failures emit only event type, source, input cardinality, query
+  tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
+  stay out of failure logs. The bounded transaction-local trace-id list passes
+  only from the lock statement to the fresh update statement; it must not
+  escape that callback or appear in logs. The writer must not lock an unbounded
+  collection or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event

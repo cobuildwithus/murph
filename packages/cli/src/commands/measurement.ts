@@ -343,6 +343,10 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
           typeof options.occurredAt === 'string'
             ? options.occurredAt
             : undefined,
+        timeZone:
+          typeof options.timeZone === 'string'
+            ? options.timeZone
+            : undefined,
       })
       const mediaPaths = Array.isArray(options.media)
         ? options.media.filter((entry): entry is string => typeof entry === 'string')

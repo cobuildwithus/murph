@@ -2,6 +2,7 @@ import Image from "next/image";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
+import { cn } from "@/src/lib/utils";
 
 import type {
   ConnectSource,
@@ -16,8 +17,10 @@ export function SourceCard({
   source,
   onDisconnectTargetChange,
   onMigrationRetry,
+  onSignIn,
   onSetupGuideOpen,
   onStartConnection,
+  presentation = "card",
 }: {
   authenticated: boolean;
   errorMessage: string | null;
@@ -26,8 +29,10 @@ export function SourceCard({
   source: ConnectSource;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
   onMigrationRetry?: (source: ConnectSource) => void;
+  onSignIn?: () => void;
   onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
+  presentation?: "card" | "dialog";
 }) {
   const setupGuideActionLabel = source.setupGuideActionLabel;
   const setupGuideId = source.setupGuideId;
@@ -93,11 +98,21 @@ export function SourceCard({
 
   return (
     <div
-      id={source.id}
-      className="relative box-border flex min-w-0 w-full max-w-full scroll-mt-24 flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 target:border-primary/80 target:ring-2 target:ring-primary target:ring-offset-2 target:ring-offset-background sm:p-5"
+      data-connect-source={source.id}
+      className={cn(
+        "relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden",
+        presentation === "dialog"
+          ? "p-1 pr-10"
+          : "rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5",
+      )}
     >
       {!setupOnly ? (
-        <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
+        <div
+          className={cn(
+            "absolute top-3 sm:top-4",
+            presentation === "dialog" ? "right-12" : "right-3 sm:right-4",
+          )}
+        >
           <SourceStatusDot
             connected={source.connected}
             historicalResetIncomplete={historicalResetIncomplete}
@@ -214,6 +229,7 @@ export function SourceCard({
               <AuthButton
                 aria-label="Sign in to Murph"
                 className="self-end"
+                onAuthRequired={onSignIn}
               >
                 Sign in
               </AuthButton>

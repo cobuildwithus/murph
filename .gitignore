@@ -33,6 +33,10 @@ apps/web/src/lib/changelog-fragments.generated.ts
 !/.agents/skills/write-changelog/agents/openai.yaml
 !/.agents/skills/frog/
 !/.agents/skills/frog/SKILL.md
+!/.agents/skills/verify-murph-assistant/
+!/.agents/skills/verify-murph-assistant/SKILL.md
+!/.agents/skills/verify-murph-assistant/agents/
+!/.agents/skills/verify-murph-assistant/agents/openai.yaml
 !/.agents/skills/crabbox/
 !/.agents/skills/crabbox/SKILL.md
 !/.agents/friction-log/

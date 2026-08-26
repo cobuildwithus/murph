@@ -92,6 +92,13 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   junctionWorkoutStreamMaxTimestampCount?: number;
   junctionWorkoutStreamTimestampCardinalityKind?: string;
   junctionWorkoutStreamTimestampCount?: number;
+  junctionEcgActualRecordingCount?: number;
+  junctionEcgActualSampleCount?: number;
+  junctionEcgBindingReason?: string;
+  junctionEcgExpectedRecordingCount?: number;
+  junctionEcgExpectedSampleCount?: number;
+  junctionEcgMaxRecordingCount?: number;
+  junctionEcgMaxSampleCount?: number;
   normalizationFailureReason?: string;
   normalizationRowOrdinal?: number;
   normalizationSourceProvider?: string;
