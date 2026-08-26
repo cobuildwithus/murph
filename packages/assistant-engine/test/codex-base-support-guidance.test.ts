@@ -19,22 +19,19 @@ describe("Murph Codex base support guidance", () => {
       "de-identified non-`Support escalation:` summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Keep ordinary feedback silent for every result, including after corrected validation",
+      "keep every ordinary result silent",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Give support@withmurph.ai only when asked.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Explicit verified-private human support",
+      "Human support: only in a verified-private conversation",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'kind: "frustration"`, no changelog IDs',
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "de-identified product explanation beginning exactly `Support escalation:`",
-    );
-    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Write it in your own words; never copy or quote the member's message",
+      "original de-identified summary beginning exactly `Support escalation:`",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Don't show or seek approval",
@@ -46,16 +43,16 @@ describe("Murph Codex base support guidance", () => {
       "Never claim email delivery/receipt",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "promise a ticket/response/fix/follow-up/timing",
+      "promise a ticket, response, fix, follow-up, or timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "For that explicit verified-private support call only",
+      "Only for that support call",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "follow the Product feedback contract's single allowed schema correction",
+      "correct the first schema rejection once from its returned issues",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Do not retry accepted, already accepted, unavailable, or callback-failure results",
+      "All other results are terminal; never retry",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "For Murph product problems, give support@withmurph.ai directly",
