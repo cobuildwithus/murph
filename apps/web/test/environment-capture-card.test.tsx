@@ -57,7 +57,7 @@ test("partial reports offer to fill only what is missing", async () => {
 
   try {
     const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Fill the remaining 5 gaps/);
+    assert.match(bodyText, /Fill in the remaining 5 details/);
     assert.match(bodyText, /Continue report/);
     assert.doesNotMatch(bodyText, /detail missing|short topic/);
     assert.doesNotMatch(bodyText, /Update by voice/);

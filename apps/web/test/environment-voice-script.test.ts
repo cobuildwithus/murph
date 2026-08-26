@@ -5,13 +5,19 @@ import {
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
   listEnvironmentInterviewFields,
+  type HabitatIndicatorValue,
 } from "@murphai/contracts";
 
 import {
   buildEnvironmentVoiceScript,
   buildEnvironmentVoiceScriptForGroup,
+  type EnvironmentVoiceField,
 } from "../app/(dashboard)/environment/environment-voice-script";
-import type { HabitatValues } from "../app/(dashboard)/environment/home-model";
+import {
+  resolveEnvironmentCoverage,
+  resolveHabitatScene,
+  type HabitatValues,
+} from "../app/(dashboard)/environment/home-model";
 
 describe("environment voice script", () => {
   it("uses focused topics at zero coverage and asks only for city-level location", () => {
@@ -79,6 +85,22 @@ describe("environment voice script", () => {
     expect([...includedFields]).toEqual(
       expect.arrayContaining(gradeableFields),
     );
+
+    const gradeableFieldKeys = new Set(gradeableFields);
+    const completeValues: HabitatValues = {};
+    for (const field of script.topics.flatMap((topic) => topic.fields ?? [])) {
+      const key = `${field.aspectId}.${field.indicatorId}`;
+      if (!gradeableFieldKeys.has(key)) {
+        continue;
+      }
+      const aspectValues = completeValues[field.aspectId] ?? {};
+      aspectValues[field.indicatorId] = exampleValue(field.valueType);
+      completeValues[field.aspectId] = aspectValues;
+    }
+
+    expect(
+      resolveEnvironmentCoverage(resolveHabitatScene(completeValues)).coverage,
+    ).toBe(100);
   });
 
   it("asks again when a report condition is stored without a value", () => {
@@ -97,6 +119,20 @@ describe("environment voice script", () => {
         }),
       ]),
     );
+
+    const groupScript = buildEnvironmentVoiceScriptForGroup("sleep", {
+      "sleep-environment": { night_temp_c: null },
+    });
+    expect(
+      groupScript?.topics.flatMap((topic) => topic.fields ?? []),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+        }),
+      ]),
+    );
   });
 
   it("omits declined gaps and switches to an open update only when collection gaps are resolved", () => {
@@ -108,6 +144,12 @@ describe("environment voice script", () => {
     expect(script.dialogTitle).toBe("Update your environment");
     expect(script.topics).toHaveLength(1);
     expect(script.topics[0].id).toBe("update");
+    expect(script.topics[0].fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ indicatorId: "smoke_sources" }),
+        expect.objectContaining({ indicatorId: "tv_in_bedroom" }),
+      ]),
+    );
   });
 
   it("uses canonical accepted topic ids for category interviews", () => {
@@ -120,6 +162,25 @@ describe("environment voice script", () => {
     );
   });
 });
+
+function exampleValue(
+  valueType: EnvironmentVoiceField["valueType"],
+): HabitatIndicatorValue {
+  if (valueType.kind === "enum") {
+    const value = valueType.values[0];
+    if (value === undefined) {
+      throw new TypeError("Environment enum field has no allowed value");
+    }
+    return value;
+  }
+  if (valueType.kind === "number") {
+    return valueType.min ?? 1;
+  }
+  if (valueType.kind === "boolean") {
+    return false;
+  }
+  return "known";
+}
 
 function resolvedCollectionValues(): HabitatValues {
   const values: HabitatValues = {};

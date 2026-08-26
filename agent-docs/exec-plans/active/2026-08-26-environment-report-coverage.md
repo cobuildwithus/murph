@@ -35,7 +35,7 @@ Updated: 2026-08-26
 
 - Technical constraints: reuse the catalog and existing interview field list;
   do not add another coverage owner or dependency.
-- Product/process constraints: Product UX Patch. Preserve decline behavior,
+- Product/process constraints: Product UX Product change. Preserve decline behavior,
   category-specific capture, accessibility, responsive layout, and existing
   report behavior for members with data.
 
@@ -67,8 +67,11 @@ Updated: 2026-08-26
   the result promised by the headline.
 - Treat stored `null` values as missing, so an unanswered condition is asked
   again instead of appearing covered.
-- Use one dynamic `Fill the remaining N gaps` line for partial reports and
-  rename the recommendation strip to `What you can improve`.
+- Use one dynamic `Fill in the remaining N details` line for partial reports
+  and rename the recommendation strip to the neutral `What to review next`.
+- The member-started main voice walkthrough is the bounded exception to the
+  normal context-only rule for low-priority gradeable conditions. Update the
+  Habitat product spec in the same change.
 
 ## Verification
 
@@ -76,7 +79,7 @@ Updated: 2026-08-26
 - Hosted Web TypeScript check: passed.
 - Browser proof: empty report checked at 1440×1000 and 390×844; partial and
   populated report copy checked at 1200×500.
-- Product UX Patch walkthrough: Ready. The zero-data and partial-report member
+- Product UX Product change walkthrough: Ready. The zero-data and partial-report member
   journeys now state the task and outcome directly. No material exclusions or
   changes from the approved scope.
 - Remaining proof: preliminary specialist ReviewGPT and exact-head PR checks.

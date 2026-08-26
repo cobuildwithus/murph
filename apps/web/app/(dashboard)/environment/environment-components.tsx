@@ -1157,9 +1157,9 @@ export function NextChecksStrip({
     if (next) open(next);
   };
   return (
-    <section aria-label="What you can improve">
+    <section aria-label="What to review next">
       <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-        What you can improve
+        What to review next
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {shown.map((item) => (

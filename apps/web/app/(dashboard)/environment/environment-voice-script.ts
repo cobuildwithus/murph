@@ -12,6 +12,7 @@ export type EnvironmentVoiceFlow = "walkthrough" | "fill-gaps" | "update";
 
 export type EnvironmentVoiceField = {
   aspectId: string;
+  extractionGuidance?: string;
   indicatorId: string;
   label: string;
   existingNote?: string;
@@ -38,6 +39,9 @@ export type EnvironmentVoiceScript = {
 };
 
 const MAX_TOPIC_FIELDS = 4;
+
+const SMOKE_SOURCES_EXTRACTION_GUIDANCE =
+  "If several sources are explicit, store smoking before fireplace before frequent_candles. Keep every additional source in the note.";
 
 const VOICE_FIELD_LABELS: Readonly<Record<string, string>> = {
   "allergens-home.pets_at_home": "Whether you have pets and what kind",
@@ -360,6 +364,9 @@ function toVoiceField({
 >[number], notes: HabitatIndicatorNotes): EnvironmentVoiceField {
   return {
     aspectId,
+    ...(aspectId === "home-air" && indicator.id === "smoke_sources"
+      ? { extractionGuidance: SMOKE_SOURCES_EXTRACTION_GUIDANCE }
+      : {}),
     indicatorId: indicator.id,
     label: VOICE_FIELD_LABELS[`${aspectId}.${indicator.id}`] ?? indicator.label,
     ...(notes[aspectId]?.[indicator.id]

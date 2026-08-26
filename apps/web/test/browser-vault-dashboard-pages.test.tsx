@@ -348,7 +348,7 @@ test("EnvironmentPage renders private habitat facts from Browser Vault", async (
   assert.match(markup, /href="\/environment\/print"/);
   assert.match(markup, /Print report/);
   assert.match(markup, /group\/category/);
-  assert.match(markup, /What you can improve/);
+  assert.match(markup, /What to review next/);
   assert.doesNotMatch(markup, /What to check next/);
   assert.doesNotMatch(markup, /fixture data|mock/i);
   assert.doesNotMatch(markup, /Overall picture/);
@@ -434,7 +434,7 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
 
   assert.match(
     markup,
-    /Fill in your report to see how your home affects your sleep, air quality and focus/,
+    /Fill in your report to review your setup for sleep, air quality and focus/,
   );
   assert.match(markup, /Fill in my report/);
   assert.match(markup, /Prefer typing\? Use chat/);

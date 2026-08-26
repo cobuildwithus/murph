@@ -528,8 +528,8 @@ export function EnvironmentEmptyState({
             id="environment-empty-title"
             className="max-w-[19ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-foreground"
           >
-            Fill in your report to see how your home affects your sleep, air
-            quality and focus.
+            Fill in your report to review your setup for sleep, air quality and
+            focus.
           </h2>
           <p className="mt-5 max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground">
             Answer one short topic at a time. Murph turns your answers into a
@@ -782,8 +782,8 @@ export function EnvironmentCaptureCard({
             : known === 0
             ? "Build your environment report in one take"
             : missing === 1
-            ? "Fill the remaining gap"
-            : `Fill the remaining ${missing} gaps`}
+            ? "Fill in the remaining detail"
+            : `Fill in the remaining ${missing} details`}
         </h2>
         {updating || known === 0 ? (
           <p className="mt-1 max-w-[68ch] text-pretty text-base text-muted-foreground sm:text-sm">
@@ -896,7 +896,7 @@ function environmentUpdateSummary(
       ? `Added ${state.factsAdded} details.`
       : "Murph saved your changes.";
   if (state.remainingDetails === 0) {
-    return `${added} Your current report has no remaining gaps.`;
+    return `${added} Your current report has no remaining details.`;
   }
   return `${added} ${state.remainingDetails} ${
     state.remainingDetails === 1 ? "detail is" : "details are"
