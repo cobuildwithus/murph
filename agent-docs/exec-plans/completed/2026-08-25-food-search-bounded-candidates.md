@@ -1,8 +1,8 @@
 # Bound food-search candidate work
 
-Status: active
+Status: completed
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -73,8 +73,14 @@ Updated: 2026-08-25
 
 ## Verification
 
-- Commands to run: focused food library/unit tests, focused PostgreSQL search
-  tests, `pnpm --filter web typecheck`, exact-head ReviewGPT/CI, clean merge-tree,
-  and a read-only production EXPLAIN/probe under the 8-second timeout.
-- Expected outcomes: all behavior tests pass; broad common-token search remains
-  bounded; production no longer reproduces SQLSTATE 57014 for the proven probe.
+- Focused SQL-shape/runtime-env tests passed (34 tests), the adversarial
+  PostgreSQL regression passed with 10,050 misleading candidates, and
+  `pnpm --dir apps/web typecheck` passed.
+- Read-only production executions completed in 2.21 seconds for a broad search
+  and 2.41 seconds for a false-FTS typo search under the unchanged eight-second
+  timeout. Plans realized exactly one GiST branch per query and kept maximum
+  direct sort input below the 20,250-row bound.
+- Final ReviewGPT returned `ROUND_OUTCOME: PASS` with no findings, and the fresh
+  post-outage exact-head GitHub suite passed, including release app verification
+  with the full PostgreSQL corpus.
+Completed: 2026-08-26
