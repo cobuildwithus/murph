@@ -3334,8 +3334,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       : null;
     const systemMailboxForegroundOwnerSelected =
       selectedSystemMailboxOwnerItem !== null
-      && isHostedApprovedContinuationSystemMailboxItem(
-        selectedSystemMailboxOwnerItem,
+      && (
+        isHostedApprovedContinuationSystemMailboxItem(
+          selectedSystemMailboxOwnerItem,
+        )
+        || (
+          selectedSystemMailboxOwnerItem.routeAction === "run-assistant-ask"
+          && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
+        )
       );
     if (
       input.request.processingMode === "system_mailbox"

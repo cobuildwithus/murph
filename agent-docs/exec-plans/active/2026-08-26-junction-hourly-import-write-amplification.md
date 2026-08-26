@@ -1,4 +1,4 @@
-# Junction hourly import write amplification
+# Hosted device catch-up and system-mailbox recovery
 
 Status: active
 Created: 2026-08-26
@@ -6,111 +6,103 @@ Updated: 2026-08-26
 
 ## Goal
 
-- Make bounded Junction hourly fallback reconciliation converge with fewer
-  canonical writes while preserving exact continuation progress, foreground
-  preemption, provider request limits, and canonical import ownership.
+- Restore one production runtime by keeping Junction collections inside their
+  declared request budget and handing a durable-head Assistant Ask to its
+  foreground owner before later model-free device maintenance.
 
 ## Success criteria
 
-- A production-shaped synthetic test proves that several consecutive hourly
-  windows can be fetched serially and committed through one canonical import.
-- The canonical import boundary advances only through the last completed
-  window. A hosted yield retains the current cursor, a later-hour retryable
-  provider failure resumes at that failed hour, and a classified optional
-  response consumes exactly its own hour without discarding an earlier prefix.
-- Provider requests remain serial and bounded; no new fanout, transaction, or
-  persisted-state owner is introduced.
-- Focused provider, service, importer, and hosted-runtime tests and affected
-  typechecks pass, followed by the required exact-head review and CI gates.
+- Ordinary grouped timeseries honor the existing one-attempt, eight-second
+  collection contract instead of multiplying that budget through client
+  defaults.
+- An ordinary consented-member Assistant Ask remains behind older work but,
+  once it reaches the durable system head, upgrades system-mailbox mode to its
+  existing detached foreground owner before any later device wake.
+- No new queue, scheduler, state owner, fanout, or manual production mutation
+  is introduced.
+- Focused device-sync and assistant-runtime tests, affected typechecks, exact-
+  head review, CI, deployment, and live mailbox convergence all pass.
 
 ## Scope
 
-- In scope: Junction hourly timeseries fallback execution, focused synthetic
-  coverage, metadata-only timing evidence, and deployment/live recovery proof.
-- Out of scope: resource-policy changes, a second queue or scheduler, longer
-  hosted pass deadlines, canonical state outside the existing importer, and
-  manual production queue mutation.
+- In scope: Junction grouped-timeseries request attempts, system-mailbox owner
+  selection, focused synthetic coverage, metadata-only operational evidence,
+  and deployment/live recovery proof.
+- Out of scope: resource-policy changes, multi-hour canonical coalescing, a
+  second queue or scheduler, longer hosted deadlines, canonical state outside
+  existing owners, and manual production queue mutation.
 
 ## Constraints
 
 - Preserve one source of truth for canonical health data under `packages/core`.
-- Keep provider requests sequential and within the existing collection work
-  limit; evaluate composed maximum request and record counts explicitly.
-- Do not mark completed records durable until their combined snapshot is
-  imported. Keep the import and continuation boundaries distinct when one
-  classified optional hour is intentionally consumed without an import.
+- Keep provider requests sequential and within the existing collection limit.
+- Preserve the canonical one-hour import and continuation boundary.
+- Preserve ordinary system-mailbox order: consented-member asks do not jump
+  older device work, but later model-free work cannot overtake the durable head.
 - Keep runtime diagnostics metadata-only and free of member, payload, provider
   record, credential, and filesystem identifiers.
 
 ## Risks and mitigations
 
-1. Risk: coalescing windows could skip an hour after interruption.
-   Mitigation: advance the continuation only after one successful canonical
-   import covering the complete fetched prefix; propagate hosted aborts before
-   import, consume only the exact classified optional hour, and add
-   interruption and optional-response regression coverage.
-2. Risk: a larger in-memory snapshot could exceed canonical record limits.
-   Mitigation: use a small fixed window count derived from the existing
-   one-hour provider bound and retain existing per-resource sanitization and
-   canonical caps.
-3. Risk: extra provider fanout could raise peak load.
-   Mitigation: keep requests strictly serial, cap attempts per job, and replace
-   the same total hourly requests rather than adding requests.
+1. Risk: reducing retries could skip provider data after a transient response.
+   Mitigation: preserve the existing retryable job continuation; bound only one
+   collection attempt so the outer durable retry remains the owner.
+2. Risk: foreground-owner selection could reorder consented-member work.
+   Mitigation: upgrade only the item already selected by ordinary durable order;
+   the existing approved-continuation priority remains unchanged.
+3. Risk: an expired Ask could be dropped without its required terminal result.
+   Mitigation: keep the existing detached/Web authority path; do not locally
+   discard or mark production work consumed.
 
 ## Tasks
 
-1. [x] Prove the remaining cost is canonical write amplification rather than
-   provider retries, queue failure, or event-index rescanning.
-2. [x] Add a synthetic failing reproduction for bounded hourly coalescing and
-   exact continuation behavior.
-3. [x] Implement the smallest provider-owned coalescing change.
-4. [ ] Run focused verification, affected typechecks, privacy/diff review, and
-   complete the Product UX walkthrough.
-5. [ ] Commit, push, run specialist/final review with required CI, deploy, and
-   prove live mailbox recovery.
+1. [x] Complete the requested three-hour production watch and isolate provider
+   work, checkpointing, and durable mailbox progress independently.
+2. [x] Prove grouped timeseries multiplied the declared attempt/time budget and
+   add a failing request-bound regression.
+3. [x] Reject and delete the reviewed multi-hour coalescing design; retain the
+   canonical one-hour owner and apply the request-bound correction only.
+4. [x] Prove an expired consented-member Ask at the durable head lets later
+   device wakes overtake it; add the exact system-mailbox integration regression.
+5. [x] Finish focused verification, affected typechecks, privacy/diff review,
+   Frog logging, and Product UX walkthrough.
+6. [ ] Commit, push, run final review with required CI, deploy, and prove live
+   mailbox and device-sync convergence.
 
 ## Decisions
 
-- Product UX Patch: connected-health catch-up becomes faster in the background;
-  no control, copy, permission, provider selection, or visible state changes.
-- Outcome: dense connected-device history reaches Murph with fewer repeated
-  background commits and unchanged data coverage.
-- Reaches: the existing connected-health catch-up journey after a page-heavy
-  provider day falls back to hourly windows.
-- Proof: provider-shaped rich, yield, and retryable-failure scenarios prove
-  import count, exact durable cursor behavior, classified optional-hour
-  consumption, and unchanged source coverage; live post-deploy evidence must
-  prove the stalled mailbox lane converges.
-- Accepted final-review finding: the first candidate conflated its import and
-  continuation boundaries after a later optional response. The corrected
-  candidate carries those coordinates separately in memory, imports the valid
-  prefix, and consumes only the classified optional hour.
-- Rejected: increasing the hosted timeout. It would hide the repeated-write
-  cost and weaken foreground responsiveness without reducing work.
-- Rejected: changing resource admission or deleting queued work. That would
-  alter product data coverage instead of correcting throughput.
-- Rejected: a pass-wide uncommitted canonical batch. Queue durability requires
-  each completed job to own a committed canonical prefix.
+- Product UX Patch: connected-health catch-up and delegated Ask recovery become
+  reliable in the background; no control, copy, permission, provider choice,
+  or visible state changes.
+- Outcome: health history retains existing coverage, and the system frontier
+  can terminalize its oldest Ask before later device maintenance continues.
+- Accepted retrospective: final review proved multi-hour coalescing had no
+  single failure-atomicity contract and could replay completed prefixes. Delete
+  it and restore one-hour canonical ownership.
+- Accepted production root cause: after device jobs became fast, a ten-minute
+  consented-member Ask remained at the durable head while later device wakes
+  each forced a large workspace checkpoint. Ordinary head ownership, not queue
+  deletion or a second scheduler, is the correction.
+- Rejected: increasing hosted timeouts, changing resource admission, deleting
+  queued work, or locally expiring the Ask without its Web-owned terminal result.
 
 ## Verification
 
-- Add focused Junction provider/service tests for serial request count,
-  combined import count, terminal cursor, yield-before-commit replay, and
-  retryable and optional provider-failure replay.
-- Run the narrow affected Vitest files and package typechecks first; expand only
-  when direct evidence or CI requires it.
-- Measure the synthetic path before and after using deterministic import and
-  request counts rather than wall-clock thresholds.
+- Run focused Junction request/provider tests and assistant-runtime durable-head
+  owner-selection coverage, then the affected package typechecks.
+- Inspect the final diff for removal of every multi-hour branch and privacy-safe
+  evidence only; expand checks only when direct evidence or CI requires it.
+- After deployment, require the expired head to terminalize, the system frontier
+  to advance materially or clear, zero-job wake replay to stop, and scheduled
+  device reconciliation to remain healthy.
 
 ## Product UX walkthrough
 
-- A member with dense connected-device history keeps the same sources and data
-  coverage, while background reconciliation performs fewer canonical commits.
-- A sparse-history member follows the unchanged daily path.
-- A foreground message or hosted timeout still interrupts between bounded work
-  units without a post-yield canonical write or falsely completed device-sync
-  wake.
-- Provider failure preserves the exact last committed cursor and ordinary
-  retry ownership.
-- A classified optional response retains its diagnostic metadata, never drops
-  an earlier valid prefix, and never consumes an unrequested later hour.
+- A member with dense connected-device history keeps the same sources, hourly
+  fallback, canonical data coverage, and durable retry ownership.
+- A consented-member Ask behind older work stays behind it; at the durable head,
+  the detached read-only owner revalidates and either completes or terminalizes
+  it before later model-free work.
+- A foreground message still preempts background device maintenance under the
+  existing rules.
+- Provider failure preserves the same one-hour cursor and outer retry path.

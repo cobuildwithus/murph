@@ -218,17 +218,14 @@ export {
 
 interface JunctionTimeseriesImportResult {
   appliedDailyAggregateResourceIds?: readonly string[];
-  continuationWindowEnd?: string | null;
   historicalProviderRecordsSeen?: boolean;
   historicalRecordsSeen?: boolean;
   yieldedAt: string | null;
 }
 
 interface JunctionFetchedRecords {
-  continuationWindowEnd: string | null;
   providerRecordsSeen: boolean;
   records: unknown[];
-  yieldedAt: string | null;
 }
 
 interface JunctionFetchedSummarySnapshots {
@@ -393,8 +390,6 @@ interface JunctionWindowFetchOptions {
   };
   chunkDays?: number;
   dateQueryFormat?: JunctionDateQueryFormat;
-  maxChunkMs?: number;
-  preservePartialWindowProgress?: boolean;
   sourceProviderSlug?: string | null;
   requireStructurallyCompleteCollection?: boolean;
 }
@@ -637,11 +632,6 @@ const JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET = new Set<string>([
   "mindfulness_minutes",
 ]);
 const TIMESERIES_HOUR_MS = 60 * 60_000;
-// Hourly fallback exists because one provider day can exceed the bounded page
-// budget. Fetch two already-required hours serially, then commit their durable
-// prefix once. The between-chunk yield and partial-failure path preserve
-// preemption and keep a failing second hour from replaying the first.
-const JUNCTION_FULL_JOB_HOURLY_IMPORT_WINDOW_COUNT = 2;
 // Three single-attempt pages allow ordinary pagination while capping provider
 // wait at 24 seconds, below the hosted job's 45-second outer budget.
 const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
@@ -4147,40 +4137,12 @@ export function createJunctionDeviceSyncProvider(
   ): Promise<JunctionFetchedRecords> {
     const records: unknown[] = [];
     let providerRecordsSeen = false;
-    const start = Date.parse(windowStart);
-    let chunkStart = start;
+    let chunkStart = Date.parse(windowStart);
     const end = Date.parse(windowEnd);
     let optionalFailureLogged = false;
 
-    const configuredFetchChunkMs = resolveJunctionTimeseriesFetchChunkMs(resource);
-    const fetchChunkMs = options.maxChunkMs !== undefined
-      && Number.isFinite(options.maxChunkMs)
-      && options.maxChunkMs > 0
-      ? Math.max(1, Math.min(configuredFetchChunkMs, Math.floor(options.maxChunkMs)))
-      : configuredFetchChunkMs;
-    const buildFetchedRecords = (
-      yieldedAt: string | null,
-      continuationWindowEnd: string | null = yieldedAt,
-    ): JunctionFetchedRecords => ({
-      continuationWindowEnd,
-      providerRecordsSeen,
-      records: resource === "electrocardiogram_voltage" || resource === "workout_stream"
-        ? resolveJunctionBoundedFeatureRecords(resource, records)
-        : dedupeJunctionTimeseriesRecords(resource, records),
-      yieldedAt,
-    });
+    const fetchChunkMs = resolveJunctionTimeseriesFetchChunkMs(resource);
     while (chunkStart < end) {
-      if (
-        options.preservePartialWindowProgress === true
-        && chunkStart > start
-        && context.shouldYield?.()
-      ) {
-        // Hosted execution aborts before any further canonical write. Direct
-        // provider callers without an abort guard may still commit this
-        // already-fetched prefix as their cooperative yield boundary.
-        context.throwIfAborted?.();
-        return buildFetchedRecords(new Date(chunkStart).toISOString());
-      }
       const chunkEnd = Math.min(chunkStart + fetchChunkMs, end);
       const chunkWindowStart = new Date(chunkStart).toISOString();
       const chunkWindowEnd = new Date(chunkEnd).toISOString();
@@ -4218,14 +4180,6 @@ export function createJunctionDeviceSyncProvider(
           ),
         );
       } catch (error) {
-        if (
-          options.preservePartialWindowProgress === true
-          && chunkStart > start
-          && isRetryableDeviceSyncFailure(error)
-          && !isJunctionJobSignalAbort(error, context.signal)
-        ) {
-          return buildFetchedRecords(chunkWindowStart);
-        }
         const failure = classifyOptionalJunctionResourceFailure(
           error,
           "timeseries",
@@ -4245,15 +4199,21 @@ export function createJunctionDeviceSyncProvider(
           resource,
           resourceCategory: "timeseries",
         });
-        if (options.preservePartialWindowProgress === true) {
-          return buildFetchedRecords(chunkWindowStart, chunkWindowEnd);
-        }
         break;
       }
       chunkStart = chunkEnd;
     }
 
-    return buildFetchedRecords(null);
+    if (resource === "electrocardiogram_voltage" || resource === "workout_stream") {
+      return {
+        providerRecordsSeen,
+        records: resolveJunctionBoundedFeatureRecords(resource, records),
+      };
+    }
+    return {
+      providerRecordsSeen,
+      records: dedupeJunctionTimeseriesRecords(resource, records),
+    };
   }
 
   async function importTimeseriesPreciseSnapshots(
@@ -4889,15 +4849,8 @@ export function createJunctionDeviceSyncProvider(
         ))
       : listedSourceProviders;
 
-    const coalescesHourlyImport = timeseriesWindowHours === 1
-      && policy?.normalizationMode === "hourly_or_session_feature";
-    let executionWindowEnd = new Date(Math.min(
-      Date.parse(timeseriesCursor)
-        + timeseriesWindowHours
-        * (coalescesHourlyImport
-            ? JUNCTION_FULL_JOB_HOURLY_IMPORT_WINDOW_COUNT
-            : 1)
-        * TIMESERIES_HOUR_MS,
+    const executionWindowEnd = new Date(Math.min(
+      Date.parse(timeseriesCursor) + timeseriesWindowHours * TIMESERIES_HOUR_MS,
       Date.parse(window.windowEnd),
     )).toISOString();
     let workoutStreamCursor: string | null = null;
@@ -5001,12 +4954,6 @@ export function createJunctionDeviceSyncProvider(
             collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
             context,
             dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
-            ...(coalescesHourlyImport
-              ? {
-                  maxFetchChunkMs: TIMESERIES_HOUR_MS,
-                  preservePartialWindowProgress: true,
-                }
-              : {}),
             resource,
             skippedOptionalResources,
             sourceProviderSlug,
@@ -5020,9 +4967,6 @@ export function createJunctionDeviceSyncProvider(
           historicalRecordsSeen ||=
             sourceProviderSlug !== null
             && timeseriesImport.historicalRecordsSeen === true;
-          executionWindowEnd = timeseriesImport.continuationWindowEnd
-            ?? timeseriesImport.yieldedAt
-            ?? executionWindowEnd;
         }
       } catch (error) {
         if (
@@ -5075,8 +5019,6 @@ export function createJunctionDeviceSyncProvider(
     authorizedLocalDay?: { dayKey: string; timeZone: string };
     context: ProviderJobContext;
     dateQueryFormat: JunctionDateQueryFormat;
-    maxFetchChunkMs?: number;
-    preservePartialWindowProgress?: boolean;
     resource: string;
     collectionWorkLimit?: JunctionCollectionWorkLimit;
     skippedOptionalResources: JunctionSkippedOptionalResource[];
@@ -5129,26 +5071,18 @@ export function createJunctionDeviceSyncProvider(
           : {}),
         collectionWorkLimit: input.collectionWorkLimit,
         dateQueryFormat: input.dateQueryFormat,
-        maxChunkMs: input.maxFetchChunkMs,
-        preservePartialWindowProgress:
-          input.preservePartialWindowProgress,
       },
     );
     const { providerRecordsSeen } = fetched;
-    const completedWindowEnd = fetched.yieldedAt ?? input.windowEnd;
     const records = scopeJunctionRecordsToSourceProvider(
       fetched.records,
       input.sourceProviderSlug,
     );
-    if (
-      input.skippedOptionalResources.length > skippedResourceCountBeforeFetch
-      && fetched.yieldedAt === null
-    ) {
+    if (input.skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
       return {
-        continuationWindowEnd: fetched.continuationWindowEnd,
         historicalProviderRecordsSeen: providerRecordsSeen,
         historicalRecordsSeen: false,
-        yieldedAt: fetched.yieldedAt,
+        yieldedAt: null,
       };
     }
 
@@ -5164,10 +5098,9 @@ export function createJunctionDeviceSyncProvider(
     }
     if (records.length === 0 && !input.authorizedLocalDay) {
       return {
-        continuationWindowEnd: fetched.continuationWindowEnd,
         historicalProviderRecordsSeen: providerRecordsSeen,
         historicalRecordsSeen: false,
-        yieldedAt: fetched.yieldedAt,
+        yieldedAt: null,
       };
     }
 
@@ -5203,19 +5136,18 @@ export function createJunctionDeviceSyncProvider(
         );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots) && !input.authorizedLocalDay) {
       return {
-        continuationWindowEnd: fetched.continuationWindowEnd,
         historicalProviderRecordsSeen: providerRecordsSeen,
         historicalRecordsSeen: sourceScopedHistoricalRecordsSeen,
-        yieldedAt: fetched.yieldedAt,
+        yieldedAt: null,
       };
     }
     await commitPreparedJunctionCanonicalImport(
       input.context,
       preparedImport,
       {
-        importedAt: completedWindowEnd,
+        importedAt: input.windowEnd,
         windowStart: input.windowStart,
-        windowEnd: completedWindowEnd,
+        windowEnd: input.windowEnd,
         ...(calendarDayAggregate && !input.authorizedLocalDay
           ? { timeseriesWindowKind: "calendar_day" as const }
           : {}),
@@ -5238,10 +5170,9 @@ export function createJunctionDeviceSyncProvider(
         : undefined,
     );
     return {
-      continuationWindowEnd: fetched.continuationWindowEnd,
       historicalProviderRecordsSeen: providerRecordsSeen,
       historicalRecordsSeen: sourceScopedHistoricalRecordsSeen,
-      yieldedAt: fetched.yieldedAt,
+      yieldedAt: null,
     };
   }
 

@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Connected health histories catch up faster",
     "summary": "New connected-health updates now catch up faster for members with large histories.",
-    "details": "Corrections and changes made between syncs still receive a full safety recheck before new data is accepted.",
+    "details": "Timed-out background requests no longer hold up newer health updates, while corrections made between syncs still receive a full safety recheck.",
     "relevanceTags": ["connected-health", "wearables", "sync", "reliability"],
     "sourcePullRequests": [2322, 2334]
   }
