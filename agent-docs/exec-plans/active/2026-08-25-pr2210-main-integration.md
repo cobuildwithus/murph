@@ -40,6 +40,16 @@ truthful stages, and no duplicate projector, repair transport, or state owner.
   Vault-usecase projection/formatter proof passes 8/8 and the affected built-CLI
   event/document recovery suite passes 10/10. Vault-usecases typecheck and
   `git diff --check` pass.
+- ReviewGPT round four found that the finite event-contract field set admitted
+  the unused input alias `eventId` but omitted the canonical schema path `id`,
+  collapsing malformed identity recovery to the root. The accepted correction
+  replaces only that finite entry; top-level parsing, root fallback,
+  `preserveDetails: false`, and dynamic-key non-echo behavior remain unchanged.
+  Prepared runtime verification passes, the focused built-CLI recovery suite
+  passes 11/11, and CLI plus Vault Usecases typechecks pass. Product UX Patch
+  walkthrough: malformed `id` and `eventId` inputs both return the canonical
+  `id` field without echo or any ledger/audit mutation, and correcting either
+  spelling revises the existing event with `created: false`; Ready.
 
 ## Design
 

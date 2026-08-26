@@ -234,7 +234,7 @@ interface VaultErrorMapping {
 }
 
 const publicEventContractFields = new Set([
-  'eventId',
+  'id',
   'occurredAt',
   'recordedAt',
   'source',

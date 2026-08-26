@@ -29,6 +29,27 @@ function assertDoesNotEcho(result: CliEnvelope, values: readonly string[]) {
   }
 }
 
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const entries = await readdir(vaultRoot, { recursive: true })
+  const snapshot: Array<[string, string]> = []
+
+  for (const relativePath of entries) {
+    try {
+      snapshot.push([
+        relativePath,
+        (await readFile(path.join(vaultRoot, relativePath))).toString('base64'),
+      ])
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'EISDIR') {
+        continue
+      }
+      throw error
+    }
+  }
+
+  return snapshot.sort(([left], [right]) => left.localeCompare(right))
+}
+
 async function importAssessmentManifestFixture(vaultRoot: string, key: string) {
   const sourceValue = `private-assessment-source-${key}`
   const sourcePath = path.join(vaultRoot, `private-assessment-${key}.json`)
@@ -129,6 +150,86 @@ test.sequential('built CLI returns bounded event import and edit fields', async 
     assert.equal(editError.stage, 'validation')
     assert.equal(editError.fieldErrors?.some((field) => field.path === 'title'), true)
     assertDoesNotEcho(invalidEdit, [eventId, vaultRoot])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('built CLI maps event identity aliases to canonical id without rejected writes', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-id-recovery-'))
+  const payloadPath = path.join(vaultRoot, 'event-input.json')
+  const basePayload = {
+    kind: 'symptom',
+    occurredAt: '2026-08-24T12:00:00.000Z',
+    title: 'Identity recovery baseline',
+    symptom: 'headache',
+    intensity: 4,
+  }
+
+  try {
+    await initializeVault({ vaultRoot })
+    await writeFile(payloadPath, JSON.stringify(basePayload), 'utf8')
+
+    const created = await runCli<{ created: boolean, eventId: string }>([
+      'event',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(created.ok, true, JSON.stringify(created))
+    assert.equal(requireData(created).created, true)
+    const eventId = requireData(created).eventId
+
+    for (const identityField of ['id', 'eventId'] as const) {
+      const privateInvalidId = `private-invalid-${identityField}-value`
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          ...basePayload,
+          [identityField]: privateInvalidId,
+        }),
+        'utf8',
+      )
+      const filesBeforeRejectedImport = await snapshotVaultFiles(vaultRoot)
+      const importArgs = [
+        'event',
+        'import-json',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ]
+
+      const rejected = await runCli(importArgs)
+      const rejectedError = requireError(rejected)
+
+      assert.equal(rejectedError.code, 'contract_invalid')
+      assert.equal(rejectedError.retryable, false)
+      assert.equal(rejectedError.stage, 'validation')
+      assert.deepEqual(rejectedError.fieldErrors?.map((field) => field.path), ['id'])
+      assertDoesNotEcho(rejected, [privateInvalidId, payloadPath, vaultRoot])
+
+      const rawRejected = await runRawCli(importArgs)
+      assert.doesNotMatch(rawRejected, new RegExp(privateInvalidId, 'u'))
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeRejectedImport)
+
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          ...basePayload,
+          [identityField]: eventId,
+          title: `Identity recovery through ${identityField}`,
+        }),
+        'utf8',
+      )
+      const retried = await runCli<{ created: boolean, eventId: string }>(importArgs)
+
+      assert.equal(retried.ok, true, JSON.stringify(retried))
+      assert.equal(requireData(retried).created, false)
+      assert.equal(requireData(retried).eventId, eventId)
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
