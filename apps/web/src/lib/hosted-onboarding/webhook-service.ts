@@ -582,12 +582,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const firstContactAdmissionMode = readHostedLinqFirstContactAdmissionMode();
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
+    const instantFirstTurnCandidate =
+      planningEvent.event_type === "message.received"
+      && isHostedLinqInstantStartEventCandidate({
+        event: requireHostedLinqMessageReceivedEvent(planningEvent),
+        phonePrefixes:
+          getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+      });
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
     let instantFirstTurnOwnsFinalPlan = false;
     let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
     const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
-      if (planningEvent.event_type !== "message.received") {
+      if (!instantFirstTurnCandidate) {
         return;
       }
       const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
@@ -603,11 +610,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         planningEvent.event_type === "message.received"
         && (
           requireFirstContactAdmission
-          || isHostedLinqInstantStartEventCandidate({
-            event: requireHostedLinqMessageReceivedEvent(planningEvent),
-            phonePrefixes:
-              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
-          })
+          || instantFirstTurnCandidate
         );
       firstContactAdmissionDecision = shouldReuseRecordedFirstContactAdmission
         ? await readRecordedHostedLinqFirstContactAdmissionDecision({
@@ -618,12 +621,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const startInstantFirstTurnGeneration = async (): Promise<void> => {
         if (
           instantFirstTurnGeneration
-          || planningEvent.event_type !== "message.received"
-          || !isHostedLinqInstantStartEventCandidate({
-            event: requireHostedLinqMessageReceivedEvent(planningEvent),
-            phonePrefixes:
-              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
-          })
+          || !instantFirstTurnCandidate
         ) {
           return;
         }

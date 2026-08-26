@@ -380,12 +380,18 @@ function buildLinqMessageWebhookBody(input: {
 }
 
 function buildPrewarmPrisma() {
+  const cleanupTx = {
+    $executeRaw: vi.fn(async () => 1),
+    hostedLinqDelivery: {
+      findUnique: vi.fn(async () => null),
+    },
+  };
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       calls.push("begin");
       rootKeyAtTransactionOpen = issuedRootKeys[0] ? [...issuedRootKeys[0]] : null;
       rootKeysAtTransactionOpen.push(rootKeyAtTransactionOpen);
-      const result = await callback({});
+      const result = await callback(cleanupTx);
       calls.push("commit");
       return result;
     }),
