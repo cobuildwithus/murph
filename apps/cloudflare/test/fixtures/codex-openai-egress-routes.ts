@@ -198,6 +198,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "Codex Apps file upload requires ChatGPT auth and the ChatGPT backend base URL.",
     },
     {
+      candidate: "/v1/liveend_turn",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux printable token joins the reviewed /v1/live route to an adjacent end_turn protocol label and is not an HTTP route.",
+    },
+    {
       candidate: "/v1/logs",
       disposition: "configurable_telemetry_origin",
       owner: "codex-otel",
@@ -214,6 +220,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "binary_false_positive",
       owner: "dependency",
       reason: "This exact Linux printable token terminates before an uppercase binary byte and is not an HTTP route.",
+    },
+    {
+      candidate: "/v1/rtc_avasraterowscols",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token joins unrelated dependency symbols and is not an HTTP route.",
     },
     {
       candidate: "/v1/scrypt",
