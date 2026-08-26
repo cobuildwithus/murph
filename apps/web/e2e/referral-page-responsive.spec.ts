@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const WIDTHS = [320, 375, 390, 768, 1280] as const;
-const REFERRAL_STUDY_WIDTHS = [390, 1440] as const;
+const REFERRAL_STUDY_WIDTHS = [320, 390, 1024, 1440] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
 const RETIRED_USAGE_TERM_PATTERN = new RegExp(
   ["cost", "weighted"].join("-"),
@@ -10,8 +10,8 @@ const RETIRED_USAGE_TERM_PATTERN = new RegExp(
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "10 days" },
-      { count: 1, label: "14 days" },
+      { count: 2, label: "About 10 days" },
+      { count: 1, label: "About 14 days" },
     ],
     description: "Share your link or start a group with Murph.",
     rewardCount: 3,
@@ -25,8 +25,8 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "10 days" },
-      { count: 1, label: "14 days" },
+      { count: 1, label: "About 10 days" },
+      { count: 1, label: "About 14 days" },
     ],
     description: "Start a fresh group with Murph.",
     rewardCount: 2,
@@ -37,7 +37,7 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "10 days" },
+      { count: 1, label: "About 10 days" },
     ],
     description: "Share your personal link with someone new.",
     rewardCount: 1,
@@ -305,6 +305,39 @@ test.describe("homepage referral design proof", () => {
           overflowPx,
           `${expected.slug} referral study should not overflow at ${width}px`,
         ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+
+        const leadContainment = await study
+          .locator("[data-referral-headline-lead]")
+          .evaluate((lead) => {
+            const pane = lead.closest("section > div > div");
+            const leadRect = lead.getBoundingClientRect();
+            const paneRect = pane?.getBoundingClientRect();
+            const lineHeight = Number.parseFloat(
+              getComputedStyle(lead).lineHeight,
+            );
+            return {
+              leadRight: leadRect.right,
+              lineCount: Math.round(leadRect.height / lineHeight),
+              paneRight: paneRect?.right ?? 0,
+              widthOverflow: lead.scrollWidth - lead.clientWidth,
+            };
+          });
+        expect(
+          leadContainment.widthOverflow,
+          `${expected.slug} headline should wrap within its line box at ${width}px`,
+        ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+        expect(
+          leadContainment.leadRight,
+          `${expected.slug} headline should stay inside its pane at ${width}px`,
+        ).toBeLessThanOrEqual(
+          leadContainment.paneRight + OVERFLOW_TOLERANCE_PX,
+        );
+        if (width >= 390) {
+          expect(
+            leadContainment.lineCount,
+            `${expected.slug} lead phrase should stay on one line at ${width}px`,
+          ).toBe(1);
+        }
 
         const screenshotPath = testInfo.outputPath(
           `homepage-referral-${expected.slug}-${width}.png`,

@@ -26,10 +26,12 @@ Gate-derived availability is program-level, not a promise that an individual
 member has enough rolling capacity for the next reward. Public signup-link
 copy therefore states that a completed signup can earn more usage only after
 the later eligibility and rolling-limit checks pass.
-On the compact homepage referral section, each enabled path leads with a
-typical-use estimate (about 10 or 14 more days of Murph usage). These day labels
-are presentation estimates, not accounting units; the homepage says that actual
-capacity varies, while `/refer` retains the full qualification detail without
+On the compact homepage referral section, each enabled path leads with a short
+typical-use estimate (`About 10 days` or `About 14 days`). One shared ledger
+note completes the meaning without repeating it in every row: the estimate is
+typical Murph usage added, not calendar access, and actual capacity varies.
+These day labels are presentation estimates, not accounting units, while
+`/refer` retains the full reward labels and qualification detail without
 exposing internal ledger units.
 
 The stable referral link remains available to an eligible signed-in member when
@@ -73,6 +75,11 @@ an amount the tool did not return.
 | Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | About 10 more days of Murph usage |
 | `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | About 10 more days of Murph usage |
 | `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | About 14 more days of Murph usage |
+
+The table labels are the self-contained form used on detailed surfaces. The
+compact homepage may use `About 10 days` or `About 14 days` only beside its
+shared note that the value is typical Murph usage added, not calendar access,
+and that actual capacity varies.
 
 The day labels estimate typical Murph usage rather than calendar access. The
 ledger continues to store the exact usage value in USD micros. The

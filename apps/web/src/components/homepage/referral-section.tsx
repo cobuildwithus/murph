@@ -2,11 +2,9 @@ import Link from "next/link";
 import { ArrowRight, Link2, UsersRound } from "lucide-react";
 
 import {
+  formatHostedPublicReferralRewardCompactValue,
   type HostedPublicReferralReward,
 } from "@/src/lib/hosted-growth/referral-program";
-import {
-  computeHostedReferralRewardUsageDays,
-} from "@/src/lib/hosted-growth/referral-reward-days";
 
 export function ReferralSection({
   rewards,
@@ -33,8 +31,8 @@ export function ReferralSection({
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#d4b87a]">
               Murph referrals
             </p>
-            <h2 className="mt-5 font-serif text-[clamp(2rem,8.5vw,3rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-[#f5f0e8]">
-              <span className="block whitespace-nowrap">
+            <h2 className="mt-5 font-serif text-[clamp(2rem,8.5vw,3rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-[#f5f0e8] lg:text-4xl xl:text-5xl">
+              <span className="block" data-referral-headline-lead>
                 Bring your people.
               </span>{" "}
               <span className="block">Earn more Murph time.</span>
@@ -64,7 +62,6 @@ export function ReferralSection({
           <div className="mt-5 border-y border-[#c4a882]/30">
             {rewards.map((reward) => {
               const Icon = reward.id === "signup-link" ? Link2 : UsersRound;
-              const rewardDays = computeHostedReferralRewardUsageDays(reward);
               return (
                 <article
                   className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-[#c4a882]/25 py-5 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_minmax(11rem,0.9fr)] sm:gap-x-5 sm:py-6"
@@ -80,7 +77,7 @@ export function ReferralSection({
                   </div>
                   <div className="col-start-2 sm:col-start-auto sm:text-right">
                     <p className="text-pretty font-serif text-[1.0625rem] font-semibold leading-[1.35] tracking-[-0.015em] text-[#2d3436] sm:text-lg">
-                      {rewardDays} {rewardDays === 1 ? "day" : "days"}
+                      {formatHostedPublicReferralRewardCompactValue(reward)}
                     </p>
                   </div>
                 </article>
@@ -89,7 +86,8 @@ export function ReferralSection({
           </div>
 
           <p className="mt-4 text-xs leading-5 text-[#736a58]">
-            Typical-use estimate. Actual capacity varies.
+            Typical Murph usage added—not calendar access. Actual capacity
+            varies.
           </p>
         </div>
       </div>

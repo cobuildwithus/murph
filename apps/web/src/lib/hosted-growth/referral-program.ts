@@ -4,6 +4,7 @@ import {
   isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
 import {
+  computeHostedReferralRewardUsageDays,
   formatHostedReferralRewardUsageDays,
 } from "./referral-reward-days";
 import {
@@ -87,4 +88,18 @@ export function formatHostedPublicReferralRewardValue(
     ...reward,
     sentenceCase: true,
   });
+}
+
+/**
+ * Compact homepage label. The section supplies the shared usage-versus-calendar
+ * context once beneath the reward ledger instead of repeating it in every row.
+ */
+export function formatHostedPublicReferralRewardCompactValue(
+  reward: Pick<
+    HostedPublicReferralReward,
+    "policyCode" | "policyVersion" | "rewardUsdMicros"
+  >,
+): string {
+  const days = computeHostedReferralRewardUsageDays(reward);
+  return `About ${days} ${days === 1 ? "day" : "days"}`;
 }
