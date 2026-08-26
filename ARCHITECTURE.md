@@ -3065,6 +3065,18 @@ server time. Owner-derived authority remains independent. Partial oversized
 rosters therefore cannot turn an omitted or departed participant into an
 unbounded subscription capability.
 
+Group-to-private growth attribution is a separate, non-authoritative analytics
+projection. The existing capped roster reconciliation also upserts one global,
+versioned contact lookup key per current non-self handle with only its first
+observation and a 14-day expiry; it stores no raw handle, group, route, or
+member identifier and adds no provider read or database round trip. The daily
+growth snapshot joins still-live observations to verified member contact
+indexes and first private activation, then sets the existing one-time member
+conversion marker. Retained group-message sender evidence remains a fallback,
+and the hourly retention owner deletes expired observations in bounded serial
+batches. This evidence never grants identity, membership, access, or product
+authority.
+
 Direct and authenticated group conversations share the same provider-response
 lifecycle. Every completed text or media segment is retained and delivered;
 the audience does not create a replacement-response owner. Group transcript
