@@ -606,6 +606,7 @@ export function registerSamplesCommands(
             unit: options.unit,
             value: options.value,
           }),
+          sampleIssuePathShape: 'direct',
         })
       },
     },

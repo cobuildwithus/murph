@@ -51,7 +51,11 @@ test("sample import error projection preserves every supported field mapping", a
   for (const [field, expectedPath, expectedType, expectedHint] of mappings) {
     sampleField = field;
     await assert.rejects(
-      () => provider.addSampleRecords({ vault: "./vault", payload: SAMPLE_PAYLOAD }),
+      () => provider.addSampleRecords({
+        vault: "./vault",
+        payload: SAMPLE_PAYLOAD,
+        sampleIssuePathShape: "indexed",
+      }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         const code = Reflect.get(error, "code");
@@ -104,7 +108,11 @@ test("identifier-shaped private sample context is not projected or written", asy
     });
 
     await assert.rejects(
-      () => provider.addSampleRecords({ vault: vaultRoot, payload: SAMPLE_PAYLOAD }),
+      () => provider.addSampleRecords({
+        vault: vaultRoot,
+        payload: SAMPLE_PAYLOAD,
+        sampleIssuePathShape: "indexed",
+      }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         const code = Reflect.get(error, "code");

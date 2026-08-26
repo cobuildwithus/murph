@@ -58,6 +58,31 @@ async function runRawSliceCli(args: string[]): Promise<string> {
   return output.join('').trim()
 }
 
+async function countAuditRecords(vaultRoot: string): Promise<number> {
+  const auditRoot = path.join(vaultRoot, 'audit')
+  let entries: string[]
+  try {
+    entries = await readdir(auditRoot, { recursive: true })
+  } catch (error) {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return 0
+    }
+    throw error
+  }
+  const counts = await Promise.all(entries
+    .filter((entry) => entry.endsWith('.jsonl'))
+    .map(async (entry) => {
+      const content = await readFile(path.join(auditRoot, entry), 'utf8')
+      return content.split('\n').filter(Boolean).length
+    }))
+  return counts.reduce((total, count) => total + count, 0)
+}
+
 test('samples import-csv schema exposes the expansion-only import options', async () => {
   const schema = JSON.parse(
     await runRawSliceCli(['samples', 'import-csv', '--schema', '--format', 'json']),
@@ -331,30 +356,6 @@ test.sequential('sample CSV failures expose value-free guidance without multiply
 
 test.sequential('sample CSV semantic failures retain fixed repair hints without writes or value echo', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-semantics-'))
-  const countAuditRecords = async () => {
-    const auditRoot = path.join(vaultRoot, 'audit')
-    let entries: string[]
-    try {
-      entries = await readdir(auditRoot, { recursive: true })
-    } catch (error) {
-      if (
-        typeof error === 'object'
-        && error !== null
-        && 'code' in error
-        && error.code === 'ENOENT'
-      ) {
-        return 0
-      }
-      throw error
-    }
-    const counts = await Promise.all(entries
-      .filter((entry) => entry.endsWith('.jsonl'))
-      .map(async (entry) => {
-        const content = await readFile(path.join(auditRoot, entry), 'utf8')
-        return content.split('\n').filter(Boolean).length
-      }))
-    return counts.reduce((total, count) => total + count, 0)
-  }
   const cases = [
     {
       command: ['samples', 'import-csv'] as const,
@@ -397,7 +398,7 @@ test.sequential('sample CSV semantic failures retain fixed repair hints without 
 
   try {
     await initializeVault({ vaultRoot })
-    const initialAuditCount = await countAuditRecords()
+    const initialAuditCount = await countAuditRecords(vaultRoot)
 
     for (const semanticCase of cases) {
       const csvPath = path.join(vaultRoot, semanticCase.fileName)
@@ -443,7 +444,7 @@ test.sequential('sample CSV semantic failures retain fixed repair hints without 
       ])
       assert.equal(requireData(samples).count, 0, semanticCase.fileName)
       assert.equal(requireData(batches).items.length, 0, semanticCase.fileName)
-      assert.equal(await countAuditRecords(), initialAuditCount, semanticCase.fileName)
+      assert.equal(await countAuditRecords(vaultRoot), initialAuditCount, semanticCase.fileName)
     }
 
     for (const [index, command] of [
@@ -658,6 +659,59 @@ test.sequential('samples add records typed manual samples and validates stream-s
     ])
     assert.equal(sleepStageWithValue.ok, false)
     assert.match(sleepStageWithValue.error?.message ?? '', /omit --value/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('samples add reports its direct value field without writes or value echo', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-add-repair-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+    const initialAuditCount = await countAuditRecords(vaultRoot)
+
+    const result = await runSliceCli([
+      'samples',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'heart_rate',
+      '--unit',
+      'bpm',
+      '--recorded-at',
+      '2026-03-12T08:00:00.000Z',
+      '--value',
+      '-17',
+    ])
+
+    assert.equal(result.ok, false)
+    assert.equal(result.error.code, 'invalid_payload')
+    assert.equal(result.error.stage, 'validation')
+    assert.equal(result.error.fieldErrors?.[0]?.path, 'value')
+    assert.equal(result.error.hint, 'Use a non-negative integer.')
+    assert.equal(JSON.stringify(result).includes('-17'), false)
+
+    const samples = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    const batches = await runSliceCli<{ items: unknown[] }>([
+      'samples',
+      'batch',
+      'list',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(requireData(samples).count, 0)
+    assert.equal(requireData(batches).items.length, 0)
+    assert.equal(await countAuditRecords(vaultRoot), initialAuditCount)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

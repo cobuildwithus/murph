@@ -149,6 +149,26 @@ shared error projector and no partial writes or submitted-value echo.
 - The post-remediation canonical runner assembly passes all eight parity probes.
   The Vault CLI is 9,541,592 / 9,588,702 bytes with an 805-byte entry and
   25,155-byte static closure; runner total is 11,383,774 / 11,393,617 bytes.
+- Round seven found that the shared JSON-import recovery path also projected
+  typed `samples add` failures as `samples.<index>.<field>`, even though that
+  command accepts the sample fields directly. The finding is accepted: a
+  negative typed heart-rate value reported `samples.0.value`, which the caller
+  could not supply on retry.
+- The correction keeps Core attribution and `sampleImportIssue` single-owned.
+  The two existing callers now provide one required `direct` or `indexed` path
+  shape to the existing projector. Typed add reports `value`; JSON import keeps
+  `samples.<index>.value`; top-level `stream` and `unit` behavior is unchanged.
+  No validator, mapper, constraint table, service, state, or compatibility path
+  was added.
+- Focused proof passes the two Vault-usecase boundary cases and the three exact
+  CLI journeys: successful typed add, negative typed recovery at
+  `value`, and indexed JSON-import recovery at `samples.0.value`. Both failure
+  paths retain the fixed constraint, echo no rejected value, and create no
+  sample, batch, or audit write. Vault Usecases and CLI typechecks pass.
+- A broader 34-test CLI invocation passed all 33 sample/provider journeys and
+  timed out only in the unrelated top-level audit-registration test at its fixed
+  60-second ceiling. The exact three-journey rerun passed without that unrelated
+  registration path.
 
 ## Tasks
 

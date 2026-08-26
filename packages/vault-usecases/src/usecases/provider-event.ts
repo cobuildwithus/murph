@@ -719,9 +719,12 @@ export async function listEventRecords(input: {
   }, items)
 }
 
+type SampleIssuePathShape = 'direct' | 'indexed'
+
 export async function addSampleRecords(input: {
   vault: string
   payload: JsonObject
+  sampleIssuePathShape: SampleIssuePathShape
 }) {
   const stream = normalizeRequiredSamplePayloadText(input.payload.stream, 'stream')
   const unit = normalizeRequiredSamplePayloadText(input.payload.unit, 'unit')
@@ -750,7 +753,7 @@ export async function addSampleRecords(input: {
       batchProvenance,
     })
   } catch (error) {
-    throw toSampleImportCliError(error, stream)
+    throw toSampleImportCliError(error, stream, input.sampleIssuePathShape)
   }
 
   return {
@@ -835,7 +838,11 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
   return samples
 }
 
-function toSampleImportCliError(error: unknown, stream: string): unknown {
+function toSampleImportCliError(
+  error: unknown,
+  stream: string,
+  sampleIssuePathShape: SampleIssuePathShape,
+): unknown {
   const cliError = toVaultCliError(error)
   if (!(cliError instanceof VaultCliError)) {
     return cliError
@@ -877,7 +884,9 @@ function toSampleImportCliError(error: unknown, stream: string): unknown {
   const { hint, ...fieldIssue } = issue
   const publicPath = sampleField === 'unit'
     ? ['unit']
-    : ['samples', sampleIndex, sampleField]
+    : sampleIssuePathShape === 'direct'
+      ? [sampleField]
+      : ['samples', sampleIndex, sampleField]
 
   return new VaultCliError(
     'invalid_payload',
@@ -971,6 +980,7 @@ export async function addSampleRecordsFromInput(input: {
   return addSampleRecords({
     vault: input.vault,
     payload,
+    sampleIssuePathShape: 'indexed',
   })
 }
 
