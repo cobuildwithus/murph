@@ -17,6 +17,14 @@ reuse, and focused proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+The canonical Linux `vault-cli` bundle gate compares the exact candidate with
+its exact first parent in isolated sibling checkouts. Total output uses a
+relative one-percent-or-96-KiB allowance, while the ordinary production bundler
+retains absolute entry-chunk and static-startup-closure caps. The workflow,
+measurement, and focused proof are specified by
+`agent-docs/operations/verification-and-runtime.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
