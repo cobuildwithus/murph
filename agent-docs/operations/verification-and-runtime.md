@@ -105,10 +105,13 @@ or non-PR manual behavior. The introducing PR necessarily uses full CI when its
 exact base does not yet contain the classifier.
 
 An affirmative classification also starts one `Markdown documentation proof`
-job in Host Support. It checks out the event's exact candidate SHA, fetches only
-the immutable event base when needed, runs `git diff --check` over those exact
-trees, installs the frozen repository tooling, and runs `pnpm docs:drift` plus
-`pnpm docs:gardening`. `Release checks (ubuntu)` accepts documentation mode only
+job in Host Support. It checks out the event's exact synthetic merge SHA,
+verifies that SHA against the pull-request payload, fetches only the immutable
+event base when needed, and runs `git diff --check` over the event base and
+merge candidate. Using the merge candidate prevents later base-only commits
+from appearing as reversed pull-request changes. The job then installs the
+frozen repository tooling and runs `pnpm docs:drift` plus `pnpm docs:gardening`.
+`Release checks (ubuntu)` accepts documentation mode only
 when that job succeeds and every runtime shard is skipped; full mode requires
 the documentation job to be skipped and every runtime shard to succeed.
 

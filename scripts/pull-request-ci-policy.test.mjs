@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -198,7 +198,7 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 });
 
-test("Host Support runs one exact-candidate documentation proof", async () => {
+test("Host Support runs one exact merge-candidate documentation proof", async () => {
   const source = await workflow("host-support.yml");
   const docsProof = jobBlock(source, "markdown-docs-proof");
   assert.match(docsProof, /^    name: Markdown documentation proof$/mu);
@@ -208,20 +208,75 @@ test("Host Support runs one exact-candidate documentation proof", async () => {
     /^    if: \$\{\{ always\(\) && github\.event_name == 'pull_request' && needs\.markdown-docs-scope\.result == 'success' && needs\.markdown-docs-scope\.outputs\.markdown_only == 'true' \}\}$/mu,
   );
   assert.match(docsProof, /^    permissions:\n      contents: read$/mu);
-  assert.match(docsProof, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
+  assert.match(docsProof, /ref: \$\{\{ github\.sha \}\}/u);
   assert.match(docsProof, /persist-credentials: false/u);
+  assert.match(docsProof, /EXPECTED_MERGE_SHA: \$\{\{ github\.event\.pull_request\.merge_commit_sha \}\}/u);
+  assert.match(docsProof, /test "\$CANDIDATE_SHA" = "\$EXPECTED_MERGE_SHA"/u);
   assert.match(docsProof, /test "\$\(git rev-parse HEAD\)" = "\$CANDIDATE_SHA"/u);
   assert.match(docsProof, /git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "\$BASE_SHA"/u);
   assert.match(docsProof, /git diff --check "\$BASE_SHA" "\$CANDIDATE_SHA" --/u);
   assert.match(docsProof, /pnpm install --frozen-lockfile/u);
   assert.match(docsProof, /MURPH_DOCS_DRIFT_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
-  assert.match(docsProof, /MURPH_DOCS_DRIFT_CANDIDATE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
+  assert.match(docsProof, /MURPH_DOCS_DRIFT_CANDIDATE_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.doesNotMatch(docsProof, /pull_request\.head\.sha/u);
   assert.match(docsProof, /run: pnpm docs:drift/u);
   assert.match(docsProof, /run: pnpm docs:gardening/u);
 
   const releaseChecks = jobBlock(source, "release-checks-linux");
   assert.match(releaseChecks, /^      - markdown-docs-proof$/mu);
   assert.match(releaseChecks, /DOCS_RESULT: \$\{\{ needs\.markdown-docs-proof\.result \}\}/u);
+});
+
+test("documentation proof excludes base-only changes after the PR base moves", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "pr-docs-merge-candidate-proof-"));
+  const runGit = (...args) => {
+    const result = spawnSync("git", args, {
+      cwd: tempDir,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+
+  try {
+    runGit("init", "--initial-branch=main");
+    runGit("config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com");
+    runGit("config", "user.name", "github-actions[bot]");
+    await writeFile(path.join(tempDir, "README.md"), "fixture\n");
+    runGit("add", "README.md");
+    runGit("commit", "-m", "initial");
+
+    runGit("switch", "-c", "release-note");
+    await mkdir(path.join(tempDir, "docs", "release-notes"), { recursive: true });
+    const releaseNote = "docs/release-notes/2026-08-26-ci-fast-path.md";
+    await writeFile(path.join(tempDir, releaseNote), "# CI fast path\n");
+    runGit("add", releaseNote);
+    runGit("commit", "-m", "add release note");
+    const headSha = runGit("rev-parse", "HEAD");
+
+    runGit("switch", "main");
+    await mkdir(path.join(tempDir, "agent-docs", "operations"), { recursive: true });
+    const baseOnlyDoc = "agent-docs/operations/base-only.md";
+    await writeFile(path.join(tempDir, baseOnlyDoc), "# Base-only change\n");
+    runGit("add", baseOnlyDoc);
+    runGit("commit", "-m", "advance base");
+    const baseSha = runGit("rev-parse", "HEAD");
+
+    runGit("merge", "--no-ff", "release-note", "-m", "synthetic pull request merge");
+    const mergeCandidateSha = runGit("rev-parse", "HEAD");
+    const inventory = (candidateSha) => runGit(
+      "diff",
+      "--name-only",
+      baseSha,
+      candidateSha,
+      "--",
+    ).split("\n").filter(Boolean).sort();
+
+    assert.deepEqual(inventory(headSha), [baseOnlyDoc, releaseNote]);
+    assert.deepEqual(inventory(mergeCandidateSha), [releaseNote]);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
 test("trusted classifier drift fails closed into the full workflow", async () => {

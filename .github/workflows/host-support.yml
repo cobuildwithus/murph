@@ -152,19 +152,21 @@ jobs:
       contents: read
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out exact documentation candidate
+      - name: Check out exact documentation merge candidate
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Check exact documentation diff
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         shell: bash
         run: |
           set -euo pipefail
+          test "$CANDIDATE_SHA" = "$EXPECTED_MERGE_SHA"
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$BASE_SHA"
@@ -187,7 +189,7 @@ jobs:
       - name: Check durable documentation drift and references
         env:
           MURPH_DOCS_DRIFT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          MURPH_DOCS_DRIFT_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          MURPH_DOCS_DRIFT_CANDIDATE_SHA: ${{ github.sha }}
         run: pnpm docs:drift
 
       - name: Check documentation gardening
