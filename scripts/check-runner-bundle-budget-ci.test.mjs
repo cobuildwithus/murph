@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   compareRunnerBundleMeasurements,
@@ -13,6 +17,19 @@ const workflowUrl = new URL(
   "../.github/workflows/host-support.yml",
   import.meta.url,
 );
+const comparisonScriptPath = fileURLToPath(
+  new URL("./check-runner-bundle-budget-ci.mjs", import.meta.url),
+);
+const bundleRelativePath = path.join(
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+  "node_modules",
+  "@murphai",
+  "murph",
+  ".bundle",
+);
 
 async function readWorkflow() {
   return readFile(workflowUrl, "utf8");
@@ -24,6 +41,24 @@ function issueCodes(source) {
 
 function measurement(totalBytes, path = "bin.js") {
   return { outputs: [{ bytes: totalBytes, path }], totalBytes };
+}
+
+async function writeBundleOutputs(repoRoot, outputs) {
+  const bundleRoot = path.join(repoRoot, bundleRelativePath);
+  await mkdir(bundleRoot, { recursive: true });
+  await Promise.all(
+    outputs.map(({ bytes, name }) =>
+      writeFile(path.join(bundleRoot, name), Buffer.alloc(bytes)),
+    ),
+  );
+}
+
+function runCheckoutComparison(baseRoot, candidateRoot) {
+  return spawnSync(
+    process.execPath,
+    [comparisonScriptPath, "compare", baseRoot, candidateRoot],
+    { encoding: "utf8" },
+  );
 }
 
 test("accepts the checked-in deployment-faithful relative budget gate", async () => {
@@ -79,6 +114,61 @@ test("rejects missing or malformed bundle measurements", () => {
       ),
     /Missing or malformed base runner bundle measurement/u,
   );
+});
+
+test("compares emitted checkout files through the production CLI boundary", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-runner-bundle-budget-"),
+  );
+  const baseRoot = path.join(fixtureRoot, "base");
+  const candidateRoot = path.join(fixtureRoot, "candidate");
+
+  try {
+    await writeBundleOutputs(baseRoot, [{ bytes: 100, name: "bin.js" }]);
+    await writeBundleOutputs(candidateRoot, [
+      { bytes: 100, name: "bin.js" },
+      { bytes: 98_304, name: "lazy.js" },
+    ]);
+
+    const atThreshold = runCheckoutComparison(baseRoot, candidateRoot);
+    assert.equal(atThreshold.status, 0, atThreshold.stderr);
+    assert.match(atThreshold.stdout, /delta: \+98304B/u);
+    assert.match(atThreshold.stdout, /excess: 0B/u);
+
+    await writeFile(
+      path.join(candidateRoot, bundleRelativePath, "lazy.js"),
+      Buffer.alloc(98_305),
+    );
+    const oneByteOver = runCheckoutComparison(baseRoot, candidateRoot);
+    assert.equal(oneByteOver.status, 1, oneByteOver.stdout);
+    assert.match(oneByteOver.stderr, /excess: 1B/u);
+    assert.match(
+      oneByteOver.stderr,
+      /largest candidate outputs:\n  98305B lazy\.js/u,
+    );
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
+});
+
+test("fails closed when the base checkout has no emitted bundle", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-runner-bundle-budget-"),
+  );
+  const candidateRoot = path.join(fixtureRoot, "candidate");
+
+  try {
+    await writeBundleOutputs(candidateRoot, [{ bytes: 100, name: "bin.js" }]);
+    const result = runCheckoutComparison(
+      path.join(fixtureRoot, "missing-base"),
+      candidateRoot,
+    );
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /Missing runner bundle measurement at/u);
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
 });
 
 test("rejects synchronize admission to the deployment budget gate", async () => {

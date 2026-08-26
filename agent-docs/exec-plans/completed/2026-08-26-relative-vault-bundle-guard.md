@@ -1,6 +1,6 @@
 # Relative vault-cli bundle regression guard
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -22,9 +22,9 @@ Updated: 2026-08-26
   truthfully rather than combining base source with candidate-only artifacts.
 - Existing absolute entry-chunk and static-startup-closure gates, external and
   single-copy dependency guards, and bundled/unbundled probes remain intact.
-- Success and failure diagnostics report baseline, candidate, delta, allowance,
-  and useful largest-input evidence without retaining the chronological
-  per-feature budget comment.
+- Every comparison reports baseline, candidate, delta, allowance, and excess;
+  failures also report the largest candidate outputs, without retaining the
+  chronological per-feature budget comment.
 - Focused tests and production-shaped direct proof cover the threshold boundary,
   malformed or unavailable baseline evidence, and unchanged production bundle
   assembly.
@@ -110,3 +110,25 @@ Updated: 2026-08-26
   - No per-feature total-budget edit is needed for ordinary bounded growth.
   - A candidate at the allowance passes and a one-byte-over candidate fails.
   - Static-import creep still fails independently of total-size movement.
+
+## Completion evidence
+
+- ReviewGPT's first implementation artifact was rejected because it added a
+  large cache/worktree architecture. Its second exact-head artifact supplied
+  the accepted sibling-checkout comparison without new durable state or raw Git
+  isolation; the parent inspected and applied that patch.
+- Focused verification passed: 32 Node workflow/boundary tests, 14 Cloudflare
+  bundle tests, Cloudflare typecheck, workflow YAML parsing, the live workflow
+  contract checker, `docs:drift`, `docs:gardening`, and `git diff --check`.
+- The preliminary specialist pass found the missing filesystem/process-boundary
+  proof and redundant detailed index guidance. The accepted test-only artifact
+  and parent-owned docs correction resolved both findings; the expanded focused
+  suite passed 32/32.
+- Final ReviewGPT round one returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings on the unchanged production implementation. The later remediation
+  was isolated to tests and explanatory process docs.
+- Local full production assembly remained blocked before the changed bundling
+  step by the unchanged 60-second Assistant Engine CLI-manifest timeout. The
+  exact-head Ubuntu required check remains the authoritative clean full
+  base/candidate assembly proof.
+Completed: 2026-08-26
