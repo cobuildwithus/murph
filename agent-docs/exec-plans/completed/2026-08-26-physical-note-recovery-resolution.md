@@ -55,4 +55,13 @@ permanently pending because the provider lookup request is malformed.
 - PostgreSQL recovery atomicity: the focused aged-absence scenario passes.
 - Web typecheck passes.
 - Changelog generation and the 9-test archive rendering suite pass.
-- ReviewGPT specialist/final gates and exact-head CI remain pending.
+- ReviewGPT Product UX/coverage specialists pass with no findings and no patch
+  artifact; the Product UX verdict is Ready.
+- ReviewGPT final round 1 passes with no findings.
+- Candidate CI reached 17 passing checks. One unchanged Cloudflare timeout test
+  failed only under full-suite load and passed three consecutive focused local
+  reproductions; its narrow rerun was requested. Final exact-head CI follows
+  the documentation-only plan-closure commit.
+Status: completed
+Updated: 2026-08-26
+Completed: 2026-08-26
