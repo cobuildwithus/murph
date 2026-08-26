@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -36,12 +36,11 @@ shared error projector and no partial writes or submitted-value echo.
   and incompatible units. Focused use-case and command tests prove value-free
   repair hints, zero sample or batch writes, and an unchanged audit-record
   count; affected typechecks and the 14-test runner bundle suite pass.
-- The first post-remediation assembly exposed a 60-second probe-harness timeout:
-  the same unbundled command completed successfully in 68.37 seconds under
-  transient host contention and 57.43 seconds on a warm repeat. The existing
-  probe boundary now uses a finite 120-second behavioral timeout and reports a
-  bounded timeout/error code, signal, and configured limit instead of generic
-  `spawn_error`; the canonical rerun then passed every probe.
+- A post-remediation assembly exceeded the existing 60-second probe ceiling
+  under transient host contention, but the same command completed in 57.43
+  seconds on a warm repeat. The temporary 120-second ceiling and expanded
+  process diagnostic were unrelated to sample recovery and were removed during
+  the round-five retrospective; the existing runner-harness behavior remains.
 - Round four found that semantic CSV failures crossed Core without retaining the
   existing finite, value-free sample constraint. The accepted correction keeps
   the importer as the single CSV failure owner: it carries only the safe import
@@ -61,12 +60,65 @@ shared error projector and no partial writes or submitted-value echo.
 - Current `main` owns shared projection, CLI guidance, and generic diagnostics.
 - Sample/importer owners retain only their finite public-field mappings and
   pre-write validation.
-- Runner assembly retains one probe boundary; its timeout is a behavioral-test
-  ceiling rather than a startup performance contract, and its diagnostic uses
-  only bounded process metadata.
+- Runner assembly retains its existing probe boundary unchanged. Only the
+  measured lazy bundle allowance required by sample recovery remains in scope.
 - Regenerate CLI artifacts and compose the measured lazy bundle allowance; add
   no registry, repair channel, retry manager, state owner, or compatibility
   layer.
+
+## Round-five anomaly retrospective
+
+- Trigger: final ReviewGPT round five at
+  `2de37f17a9b4636b2b64fea60e6bbd1d2e5cc9cc` returned
+  `RETROSPECTIVE_REQUIRED`. Authored-source churn remains below the 2,000-line
+  threshold, but a fifth substantive round independently requires the
+  retrospective before another tactical correction.
+- Original requirement: when JSON or CSV sample validation rejects a command,
+  return one bounded, value-free public field, validation stage, and fixed
+  constraint that lets the assistant correct and retry the same command. The
+  rejected operation must create no sample, batch, or audit write. Runner
+  timeout policy and process diagnostics are explicitly outside this outcome.
+- Shape comparison: the first-reviewed head
+  `54665cf653a11f010a70100ee3f5a976b68fd39c` grew to 730 additions and 80
+  deletions of authored source at the round-five head. Across the current PR's
+  touched-file set, that head-to-head delta is 333/181 authored source, 745/50
+  tests, 296/0 docs, 26/10 runner tooling, and 1/1 generated output. The full
+  current PR is 2,174 additions and 97 deletions; most review-driven growth is
+  proof and plan history rather than production machinery.
+- Growth attribution: round one removed raw CSV row-zero serialization; round
+  two repaired batch list-to-show compatibility and expanded non-echo/atomicity
+  proof; current-main integration composed the shared projector and generated
+  artifacts; round three restored fixed constraints for correctly typed sample
+  failures; round four carried only `importIndex`, canonical `stream`, and
+  finite `sampleField` across CSV planning/import before reusing the same sample
+  mapper. The temporary parity-probe timeout and diagnostic expansion was an
+  unrelated verification-harness accommodation.
+- Concept inventory: Core remains the pre-write semantic validator. The
+  importer remains the CSV planning/write owner and carries only safe location
+  metadata. `sampleImportIssue` remains the one finite constraint mapper in the
+  Vault-usecase owner. The CLI has one `invalid_sample` conversion branch, then
+  delegates to the unchanged shared projector. No registry, protocol, repair
+  service, second mapper, state owner, retry path, or compatibility layer was
+  added. The temporary runner timeout constant and expanded diagnostic are
+  removed; the measured total-byte cap and its boundary test remain because the
+  shipped CLI graph grew.
+- Decision: continue with the current Core -> importer -> finite
+  `sampleImportIssue` -> shared projector chain and shrink the unrelated runner
+  tooling. Combining the finite mapper with Core would make Core own
+  model-facing paths; moving it into the importer would duplicate JSON and CSV
+  constraints; deriving constraints from primitive error prose cannot preserve
+  the fixed privacy-safe semantic rules. The existing chain is therefore the
+  smallest design that preserves atomicity, non-echo, accurate public paths,
+  and actionable constraints.
+- Scope-shrink proof: restore both parity probes to the existing 60-second
+  ceiling and restore their existing `spawn_error`/signal/missing-status
+  diagnostic. Retain only the 8,212-byte measured lazy-graph cap ratchet and its
+  exact boundary test; no sample behavior or test is removed.
+- Focused verification after the shrink passes the 14-test runner-bundle suite,
+  the Cloudflare package typecheck, agent-doc drift and gardening gates,
+  `git diff --check`, and the identifier/privacy scan. The runner source blob
+  now exactly matches its pre-timeout parent while the separate bundle boundary
+  test remains unchanged at the measured sample-recovery budget.
 
 ## Tasks
 
@@ -77,4 +129,8 @@ shared error projector and no partial writes or submitted-value echo.
 4. Push the exact candidate, update the PR contract, and run the sensitive
    post-integration ReviewGPT round with the prior finding ledger. [done through
    the round-four finding and local correction]
-5. Resolve any accepted finding, close the plan, admit the PR to CI, and merge.
+5. [done] Record the round-five retrospective and remove the unrelated parity
+   timeout/diagnostic expansion while retaining the sample behavior and measured
+   bundle ratchet.
+6. Resolve any later accepted finding, close the plan, admit the PR to CI, and
+   merge.
