@@ -10,8 +10,8 @@ const RETIRED_USAGE_TERM_PATTERN = new RegExp(
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "About 10 more days of Murph usage" },
-      { count: 1, label: "About 14 more days of Murph usage" },
+      { count: 2, label: "10 days" },
+      { count: 1, label: "14 days" },
     ],
     description: "Share your link or start a group with Murph.",
     rewardCount: 3,
@@ -25,8 +25,8 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "About 10 more days of Murph usage" },
-      { count: 1, label: "About 14 more days of Murph usage" },
+      { count: 1, label: "10 days" },
+      { count: 1, label: "14 days" },
     ],
     description: "Start a fresh group with Murph.",
     rewardCount: 2,
@@ -37,7 +37,7 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "About 10 more days of Murph usage" },
+      { count: 1, label: "10 days" },
     ],
     description: "Share your personal link with someone new.",
     rewardCount: 1,
