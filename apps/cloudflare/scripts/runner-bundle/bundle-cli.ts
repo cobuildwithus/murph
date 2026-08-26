@@ -165,9 +165,7 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // production Linux assembly measured 9,539,530 B on 2026-08-26; ratchet from
 // that exact baseline while retaining the 32 KiB graph allowance and 8 KiB
 // production-overlay reserve.
-// Sample recovery adds 8,212 B to the same lazy graph. It changes neither entry
-// nor static-startup topology.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_588_702;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_580_490;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
