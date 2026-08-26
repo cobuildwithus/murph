@@ -75,3 +75,10 @@ caller cancellation cannot be mistaken for a retryable timeout.
 - The corrections add one explicit cancellation rethrow and relocate existing
   test proof; they add no runtime abstraction, state, compatibility layer, or
   duplicate error map.
+- On the current-main merge candidate, the 28 focused route tests, nine split
+  production-device assembly cases, CLI and assistant-runtime typechecks,
+  prepared runtime build, and CLI package-shape check pass.
+- Canonical production assembly passes all eight parity probes. The Vault CLI
+  is 9,521,301 / 9,527,848 bytes with an 805-byte entry and 25,155-byte static
+  closure; the runner is 11,369,410 / 11,393,617 bytes with a 1,753,568-byte
+  entry and 8,662,171-byte static closure.
