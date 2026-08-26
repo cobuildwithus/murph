@@ -551,19 +551,20 @@ async function assistantDaemonFetchJson(
       body: input.body === undefined ? undefined : JSON.stringify(input.body),
     })
   } catch {
-    throw buildAssistantDaemonTransportError(routePath)
+    throw buildAssistantDaemonTransportError(routePath, input.method)
   }
 
   let text: string
   try {
     text = await response.text()
   } catch {
-    throw buildAssistantDaemonTransportError(routePath)
+    throw buildAssistantDaemonTransportError(routePath, input.method)
   }
   if (!response.ok) {
     throw buildAssistantDaemonHttpError(
       response.status,
       readAssistantDaemonErrorCode(text),
+      input.method,
     )
   }
 
@@ -575,12 +576,20 @@ async function assistantDaemonFetchJson(
   return parsedPayload.value
 }
 
-function buildAssistantDaemonTransportError(routePath: string): VaultCliError {
+function buildAssistantDaemonTransportError(
+  routePath: string,
+  method: 'GET' | 'POST',
+): VaultCliError {
+  const retryable = method === 'GET'
   return new VaultCliError(
-    'assistant_daemon_unavailable',
-    `Assistant daemon request did not complete for ${assistantDaemonRouteLabel(routePath)}. Check that the local assistant daemon is running, then retry.`,
+    retryable
+      ? 'assistant_daemon_unavailable'
+      : 'assistant_daemon_completion_unknown',
+    retryable
+      ? `Assistant daemon request did not complete for ${assistantDaemonRouteLabel(routePath)}. Check that the local assistant daemon is running, then retry.`
+      : `Assistant daemon ${assistantDaemonRouteLabel(routePath)} may have completed, but its response was not confirmed. Inspect daemon state before retrying.`,
     {
-      retryable: true,
+      retryable,
       stage: 'transport',
     },
   )
@@ -616,6 +625,7 @@ const ASSISTANT_DAEMON_OWNER_FAILURES = {
 function buildAssistantDaemonHttpError(
   status: number,
   ownerCode: string | null,
+  method: 'GET' | 'POST',
 ): VaultCliError {
   if (status === 401 || status === 403) {
     return new VaultCliError(
@@ -681,12 +691,18 @@ function buildAssistantDaemonHttpError(
     )
   }
 
-  const retryable = status === 408 || status === 425 || status === 429 || status >= 500
+  const transient = status === 408 || status === 425 || status === 429 || status >= 500
+  const retryable = method === 'GET' && transient
+  const completionUnknown = method === 'POST' && transient
   return new VaultCliError(
-    'assistant_daemon_http_failed',
-    `Assistant daemon request failed with HTTP ${status}. ${retryable
-      ? 'Retry after checking the local assistant daemon status.'
-      : 'Check that the client and local assistant daemon versions match.'}`,
+    completionUnknown
+      ? 'assistant_daemon_completion_unknown'
+      : 'assistant_daemon_http_failed',
+    completionUnknown
+      ? `Assistant daemon returned HTTP ${status} after an effectful request whose completion is unknown. Inspect daemon state before retrying.`
+      : `Assistant daemon request failed with HTTP ${status}. ${retryable
+        ? 'Retry after checking the local assistant daemon status.'
+        : 'Check that the client and local assistant daemon versions match.'}`,
     {
       retryable,
       stage: 'response',

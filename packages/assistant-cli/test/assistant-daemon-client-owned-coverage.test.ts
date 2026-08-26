@@ -929,13 +929,13 @@ test('daemon helpers surface invalid JSON, invalid payload fields, and plain-tex
       ),
     (error: unknown) => {
       assertDaemonClientError(error, {
-        code: 'assistant_daemon_http_failed',
-        retryable: true,
+        code: 'assistant_daemon_completion_unknown',
+        retryable: false,
         stage: 'response',
       })
       assert.equal(
         error.message,
-        'Assistant daemon request failed with HTTP 502. Retry after checking the local assistant daemon status.',
+        'Assistant daemon returned HTTP 502 after an effectful request whose completion is unknown. Inspect daemon state before retrying.',
       )
       assert.equal(JSON.stringify(error).includes('temporary daemon outage'), false)
       return true
@@ -1141,7 +1141,7 @@ test('daemon authentication failures are non-retryable and never echo response b
   )
 })
 
-test('daemon response-body transport failures are retryable and non-echoing', async () => {
+test('daemon GET response-body transport failures are retryable and non-echoing', async () => {
   const body = new ReadableStream({
     start(controller) {
       controller.error(new Error('private response-stream failure'))
@@ -1161,6 +1161,42 @@ test('daemon response-body transport failures are retryable and non-echoing', as
         JSON.stringify(error).includes('private response-stream failure'),
         false,
       )
+      return true
+    },
+  )
+})
+
+test('daemon message response-body failures are terminal completion-unknown and non-echoing', async () => {
+  let completedEffects = 0
+  const body = new ReadableStream({
+    start(controller) {
+      controller.error(new Error('private completed-message response failure'))
+    },
+  })
+  fetchMock.mockImplementationOnce(async (_request, init) => {
+    assert.equal(init?.method, 'POST')
+    completedEffects += 1
+    return new Response(body, { status: 200 })
+  })
+
+  await assert.rejects(
+    () => maybeSendAssistantMessageViaDaemon(TEST_MESSAGE_INPUT, TEST_ENV),
+    (error: unknown) => {
+      assertDaemonClientError(error, {
+        code: 'assistant_daemon_completion_unknown',
+        retryable: false,
+        stage: 'transport',
+      })
+      assert.equal(
+        error.message,
+        'Assistant daemon /message may have completed, but its response was not confirmed. Inspect daemon state before retrying.',
+      )
+      assert.equal(
+        JSON.stringify(error).includes('private completed-message response failure'),
+        false,
+      )
+      assert.equal(completedEffects, 1)
+      assert.equal(fetchMock.mock.calls.length, 1)
       return true
     },
   )
