@@ -1,6 +1,6 @@
 # Restore main-push Stripe live-job admission
 
-Status: active
+Status: completed
 Updated: 2026-08-26
 
 ## Goal
@@ -56,7 +56,12 @@ Success means:
 - [x] Implement the workflow condition and regression guard.
 - [x] Pass the hosted billing CI guard, all 24 focused workflow mutation tests,
   and all 21 dependency-free pull-request CI policy tests.
-- [ ] Complete exact-head review gates, required CI, final review, and plan
-  closure. The broader diff-aware lane reached unrelated pre-existing failures
-  in `scripts/frog-autofix.test.ts` after its syntax, architecture, provider,
+- [x] Required CI passed on the reviewed candidate head. Final ReviewGPT passed
+  with no qualifying findings. The preliminary coverage specialist found one
+  test-only mutation that retained a status-check function; the mutation was
+  corrected and all 24 focused workflow tests, all 21 pull-request policy tests,
+  and the hosted billing guard passed again.
+- [x] The broader diff-aware lane reached unrelated pre-existing failures in
+  `scripts/frog-autofix.test.ts` after its syntax, architecture, provider,
   TypeScript tooling, and dependency-policy phases passed.
+Completed: 2026-08-26

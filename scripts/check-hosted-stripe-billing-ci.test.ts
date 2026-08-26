@@ -77,7 +77,7 @@ describe("hosted Stripe billing workflow guard", () => {
   it("rejects allowing the skipped pull-request classifier to suppress the main live job", async () => {
     const source = (await readWorkflow()).replace(
       "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
-      "if: ${{ !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
     );
     expect(issueCodes(source)).toContain("missing-live-if");
   });
