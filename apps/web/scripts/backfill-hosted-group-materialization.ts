@@ -1,13 +1,24 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { HostedGroupMaterializationBackfillMode } from "../src/lib/hosted-groups/group-materialization-backfill";
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+import { ensureHostedGroupStructureForThreadContainerTx } from "../src/lib/hosted-groups/group-store";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../src/lib/hosted-onboarding/shared";
+
+const DEFAULT_BATCH_SIZE = 50;
+const CANDIDATE_WHERE = {
+  member: {
+    hostedGroupRuntime: { is: null },
+  },
+  routes: { some: {} },
+} satisfies Prisma.HostedThreadContainerWhereInput;
 
 interface ScriptOptions {
   batchSize: number | undefined;
   check: boolean;
   help: boolean;
-  mode: HostedGroupMaterializationBackfillMode;
+  mode: "apply" | "dry-run";
 }
 
 const usage = `
@@ -52,37 +63,91 @@ async function main(): Promise<void> {
   }
   assertReactServerCondition();
 
-  const [{ createPrismaClient }, backfillModule] = await Promise.all([
-    import("../src/lib/prisma"),
-    import("../src/lib/hosted-groups/group-materialization-backfill"),
-  ]);
+  const { createPrismaClient } = await import("../src/lib/prisma");
   const databaseUrl = normalizeRequiredEnv("DATABASE_URL", process.env.DATABASE_URL);
   const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
 
   try {
-    if (options.check) {
-      const readiness =
-        await backfillModule.readHostedGroupMaterializationReadiness({
-          store: backfillModule.createHostedGroupMaterializationBackfillStore(prisma),
-        });
-      console.log(JSON.stringify(readiness, null, 2));
-      if (!readiness.complete) {
-        process.exitCode = 1;
-      }
-      return;
-    }
-    const summary = await backfillModule.backfillHostedGroupMaterialization({
-      batchSize: options.batchSize,
-      mode: options.mode,
-      store: backfillModule.createHostedGroupMaterializationBackfillStore(prisma),
+    const result = await runHostedGroupMaterializationCommand({
+      options,
+      prisma,
     });
-    console.log(JSON.stringify(summary, null, 2));
-    if (summary.failedRows > 0) {
+    console.log(JSON.stringify(result, null, 2));
+    if (
+      ("complete" in result && !result.complete)
+      || ("failedRows" in result && result.failedRows > 0)
+    ) {
       process.exitCode = 1;
     }
   } finally {
     await prisma.$disconnect();
   }
+}
+
+export async function runHostedGroupMaterializationCommand(input: {
+  now?: () => Date;
+  options: ScriptOptions;
+  prisma: PrismaClient;
+}) {
+  if (input.options.check) {
+    const pendingRows = await input.prisma.hostedThreadContainer.count({
+      where: CANDIDATE_WHERE,
+    });
+    return {
+      complete: pendingRows === 0,
+      pendingRows,
+    };
+  }
+
+  const batchSize = input.options.batchSize ?? DEFAULT_BATCH_SIZE;
+  const candidates = await input.prisma.hostedThreadContainer.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    take: batchSize + 1,
+    where: CANDIDATE_WHERE,
+  });
+  const selected = candidates.slice(0, batchSize);
+  const result = {
+    alreadyMaterializedRows: 0,
+    batchSize,
+    failedRows: 0,
+    hasMore: candidates.length > batchSize,
+    materializedRows: 0,
+    mode: input.options.mode,
+    remainingRows: 0,
+    selectedRows: selected.length,
+    wouldMaterializeRows: selected.length,
+  };
+
+  if (input.options.mode === "apply") {
+    const now = input.now ?? (() => new Date());
+    for (const { memberId: containerMemberId } of selected) {
+      try {
+        const materialized = await input.prisma.$transaction(async (tx) => {
+          return ensureHostedGroupStructureForThreadContainerTx({
+            containerMemberId,
+            now: now(),
+            tx,
+          });
+        }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        if (materialized.created) {
+          result.materializedRows += 1;
+        } else {
+          result.alreadyMaterializedRows += 1;
+        }
+      } catch {
+        // Each candidate owns one short transaction. Later candidates still
+        // run, and identifiers never enter operator output.
+        result.failedRows += 1;
+      }
+    }
+  }
+
+  result.remainingRows = await input.prisma.hostedThreadContainer.count({
+    where: CANDIDATE_WHERE,
+  });
+  result.hasMore = result.remainingRows > 0;
+  return result;
 }
 
 export function parseHostedGroupMaterializationScriptOptions(

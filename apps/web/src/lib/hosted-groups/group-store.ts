@@ -306,6 +306,12 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     });
   }
 
+  await grantHostedGroupMembershipProfileNameTx(input.tx, {
+    groupRuntimeMemberId: input.containerMemberId,
+    memberId: container.ownerMemberId,
+    now: input.now,
+  });
+
   const summary = await readHostedGroupSummaryById(input.tx, ensured.groupId);
   if (!summary) {
     throw hostedOnboardingError({
@@ -357,11 +363,6 @@ async function ensureHostedGroupStructureForLockedThreadContainerTx(input: {
       memberId: input.container.ownerMemberId,
       now: input.now,
     });
-    await grantHostedGroupMembershipProfileNameTx(input.tx, {
-      groupRuntimeMemberId: input.container.memberId,
-      memberId: input.container.ownerMemberId,
-      now: input.now,
-    });
     return {
       created: false,
       displayName: existing.displayName,
@@ -388,11 +389,6 @@ async function ensureHostedGroupStructureForLockedThreadContainerTx(input: {
   });
   await ensureHostedGroupOwnerMembershipTx(input.tx, {
     groupId: created.id,
-    memberId: input.container.ownerMemberId,
-    now: input.now,
-  });
-  await grantHostedGroupMembershipProfileNameTx(input.tx, {
-    groupRuntimeMemberId: input.container.memberId,
     memberId: input.container.ownerMemberId,
     now: input.now,
   });

@@ -2197,6 +2197,7 @@ describe("organic hosted-group materialization", () => {
       created: false,
     });
     expect(tx.hostedGroup.create).toHaveBeenCalledTimes(1);
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
   it("repairs owner membership without rewriting an existing group configuration", async () => {
@@ -2217,6 +2218,7 @@ describe("organic hosted-group materialization", () => {
     expect(tx.hostedGroup.create).not.toHaveBeenCalled();
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.upsert).toHaveBeenCalledOnce();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 });
 

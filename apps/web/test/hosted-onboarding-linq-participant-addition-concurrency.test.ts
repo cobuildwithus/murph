@@ -29,9 +29,16 @@ import {
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
 import {
+  readHostedGroupMembershipsForMember,
+} from "@/src/lib/hosted-groups/group-store";
+import {
   ensureHostedThreadContainerRouteTx,
   type PreparedHostedThreadContainerCreation,
 } from "@/src/lib/hosted-routing/thread-container-service";
+import {
+  parseHostedGroupMaterializationScriptOptions,
+  runHostedGroupMaterializationCommand,
+} from "@/scripts/backfill-hosted-group-materialization";
 import {
   buildHostedThreadDeliveryRoute,
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
@@ -202,6 +209,9 @@ async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
   const container = await fixture.observer.hostedThreadContainer.findUnique({
     select: { ownerMemberId: true },
     where: { memberId: fixture.containerMemberId },
+  });
+  await fixture.observer.hostedGroup.deleteMany({
+    where: { runtimeMemberId: fixture.containerMemberId },
   });
   await fixture.observer.hostedThreadContainer.deleteMany({
     where: { memberId: fixture.containerMemberId },
@@ -566,6 +576,66 @@ function observeHostedThreadRouteLockAttempt(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
+    it("backfills a historical route through the production command and private membership read", async () => {
+      const fixture = await createRouteFixture();
+      try {
+        await expect(fixture.observer.hostedGroup.findUnique({
+          where: { runtimeMemberId: fixture.containerMemberId },
+        })).resolves.toBeNull();
+
+        await expect(runHostedGroupMaterializationCommand({
+          now: () => new Date("2026-08-25T12:00:00.000Z"),
+          options: parseHostedGroupMaterializationScriptOptions([
+            "--apply",
+            "--batch-size",
+            "100",
+          ]),
+          prisma: fixture.observer,
+        })).resolves.toMatchObject({
+          failedRows: 0,
+          materializedRows: 1,
+          remainingRows: 0,
+        });
+        await expect(readHostedGroupMembershipsForMember({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.observer,
+        })).resolves.toEqual({
+          memberships: [{
+            displayName: null,
+            grantedVaultShareProjectionScopes: [],
+            kind: "custom",
+            memberCount: 1,
+            membershipId: expect.any(String),
+            ownerJoinCode: null,
+            requestedVaultShareProjectionScopes: [],
+            role: "owner",
+            runtimeMemberId: fixture.containerMemberId,
+          }],
+          truncated: false,
+        });
+        await expect(fixture.observer.hostedVaultShare.count({
+          where: { destinationMemberId: fixture.containerMemberId },
+        })).resolves.toBe(0);
+        await expect(runHostedGroupMaterializationCommand({
+          options: parseHostedGroupMaterializationScriptOptions(["--check"]),
+          prisma: fixture.observer,
+        })).resolves.toEqual({
+          complete: true,
+          pendingRows: 0,
+        });
+        await expect(runHostedGroupMaterializationCommand({
+          options: parseHostedGroupMaterializationScriptOptions(["--apply"]),
+          prisma: fixture.observer,
+        })).resolves.toMatchObject({
+          materializedRows: 0,
+          remainingRows: 0,
+          selectedRows: 0,
+        });
+      } finally {
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
     it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
@@ -584,6 +654,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         `member_thread_create_container_a_${fixtureId}`,
         `member_thread_create_container_b_${fixtureId}`,
       ] as const;
+      const saturatedDestinationMemberIds = Array.from(
+        { length: 25 },
+        (_, index) => `member_thread_create_share_destination_${index}_${fixtureId}`,
+      );
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const winnerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const loserClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -597,9 +671,24 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       configureHostedContactPrivacyKeyringForTest("v1");
       try {
         await observer.hostedMember.createMany({
-          data: ownerMemberIds.map((id) => ({
-            billingStatus: "active" as const,
-            id,
+          data: [
+            ...ownerMemberIds.map((id) => ({
+              billingStatus: "active" as const,
+              id,
+            })),
+            ...saturatedDestinationMemberIds.map((id) => ({ id })),
+          ],
+        });
+        await observer.hostedVaultShare.createMany({
+          data: saturatedDestinationMemberIds.map((destinationMemberId, index) => ({
+            destinationMemberId,
+            grantedAt: new Date("2026-08-25T11:00:00.000Z"),
+            grantorMemberId: ownerMemberIds[0],
+            id: `share_thread_create_${index}_${fixtureId}`,
+            projectionKind: "profile-name.v0",
+            projectionScopeJson: { projectionKind: "profile-name.v0" },
+            projectionScopeKey: "profile-name.v0",
+            status: "granted",
           })),
         });
         const [winnerPreparation, loserPreparation] = await Promise.all([
@@ -749,19 +838,33 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           ownerMemberId: ownerMemberIds[0],
           runtimeMemberId: containerMemberIds[0],
         });
-        await expect(observer.hostedVaultShare.findMany({
-          orderBy: { projectionKind: "asc" },
-          select: {
-            grantorMemberId: true,
-            projectionKind: true,
-            status: true,
-          },
+        await expect(readHostedGroupMembershipsForMember({
+          memberId: ownerMemberIds[0],
+          prisma: observer,
+        })).resolves.toEqual({
+          memberships: [{
+            displayName: null,
+            grantedVaultShareProjectionScopes: [],
+            kind: "custom",
+            memberCount: 1,
+            membershipId: expect.any(String),
+            ownerJoinCode: null,
+            requestedVaultShareProjectionScopes: [],
+            role: "owner",
+            runtimeMemberId: containerMemberIds[0],
+          }],
+          truncated: false,
+        });
+        await expect(observer.hostedVaultShare.count({
           where: { destinationMemberId: containerMemberIds[0] },
-        })).resolves.toEqual([{
-          grantorMemberId: ownerMemberIds[0],
-          projectionKind: "profile-name.v0",
-          status: "granted",
-        }]);
+        })).resolves.toBe(0);
+        await expect(observer.hostedVaultShare.count({
+          where: {
+            grantorMemberId: ownerMemberIds[0],
+            projectionScopeKey: "profile-name.v0",
+            status: "granted",
+          },
+        })).resolves.toBe(25);
       } finally {
         releaseWinner.resolve();
         await Promise.allSettled([
@@ -786,7 +889,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await observer.hostedMember.deleteMany({
           where: {
             id: {
-              in: [...ownerMemberIds, ...containerMemberIds],
+              in: [
+                ...ownerMemberIds,
+                ...containerMemberIds,
+                ...saturatedDestinationMemberIds,
+              ],
             },
           },
         });

@@ -1518,9 +1518,10 @@ NODE_OPTIONS=--conditions=react-server \
 
 Each candidate runs serially in its own short database-only transaction and
 reuses the same structural group-store primitive as future route creation. The
-operation creates only the unnamed group, route-owner membership, and automatic
-profile-name share. It does not add roster participants, create a join code,
-import a provider title, or request health or email sharing. Repeat bounded
+operation creates only the unnamed group and route-owner membership. It does
+not add roster participants, create a join code, import a provider title, or
+grant profile, health, or email sharing. Existing owner-authorized setup and
+explicit join flows retain their sharing behavior. Repeat bounded
 apply batches until `remainingRows` is zero, then require `--check` to pass. Do
 not install a recurring job; remove the temporary command after production
 convergence is verified.

@@ -1,36 +1,86 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  backfillHostedGroupMaterialization,
-  createHostedGroupMaterializationBackfillStore,
-  readHostedGroupMaterializationReadiness,
-  type HostedGroupMaterializationBackfillStore,
-} from "@/src/lib/hosted-groups/group-materialization-backfill";
+const mocks = vi.hoisted(() => ({
+  ensureHostedGroupStructureForThreadContainerTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-store", () => ({
+  ensureHostedGroupStructureForThreadContainerTx:
+    mocks.ensureHostedGroupStructureForThreadContainerTx,
+}));
+
 import {
   parseHostedGroupMaterializationScriptOptions,
+  runHostedGroupMaterializationCommand,
 } from "@/scripts/backfill-hosted-group-materialization";
 
-describe("hosted group materialization backfill", () => {
-  it("is bounded, resumable, and idempotent across repeated apply batches", async () => {
-    const candidates = ["container_a", "container_b", "container_c"];
-    const materialized = new Set<string>();
-    const store: HostedGroupMaterializationBackfillStore = {
-      countCandidateContainerMemberIds: vi.fn(async () =>
-        candidates.filter((id) => !materialized.has(id)).length),
-      listCandidateContainerMemberIds: vi.fn(async ({ take }) =>
-        candidates.filter((id) => !materialized.has(id)).slice(0, take)),
-      materializeCandidate: vi.fn(async ({ containerMemberId }) => {
-        const created = !materialized.has(containerMemberId);
-        materialized.add(containerMemberId);
-        return { created };
-      }),
-    };
+function createBackfillPrismaStub(candidateIds: readonly string[]) {
+  const materializedIds = new Set<string>();
+  let inFlightTransactions = 0;
+  let maxInFlightTransactions = 0;
+  const count = vi.fn(async () =>
+    candidateIds.filter((id) => !materializedIds.has(id)).length);
+  const findMany = vi.fn(async (input: { take: number }) =>
+    candidateIds
+      .filter((id) => !materializedIds.has(id))
+      .slice(0, input.take)
+      .map((memberId) => ({ memberId })));
+  const transaction = vi.fn(async (
+    callback: (tx: object) => Promise<unknown>,
+  ) => {
+    inFlightTransactions += 1;
+    maxInFlightTransactions = Math.max(
+      maxInFlightTransactions,
+      inFlightTransactions,
+    );
+    try {
+      return await callback({});
+    } finally {
+      inFlightTransactions -= 1;
+    }
+  });
 
-    await expect(backfillHostedGroupMaterialization({
-      batchSize: 2,
-      mode: "apply",
+  return {
+    count,
+    findMany,
+    materializedIds,
+    maxInFlightTransactions: () => maxInFlightTransactions,
+    prisma: {
+      $transaction: transaction,
+      hostedThreadContainer: { count, findMany },
+    } as never,
+    transaction,
+  };
+}
+
+describe("hosted group materialization command", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("is bounded, serial, resumable, and idempotent across apply batches", async () => {
+    const fixture = createBackfillPrismaStub([
+      "container_a",
+      "container_b",
+      "container_c",
+    ]);
+    mocks.ensureHostedGroupStructureForThreadContainerTx.mockImplementation(
+      async ({ containerMemberId }: { containerMemberId: string }) => {
+        const created = !fixture.materializedIds.has(containerMemberId);
+        fixture.materializedIds.add(containerMemberId);
+        return { created, groupId: `group_${containerMemberId}` };
+      },
+    );
+    const options = parseHostedGroupMaterializationScriptOptions([
+      "--apply",
+      "--batch-size",
+      "2",
+    ]);
+
+    await expect(runHostedGroupMaterializationCommand({
       now: () => new Date("2026-08-25T12:00:00.000Z"),
-      store,
+      options,
+      prisma: fixture.prisma,
     })).resolves.toEqual({
       alreadyMaterializedRows: 0,
       batchSize: 2,
@@ -42,62 +92,59 @@ describe("hosted group materialization backfill", () => {
       selectedRows: 2,
       wouldMaterializeRows: 2,
     });
-    expect(materialized).toEqual(new Set(["container_a", "container_b"]));
+    expect(fixture.materializedIds).toEqual(
+      new Set(["container_a", "container_b"]),
+    );
 
-    await expect(backfillHostedGroupMaterialization({
-      batchSize: 2,
-      mode: "apply",
-      now: () => new Date("2026-08-25T12:01:00.000Z"),
-      store,
-    })).resolves.toEqual({
-      alreadyMaterializedRows: 0,
-      batchSize: 2,
+    await expect(runHostedGroupMaterializationCommand({
+      options,
+      prisma: fixture.prisma,
+    })).resolves.toMatchObject({
       failedRows: 0,
       hasMore: false,
       materializedRows: 1,
-      mode: "apply",
       remainingRows: 0,
       selectedRows: 1,
-      wouldMaterializeRows: 1,
     });
-
-    await expect(backfillHostedGroupMaterialization({
-      batchSize: 2,
-      mode: "apply",
-      store,
+    await expect(runHostedGroupMaterializationCommand({
+      options,
+      prisma: fixture.prisma,
     })).resolves.toMatchObject({
       hasMore: false,
       materializedRows: 0,
       remainingRows: 0,
       selectedRows: 0,
     });
-    expect(store.materializeCandidate).toHaveBeenCalledTimes(3);
+    expect(fixture.transaction).toHaveBeenCalledTimes(3);
+    expect(fixture.maxInFlightTransactions()).toBe(1);
   });
 
-  it("continues the bounded batch after a row failure and retries it on the next run", async () => {
-    const candidates = ["container_a", "container_b", "container_c"];
-    const materialized = new Set<string>();
+  it("continues after one row failure and retries it on the next run", async () => {
+    const fixture = createBackfillPrismaStub([
+      "container_a",
+      "container_b",
+      "container_c",
+    ]);
     let failContainerAOnce = true;
-    const store: HostedGroupMaterializationBackfillStore = {
-      countCandidateContainerMemberIds: vi.fn(async () =>
-        candidates.filter((id) => !materialized.has(id)).length),
-      listCandidateContainerMemberIds: vi.fn(async ({ take }) =>
-        candidates.filter((id) => !materialized.has(id)).slice(0, take)),
-      materializeCandidate: vi.fn(async ({ containerMemberId }) => {
+    mocks.ensureHostedGroupStructureForThreadContainerTx.mockImplementation(
+      async ({ containerMemberId }: { containerMemberId: string }) => {
         if (containerMemberId === "container_a" && failContainerAOnce) {
           failContainerAOnce = false;
           throw new Error("transient test failure");
         }
-        const created = !materialized.has(containerMemberId);
-        materialized.add(containerMemberId);
-        return { created };
-      }),
-    };
+        fixture.materializedIds.add(containerMemberId);
+        return { created: true, groupId: `group_${containerMemberId}` };
+      },
+    );
+    const options = parseHostedGroupMaterializationScriptOptions([
+      "--apply",
+      "--batch-size",
+      "2",
+    ]);
 
-    await expect(backfillHostedGroupMaterialization({
-      batchSize: 2,
-      mode: "apply",
-      store,
+    await expect(runHostedGroupMaterializationCommand({
+      options,
+      prisma: fixture.prisma,
     })).resolves.toMatchObject({
       failedRows: 1,
       hasMore: true,
@@ -105,12 +152,9 @@ describe("hosted group materialization backfill", () => {
       remainingRows: 2,
       selectedRows: 2,
     });
-    expect(materialized).toEqual(new Set(["container_b"]));
-
-    await expect(backfillHostedGroupMaterialization({
-      batchSize: 2,
-      mode: "apply",
-      store,
+    await expect(runHostedGroupMaterializationCommand({
+      options,
+      prisma: fixture.prisma,
     })).resolves.toMatchObject({
       failedRows: 0,
       hasMore: false,
@@ -118,88 +162,78 @@ describe("hosted group materialization backfill", () => {
       remainingRows: 0,
       selectedRows: 2,
     });
-    expect(materialized).toEqual(
-      new Set(["container_a", "container_b", "container_c"]),
-    );
   });
 
-  it("dry-runs without invoking the structural mutation owner", async () => {
-    const store: HostedGroupMaterializationBackfillStore = {
-      countCandidateContainerMemberIds: vi.fn(async () => 1),
-      listCandidateContainerMemberIds: vi.fn(async () => ["container_a"]),
-      materializeCandidate: vi.fn(),
-    };
+  it("converges when another writer materialized a selected row first", async () => {
+    const fixture = createBackfillPrismaStub(["container_a"]);
+    mocks.ensureHostedGroupStructureForThreadContainerTx.mockImplementation(
+      async ({ containerMemberId }: { containerMemberId: string }) => {
+        fixture.materializedIds.add(containerMemberId);
+        return { created: false, groupId: "group_existing" };
+      },
+    );
 
-    await expect(backfillHostedGroupMaterialization({
-      store,
+    await expect(runHostedGroupMaterializationCommand({
+      options: parseHostedGroupMaterializationScriptOptions(["--apply"]),
+      prisma: fixture.prisma,
     })).resolves.toMatchObject({
+      alreadyMaterializedRows: 1,
+      failedRows: 0,
+      materializedRows: 0,
+      remainingRows: 0,
+    });
+  });
+
+  it("dry-runs with the production predicate and without opening a transaction", async () => {
+    const fixture = createBackfillPrismaStub(["container_a"]);
+
+    await expect(runHostedGroupMaterializationCommand({
+      options: parseHostedGroupMaterializationScriptOptions([]),
+      prisma: fixture.prisma,
+    })).resolves.toEqual({
+      alreadyMaterializedRows: 0,
+      batchSize: 50,
+      failedRows: 0,
+      hasMore: true,
       materializedRows: 0,
       mode: "dry-run",
       remainingRows: 1,
       selectedRows: 1,
       wouldMaterializeRows: 1,
     });
-    expect(store.materializeCandidate).not.toHaveBeenCalled();
-  });
-
-  it("reports readiness from the same missing-group candidate query", async () => {
-    const store: HostedGroupMaterializationBackfillStore = {
-      countCandidateContainerMemberIds: vi.fn(async () => 0),
-      listCandidateContainerMemberIds: vi.fn(),
-      materializeCandidate: vi.fn(),
-    };
-
-    await expect(readHostedGroupMaterializationReadiness({ store }))
-      .resolves.toEqual({
-        complete: true,
-        pendingRows: 0,
-      });
-    expect(store.countCandidateContainerMemberIds).toHaveBeenCalledOnce();
-  });
-
-  it("rejects an unbounded batch size", async () => {
-    await expect(backfillHostedGroupMaterialization({
-      batchSize: 101,
-      store: {
-        countCandidateContainerMemberIds: vi.fn(),
-        listCandidateContainerMemberIds: vi.fn(),
-        materializeCandidate: vi.fn(),
-      },
-    })).rejects.toThrow(/between 1 and 100/u);
-  });
-});
-
-describe("hosted group materialization backfill store", () => {
-  it("selects only routed thread containers without canonical group state", async () => {
-    const count = vi.fn().mockResolvedValue(1);
-    const findMany = vi.fn().mockResolvedValue([
-      { memberId: "container_candidate" },
-    ]);
-    const store = createHostedGroupMaterializationBackfillStore({
-      $transaction: vi.fn(),
-      hostedThreadContainer: { count, findMany },
-    } as never);
-    const where = {
-      member: {
-        hostedGroupRuntime: { is: null },
-      },
-      routes: { some: {} },
-    };
-
-    await expect(store.listCandidateContainerMemberIds({ take: 51 }))
-      .resolves.toEqual(["container_candidate"]);
-    expect(findMany).toHaveBeenCalledWith({
+    expect(fixture.findMany).toHaveBeenCalledWith({
       orderBy: { memberId: "asc" },
       select: { memberId: true },
       take: 51,
-      where,
+      where: {
+        member: { hostedGroupRuntime: { is: null } },
+        routes: { some: {} },
+      },
     });
-    await expect(store.countCandidateContainerMemberIds()).resolves.toBe(1);
-    expect(count).toHaveBeenCalledWith({ where });
+    expect(fixture.transaction).not.toHaveBeenCalled();
+  });
+
+  it("reports exact readiness from the same production predicate", async () => {
+    const fixture = createBackfillPrismaStub([]);
+
+    await expect(runHostedGroupMaterializationCommand({
+      options: parseHostedGroupMaterializationScriptOptions(["--check"]),
+      prisma: fixture.prisma,
+    })).resolves.toEqual({
+      complete: true,
+      pendingRows: 0,
+    });
+    expect(fixture.count).toHaveBeenCalledWith({
+      where: {
+        member: { hostedGroupRuntime: { is: null } },
+        routes: { some: {} },
+      },
+    });
+    expect(fixture.findMany).not.toHaveBeenCalled();
   });
 });
 
-describe("hosted group materialization backfill script options", () => {
+describe("hosted group materialization script options", () => {
   it("defaults to dry-run and supports one bounded apply batch", () => {
     expect(parseHostedGroupMaterializationScriptOptions([])).toEqual({
       batchSize: undefined,
@@ -217,16 +251,13 @@ describe("hosted group materialization backfill script options", () => {
       help: false,
       mode: "apply",
     });
-    expect(parseHostedGroupMaterializationScriptOptions(["--check"]))
-      .toEqual({
-        batchSize: undefined,
-        check: true,
-        help: false,
-        mode: "dry-run",
-      });
   });
 
-  it("rejects ambiguous check combinations", () => {
+  it("rejects unbounded or ambiguous options", () => {
+    expect(() => parseHostedGroupMaterializationScriptOptions([
+      "--batch-size",
+      "101",
+    ])).toThrow("integer from 1 through 100");
     expect(() => parseHostedGroupMaterializationScriptOptions([
       "--apply",
       "--check",

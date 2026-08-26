@@ -36,8 +36,7 @@ Updated: 2026-08-25
 ### Affected people
 
 - Route owner with one group: the unnamed membership is selectable through the
-  existing single-membership path and carries only the normal automatic
-  profile-name share.
+  existing single-membership path without silently granting profile sharing.
 - Route owner with several groups: existing exact-name selection remains; if
   unnamed groups make selection ambiguous, Murph fails closed and asks the
   owner to name the target rather than guessing.
@@ -50,10 +49,10 @@ Updated: 2026-08-25
 
 ### Product effects and exclusions
 
-- The normal owner membership also grants the existing automatic
-  `profile-name.v0` projection and qualifies through current membership-based
-  product rules such as Core eligibility. That is accepted ordinary membership
-  behavior, not a new special group class.
+- The normal owner membership qualifies through current membership-based
+  product rules such as Core eligibility without implying a vault-share grant.
+  Existing owner-authorized setup and explicit join flows retain their sharing
+  behavior.
 - Funding remains available through the existing signed funding-only locator
   whenever no owner-created join code exists. The locator itself still writes
   no state or grants and remains invalid on join surfaces.

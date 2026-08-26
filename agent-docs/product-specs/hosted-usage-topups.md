@@ -1270,9 +1270,9 @@ re-verifying the container and active access, and is rejected by every join
 surface because it is not a join code. Creating or resolving that funding
 locator writes no group state, membership, join code, vault-share projection,
 or profile-name/email grant. The route transaction owns the pre-existing group,
-owner membership, and automatic profile-name share independently. Owner-created
-join codes keep funding exactly as before, and participant enrollment stays
-behind the owner-minted join link.
+and owner membership independently without granting a vault share.
+Owner-created join codes keep funding exactly as before, and participant
+enrollment stays behind the owner-minted join link.
 
 An exhaustion notice may also use the signed locator for an owner-created
 group so notice construction stays database-free. After authenticating that

@@ -45,9 +45,10 @@ The same link supports both initial join and later sharing changes. It is reusab
 
 The canonical thread-route owner composes initial group materialization through
 the existing group-store primitive in the same transaction. That structural
-write creates only the route owner membership and its existing automatic
-`profile-name.v0` share. It does not mint a join code, request health or email
-sharing, import a provider title, or enroll roster participants.
+write creates only the route owner membership. It does not grant a vault share,
+mint a join code, request health or email sharing, import a provider title, or
+enroll roster participants. Existing owner-authorized setup and explicit join
+flows retain their sharing behavior.
 
 The personal list derives its member id from the signed hosted callback. The
 model cannot choose another member. Results may include the member's own opaque
