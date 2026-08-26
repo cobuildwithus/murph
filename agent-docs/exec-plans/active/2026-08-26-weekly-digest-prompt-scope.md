@@ -67,6 +67,11 @@ Updated: 2026-08-26
    failed its pre-build revision assertion when the mutable pull-request merge
    ref advanced beyond the event's base revision; the patch was not built by
    that job. The reproducible repository friction is recorded in Frog.
+5. [x] Remove the redundant event-base comparison from the bundle-budget job.
+   The job still proves the exact candidate SHA and pull-request head, derives
+   its baseline from that candidate's exact first parent, and checks out that
+   parent for the relative bundle comparison. A policy regression rejects
+   restoring the stale event-base comparison.
 
 ## Decisions
 
@@ -108,3 +113,13 @@ Updated: 2026-08-26
   because its mutable candidate first parent differed from the immutable event
   base. Other completed checks remained green; this is separate from the
   product patch and remains a required-CI blocker.
+- Passed: bundle-budget workflow contract (12 tests), pull-request CI policy
+  (21 tests), and the direct workflow contract executable after removing the
+  stale event-base assertion.
+- Unrelated local broad-lane failures: `pnpm test:diff` passed syntax,
+  architecture, privacy/logging, provider-boundary, tooling typecheck, and
+  dependency-policy gates, then finished with 711 passing repo-tools tests and
+  10 failures. Nine Frog autofix fixtures use a privacy-rejected test email;
+  one Crabbox signal-forwarding test timed out before its synthetic descendant
+  became ready. Neither failed suite imports or exercises the changed workflow
+  or bundle-budget policy.

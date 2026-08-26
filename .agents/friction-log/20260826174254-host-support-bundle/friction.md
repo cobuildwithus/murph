@@ -13,7 +13,7 @@ The production bundle job fetches the mutable pull-request merge ref, then compa
 
 ## Possible Solution
 
-Construct the candidate deterministically from the event's exact base and head revisions, or fetch an immutable candidate whose parents are tied to that event instead of the mutable merge ref.
+Use the checked-out exact candidate's first parent as the bundle baseline while retaining the exact candidate and pull-request head checks. Do not compare that parent with the event's older base snapshot.
 
 ## Minimal Reproducible Example
 
