@@ -73,7 +73,7 @@ jobs:
   temporal-compatibility-producer:
     name: Exact Temporal producer fixture
     needs: markdown-docs-scope
-    if: ${{ always() && github.event_name == 'pull_request' && needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Check out exact public candidate
@@ -103,7 +103,7 @@ jobs:
   tracked-artifacts:
     name: Tracked private/build artifacts
     needs: markdown-docs-scope
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof

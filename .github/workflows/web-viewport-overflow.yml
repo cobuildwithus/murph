@@ -73,7 +73,7 @@ jobs:
   viewport-overflow:
     name: No horizontal overflow on marketing pages
     needs: markdown-docs-scope
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

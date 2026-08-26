@@ -86,7 +86,7 @@ jobs:
   cli-host-matrix:
     name: CLI host matrix (${{ matrix.os }})
     needs: markdown-docs-scope
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -147,7 +147,7 @@ jobs:
   markdown-docs-proof:
     name: Markdown documentation proof
     needs: markdown-docs-scope
-    if: ${{ always() && github.event_name == 'pull_request' && needs.markdown-docs-scope.result == 'success' && needs.markdown-docs-scope.outputs.markdown_only == 'true' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.markdown-docs-scope.result == 'success' && needs.markdown-docs-scope.outputs.markdown_only == 'true' }}
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -198,7 +198,7 @@ jobs:
   release-build-typecheck-linux:
     name: Release build/typecheck (ubuntu)
     needs: markdown-docs-scope
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof
@@ -277,7 +277,7 @@ jobs:
   release-package-coverage-linux:
     name: Release package coverage (${{ matrix.shard }})
     needs: markdown-docs-scope
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -366,7 +366,7 @@ jobs:
   release-app-verification-linux:
     name: Release app verification (ubuntu)
     needs: markdown-docs-scope
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -434,7 +434,7 @@ jobs:
   production-runner-bundle-budget-linux:
     name: Production runner bundle budget (ubuntu)
     needs: markdown-docs-scope
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
@@ -475,7 +475,7 @@ jobs:
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)
     needs: markdown-docs-scope
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof
@@ -516,7 +516,7 @@ jobs:
       - release-app-verification-linux
       - release-fixture-coverage-linux
       - production-runner-bundle-budget-linux
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     steps:
       - name: Reject draft pull request proof
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}

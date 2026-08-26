@@ -26,8 +26,15 @@ const EXPENSIVE_WORKFLOWS = new Map([
 ]);
 const READY_ONLY_TYPES = ["opened", "reopened", "ready_for_review"];
 const MARKDOWN_SCOPE_JOB = "markdown-docs-scope";
-const FULL_VERIFICATION_CONDITION = "if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
+const FULL_VERIFICATION_CONDITION = "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
+const NONCANCELABLE_FULL_VERIFICATION_CONDITION = "if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
 const FULL_STEP_CONDITION = "if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}";
+const CANCELABLE_MARKDOWN_WORKFLOWS = [
+  "foreground-reply-state-cardinality.yml",
+  "host-support.yml",
+  "repo-hygiene.yml",
+  "web-viewport-overflow.yml",
+];
 const REQUIRED_OWNER_JOBS = new Map([
   ["host-support.yml", "release-checks-linux"],
   ["hosted-stripe-billing.yml", "billing-required"],
@@ -120,6 +127,20 @@ function inspectTrustedMarkdownScope(source, name) {
   assert.match(requiredOwner, /exact-inventory Markdown documentation proof/u);
 }
 
+function inspectCancellationAwareJobs(source, name) {
+  assert.match(source, /^  cancel-in-progress: true$/mu, `${name} must cancel superseded runs`);
+  for (const jobName of workflowJobNames(source)) {
+    const job = jobBlock(source, jobName);
+    const steps = job.indexOf("    steps:\n");
+    assert.ok(steps >= 0, `${name}:${jobName} must own steps`);
+    assert.doesNotMatch(
+      job.slice(0, steps),
+      /^    if: .*\balways\(\)/mu,
+      `${name}:${jobName} must not survive cancellation through always()`,
+    );
+  }
+}
+
 test("expensive pull-request workflows are ready-only and fail closed for draft opens", async () => {
   for (const [name, jobs] of EXPENSIVE_WORKFLOWS) {
     inspectExpensiveWorkflow(await workflow(name), name, jobs);
@@ -136,6 +157,21 @@ test("each required owner uses an exact-base trusted Markdown classifier", async
   assert.equal(new Set(classifierNames).size, classifierNames.length, "classifier checks must not share duplicate display names");
 });
 
+test("cancelable Markdown workflows release superseded jobs", async () => {
+  for (const name of CANCELABLE_MARKDOWN_WORKFLOWS) {
+    inspectCancellationAwareJobs(await workflow(name), name);
+  }
+
+  const host = await workflow("host-support.yml");
+  assert.throws(
+    () => inspectCancellationAwareJobs(
+      host.replace("if: ${{ !cancelled() }}", "if: ${{ always() }}"),
+      "host-support.yml",
+    ),
+    /must not survive cancellation/u,
+  );
+});
+
 test("runtime-heavy jobs skip only an affirmative trusted Markdown result", async () => {
   const host = await workflow("host-support.yml");
   for (const jobName of [
@@ -149,7 +185,7 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 
   const cliHostMatrix = jobBlock(host, "cli-host-matrix");
-  assert.match(cliHostMatrix, /^    if: \$\{\{ always\(\) \}\}$/mu);
+  assert.match(cliHostMatrix, /^    if: \$\{\{ !cancelled\(\) \}\}$/mu);
   assert.match(
     cliHostMatrix,
     /CLI host matrix \(\$\{\{ matrix\.os \}\}\) satisfied by exact-inventory Markdown documentation proof/u,
@@ -174,7 +210,10 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 
   const billing = await workflow("hosted-stripe-billing.yml");
-  assert.match(jobBlock(billing, "billing-hermetic"), new RegExp(`^    ${escapeRegExp(FULL_VERIFICATION_CONDITION)}$`, "mu"));
+  assert.match(
+    jobBlock(billing, "billing-hermetic"),
+    new RegExp(`^    ${escapeRegExp(NONCANCELABLE_FULL_VERIFICATION_CONDITION)}$`, "mu"),
+  );
 
   const repoHygiene = await workflow("repo-hygiene.yml");
   assert.match(jobBlock(repoHygiene, "temporal-compatibility-producer"), /needs\.markdown-docs-scope\.outputs\.markdown_only != 'true'/u);
@@ -205,7 +244,7 @@ test("Host Support runs one exact merge-candidate documentation proof", async ()
   assert.match(docsProof, /^    needs: markdown-docs-scope$/mu);
   assert.match(
     docsProof,
-    /^    if: \$\{\{ always\(\) && github\.event_name == 'pull_request' && needs\.markdown-docs-scope\.result == 'success' && needs\.markdown-docs-scope\.outputs\.markdown_only == 'true' \}\}$/mu,
+    /^    if: \$\{\{ !cancelled\(\) && github\.event_name == 'pull_request' && needs\.markdown-docs-scope\.result == 'success' && needs\.markdown-docs-scope\.outputs\.markdown_only == 'true' \}\}$/mu,
   );
   assert.match(docsProof, /^    permissions:\n      contents: read$/mu);
   assert.match(docsProof, /ref: \$\{\{ github\.sha \}\}/u);
