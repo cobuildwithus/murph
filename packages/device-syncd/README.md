@@ -113,11 +113,14 @@ Current providers:
   41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
-  wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
-  hour; daily aggregates remain day-atomic. Workout streams use the same bounded
+  wait to 24 seconds. A page-heavy hourly/session feature fetches at most two
+  complete hours serially and commits their fetched prefix once. A foreground
+  yield retains the current cursor; a retryable second-hour failure commits
+  only the fetched active prefix and resumes from the exact next hour.
+  Daily aggregates remain day-atomic. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
-  serial stream reads. Each reduced unit is imported before the scalar resource
-  and window coordinate advance. A deployed v1 resource envelope is accepted
+  serial stream reads. Each reduced hourly prefix is imported before the scalar
+  resource and window coordinate advance. A deployed v1 resource envelope is accepted
   only as read-only upgrade input and its validated active resource is immediately
   rewritten as a scalar successor. Pagination remains in memory, and no provider
   row, vendor page cursor, waveform sample, or workout point enters job state.

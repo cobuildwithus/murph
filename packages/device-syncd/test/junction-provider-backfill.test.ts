@@ -486,7 +486,8 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
       if (url.includes("/v2/timeseries/junction-user-1/heartrate/grouped")) {
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
         const searchParams = new URL(url).searchParams;
-        if (searchParams.get("start_date") === "2026-04-02") {
+        const windowStart = searchParams.get("start_date");
+        if (windowStart === "2026-04-02") {
           return createJsonResponse({
             groups: {},
             next_cursor: searchParams.get("next_cursor") === "page-3"
@@ -507,7 +508,9 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
           groups: {
             garmin: [{
               data: [{
-                timestamp: "2026-04-02T00:30:00.000Z",
+                timestamp: new Date(
+                  Date.parse(windowStart ?? "") + 30 * 60_000,
+                ).toISOString(),
                 unit: "bpm",
                 value: 72,
               }],
@@ -572,16 +575,154 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
     context,
     createJobFromInput(hourlyContinuation),
   );
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 6);
   assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    (importedSnapshots[0] as { windowEnd?: unknown }).windowEnd,
+    "2026-04-02T02:00:00.000Z",
+  );
+  assert.equal(
+    (importedSnapshots[0] as { timeseries?: { heartrate?: unknown[] } })
+      .timeseries?.heartrate?.length,
+    2,
+  );
   assert.deepEqual(hourlyResult.scheduledJobs?.[0]?.payload, {
     emptyBackfillAttempts: 1,
-    timeseriesCursor: "2026-04-02T01:00:00.000Z",
+    timeseriesCursor: "2026-04-02T02:00:00.000Z",
     timeseriesResourceCursor: "heartrate",
     timeseriesWindowHours: 1,
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-02T00:00:00.000Z",
   });
+});
+
+test("Junction hourly coalescing does not import after hosted execution yields", async () => {
+  const requestedWindows: Array<{ end: string | null; start: string | null }> = [];
+  const importedSnapshots: unknown[] = [];
+  const yielded = new Error("Synthetic hosted execution yield.");
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    const start = url.searchParams.get("start_date");
+    const end = url.searchParams.get("end_date");
+    requestedWindows.push({ end, start });
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            timestamp: new Date(Date.parse(start ?? "") + 30 * 60_000).toISOString(),
+            unit: "bpm",
+            value: 72,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heartrate"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    shouldYield: () => requestedWindows.length >= 1,
+    throwIfAborted: () => {
+      if (requestedWindows.length >= 1) {
+        throw yielded;
+      }
+    },
+  });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      context,
+      createJob("reconcile", {
+        timeseriesCursor: "2026-04-02T00:00:00.000Z",
+        timeseriesResourceCursor: "heartrate",
+        timeseriesWindowHours: 1,
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      }),
+    ),
+    (error: unknown) => error === yielded,
+  );
+
+  assert.deepEqual(requestedWindows, [{
+    end: "2026-04-02T01:00:00.000Z",
+    start: "2026-04-02T00:00:00.000Z",
+  }]);
+  assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction hourly coalescing retains a fetched prefix when the next hour fails", async () => {
+  const requestedWindows: Array<{ end: string | null; start: string | null }> = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    const start = url.searchParams.get("start_date");
+    const end = url.searchParams.get("end_date");
+    requestedWindows.push({ end, start });
+    if (start === "2026-04-02T01:00:00.000Z") {
+      return createJsonResponse({ message: "Synthetic transient failure." }, 503);
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            timestamp: new Date(Date.parse(start ?? "") + 30 * 60_000).toISOString(),
+            unit: "bpm",
+            value: 72,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heartrate"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: "heartrate",
+      timeseriesWindowHours: 1,
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows[0], {
+    end: "2026-04-02T01:00:00.000Z",
+    start: "2026-04-02T00:00:00.000Z",
+  });
+  assert.ok(requestedWindows.length > 1);
+  assert.equal(
+    requestedWindows.slice(1).every(({ end, start }) =>
+      start === "2026-04-02T01:00:00.000Z"
+      && end === "2026-04-02T02:00:00.000Z"
+    ),
+    true,
+  );
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    (importedSnapshots[0] as { windowEnd?: unknown }).windowEnd,
+    "2026-04-02T01:00:00.000Z",
+  );
+  assert.equal(
+    result.scheduledJobs?.[0]?.payload?.timeseriesCursor,
+    "2026-04-02T01:00:00.000Z",
+  );
 });
 
 test("Junction deployed full-job progress resumes once and emits only scalar successors", async () => {
