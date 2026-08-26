@@ -19,18 +19,28 @@ Updated: 2026-08-26
   correction binds that prefix to ordered hidden structure, restores the
   initial editor's logged-state equality guard, and proves both reorder
   rejection and result-save refresh through the real vault boundary.
+- ReviewGPT's second backend pass found that safe pre-checkpoint admission
+  imported `member.action.requested` without allowing the existing
+  `apply-member-action` owner to execute in that causal phase. The accepted
+  correction adds that existing route/wake pair to the existing selector. A
+  production-shaped entrypoint regression now proves real canonical apply and
+  snapshot work, post-checkpoint terminal outcome recording, no provider pass,
+  conversation priority, and complete-prefix gating by an unsafe system item.
 - Every affected package and Web typecheck passes. Full contracts (328),
-  operator-config (385), vault-usecases (381), assistant-runtime (2,508 pass,
+  operator-config (385), vault-usecases (381), assistant-runtime (2,511 pass,
   5 skip), and hosted-execution (557) tests pass, along with 78 focused Web
   member-action and changelog tests.
+- The corrected affected-diff gate passes, including 794 Web files / 11,168
+  tests, production build and dev smoke, 150 Cloudflare Node files / 2,688
+  tests, and 6 Worker files / 15 tests. Lint has zero errors and 45 unrelated
+  existing warnings.
 - Companion formatting, source parsing, strict-concurrency API/workout-core
   typechecks, project generation, and review-workflow verification pass.
   Simulator, XCTest, and physical Messages proof remain blocked because the
   current host has Command Line Tools but no Xcode or iOS SDK.
-- Coordinated draft PRs are open. Remaining: finish broad verification, push
-  corrected exact heads, run ReviewGPT to PASS, complete exact-head CI, record
-  the native verification gap, and archive this plan with the final backend
-  commit.
+- Coordinated draft PRs are open. Remaining: push corrected exact heads, run
+  ReviewGPT to PASS, complete exact-head CI, record the native verification
+  gap, and archive this plan with the final backend commit.
 
 ## Goal
 
@@ -96,8 +106,9 @@ Updated: 2026-08-26
 3. Risk: a wake notification is consumed before a long snapshot and leaves the
    accepted request queued.
    Mitigation: admit the complete safe `member.action.requested` prefix through
-   the foreground-causal pre-checkpoint path and pin ordering with an entrypoint
-   regression.
+   the foreground-causal pre-checkpoint path, select its existing
+   `apply-member-action` owner in that phase, and pin canonical execution plus
+   terminal outcome ordering with an entrypoint regression.
 4. Risk: a new card schema or parallel result model establishes a rollback
    floor and duplicates validation. Mitigation: emit only ordinary V4/V6 URLs
    and pass the result through the existing native card decoder.
