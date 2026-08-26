@@ -363,6 +363,7 @@ const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
+  "deviceSyncJobTimingSummaries",
 ]);
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([

@@ -92,6 +92,13 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   junctionWorkoutStreamMaxTimestampCount?: number;
   junctionWorkoutStreamTimestampCardinalityKind?: string;
   junctionWorkoutStreamTimestampCount?: number;
+  junctionEcgActualRecordingCount?: number;
+  junctionEcgActualSampleCount?: number;
+  junctionEcgBindingReason?: string;
+  junctionEcgExpectedRecordingCount?: number;
+  junctionEcgExpectedSampleCount?: number;
+  junctionEcgMaxRecordingCount?: number;
+  junctionEcgMaxSampleCount?: number;
   normalizationFailureReason?: string;
   normalizationRowOrdinal?: number;
   normalizationSourceProvider?: string;
@@ -166,6 +173,38 @@ export interface DeviceSyncJobFailureDiagnostic {
   retryable: boolean;
   /** Sanitized failure summary already passed through the shared redaction helpers. */
   summary?: string;
+}
+
+export type DeviceSyncJobTimingOutcome =
+  | "cancelled"
+  | "completed"
+  | "deferred"
+  | "failed"
+  | "yielded";
+
+/**
+ * Bounded metadata for one claimed worker attempt. This intentionally omits
+ * account/job ids, payloads, cursors, provider responses, and health values so
+ * hosted runtimes can persist it as privacy-safe operational telemetry.
+ */
+export interface DeviceSyncJobTimingDiagnostic {
+  at: string;
+  attempts: number;
+  connectionSourceReadCount: number;
+  connectionSourceReadElapsedMs: number;
+  credentialRefreshCount: number;
+  credentialRefreshElapsedMs: number;
+  durableProgressCommitted: boolean;
+  elapsedMs: number;
+  jobCount: number;
+  jobKind: string;
+  outcome: DeviceSyncJobTimingOutcome;
+  provider: string;
+  providerExecutionElapsedMs: number | null;
+  providerUnattributedElapsedMs: number | null;
+  resource?: string;
+  snapshotImportCount: number;
+  snapshotImportElapsedMs: number;
 }
 
 export interface DeviceSyncHttpConfig {

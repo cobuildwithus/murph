@@ -13,7 +13,6 @@ import { renderClientComponent } from "./render-client-component";
 const GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription: "One short topic.",
   idleTitle: "Only the missing details",
   topics: [
     {
@@ -29,7 +28,6 @@ const GAP_SCRIPT: EnvironmentVoiceScript = {
 const UPDATE_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Update your environment",
   flow: "update",
-  idleDescription: "Mention only what changed.",
   idleTitle: "Record what changed",
   topics: [
     {

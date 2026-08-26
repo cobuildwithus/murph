@@ -4713,6 +4713,9 @@ export function createJunctionDeviceSyncProvider(
       } else {
         try {
           await importJunctionTimeseriesResourceSnapshot({
+            collectionWorkLimit: resource === "electrocardiogram_voltage"
+              ? JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT
+              : undefined,
             context,
             dateQueryFormat: "date",
             resource,
@@ -4790,14 +4793,6 @@ export function createJunctionDeviceSyncProvider(
     const resource = resourceCursor.resource;
     const policy = resolveJunctionTimeseriesResourcePolicy(resource);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
-    const sourceProviders = sourceProviderSlug
-      ? (await client.listUserProviders(context.account.externalAccountId, {
-          signal: context.signal ?? null,
-        })).filter((provider) => areJunctionProviderSlugsDataEquivalent(
-          provider.origin.sourceProviderSlug ?? provider.slug,
-          sourceProviderSlug,
-        ))
-      : [];
     let historicalProviderRecordsSeen = sourceProviderSlug !== null
       && job.payload.historicalProviderRecordsSeen === true;
     let historicalRecordsSeen = sourceProviderSlug !== null
@@ -4814,6 +4809,20 @@ export function createJunctionDeviceSyncProvider(
     ) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
+    const listedSourceProviders = sourceProviderSlug || resource === "workout_stream"
+      ? await client.listUserProviders(context.account.externalAccountId, {
+          ...(!sourceProviderSlug && resource === "workout_stream"
+            ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+            : {}),
+          signal: context.signal ?? null,
+        })
+      : [];
+    const sourceProviders = sourceProviderSlug
+      ? listedSourceProviders.filter((provider) => areJunctionProviderSlugsDataEquivalent(
+          provider.origin.sourceProviderSlug ?? provider.slug,
+          sourceProviderSlug,
+        ))
+      : listedSourceProviders;
 
     const executionWindowEnd = new Date(Math.min(
       Date.parse(timeseriesCursor) + timeseriesWindowHours * TIMESERIES_HOUR_MS,
@@ -5197,6 +5206,40 @@ export function createJunctionDeviceSyncProvider(
       throw error;
     };
 
+    let eligibleSourceProviderSlugs: ReadonlySet<string>;
+    try {
+      eligibleSourceProviderSlugs = await resolveJunctionWorkoutStreamEligibleSources(
+        input.context,
+        input.sourceProviders,
+      );
+    } catch (error) {
+      return carryTerminalProgressOrThrow(error);
+    }
+    const sourceScopeProvided = input.sourceProviderSlug !== undefined
+      && input.sourceProviderSlug !== null;
+    const scopedSourceProviderSlug = canonicalizeJunctionProviderSlug(
+      input.sourceProviderSlug,
+    );
+    if (
+      eligibleSourceProviderSlugs.size === 0
+      || (
+        sourceScopeProvided
+        && (
+          !scopedSourceProviderSlug
+          || !eligibleSourceProviderSlugs.has(scopedSourceProviderSlug)
+        )
+      )
+    ) {
+      return {
+        emptyTimestampArraySeen: workoutStreamEmptySeen,
+        historicalProviderRecordsSeen,
+        historicalRecordsSeen,
+        madeProgress,
+        workoutStreamCursor: null,
+        yieldedAt: null,
+      };
+    }
+
     let candidateListing: Awaited<ReturnType<typeof listJunctionWorkoutStreamCandidates>>;
     try {
       candidateListing = await listJunctionWorkoutStreamCandidates(
@@ -5211,6 +5254,7 @@ export function createJunctionDeviceSyncProvider(
           windowStart: input.windowStart,
         },
         true,
+        eligibleSourceProviderSlugs,
       );
     } catch (error) {
       return carryTerminalProgressOrThrow(error);
@@ -5252,10 +5296,8 @@ export function createJunctionDeviceSyncProvider(
           input.collectionWorkLimit,
         );
       } catch (error) {
-        const failure = classifyOptionalJunctionResourceFailure(
+        const failure = classifyOptionalJunctionWorkoutStreamCandidateFailure(
           error,
-          "timeseries",
-          "workout_stream",
           input.context.account.externalAccountId,
         );
         if (!failure) {
@@ -6012,19 +6054,268 @@ async function fetchJunctionTimeseriesWindow(
     return features;
   }
 
+  if (policy.normalizationMode === "ecg_recording_feature") {
+    if (!policy.maxRecordsPerWindow || !policy.maxSamplesPerWindow) {
+      throw new TypeError("Junction ECG voltage policy did not define bounded limits.");
+    }
+    return fetchJunctionElectrocardiogramVoltageFeatures(
+      junctionClient,
+      input,
+      {
+        maxRecordings: policy.maxRecordsPerWindow,
+        maxSamples: policy.maxSamplesPerWindow,
+      },
+    );
+  }
+
   const records = await junctionClient.listTimeseries({
     ...input,
     maxRecords: input.maxRecords ?? policy.maxSamplesPerWindow,
   });
-  if (policy.normalizationMode !== "ecg_recording_feature") {
-    return records;
+  return records;
+}
+
+interface JunctionElectrocardiogramRecordingCandidate {
+  recordingId: string;
+  sessionEnd: string;
+  sessionStart: string;
+  sourceInstanceId?: string;
+  sourceProviderSlug: string;
+  sourceType?: string;
+  voltageSampleCount: number;
+}
+
+async function fetchJunctionElectrocardiogramVoltageFeatures(
+  junctionClient: JunctionClient,
+  input: JunctionWindowInput,
+  limits: { maxRecordings: number; maxSamples: number },
+): Promise<unknown[]> {
+  const summaries = await junctionClient.listSummary({
+    collectionWorkLimit: input.collectionWorkLimit,
+    maxRecords: limits.maxRecordings + 1,
+    resource: "electrocardiogram",
+    signal: input.signal ?? null,
+    sourceProviderSlug: input.sourceProviderSlug,
+    userId: input.userId,
+    windowEnd: input.windowEnd,
+    windowStart: input.windowStart,
+  });
+  const candidates = selectJunctionElectrocardiogramRecordingCandidates(
+    summaries,
+    {
+      maxRecordings: limits.maxRecordings,
+      requestedSourceProviderSlug: input.sourceProviderSlug,
+      windowEnd: input.windowEnd,
+      windowStart: input.windowStart,
+    },
+  );
+  const expectedSampleCount = candidates.reduce(
+    (total, candidate) => total + candidate.voltageSampleCount,
+    0,
+  );
+  if (expectedSampleCount > limits.maxSamples) {
+    throw junctionElectrocardiogramBindingError("sample_limit_exceeded", {
+      expectedSampleCount,
+      maxSampleCount: limits.maxSamples,
+    });
   }
-  if (!policy.maxRecordsPerWindow || !policy.maxSamplesPerWindow) {
-    throw new TypeError("Junction ECG voltage policy did not define bounded limits.");
+
+  const features: unknown[] = [];
+  for (const candidate of candidates) {
+    if (candidate.voltageSampleCount === 0) {
+      continue;
+    }
+    const samples = await junctionClient.listElectrocardiogramVoltage({
+      collectionWorkLimit: input.collectionWorkLimit,
+      maxRecords: candidate.voltageSampleCount + 1,
+      recordingId: candidate.recordingId,
+      signal: input.signal ?? null,
+      sourceInstanceId: candidate.sourceInstanceId,
+      sourceProviderSlug: candidate.sourceProviderSlug,
+      sourceType: candidate.sourceType,
+      userId: input.userId,
+      windowEnd: candidate.sessionEnd,
+      windowStart: candidate.sessionStart,
+    });
+    let candidateFeatures: Record<string, unknown>[];
+    try {
+      candidateFeatures = reduceJunctionElectrocardiogramVoltageRecords(
+        samples,
+        { maxRecordings: 1, maxSamples: limits.maxSamples },
+      );
+    } catch (error) {
+      if (isDeviceSyncError(error)) {
+        throw error;
+      }
+      throw junctionElectrocardiogramBindingError("sample_normalization_invalid");
+    }
+    const feature = candidateFeatures[0];
+    if (!feature || candidateFeatures.length !== 1) {
+      throw junctionElectrocardiogramBindingError("feature_cardinality_mismatch", {
+        actualRecordingCount: candidateFeatures.length,
+        expectedRecordingCount: 1,
+      });
+    }
+    const actualSampleCount = readJunctionElectrocardiogramSampleCount(feature);
+    if (actualSampleCount !== candidate.voltageSampleCount) {
+      throw junctionElectrocardiogramBindingError("sample_count_mismatch", {
+        actualSampleCount: actualSampleCount ?? 0,
+        expectedSampleCount: candidate.voltageSampleCount,
+      });
+    }
+    features.push(feature);
   }
-  return reduceJunctionElectrocardiogramVoltageRecords(records, {
-    maxRecordings: policy.maxRecordsPerWindow,
-    maxSamples: policy.maxSamplesPerWindow,
+  return features;
+}
+
+function selectJunctionElectrocardiogramRecordingCandidates(
+  summaries: readonly unknown[],
+  input: {
+    maxRecordings: number;
+    requestedSourceProviderSlug?: string | null;
+    windowEnd: string;
+    windowStart: string;
+  },
+): JunctionElectrocardiogramRecordingCandidate[] {
+  const windowStartMs = Date.parse(input.windowStart);
+  const windowEndMs = Date.parse(input.windowEnd);
+  if (
+    !Number.isFinite(windowStartMs)
+    || !Number.isFinite(windowEndMs)
+    || windowEndMs <= windowStartMs
+  ) {
+    throw new TypeError("Junction ECG collection window was invalid.");
+  }
+
+  const selected = new Map<string, JunctionElectrocardiogramRecordingCandidate>();
+  for (const value of summaries) {
+    const summary = readPlainObject(value);
+    const recordingId = normalizeString(summary?.id);
+    const sessionStart = readJunctionElectrocardiogramTimestamp(
+      summary,
+      ["sessionStart", "session_start"],
+    );
+    const sessionEnd = readJunctionElectrocardiogramTimestamp(
+      summary,
+      ["sessionEnd", "session_end"],
+    );
+    const voltageSampleCount = readJunctionElectrocardiogramSampleCount(summary);
+    if (!summary || !recordingId || !sessionStart || !sessionEnd || voltageSampleCount === null) {
+      throw junctionElectrocardiogramBindingError("summary_identity_incomplete");
+    }
+    const sessionStartMs = Date.parse(sessionStart);
+    const sessionEndMs = Date.parse(sessionEnd);
+    if (sessionEndMs < sessionStartMs) {
+      throw junctionElectrocardiogramBindingError("summary_window_invalid");
+    }
+    if (sessionStartMs < windowStartMs || sessionStartMs >= windowEndMs) {
+      continue;
+    }
+
+    const unresolvedOrigin = resolveJunctionOrigin(summary);
+    const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(
+      unresolvedOrigin.sourceProviderSlug,
+    );
+    const origin = resolveJunctionOrigin({
+      ...summary,
+      sourceProviderSlug: canonicalSourceProviderSlug
+        ?? unresolvedOrigin.sourceProviderSlug,
+    });
+    const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+      origin.sourceProviderSlug,
+    );
+    if (
+      !sourceProviderSlug
+      || (
+        input.requestedSourceProviderSlug
+        && !areJunctionProviderSlugsDataEquivalent(
+          sourceProviderSlug,
+          input.requestedSourceProviderSlug,
+        )
+      )
+    ) {
+      throw junctionElectrocardiogramBindingError("summary_source_inconsistent");
+    }
+
+    const candidate: JunctionElectrocardiogramRecordingCandidate = {
+      recordingId,
+      sessionEnd,
+      sessionStart,
+      sourceInstanceId: normalizeString(origin.sourceInstanceId),
+      sourceProviderSlug,
+      sourceType: normalizeString(origin.sourceType),
+      voltageSampleCount,
+    };
+    const existing = selected.get(recordingId);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(candidate)) {
+      throw junctionElectrocardiogramBindingError("summary_identity_conflict");
+    }
+    selected.set(recordingId, candidate);
+  }
+
+  if (selected.size > input.maxRecordings) {
+    throw junctionElectrocardiogramBindingError("recording_limit_exceeded", {
+      actualRecordingCount: selected.size,
+      maxRecordingCount: input.maxRecordings,
+    });
+  }
+  const candidates = [...selected.values()].sort((left, right) =>
+    left.sessionStart.localeCompare(right.sessionStart)
+    || left.recordingId.localeCompare(right.recordingId)
+  );
+  const latestEndBySource = new Map<string, number>();
+  for (const candidate of candidates) {
+    const sourceIdentity = JSON.stringify([
+      candidate.sourceProviderSlug,
+      candidate.sourceType ?? null,
+      candidate.sourceInstanceId ?? null,
+    ]);
+    const latestEnd = latestEndBySource.get(sourceIdentity);
+    if (latestEnd !== undefined && Date.parse(candidate.sessionStart) < latestEnd) {
+      throw junctionElectrocardiogramBindingError("summary_windows_ambiguous");
+    }
+    latestEndBySource.set(sourceIdentity, Date.parse(candidate.sessionEnd));
+  }
+  return candidates;
+}
+
+function readJunctionElectrocardiogramTimestamp(
+  summary: Record<string, unknown> | null,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = summary?.[key];
+    const timestamp = value instanceof Date
+      ? value.getTime()
+      : Date.parse(normalizeString(value) ?? "");
+    if (Number.isFinite(timestamp)) {
+      return new Date(timestamp).toISOString();
+    }
+  }
+  return null;
+}
+
+function readJunctionElectrocardiogramSampleCount(
+  summary: Record<string, unknown> | null,
+): number | null {
+  const value = summary?.voltageSampleCount ?? summary?.voltage_sample_count;
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    ? value
+    : null;
+}
+
+function junctionElectrocardiogramBindingError(
+  reason: string,
+  details: Record<string, number> = {},
+) {
+  return deviceSyncError({
+    code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+    details: { reason, ...details },
+    message: "Junction ECG summary and voltage response were inconsistent.",
+    retryable: true,
+    httpStatus: 502,
   });
 }
 
@@ -6032,6 +6323,7 @@ async function listJunctionWorkoutStreamCandidates(
   junctionClient: JunctionClient,
   input: JunctionWindowInput,
   strictSourceScope = false,
+  eligibleSourceProviderSlugs?: ReadonlySet<string>,
 ) {
   const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
     ?.maxRecordsPerWindow;
@@ -6046,7 +6338,6 @@ async function listJunctionWorkoutStreamCandidates(
     userId: input.userId,
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
-    maxRecords: maxWorkouts + 1,
   });
   const summaries = strictSourceScope
     ? scopeJunctionRecordsToSourceProvider(
@@ -6056,8 +6347,21 @@ async function listJunctionWorkoutStreamCandidates(
     : indexRecords.map((record) =>
         withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
       );
+  const eligibleSummaries = eligibleSourceProviderSlugs === undefined
+    ? summaries
+    : summaries.filter((summary) => {
+        const summaryRecord = readPlainObject(summary);
+        if (!summaryRecord) {
+          return false;
+        }
+        const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+          resolveJunctionOrigin(summaryRecord).sourceProviderSlug,
+        );
+        return sourceProviderSlug !== null
+          && eligibleSourceProviderSlugs.has(sourceProviderSlug);
+      });
   return {
-    candidates: selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts),
+    candidates: selectJunctionWorkoutStreamCandidates(eligibleSummaries, maxWorkouts),
     providerRecordsSeen: indexRecords.length > 0,
   };
 }
@@ -6310,6 +6614,38 @@ function classifyOptionalJunctionResourceFailure(
     responseStatus: status,
     ...(responseDetail ? { responseDetail } : {}),
   };
+}
+
+function classifyOptionalJunctionWorkoutStreamCandidateFailure(
+  error: unknown,
+  accountExternalId: string,
+): JunctionOptionalResourceFailure | null {
+  const existing = classifyOptionalJunctionResourceFailure(
+    error,
+    "timeseries",
+    "workout_stream",
+    accountExternalId,
+  );
+  if (existing) {
+    return existing;
+  }
+  if (
+    !isDeviceSyncError(error)
+    || error.code !== "JUNCTION_API_REQUEST_FAILED"
+    || error.details?.status !== 400
+  ) {
+    return null;
+  }
+
+  const reason = classifyClearOptionalJunctionResourceFailureReason({
+    responseErrorCode: readJunctionDiagnosticString(error.details.responseErrorCode),
+    responseErrorDescription: readJunctionDiagnosticString(
+      error.details.responseErrorDescription,
+    ),
+  });
+  return reason === "unsupported"
+    ? { reason, responseStatus: 400 }
+    : null;
 }
 
 function isRetryableDeviceSyncFailure(error: unknown): error is DeviceSyncError {
@@ -9888,6 +10224,34 @@ function isJunctionResourceAvailableInSummary(
     normalizeJunctionResourceName(candidate) === normalizedResource
     && isJunctionResourceAdvertisedAvailable(availability)
   );
+}
+
+async function resolveJunctionWorkoutStreamEligibleSources(
+  context: ProviderJobContext,
+  providers: readonly JunctionProviderConnection[],
+): Promise<ReadonlySet<string>> {
+  if (!context.listConnectionSources) {
+    return new Set();
+  }
+  const sources = await context.listConnectionSources();
+
+  return new Set(projectJunctionSourcesByProviderSlug(
+    context.account.id,
+    providers,
+  ).flatMap((source) =>
+    isJunctionSourceAdmittedForImport(
+      sources,
+      source.sourceProviderSlug,
+      context.connectionSourceAdmissionMode !== "listed_only",
+    )
+      && source.status === "connected"
+      && isJunctionResourceAvailableInSummary(
+        source.resourceAvailabilitySummary,
+        "workout_stream",
+      )
+      ? [source.sourceProviderSlug]
+      : []
+  ));
 }
 
 function isJunctionSourceResourceCurrentlyAvailable(input: {

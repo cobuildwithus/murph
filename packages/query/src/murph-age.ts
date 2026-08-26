@@ -176,7 +176,19 @@ export interface MurphAgeInputReadinessForVault {
 
 export interface MurphAgeLocalModelCardLoadResult {
   models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
-  warnings: MurphAgeWarning[];
+  warnings: MurphAgeLocalModelCardArtifactWarning[];
+}
+
+export type MurphAgeLocalModelCardArtifactIssue =
+  | "artifact_unreadable"
+  | "directory_unreadable"
+  | "duplicate_card_id"
+  | "invalid_json"
+  | "invalid_schema"
+  | "policy_violation";
+
+export interface MurphAgeLocalModelCardArtifactWarning extends MurphAgeWarning {
+  artifactIssue: MurphAgeLocalModelCardArtifactIssue;
 }
 
 export interface AssessMurphAgeWearableShadowReadinessFromVaultInput {
@@ -802,13 +814,14 @@ export async function loadMurphAgeLocalModelCardArtifacts(input: {
     return {
       models: {},
       warnings: [localModelCardWarning(
+        "directory_unreadable",
         "A local Murph Age model-card artifact directory could not be read.",
       )],
     };
   }
 
   const models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>> = {};
-  const warnings: MurphAgeWarning[] = [];
+  const warnings: MurphAgeLocalModelCardArtifactWarning[] = [];
   const jsonEntries = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -819,6 +832,7 @@ export async function loadMurphAgeLocalModelCardArtifacts(input: {
     if (!artifact.value) continue;
     if (models[artifact.value.cardId]) {
       warnings.push(localModelCardWarning(
+        "duplicate_card_id",
         "Duplicate local Murph Age model-card artifacts were found for the same card id.",
       ));
       continue;
@@ -912,7 +926,7 @@ function localWearableResidualParameterPackRootForLoad(input: {
 
 async function readLocalModelCardArtifact(filePath: string): Promise<{
   value: MurphAgeLocalModelCardArtifact | null;
-  warnings: MurphAgeWarning[];
+  warnings: MurphAgeLocalModelCardArtifactWarning[];
 }> {
   let raw: string;
   try {
@@ -920,7 +934,10 @@ async function readLocalModelCardArtifact(filePath: string): Promise<{
   } catch {
     return {
       value: null,
-      warnings: [localModelCardWarning("A local Murph Age model-card artifact could not be read.")],
+      warnings: [localModelCardWarning(
+        "artifact_unreadable",
+        "A local Murph Age model-card artifact could not be read.",
+      )],
     };
   }
 
@@ -930,22 +947,43 @@ async function readLocalModelCardArtifact(filePath: string): Promise<{
   } catch {
     return {
       value: null,
-      warnings: [localModelCardWarning("A local Murph Age model-card artifact is not valid JSON.")],
+      warnings: [localModelCardWarning(
+        "invalid_json",
+        "A local Murph Age model-card artifact is not valid JSON.",
+      )],
     };
   }
 
   const artifact = parseMurphAgeLocalModelCardArtifact(parsed);
-  if (!artifact.value) return artifact;
+  if (!artifact.value) {
+    return {
+      value: null,
+      warnings: artifact.warnings.map((warning) => ({
+        ...warning,
+        artifactIssue: "invalid_schema" as const,
+      })),
+    };
+  }
 
   const warnings = validateMurphAgeLocalModelCardArtifactPolicy(artifact.value);
   if (warnings.length > 0) {
-    return { value: null, warnings };
+    return {
+      value: null,
+      warnings: warnings.map((warning) => ({
+        ...warning,
+        artifactIssue: "policy_violation" as const,
+      })),
+    };
   }
   return { value: artifact.value, warnings: [] };
 }
 
-function localModelCardWarning(message: string): MurphAgeWarning {
+function localModelCardWarning(
+  artifactIssue: MurphAgeLocalModelCardArtifactIssue,
+  message: string,
+): MurphAgeLocalModelCardArtifactWarning {
   return {
+    artifactIssue,
     code: "INVALID_INPUT",
     message,
   };

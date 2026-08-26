@@ -59,7 +59,10 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.',
+      'A nutrition card blocked by an unresolved device meal is an interactive recovery turn, not a blank-totals dead end: load both skills; import itself does not start a model turn.',
+    )
+    expect(prompt).not.toContain(
+      'For a requested daily nutrition card, never answer unavailable from inference:',
     )
   })
 

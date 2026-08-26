@@ -96,12 +96,19 @@ Current providers:
   collection contract permits chunks no larger than 30 days. `fat` remains the
   public resource name while the client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
-  that same code-owned production set. ECG voltage uses one-day grouped windows capped at
-  100,000 admitted samples and 64 recordings, then reduces each recording to one
-  clinically neutral feature record before a sync snapshot exists. Workout stream
-  uses the ordinary workout index only to admit at most 32 stable workouts per
-  one-day window, then reads Junction's dedicated per-workout stream endpoint
-  serially and caps each stream at 100,000 points. The exact production assembly has
+  that same code-owned production set. ECG voltage first reads the stable ECG
+  summaries for a one-day window, then serially reads each recording's exact
+  source/session interval. Junction's id-less voltage group is bound only to
+  that summary ID; source, interval, ambiguity, and declared sample-count
+  mismatches retry without inventing identity. The path admits at most 100,000
+  samples and 64 recordings, then reduces each recording to one clinically
+  neutral feature before a sync snapshot exists. Workout stream
+  runs only for sources admitted for current import by the control-plane
+  lifecycle state and whose current Junction provider inventory advertises that
+  capability. It uses the ordinary workout index to admit at most 32 eligible,
+  attributed workouts per one-day window, then reads Junction's dedicated
+  per-workout stream endpoint serially and caps each stream at 100,000 points.
+  The exact production assembly has
   48 production timeseries resources: 6 wide and 42 one-day resources, including
   41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential

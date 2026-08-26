@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -201,6 +201,13 @@ product-decision owners.
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
    shared-default push, run `pnpm verify:acceptance`.
+   When the diff can change how Murph interprets a turn, selects or calls a
+   tool, decides to stay quiet, or writes a user-visible reply, apply
+   `$verify-murph-assistant`: add a production-derived real-Codex journey for
+   the changed behavior, run that focused journey after deterministic boundary
+   proof, inspect every actual reply, and record its effect result plus
+   `Ready`/`Hold` UX verdict. This live proof is required even when the ordinary
+   deterministic suite is already green.
 6. For user-visible, persisted-state, operational, or trust-boundary changes,
    complete the Product UX Walkthrough with direct evidence in addition to
    scripted tests. Match the evidence to each affected person's changed claim.
@@ -259,6 +266,15 @@ product-decision owners.
     default completion bar; if a required check failed for a credibly unrelated
     pre-existing reason, name the command, failing target, and why the current
     diff did not cause it.
+    For every completed feature or bug fix, the final message to the developer
+    or user must also include a concise `How to verify` section for testing the
+    landed change. Name any prerequisite or environment, give the shortest
+    concrete action sequence, and state the observable expected result. For a
+    feature, cover its shortest end-to-end path. For a bug fix, start from the
+    original reproduction when practical and name the behavior that proves the
+    regression is gone. Automated check names may supplement these instructions
+    but do not replace them. If practical human verification is unavailable,
+    say why and point to the closest direct proof.
     If the completed task could break or degrade production when deployed components are temporarily out of sync, include a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, expected skew behavior, and post-deploy checks. For Cloudflare hosted execution changes, explicitly consider both web/Worker skew and Worker/container skew: a new Worker version can receive traffic while active warm `RunnerContainer` processes still run the previous runner bundle, process env, or provider-credential shape during gradual rollout.
 
 ## PR Description

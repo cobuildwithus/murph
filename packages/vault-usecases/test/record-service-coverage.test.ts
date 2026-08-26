@@ -490,6 +490,7 @@ describe("shared and vault helper functions", () => {
     assert.deepEqual(compactObject({ a: 1, b: undefined, c: null }), { a: 1, c: null });
     assert.deepEqual(relativePathEntries([{ relativePath: "x.md" }]), ["x.md"]);
   });
+
 });
 
 describe("record patching and duration helpers", () => {

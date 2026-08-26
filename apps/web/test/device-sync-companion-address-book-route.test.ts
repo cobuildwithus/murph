@@ -71,6 +71,8 @@ const DELETION = {
   schemaVersion: 1 as const,
 };
 
+const SLOW_GET_STAGE_MS = 5_000;
+
 let route: AddressBookRoute;
 
 describe("device sync companion address-book route", () => {
@@ -100,6 +102,8 @@ describe("device sync companion address-book route", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -115,6 +119,7 @@ describe("device sync companion address-book route", () => {
     expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
+      { runStage: expect.any(Function) },
     );
     expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
@@ -123,6 +128,111 @@ describe("device sync companion address-book route", () => {
       prisma: mocks.prisma,
     });
     expect(route.maxDuration).toBe(60);
+  });
+
+  it("reports stalled identity-token verification before the route deadline", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let resolveAuth!: (value: { member: typeof MEMBER }) => void;
+    const pendingAuth = new Promise<{ member: typeof MEMBER }>((resolve) => {
+      resolveAuth = resolve;
+    });
+    mocks.requirePrivyMemberAuthFromBearerToken.mockImplementation(
+      (_request, _prisma, options) => options.runStage(
+        "identity_token_verification",
+        () => pendingAuth,
+      ),
+    );
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    const responsePromise = route.GET(request);
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
+
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted companion address-book GET stage slow.",
+      {
+        elapsedMs: SLOW_GET_STAGE_MS,
+        stage: "identity_token_verification",
+      },
+    );
+
+    resolveAuth({ member: MEMBER });
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("reports a stalled member lookup before the route deadline", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let resolveAuth!: (value: { member: typeof MEMBER }) => void;
+    const pendingAuth = new Promise<{ member: typeof MEMBER }>((resolve) => {
+      resolveAuth = resolve;
+    });
+    mocks.requirePrivyMemberAuthFromBearerToken.mockImplementation(
+      (_request, _prisma, options) => options.runStage(
+        "member_lookup",
+        () => pendingAuth,
+      ),
+    );
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    const responsePromise = route.GET(request);
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
+
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted companion address-book GET stage slow.",
+      {
+        elapsedMs: SLOW_GET_STAGE_MS,
+        stage: "member_lookup",
+      },
+    );
+
+    resolveAuth({ member: MEMBER });
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("reports a stalled status read without logging member or request data", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let resolveStatus!: (value: typeof STATUS) => void;
+    mocks.readHostedAddressBookStatus.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    const responsePromise = route.GET(request);
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
+
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted companion address-book GET stage slow.",
+      {
+        elapsedMs: SLOW_GET_STAGE_MS,
+        stage: "status_read",
+      },
+    );
+
+    resolveStatus(STATUS);
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("clears the slow-stage timers after a normal status read", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    await expect(route.GET(request)).resolves.toMatchObject({ status: 200 });
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS * 2);
+
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("requires active access and launch consent for bounded replacements", async () => {
