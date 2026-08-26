@@ -1,6 +1,7 @@
 ---
 title: 'Frog autofix implementation review ignores isolated browser lanes'
 severity: 'major'
+issue: 'cobuildwithus/murph#2315'
 ---
 
 ## Expected Behavior
