@@ -559,7 +559,7 @@ const TYPO_CASES: readonly SearchCase[] = [
 
 const FOOD_EXACT_ADMISSION_LIMIT = 250;
 const FOOD_FTS_ADMISSION_LIMIT = 10_000;
-const FOOD_NEAREST_NAME_ADMISSION_LIMIT = 5_000;
+const FOOD_NEAREST_NAME_ADMISSION_LIMIT = 10_000;
 const FOOD_MAX_SORT_INPUT = FOOD_EXACT_ADMISSION_LIMIT +
   FOOD_FTS_ADMISSION_LIMIT + FOOD_NEAREST_NAME_ADMISSION_LIMIT;
 
@@ -1016,8 +1016,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
       );
     }, 20_000);
 
-    it("recovers a private food through the trigram fallback", async () => {
-      const q = "Butter Chiken with Basmati Rice";
+    it("keeps typo recovery, canonical diversity, and stable results for a large alias group", async () => {
+      const q = "Boundryfts";
       const predicates = await client.query<{
         fts_match: boolean;
         trigram_match: boolean;
@@ -1028,7 +1028,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
             websearch_to_tsquery('simple', $1) AS fts_match,
           name % $1::text AS trigram_match
         FROM foods
-        WHERE id = 'trader-joes:099032'
+        WHERE id = 'zz-food-boundary-fts-winner'
         `,
         [q],
       );
@@ -1037,13 +1037,25 @@ describe.runIf(Boolean(testDatabaseUrl))(
         trigram_match: true,
       });
 
-      const rows = await foodQueries.searchFoods({
+      const first = await foodQueries.searchFoods({
         includeOffMarket: false,
-        limit: 5,
+        limit: 50,
+        q,
+      });
+      const repeated = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
         q,
       });
 
-      expect(rows.map((row) => row.id)).toContain("trader-joes:099032");
+      expect(first).toHaveLength(50);
+      expect(first[0]?.id).toBe("zz-food-boundary-fts-winner");
+      expect(first.map((row) => row.id)).toContain(
+        "zz-food-boundary-fts-alias-priority",
+      );
+      expect(repeated.map((row) => row.id)).toEqual(
+        first.map((row) => row.id),
+      );
     }, 20_000);
 
     it.each(["% boundaryfts", "_ boundaryfts"])(

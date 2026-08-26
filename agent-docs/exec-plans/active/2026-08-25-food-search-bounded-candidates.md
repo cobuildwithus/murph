@@ -67,8 +67,8 @@ Updated: 2026-08-25
 - Keep the existing timeout as a correctness boundary; do not mask the query
   defect by increasing it.
 - Use two complementary bounded admission lanes: GIN-first FTS for brand/search
-  text recall (10,000 rows) and GiST nearest-name for name relevance (5,000
-  rows), with canonical dedupe only after their bounded union.
+  text recall and one shared GiST nearest-name set for name relevance and typo
+  recovery (10,000 rows each), with canonical dedupe only after bounded admission.
 
 ## Verification
 

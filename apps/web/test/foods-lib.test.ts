@@ -370,7 +370,7 @@ describe("foods query helpers", () => {
       /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
-      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
     );
     expect(searchCall?.text).toMatch(
       /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?to_tsvector/u,
@@ -379,8 +379,9 @@ describe("foods query helpers", () => {
       /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_index_matches[\s\S]*?SELECT \* FROM fts_nearest_matches/u,
     );
     expect(searchCall?.text).toMatch(
-      /trigram_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?name % \$1::text[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?name % \$1::text/u,
     );
+    expect(searchCall?.text).not.toContain("trigram_nearest_matches");
     expect(searchCall?.text).not.toContain("fts_canonical_matches");
     expect(searchCall?.text).not.toContain("trigram_canonical_matches");
     expect(searchCall?.text).toMatch(
@@ -517,7 +518,7 @@ describe("foods query helpers", () => {
     );
     expect(searchCall?.text.match(
       /\(\$4::text\[\] IS NULL OR data_origin = ANY\(\$4::text\[\]\)\)/gu,
-    )).toHaveLength(4);
+    )).toHaveLength(3);
     expect(searchCall?.values).toEqual([
       "chicken breast cooked skinless",
       false,

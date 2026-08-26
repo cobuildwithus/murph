@@ -21,8 +21,7 @@ const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
-const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 5_000;
-const PRODUCT_LABEL_SEARCH_FTS_MATCH_LIMIT = 10_000;
+const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 10_000;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -2119,7 +2118,7 @@ async function searchGenericProductLabels(
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-          LIMIT ${PRODUCT_LABEL_SEARCH_FTS_MATCH_LIMIT}
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
         name_nearest_matches AS MATERIALIZED (
           SELECT
@@ -2201,7 +2200,7 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM fts_matches, query
         ),
-        trigram_nearest_matches AS MATERIALIZED (
+        trigram_matches AS MATERIALIZED (
           SELECT
             id,
             canonical_key,
@@ -2212,19 +2211,10 @@ async function searchGenericProductLabels(
             upc,
             off_market,
             data_origin_priority
-          FROM ${tableSql}
+          FROM name_nearest_matches
           WHERE
             NOT EXISTS (SELECT 1 FROM fts_matches)
             AND name % $1::text
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-          ORDER BY name <->>> $1::text
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
-        ),
-        trigram_matches AS MATERIALIZED (
-          SELECT * FROM trigram_nearest_matches
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT

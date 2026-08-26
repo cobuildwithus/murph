@@ -1996,11 +1996,11 @@ Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
 lane admits up to 10,000 full-text matches without sorting the whole match set,
-and a separate GiST trigram lane admits up to 5,000 nearest names before its
-full-text eligibility check. The typo fallback keeps its own bounded GiST lane.
+and one materialized GiST trigram lane admits up to 10,000 nearest names. Full-
+text name relevance and false-full-text typo recovery both reuse that one set.
 Canonical-key deduplication happens only after those bounded admissions.
-The wider full-text lane preserves representative choice and canonical diversity
-across the established 5,000-row boundary fixture. Ranking is deterministic
+The shared 10,000-row admissions preserve representative choice and canonical
+diversity across the established 5,000-row boundary fixture. Ranking is deterministic
 within the admitted set rather than exhaustive across the full food catalog.
 Exact-id and UPC lookups retain their direct indexed paths;
 supplement generic search and the public projection retain their pre-existing
