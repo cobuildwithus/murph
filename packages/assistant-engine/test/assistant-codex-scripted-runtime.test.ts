@@ -7588,8 +7588,7 @@ if (!tool) {
     const deferredDiscoveryOverheadBytes =
       (ordinarySummaries[0]?.providerRequestDiagnostics?.bytes ?? 0)
       - (baselineSummary?.providerRequestDiagnostics?.bytes ?? 0)
-    expect(deferredDiscoveryOverheadBytes).toBeGreaterThan(0)
-    expect(deferredDiscoveryOverheadBytes).toBeLessThan(200)
+    expect(deferredDiscoveryOverheadBytes).toBe(0)
     expect(recoveryRequests).toHaveLength(0)
 
     await stopWarmCodexAppServer()
