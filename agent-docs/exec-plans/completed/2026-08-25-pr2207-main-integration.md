@@ -1,6 +1,6 @@
 # PR 2207 current-main integration
 
-Status: active
+Status: completed
 Created: 2026-08-25
 Updated: 2026-08-25
 
@@ -28,6 +28,9 @@ journey policy, or validation owner.
   returns the existing value-free `recordedAt` validation error before writing.
 - The current head has focused post-remediation proof but no exact-head final
   review.
+- ReviewGPT round five returned `ROUND_OUTCOME: PASS` at exact candidate
+  `8c90783892cb84117de8259ee395164279086817`; the model verification matched
+  the requested review model.
 - Current `main` was merged at `18c38c8474`; stale shared projector, prompt,
   validation, and test copies were removed so the resulting tree differs from
   `main` only in the domain slice, authored plans, and measured bundle allowance.
@@ -57,5 +60,8 @@ journey policy, or validation owner.
    gates, and production runner bundle/parity proof.
 4. [done] Push the exact candidate, update the PR contract, and run a sensitive full
    ReviewGPT round with the complete prior finding ledger and retrospective.
-5. Resolve the accepted calendar-date finding, close the plan, admit the exact head to required
-   CI, prove a clean current-base merge, merge, and retire the worktree.
+5. [done] Resolve the accepted calendar-date finding and pass the exact-head
+   final review.
+6. Close the plan, admit the exact head to required CI, prove a clean
+   current-base merge, merge, and retire the worktree.
+Completed: 2026-08-25
