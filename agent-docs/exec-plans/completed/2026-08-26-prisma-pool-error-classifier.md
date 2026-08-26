@@ -1,6 +1,6 @@
 # Classify wrapped Prisma pool errors accurately
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -51,13 +51,13 @@ Updated: 2026-08-26
 
 ## Tasks
 
-1. Prove current ownership and existing classifier behavior on `origin/main`.
-2. Ask ReviewGPT to agree or reject the narrow design and implement a patch.
-3. Inspect and deliberately apply a valid artifact only if ReviewGPT agrees.
-4. Run focused verification and review the full diff locally.
-5. Commit, push, open a separate draft PR, and run exact-head specialist/final
+1. [x] Prove current ownership and existing classifier behavior on `origin/main`.
+2. [x] Ask ReviewGPT to agree or reject the narrow design and implement a patch.
+3. [x] Inspect and deliberately apply a valid artifact only if ReviewGPT agrees.
+4. [x] Run focused verification and review the full diff locally.
+5. [x] Commit, push, open a separate draft PR, and run exact-head specialist/final
    ReviewGPT concurrently with CI.
-6. Resolve accepted findings without widening the architecture and hand off at
+6. [x] Resolve accepted findings without widening the architecture and hand off at
    the intentional draft boundary.
 
 ## Decisions
@@ -82,3 +82,8 @@ Updated: 2026-08-26
   all allowlisted log assertions remain secret-safe.
 - Completed local proof: 55 focused tests passed; focused ESLint, canonical
   hosted Web typecheck, docs drift, and `git diff --check` passed.
+- Exact-head preliminary specialists passed with no findings or patch at
+  `46a477ece090fbc2c5dd78eaeac40f7ffff1bc2a`.
+- Exact-head final ReviewGPT round one passed with no findings at the same head.
+- Draft PR Evidence and the Vercel ignored-build check passed.
+Completed: 2026-08-26
