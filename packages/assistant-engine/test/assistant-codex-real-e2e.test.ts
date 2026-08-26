@@ -9317,21 +9317,24 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
             commands: result.commands,
             message: result.message,
             providerActionCount: result.providerActionCount,
+            savedCalories: result.savedCalories,
           })}\n`,
         )
-        const editIndexes = result.commands.flatMap((command, index) =>
+        const semanticCommands = expandRecordedVaultCommands(result.commands)
+        const editIndexes = semanticCommands.flatMap((command, index) =>
           command.startsWith(`meal edit ${result.currentMealId} `)
             ? [index]
             : [],
         )
         expect(editIndexes).toHaveLength(1)
         const editIndex = editIndexes[0] ?? -1
-        const readbackIndex = result.commands.findIndex(
+        const editCommand = semanticCommands[editIndex] ?? ''
+        const readbackIndex = semanticCommands.findIndex(
           (command, index) =>
             index > editIndex
-            && command === `meal show ${result.currentMealId} --format json`,
+            && command === `meal show ${result.currentMealId}`,
         )
-        const totalsIndex = result.commands.findIndex(
+        const totalsIndex = semanticCommands.findIndex(
           (command, index) =>
             index > readbackIndex
             && command.startsWith(
@@ -9342,7 +9345,11 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
           result.commands,
           ['meal', 'show', result.priorMealId],
         )).toBe(true)
+        expect(semanticCommands.filter(
+          (command) => command === 'memory show',
+        )).toHaveLength(1)
         expect(editIndex).toBeGreaterThanOrEqual(0)
+        expect(editCommand).toContain('--nutrition-source inherited')
         expect(readbackIndex).toBeGreaterThan(editIndex)
         expect(totalsIndex).toBeGreaterThan(readbackIndex)
         expect(recordedVaultCommandStartsWith(
@@ -10021,17 +10028,66 @@ async function runRealPriorMealNutritionRecovery(input: {
   }
 }
 
+describe('recorded vault command parsing', () => {
+  it('normalizes global format options and flattens batch commands', () => {
+    expect(expandRecordedVaultCommands([
+      '--format json meal edit meal_example --nutrition-source inherited',
+      '--format json batch --compact --command ["memory","show","--format","json"] --command ["meal","show","meal_example"] --command ["meal","edit","meal_example","--nutrition-source-detail","copied [verified]"]',
+    ])).toEqual([
+      'meal edit meal_example --nutrition-source inherited',
+      'memory show',
+      'meal show meal_example',
+      'meal edit meal_example --nutrition-source-detail copied [verified]',
+    ])
+  })
+})
+
 function recordedVaultCommandStartsWith(
   commands: readonly string[],
   prefix: readonly string[],
 ): boolean {
   const directPrefix = prefix.join(' ')
-  const batchPrefix = `[${prefix.map((part) => JSON.stringify(part)).join(',')}`
-  return commands.some((command) =>
+  return expandRecordedVaultCommands(commands).some((command) =>
     command === directPrefix
     || command.startsWith(`${directPrefix} `)
-    || command.includes(`--command ${batchPrefix}`)
   )
+}
+
+function expandRecordedVaultCommands(commands: readonly string[]): string[] {
+  return commands.flatMap((command) => {
+    const normalized = normalizeRecordedVaultCommand(command)
+    if (normalized !== 'batch' && !normalized.startsWith('batch ')) {
+      return [normalized]
+    }
+
+    return readRecordedBatchCommandArguments(normalized)
+      .map((arguments_) => normalizeRecordedVaultCommand(arguments_.join(' ')))
+  })
+}
+
+function normalizeRecordedVaultCommand(command: string): string {
+  let normalized = command.trim()
+  while (normalized.startsWith('--format ')) {
+    normalized = normalized.replace(/^--format\s+\S+\s*/u, '')
+  }
+  return normalized.replace(/\s+--format\s+\S+$/u, '')
+}
+
+function readRecordedBatchCommandArguments(command: string): string[][] {
+  return command.split(' --command ').slice(1).flatMap((encodedArguments) => {
+    try {
+      const parsed: unknown = JSON.parse(encodedArguments)
+      if (
+        Array.isArray(parsed)
+        && parsed.every((part) => typeof part === 'string')
+      ) {
+        return [parsed]
+      }
+    } catch {
+      // An invalid batch argument cannot prove a canonical nested command.
+    }
+    return []
+  })
 }
 
 async function runRealAutomaticMealClarificationScenario(input: {
@@ -10262,8 +10318,10 @@ async function readAutomaticMealClarificationState(input: {
   const vault = await readVaultRawTolerant(input.vaultRoot)
   const event = [...vault.events]
     .reverse()
-    .find((candidate) => candidate.entityId === input.mealId)
-  const meal = readRecord(event?.attributes.meal)
+    .find((candidate) =>
+      candidate.entityId === input.mealId && candidate.kind === 'meal'
+    )
+  const meal = event?.attributes
   const nutrition = readRecord(meal?.nutrition)
   const totals = readRecord(nutrition?.totals)
 

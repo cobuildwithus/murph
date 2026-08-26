@@ -1025,6 +1025,9 @@ describe('murph.attach_response_card', () => {
       'Do not re-ask or recite established categories.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or explain it.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'If suitability is clear, proceed and state only the request-relevant outcome.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(

@@ -181,6 +181,27 @@ describe('assistant food journal skill', () => {
       "A member's current statement that the\nmeal is equivalent to a specific prior meal is usable evidence.",
     )
     expect(skill).toContain(
+      'Use only the canonical meal surface for this recovery: `vault-cli meal list',
+    )
+    expect(skill).toContain(
+      '`vault-cli meal show\n<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed',
+    )
+    expect(skill).toContain(
+      '`--nutrition-calories`, `--nutrition-protein-grams`,',
+    )
+    expect(skill).toContain(
+      '`--nutrition-confidence`, and `--nutrition-source-detail` flags.',
+    )
+    expect(skill).toContain(
+      'Never inspect\nor modify raw vault files.',
+    )
+    expect(skill).toContain(
+      'show the\nselected prior meal before copying its saved totals.',
+    )
+    expect(skill).toContain(
+      'Use `--nutrition-source inherited` for\ncopied prior-meal totals',
+    )
+    expect(skill).toContain(
       'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',
     )
     expect(skill).toContain(

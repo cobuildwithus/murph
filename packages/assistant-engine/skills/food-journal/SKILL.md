@@ -102,6 +102,20 @@ meal is equivalent to a specific prior meal is usable evidence. A similar
 informal name alone is not: require matching saved ingredients and portion
 evidence or ask instead of copying nutrition.
 
+Use only the canonical meal surface for this recovery: `vault-cli meal list
+--from <date> --to <date> --limit 200 --format json`, `vault-cli meal show
+<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed
+`--nutrition-calories`, `--nutrition-protein-grams`,
+`--nutrition-carbs-grams`, `--nutrition-fat-grams`,
+`--nutrition-fiber-grams`, `--nutrition-source`,
+`--nutrition-confidence`, and `--nutrition-source-detail` flags. Never inspect
+or modify raw vault files. After the date lists identify the records, show the
+selected prior meal before copying its saved totals. After the edit succeeds,
+run the exact edited-meal `meal show` readback and fresh same-date `meal totals`
+command before attaching the card. Use `--nutrition-source inherited` for
+copied prior-meal totals and preserve the prior source in
+`--nutrition-source-detail`.
+
 Apply the estimation-eligibility and label/database grounding rules below. If
 the available evidence supports a meaningful bounded estimate, edit and read
 back the exact existing meal, then rerun fresh same-date totals before any card.
