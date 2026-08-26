@@ -54,6 +54,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_ANALYZE_VIDEO_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_DEVICE_TOOL,
@@ -123,6 +124,7 @@ import {
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
 } from '../src/assistant/cron/execution.ts'
 import {
+  buildAssistantAutoReplyPrompt,
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
@@ -1234,6 +1236,212 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
 ].join(' ')
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
+  it(
+    'analyzes the requesting participant\'s own group video and reports only the tool result',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-video-analysis-e2e-'),
+      )
+      const messageRef = `ain_${'a'.repeat(32)}`
+      const rawPath = 'raw/inbox/group-movement.mp4'
+      const videoBytes = Buffer.concat([
+        Buffer.from([0, 0, 0, 16]),
+        Buffer.from('ftyp'),
+        Buffer.from('isom'),
+        Buffer.from('synthetic-video-evidence'),
+      ])
+      const sha256 = createHash('sha256').update(videoBytes).digest('hex')
+      let providerCallCount = 0
+
+      try {
+        await mkdir(path.join(workingDirectory, path.dirname(rawPath)), {
+          recursive: true,
+        })
+        await writeFile(path.join(workingDirectory, rawPath), videoBytes)
+        const promptResult = buildAssistantAutoReplyPrompt([{
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [{
+              byteSize: videoBytes.byteLength,
+              derived: null,
+              descriptorAttachmentId: 'synthetic-video',
+              fileName: 'movement.mp4',
+              inlineFragments: [],
+              kind: 'video',
+              mime: 'video/mp4',
+              ordinal: 1,
+              parseState: null,
+              raw: {
+                byteSize: videoBytes.byteLength,
+                kind: 'vault-relative-file',
+                mediaType: 'video/mp4',
+                path: rawPath,
+                sha256,
+              },
+              sourceAttachmentId: 'synthetic-video',
+            }],
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            source: 'manual',
+            status: 'available',
+            updatedAt: '2026-08-26T12:00:01.000Z',
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-participant',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'synthetic-group-thread',
+            threadIsDirect: false,
+          },
+          inputId: messageRef,
+          occurredAt: '2026-08-26T12:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T12:00:01.000Z',
+          replyTarget: {
+            channel: 'telegram',
+            messageId: '101',
+            threadId: 'synthetic-group-thread',
+          },
+          source: 'telegram',
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderDisplayName: 'Sam',
+            senderHandle: 'synthetic-participant',
+          },
+          telegramMetadata: null,
+          text:
+            'Murph, please analyze my video. How many push-ups do I complete, and what is visibly happening with my hip position?',
+        }])
+        expect(promptResult.kind).toBe('ready')
+        if (promptResult.kind !== 'ready') {
+          throw new Error('Expected a ready group-video prompt.')
+        }
+
+        const hostedToolContext = {
+          computerToolsAvailable: false,
+          currentAnalyzeVideoAttachmentAuthorities: () => [{
+            byteSize: videoBytes.byteLength,
+            messageRef,
+            mimeType: 'video/mp4',
+            ordinal: 1,
+            rawPath,
+            sha256,
+          }],
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [messageRef],
+            conversationId: 'conversation-group-video',
+            conversationScope: 'group' as const,
+            inboundMailboxItemIds: ['mailbox-group-video'],
+            originSessionId: 'session-group-video',
+            recipientKey: 'recipient-group-video',
+          }),
+          sendVaultFile: async () => ({
+            filename: 'unused',
+            status: 'denied' as const,
+          }),
+          vaultFileSendAvailable: false,
+        } satisfies AssistantHostedToolContext
+        const result = await executeRealCodexAppServerTurn({
+          analyzeVideoRuntime: {
+            apiKey: 'synthetic-gemini-key',
+            fetchImpl: async () => {
+              providerCallCount += 1
+              return Response.json({
+                candidates: [{
+                  content: {
+                    parts: [{
+                      text:
+                        'Eight push-ups are visible. The torso stays mostly straight, while the hips rise slightly ahead of the shoulders on the final two repetitions.',
+                    }],
+                    role: 'model',
+                  },
+                  finishReason: 'STOP',
+                }],
+              })
+            },
+          },
+          approvalPolicy: 'never',
+          authorizeAcceptedMessageTarget: async ({ messageRef: requested }) =>
+            requested === messageRef
+              ? {
+                  participant: {
+                    assistantInputId: messageRef,
+                    senderHandle: 'synthetic-participant',
+                    source: 'telegram' as const,
+                  },
+                  targetInputId: messageRef,
+                }
+              : null,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            hostedRuntime: true,
+          }),
+          dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: promptResult.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const videoCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ANALYZE_VIDEO_TOOL.name
+          )
+
+        process.stdout.write(
+          `[group-video-analysis-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            providerCallCount,
+            scenario: 'authenticated participant requests own group video',
+            toolCallCount: videoCalls.length,
+          })}\n`,
+        )
+        expect(videoCalls).toHaveLength(1)
+        expect(videoCalls[0]).toMatchObject({
+          argumentsValue: {
+            message_ref: messageRef,
+            request_message_ref: messageRef,
+          },
+          kind: 'dynamic',
+        })
+        expect(providerCallCount).toBe(1)
+        expect(result.finalMessage).toMatch(/\b(?:eight|8)\b/iu)
+        expect(result.finalMessage).toMatch(/hip/iu)
+        expect(result.finalMessage).not.toMatch(
+          /(?:no|without).{0,30}(?:analy[sz]e[_ -]?video|video analysis) tool|deferred.{0,20}(?:tool|schema)|extract(?:ed|ing).{0,20}(?:still )?frames|reviewed.{0,20}(?:still )?frames|chat runtime/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
   it(
     'answers every human request after same-thread reconsideration',
     async () => {

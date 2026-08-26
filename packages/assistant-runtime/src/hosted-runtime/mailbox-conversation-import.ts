@@ -1858,7 +1858,7 @@ function isHostedConversationAnalyzeVideoRuntimeEligible(input: {
   wake: HostedExecutionConversationMessageWake;
 }): boolean {
   return hasHostedGeminiVideoAnalysisRuntimeKey(input.runtime)
-    && isHostedConversationPrivateDirectWake(input.wake);
+    && isHostedConversationAnalyzeVideoAudienceEligible(input.wake);
 }
 
 function hasHostedGeminiVideoAnalysisRuntimeKey(
@@ -1868,14 +1868,16 @@ function hasHostedGeminiVideoAnalysisRuntimeKey(
     && runtime.forwardedEnv[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV].trim().length > 0;
 }
 
-function isHostedConversationPrivateDirectWake(
+function isHostedConversationAnalyzeVideoAudienceEligible(
   wake: HostedExecutionConversationMessageWake,
 ): boolean {
   if (isHostedLinqConversationMessageWake(wake)) {
-    return wake.message.linqMessage.threadIsDirect !== false;
+    return wake.message.linqMessage.threadIsDirect !== false
+      || wake.message.routeAuthority != null;
   }
   if (isHostedTelegramConversationMessageWake(wake)) {
-    return wake.message.telegramMessage.threadIsDirect !== false;
+    return wake.message.telegramMessage.threadIsDirect !== false
+      || wake.message.routeAuthority != null;
   }
   if (isHostedEmailConversationMessageWake(wake)) {
     return resolveHostedEmailConversationDirectness({

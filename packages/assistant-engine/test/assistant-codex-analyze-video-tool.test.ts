@@ -117,17 +117,19 @@ describe('murph.analyze_video arguments and availability', () => {
       .toEqual([authorities[1]])
   })
 
-  it('parses only a message ref, optional attachment ordinal, and question', () => {
+  it('parses video and optional group-request message refs without runtime overrides', () => {
     expect(readAnalyzeVideoCall({
       attachment_ordinal: 2,
       message_ref: 'ain_11111111111111111111111111111111',
       question: 'Count the push-ups and describe visible form.',
+      request_message_ref: 'ain_22222222222222222222222222222222',
     })).toEqual({
       kind: 'analyze-video',
       args: {
         attachmentOrdinal: 2,
         messageRef: 'ain_11111111111111111111111111111111',
         question: 'Count the push-ups and describe visible form.',
+        requestMessageRef: 'ain_22222222222222222222222222222222',
       },
     })
   })
@@ -647,7 +649,129 @@ describe('executeAnalyzeVideoTool', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects group dispatch before reading or sending video bytes', async () => {
+  it('allows an authenticated group participant to analyze their own current video', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const requestInputId = `ain_${'2'.repeat(32)}`
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerResponse('One person completes eight push-ups.'),
+    )
+    const authorizeAcceptedMessageTarget = vi.fn(async (input: {
+      action: 'native-reply' | 'participant-effect' | 'reaction'
+      deliveryContextOrdinal: number
+      messageRef: string
+    }) => ({
+      participant: {
+        assistantInputId: input.messageRef,
+        senderHandle: 'participant-sentinel',
+        source: 'telegram' as const,
+      },
+      targetInputId: input.messageRef,
+    }))
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
+      getConversationScope: () => 'group',
+      getUserActionAcceptedInputIds: () => [fixture.inputId, requestInputId],
+      messageInput: { channel: 'telegram' } as never,
+      session: {
+        binding: { channel: 'telegram' },
+        sessionId: 'session_analyze_video_group_dispatch',
+      } as never,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      analyzeVideoTurnState: createAnalyzeVideoTurnState(),
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'What happens?',
+        request_message_ref: requestInputId,
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('eight push-ups'),
+        type: 'inputText',
+      }],
+      success: true,
+    })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledTimes(2)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a group request for another participant\'s video before reading bytes', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const requestInputId = `ain_${'2'.repeat(32)}`
+    const fetchImpl = vi.fn<typeof fetch>()
+    const materializeWorkspaceArtifacts = vi.fn(async () => ({
+      materializedArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Set<string>(),
+    }))
+    const authorizeAcceptedMessageTarget = vi.fn(async (input: {
+      action: 'native-reply' | 'participant-effect' | 'reaction'
+      deliveryContextOrdinal: number
+      messageRef: string
+    }) => ({
+      participant: {
+        assistantInputId: input.messageRef,
+        senderHandle:
+          input.messageRef === fixture.inputId
+            ? 'video-owner-sentinel'
+            : 'requester-sentinel',
+        source: 'telegram' as const,
+      },
+      targetInputId: input.messageRef,
+    }))
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
+      getConversationScope: () => 'group',
+      getUserActionAcceptedInputIds: () => [fixture.inputId, requestInputId],
+      messageInput: { channel: 'telegram' } as never,
+      session: {
+        binding: { channel: 'telegram' },
+        sessionId: 'session_analyze_video_group_dispatch',
+      } as never,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      analyzeVideoTurnState: createAnalyzeVideoTurnState(),
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl,
+      hostedToolContext,
+      materializeWorkspaceArtifacts,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'What happens?',
+        request_message_ref: requestInputId,
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('only when the requester sent'),
+        type: 'inputText',
+      }],
+      success: false,
+    })
+    expect(materializeWorkspaceArtifacts).not.toHaveBeenCalled()
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('requires the explicit request Message ref in a group before reading bytes', async () => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
     const fetchImpl = vi.fn<typeof fetch>()
     const materializeWorkspaceArtifacts = vi.fn(async () => ({
@@ -661,7 +785,7 @@ describe('executeAnalyzeVideoTool', () => {
       messageInput: { channel: 'telegram' } as never,
       session: {
         binding: { channel: 'telegram' },
-        sessionId: 'session_analyze_video_group_dispatch',
+        sessionId: 'session_analyze_video_group_missing_request_ref',
       } as never,
     })
 
@@ -683,7 +807,7 @@ describe('executeAnalyzeVideoTool', () => {
 
     expect(result.rpcResult).toMatchObject({
       contentItems: [{
-        text: expect.stringContaining('private direct conversation'),
+        text: expect.stringContaining('exact request Message ref'),
         type: 'inputText',
       }],
       success: false,

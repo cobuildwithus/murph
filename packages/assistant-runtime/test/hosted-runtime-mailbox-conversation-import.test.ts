@@ -463,13 +463,14 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test("waits for attachment evidence before notifying active turn input", async () => {
+  test("waits for attachment evidence before notifying an authenticated group video turn", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-notify-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake({
       message: {
+        accountLookupKey: "synthetic-account-lookup",
         channel: "linq",
         linqMessage: {
           chatId: "chat_evidence_notify",
@@ -490,9 +491,15 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
-          threadIsDirect: true,
+          threadIsDirect: false,
         },
         phoneLookupKey: "redacted-contact-sentinel",
+        routeAuthority: {
+          accountLookupKey: "synthetic-account-lookup",
+          channel: "linq",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_evidence_notify",
+        },
       },
     });
     const rawPath =
@@ -627,7 +634,7 @@ describe("hosted mailbox conversation import adapter", () => {
         type: "media",
         url: "redacted-attachment-url-sentinel",
       } as const,
-      name: "group MP4",
+      name: "group MP4 without route authority",
       runtime: createRuntime({
         forwardedEnv: {
           [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",

@@ -3458,11 +3458,52 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'analyze-video': {
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (userActionScope?.conversationScope !== 'direct') {
+      if (
+        userActionScope?.conversationScope === 'unverified-external'
+        || !userActionScope
+      ) {
         return toolTextResult(
           false,
-          'video analysis requires a verified private direct conversation',
+          'video analysis requires a verified direct or authenticated group conversation',
         )
+      }
+      if (userActionScope.conversationScope === 'group') {
+        const requestMessageRef = input.request.args.requestMessageRef
+        if (!requestMessageRef) {
+          return toolTextResult(
+            false,
+            'group video analysis requires the exact request Message ref; no analysis ran',
+          )
+        }
+        const [videoParticipant, requestParticipant] = await Promise.all([
+          authorizeDynamicToolParticipant({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: input.request.args.messageRef,
+          }),
+          requestMessageRef === input.request.args.messageRef
+            ? Promise.resolve(null)
+            : authorizeDynamicToolParticipant({
+                authorizer: input.authorizeAcceptedMessageTarget ?? null,
+                deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+                messageRef: requestMessageRef,
+              }),
+        ])
+        const resolvedRequestParticipant =
+          requestMessageRef === input.request.args.messageRef
+            ? videoParticipant
+            : requestParticipant
+        if (
+          !videoParticipant ||
+          !resolvedRequestParticipant ||
+          videoParticipant.source !== resolvedRequestParticipant.source ||
+          videoParticipant.senderHandle !== resolvedRequestParticipant.senderHandle
+        ) {
+          return toolTextResult(
+            false,
+            'group video analysis is available only when the requester sent the selected video; no analysis ran',
+          )
+        }
       }
       return await executeAnalyzeVideoDynamicTool({
         abortSignal: input.abortSignal ?? null,
