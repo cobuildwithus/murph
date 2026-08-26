@@ -42,6 +42,9 @@ generic projector, validation framework, or recovery state owner.
   `targetId`, evidence, and condition-history paths plus unknown-key and dynamic
   qualifier non-echo/no-write behavior. Fourteen focused tests and the affected
   Vault Usecases and CLI typechecks pass.
+- Exact corrected-head production assembly passes all eight parity probes. The
+  Vault CLI is 9,509,571 / 9,519,180 bytes with an 805-byte entry and
+  25,155-byte static closure; runner total is 11,346,915 / 11,393,617 bytes.
 
 ## Design
 
