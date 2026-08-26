@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-24
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -135,3 +135,14 @@ without changing automation ownership or adding a second error framework.
   method boundary. The broad shared path rewrite was deleted with no
   replacement. Focused daemon 15/15, batch 12/12, operator-config 6/6, and inbox
   seam 10/10 tests pass; all four affected package typechecks pass.
+- Current `main` through `2945c0daa4` is integrated at merge commit
+  `bf74bfcdf3`. Both CLI architecture owners were composed, and CLI schema,
+  command metadata, and skill hash were regenerated from authored sources.
+- Post-merge proof passes: daemon 15/15, batch 12/12, operator-config 6/6,
+  inbox seam 10/10, and bundle-boundary 14/14; all four affected package
+  typechecks, prepared runtime, and CLI package shape also pass.
+- Canonical production assembly passes all eight parity probes. Vault CLI is
+  9,552,878 / 9,553,004 bytes with an 805-byte entry and 25,155-byte static
+  closure; runner total is 11,367,625 / 11,393,617 bytes. The total-only ratchet
+  preserves the prior candidate's 126-byte allowance and leaves entry and
+  static-startup limits unchanged.
