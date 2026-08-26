@@ -293,7 +293,6 @@ function buildScheduledLogMarkdown(record: ScheduledLogRecord): string {
 function invalidScheduledLogRegistry(
   issues: readonly {
     code: string;
-    message: string;
     path: readonly PropertyKey[];
   }[] = [],
 ): VaultError {
@@ -304,7 +303,6 @@ function invalidScheduledLogRegistry(
       ? {
           issues: issues.map((issue) => ({
             code: issue.code,
-            message: issue.message,
             path: issue.path.map((segment) =>
               typeof segment === "string" || typeof segment === "number"
                 ? segment

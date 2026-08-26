@@ -27,7 +27,6 @@ class ScheduledLogQueryError extends Error {
   constructor(
     issues: readonly {
       code: string;
-      message: string;
       path: readonly PropertyKey[];
     }[] = [],
   ) {
@@ -37,7 +36,6 @@ class ScheduledLogQueryError extends Error {
       ? {
           issues: issues.map((issue) => ({
             code: issue.code,
-            message: issue.message,
             path: issue.path.map((segment) =>
               typeof segment === "string" || typeof segment === "number"
                 ? segment

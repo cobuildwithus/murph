@@ -1035,7 +1035,6 @@ function scheduledLogImportIssuePath(
 
 interface ScheduledLogValidationIssue {
   code: string;
-  message?: string;
   path: readonly PropertyKey[];
 }
 
@@ -1080,9 +1079,6 @@ function readScheduledLogValidationIssues(
     return [{
       path: issue.path,
       code: issue.code,
-      ...(typeof issue.message === "string" && issue.message.trim().length > 0
-        ? { message: issue.message.trim() }
-        : {}),
     }];
   });
 }
@@ -1091,22 +1087,19 @@ function storedScheduledLogFailureMessage(
   issues: readonly ScheduledLogValidationIssue[],
 ): string {
   const recovery = "Stop without retrying or writing scheduled logs and report that operator repair is required.";
-  const issue = issues.find((candidate) => {
-    return candidate.message !== undefined &&
-      scheduledLogImportIssuePath(candidate.path) !== undefined;
-  });
-  if (!issue?.message) {
+  const issue = issues[0];
+  if (!issue) {
     return `Stored scheduled-log registry data is invalid. ${recovery}`;
   }
 
   const publicPath = scheduledLogImportIssuePath(issue.path);
-  if (!publicPath) {
-    return `Stored scheduled-log registry data is invalid. ${recovery}`;
-  }
-
-  const reason = Array.from(issue.message).slice(0, 240).join("");
-  const separator = /[.!?]$/u.test(reason) ? " " : ". ";
-  return `Stored scheduled-log registry data is invalid at ${publicPath.join(".")}: ${reason}${separator}${recovery}`;
+  const code = /^[a-z][a-z0-9_]{0,63}$/u.test(issue.code)
+    ? issue.code
+    : "invalid_value";
+  const location = publicPath === undefined
+    ? `code ${code}`
+    : `path ${publicPath.join(".")}, code ${code}`;
+  return `Stored scheduled-log registry data is invalid (${location}). ${recovery}`;
 }
 
 type ScheduledLogInputSurface = "typed_save" | "import_json";
@@ -1139,12 +1132,6 @@ function toScheduledLogCliError(
         storedScheduledLogFailureMessage(issues),
         {
           hint: "Stop without retrying or writing scheduled logs and report that operator repair is required.",
-          issues: issues.flatMap((issue) => {
-            const publicPath = scheduledLogImportIssuePath(issue.path);
-            return publicPath === undefined
-              ? []
-              : [publicValidationIssue(issue, publicPath)];
-          }),
           stage: "read",
         },
       );

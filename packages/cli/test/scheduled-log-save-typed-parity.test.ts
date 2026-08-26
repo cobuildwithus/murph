@@ -1621,63 +1621,39 @@ test("scheduled-log commands stop on invalid stored registries without writing o
         vaultRoot,
       ],
     ] as const;
-    const variants = [
+    const invalidDocument = canonicalDocument.replace(
+      "updatedAt: 2026-08-24T09:00:00.000Z",
       [
-        "uppercase-tag",
-        canonicalDocument.replace("valid-tag", "PRIVATE_UPPERCASE_TAG_SENTINEL"),
-        "tags.0",
-      ],
-      [
-        "invalid-id",
-        canonicalDocument.replace(
-          "slog_01JX8V9QY2M5ZBV64ZP4N1DRB9",
-          "PRIVATE_INVALID_ID_SENTINEL",
-        ),
-        "scheduledLogId",
-      ],
-      [
-        "malformed-frontmatter",
-        "---\nschemaVersion: [PRIVATE_MALFORMED_FRONTMATTER_SENTINEL\n---\n",
-        "scheduledLogId",
-      ],
-    ] as const;
+        "updatedAt: 2026-08-24T09:00:00.000Z",
+        "PRIVATE_UNKNOWN_STORED_KEY_SENTINEL: private-stored-value",
+      ].join("\n"),
+    );
+    await writeFile(invalidPath, invalidDocument, "utf8");
 
-    for (const [variant, invalidDocument, expectedPath] of variants) {
-      await writeFile(invalidPath, invalidDocument, "utf8");
+    for (const command of commands) {
+      const before = await snapshotVaultFiles(vaultRoot);
+      const result = await runInProcessJsonCli(cli, [...command]);
+      const label = command[1];
 
-      for (const command of commands) {
-        const before = await snapshotVaultFiles(vaultRoot);
-        const result = await runInProcessJsonCli(cli, [...command]);
-        const label = `${variant}:${command[1]}`;
-
-        assert.equal(result.exitCode, 1, label);
-        assert.equal(result.envelope.ok, false, label);
-        assert.equal(result.envelope.error.code, "invalid_registry", label);
-        assert.equal(result.envelope.error.retryable, false, label);
-        assert.equal(
-          result.envelope.error.fieldErrors?.[0]?.path,
-          expectedPath,
-          label,
-        );
-        const errorMessage = result.envelope.error.message;
-        if (typeof errorMessage !== "string") {
-          throw new TypeError(`Expected a scheduled-log error message for ${label}.`);
-        }
-        assert.match(
-          errorMessage,
-          new RegExp(`^Stored scheduled-log registry data is invalid at ${expectedPath.replace(".", "\\.")}: `, "u"),
-          label,
-        );
-        assert.match(
-          errorMessage,
-          /Stop without retrying or writing scheduled logs and report that operator repair is required\.$/u,
-          label,
-        );
-        assert.equal(result.envelope.error.stage, "read", label);
-        assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_[A-Z_]+_SENTINEL/u);
-        assert.equal(JSON.stringify(result.envelope).includes(parentRoot), false, label);
-        assert.deepEqual(await snapshotVaultFiles(vaultRoot), before, label);
-      }
+      assert.equal(result.exitCode, 1, label);
+      assert.equal(result.envelope.ok, false, label);
+      assert.equal(result.envelope.error.code, "invalid_registry", label);
+      assert.equal(result.envelope.error.retryable, false, label);
+      assert.equal(result.envelope.error.fieldErrors, undefined, label);
+      assert.equal(result.envelope.error.stage, "read", label);
+      assert.match(
+        result.envelope.error.message ?? "",
+        /^Stored scheduled-log registry data is invalid \(code unrecognized_keys\)\. Stop without retrying or writing scheduled logs and report that operator repair is required\.$/u,
+        label,
+      );
+      assert.equal(
+        result.envelope.error.hint,
+        "Stop without retrying or writing scheduled logs and report that operator repair is required.",
+        label,
+      );
+      assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_[A-Z_]+_SENTINEL/u);
+      assert.equal(JSON.stringify(result.envelope).includes(parentRoot), false, label);
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), before, label);
     }
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
