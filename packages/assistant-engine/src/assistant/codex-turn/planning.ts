@@ -97,6 +97,7 @@ import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantCreativeNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -257,6 +258,7 @@ export type AssistantCodexTurnPromptProfile =
   | 'assistant-ask-continuation'
   | 'system-notification'
   | 'creative-notification'
+  | 'operator-message'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
@@ -518,13 +520,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.profile.threadScope === 'isolated-thread' &&
     outputOnlyTurn
+  const operatorMessageNotificationTurn =
+    input.profile.promptProfile === 'operator-message' &&
+    input.profile.threadScope === 'isolated-thread' &&
+    outputOnlyTurn
   const onboardingGoalCheckinTurn =
     input.input.scheduledInvocationAuthority?.automationId ===
       MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
   const systemNotificationTurn =
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'system-notification' ||
-    input.profile.promptProfile === 'creative-notification'
+    input.profile.promptProfile === 'creative-notification' ||
+    operatorMessageNotificationTurn
   const privateInteractiveProviderTurn =
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
@@ -580,6 +587,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'assistant-ask-continuation' ||
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'creative-notification' ||
+    operatorMessageNotificationTurn ||
     onboardingGoalCheckinTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
@@ -818,6 +826,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
     if (input.profile.promptProfile === 'creative-notification') {
       return buildAssistantCreativeNotificationPromptWithCacheMetadata({
+        channel: resolvedChannel,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
+    if (input.profile.promptProfile === 'operator-message') {
+      return buildAssistantOperatorMessagePromptWithCacheMetadata({
         channel: resolvedChannel,
       }, {
         toolSchemaHash,

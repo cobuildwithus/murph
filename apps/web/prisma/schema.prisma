@@ -1210,6 +1210,7 @@ model HostedOperatorTask {
   memberId             String        @map("member_id")
   requestedByMemberId  String?       @map("requested_by_member_id")
   idempotencyKey       String        @unique @map("idempotency_key")
+  requestShapeHash     String        @map("request_shape_hash")
   requestMailboxItemId String        @unique @map("request_mailbox_item_id")
   source               String
   kind                 String

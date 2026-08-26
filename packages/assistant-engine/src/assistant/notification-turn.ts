@@ -147,7 +147,7 @@ const ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
-  promptProfile: 'conversation',
+  promptProfile: 'operator-message',
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }

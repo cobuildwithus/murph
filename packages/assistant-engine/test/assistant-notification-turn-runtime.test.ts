@@ -4041,7 +4041,7 @@ test.each([
     profile: 'creative-response-text' as const,
   },
   {
-    expectedPromptProfile: 'conversation',
+    expectedPromptProfile: 'operator-message',
     expectedToolProfile: 'output-only-turn',
     profile: 'operator-message' as const,
   },

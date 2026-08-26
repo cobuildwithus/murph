@@ -8,6 +8,10 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
 } from "../src/contracts.ts";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
+import {
+  parseHostedOperatorTaskControlRequest,
+  parseHostedOperatorTaskControlResponse,
+} from "../src/operator-task-control.ts";
 
 describe("hosted operator task contracts", () => {
   it("round trips the closed read-only operator task target", () => {
@@ -30,16 +34,31 @@ describe("hosted operator task contracts", () => {
 
   it("accepts the message-only operator prompt profile", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "assistant.notification.requested:operator-task:synthetic",
+      eventId: "assistant.notification.requested:operator-task:opt_synthetic",
       memberId: "hbm_synthetic",
       notification: {
-        instructions: "Write one natural direct message.",
+        deliveryDedupeToken:
+          "assistant.notification.requested:operator-task:opt_synthetic",
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey:
+          "assistant.notification.requested:operator-task:opt_synthetic",
+        externalThreadRouteAuthority: {
+          accountLookupKey: "account_synthetic",
+          channel: "telegram",
+          containerMemberId: "hbm_synthetic",
+          threadId: "thread_synthetic",
+        },
+        instructions: "Author one natural direct message.",
         notificationPromptProfile: "operator-message",
+        operatorTask: {
+          expiresAt: "2026-08-25T18:10:00.000Z",
+          taskId: "opt_synthetic",
+        },
         responsePolicy: { kind: "require_send" },
         route: {
           actorId: null,
           channel: "telegram",
-          delivery: { kind: "thread", target: "thread_synthetic" },
+          delivery: { kind: "explicit", target: "thread_synthetic" },
           identityId: null,
           threadId: "thread_synthetic",
           threadIsDirect: true,
@@ -49,5 +68,23 @@ describe("hosted operator task contracts", () => {
     });
 
     expect(parseHostedExecutionWake(wake)).toEqual(wake);
+  });
+
+  it("parses the closed runtime control contract", () => {
+    expect(parseHostedOperatorTaskControlRequest({
+      action: "authorize",
+      expiresAt: "2036-08-25T18:10:00.000Z",
+      requestId: "assistant.notification.requested:operator-task:opt_synthetic",
+      taskId: "opt_synthetic",
+    })).toEqual({
+      action: "authorize",
+      expiresAt: "2036-08-25T18:10:00.000Z",
+      requestId: "assistant.notification.requested:operator-task:opt_synthetic",
+      taskId: "opt_synthetic",
+    });
+    expect(parseHostedOperatorTaskControlResponse({ status: "completed" }))
+      .toEqual({ status: "completed" });
+    expect(parseHostedOperatorTaskControlResponse({ status: "failed" }))
+      .toEqual({ status: "failed" });
   });
 });

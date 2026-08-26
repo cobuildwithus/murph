@@ -8,6 +8,8 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  type HostedOperatorTaskControlRequest,
+  type HostedOperatorTaskControlResponse,
   type HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution";
 
@@ -82,6 +84,13 @@ export async function admitHostedOperatorTask(
     HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
     "prompt",
   );
+  const requestShapeHash = createOperatorTaskRequestShapeHash({
+    kind: input.kind,
+    memberId,
+    prompt,
+    requestedByMemberId,
+    source: input.source,
+  });
   await requireHostedRuntimeActiveAccess(memberId, { prisma });
 
   const taskId = createOperatorTaskId({ idempotencyKey, source: input.source });
@@ -110,6 +119,7 @@ export async function admitHostedOperatorTask(
         prisma,
         prompt,
         requestMailboxItemId,
+        taskId,
       });
 
   const task = await runWithPreparedHostedMailboxItemAppendCrypto({
@@ -125,6 +135,7 @@ export async function admitHostedOperatorTask(
           || existing.kind !== input.kind
           || existing.source !== input.source
           || existing.requestedByMemberId !== requestedByMemberId
+          || existing.requestShapeHash !== requestShapeHash
         ) {
           throw operatorTaskError(
             "HOSTED_OPERATOR_TASK_IDEMPOTENCY_CONFLICT",
@@ -156,6 +167,7 @@ export async function admitHostedOperatorTask(
           kind: input.kind,
           memberId,
           requestMailboxItemId,
+          requestShapeHash,
           requestedByMemberId,
           source: input.source,
           status: input.kind === "member_message" ? "accepted" : "queued",
@@ -315,6 +327,85 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
   };
 }
 
+export async function handleHostedOperatorMessageControl(input: {
+  boundRuntimeMemberId: string;
+  now?: Date;
+  prisma?: PrismaClient;
+  request: HostedOperatorTaskControlRequest;
+}): Promise<HostedOperatorTaskControlResponse> {
+  const prisma = input.prisma ?? getPrisma();
+  const task = await prisma.hostedOperatorTask.findUnique({
+    where: { id: input.request.taskId },
+  });
+  if (
+    !task
+    || task.kind !== "member_message"
+    || task.memberId !== input.boundRuntimeMemberId
+    || task.requestMailboxItemId !== input.request.requestId
+    || task.expiresAt.toISOString() !== input.request.expiresAt
+  ) {
+    throw operatorTaskError(
+      "HOSTED_OPERATOR_TASK_CONTROL_INVALID",
+      "Operator task runtime authority is invalid.",
+      409,
+    );
+  }
+  if (task.status === "completed") {
+    return { status: "already_completed" };
+  }
+  const now = input.now ?? new Date();
+  if (task.status === "failed") {
+    return { status: "expired" };
+  }
+  if (input.request.action === "authorize") {
+    if (task.expiresAt <= now) {
+      await prisma.hostedOperatorTask.updateMany({
+        data: { completedAt: now, status: "failed" },
+        where: { id: task.id, status: { in: ["accepted", "running"] } },
+      });
+      return { status: "expired" };
+    }
+    const updated = await prisma.hostedOperatorTask.updateMany({
+      data: { status: "running" },
+      where: { id: task.id, status: "accepted" },
+    });
+    if (updated.count === 1 || task.status === "running") {
+      return { status: "authorized" };
+    }
+    return { status: "expired" };
+  }
+  if (input.request.action === "fail") {
+    const failed = await prisma.hostedOperatorTask.updateMany({
+      data: { completedAt: now, status: "failed" },
+      where: { id: task.id, status: { in: ["accepted", "running"] } },
+    });
+    if (failed.count === 1) {
+      return { status: "failed" };
+    }
+    const current = await prisma.hostedOperatorTask.findUnique({
+      select: { status: true },
+      where: { id: task.id },
+    });
+    return {
+      status: current?.status === "completed" ? "already_completed" : "expired",
+    };
+  }
+  const completed = await prisma.hostedOperatorTask.updateMany({
+    data: { completedAt: now, status: "completed" },
+    where: { id: task.id, status: { in: ["accepted", "running"] } },
+  });
+  if (completed.count === 1) {
+    return { status: "completed" };
+  }
+  const current = await prisma.hostedOperatorTask.findUnique({
+    select: { status: true },
+    where: { id: task.id },
+  });
+  return {
+    status: current?.status === "completed" ? "already_completed" : "expired",
+  };
+}
+
 async function buildOperatorMessageWake(input: {
   expiresAt: Date;
   memberId: string;
@@ -322,6 +413,7 @@ async function buildOperatorMessageWake(input: {
   prisma: PrismaClient;
   prompt: string;
   requestMailboxItemId: string;
+  taskId: string;
 }) {
   const destination = await resolveHostedAssistantNotificationDestination({
     memberId: input.memberId,
@@ -354,12 +446,16 @@ async function buildOperatorMessageWake(input: {
       deliveryIdempotencyKey: input.requestMailboxItemId,
       externalThreadRouteAuthority: bound.externalThreadRouteAuthority,
       instructions: [
-        "Write and send one natural direct message to this member.",
-        "Use the existing private conversation and Murph context when useful. Do not mention internal tools, queues, operators, or claim the member requested this message. Do not perform any other action. Return only the message text.",
+        "Author one natural in-chat continuation for this member's existing private conversation.",
+        "Use the bounded private conversation context when useful. The platform owns delivery; do not mention internal tools, queues, operators, or claim the member requested this message. Do not perform any other action.",
         "The authorized team request is:",
         JSON.stringify({ request: input.prompt }),
       ].join("\n\n"),
       notificationPromptProfile: "operator-message",
+      operatorTask: {
+        expiresAt: input.expiresAt.toISOString(),
+        taskId: input.taskId,
+      },
       responsePolicy: { kind: "require_send" },
       route: bound.route,
     },
@@ -378,6 +474,20 @@ function createOperatorTaskId(input: {
     .update("\0")
     .update(input.idempotencyKey)
     .digest("hex")}`;
+}
+
+function createOperatorTaskRequestShapeHash(input: {
+  kind: HostedOperatorTaskKind;
+  memberId: string;
+  prompt: string;
+  requestedByMemberId: string | null;
+  source: HostedOperatorTaskSource;
+}): string {
+  return createHash("sha256")
+    .update("murph.hosted-operator-task-request.v1")
+    .update("\0")
+    .update(JSON.stringify(input))
+    .digest("hex");
 }
 
 function createOperatorAssistantAskRequestId(taskId: string): string {

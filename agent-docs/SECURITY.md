@@ -1683,8 +1683,10 @@ neither capability.
 
 Operator-task admission is restricted to the existing hosted Ops allowlist and
 same-origin mutation boundary. Every task is bound to one active member and the
-admitting operator. A diagnostic receives one fixed read-only disclosure,
+admitting operator, and a stable idempotency key is bound to an exact hashed
+request shape. A diagnostic receives one fixed read-only disclosure,
 cannot deliver to the member, and stores its bounded result with member-bound
 secure-box encryption. A message is restricted to an existing private direct
-route and enters the normal notification/outbox authority checks. Neither path
-creates first-contact, group, arbitrary tool, or runtime-shell authority.
+route; Web reauthorizes the member-bound task immediately before model work and
+again at the normal notification/outbox boundary. Neither path creates
+first-contact, group, arbitrary tool, or runtime-shell authority.

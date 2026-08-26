@@ -291,6 +291,11 @@ export interface HostedExecutionGroupContextHandoffNotification {
   originAssistantInputId: string;
 }
 
+export interface HostedExecutionOperatorTaskNotification {
+  expiresAt: string;
+  taskId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
@@ -300,6 +305,7 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   groupContextHandoff?: HostedExecutionGroupContextHandoffNotification;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  operatorTask?: HostedExecutionOperatorTaskNotification;
   privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;

@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2Icon, RefreshCwIcon, SendIcon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -13,6 +13,10 @@ import type {
   HostedOperatorTaskKind,
   HostedOperatorTaskView,
 } from "@/src/lib/hosted-ops/operator-task";
+import {
+  type OperatorTaskSubmissionIdentity,
+  resolveOperatorTaskSubmissionIdentity,
+} from "@/src/lib/hosted-ops/operator-task-submission";
 
 export function OperatorTasksClient({
   initialTasks,
@@ -21,11 +25,12 @@ export function OperatorTasksClient({
 }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [kind, setKind] = useState<HostedOperatorTaskKind>("diagnostic");
-  const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"refresh" | "submit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const submissionIdentity = useRef<OperatorTaskSubmissionIdentity | null>(null);
 
   async function refresh(): Promise<void> {
-    setPending(true);
+    setPendingAction("refresh");
     setError(null);
     try {
       const response = await requestJson<{ tasks: HostedOperatorTaskView[] }>(
@@ -35,32 +40,41 @@ export function OperatorTasksClient({
     } catch (cause) {
       setError(describeError(cause));
     } finally {
-      setPending(false);
+      setPendingAction(null);
     }
   }
 
   async function submit(formData: FormData): Promise<void> {
-    setPending(true);
+    const memberId = String(formData.get("memberId") ?? "").trim();
+    const prompt = String(formData.get("prompt") ?? "").trim();
+    const fingerprint = JSON.stringify({ kind, memberId, prompt });
+    submissionIdentity.current = resolveOperatorTaskSubmissionIdentity(
+      submissionIdentity.current,
+      fingerprint,
+      () => crypto.randomUUID(),
+    );
+    setPendingAction("submit");
     setError(null);
     try {
       const task = await requestJson<HostedOperatorTaskView>(
         "/api/ops/operator-tasks",
         {
           body: JSON.stringify({
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: submissionIdentity.current.key,
             kind,
-            memberId: String(formData.get("memberId") ?? ""),
-            prompt: String(formData.get("prompt") ?? ""),
+            memberId,
+            prompt,
           }),
           headers: { "Content-Type": "application/json" },
           method: "POST",
         },
       );
+      submissionIdentity.current = null;
       setTasks((current) => [task, ...current].slice(0, 20));
     } catch (cause) {
       setError(describeError(cause));
     } finally {
-      setPending(false);
+      setPendingAction(null);
     }
   }
 
@@ -133,9 +147,9 @@ export function OperatorTasksClient({
             />
           </div>
           <div>
-            <Button disabled={pending} type="submit">
+            <Button disabled={pendingAction !== null} type="submit">
               <SendIcon data-icon="inline-start" />
-              {pending ? "Submitting..." : "Submit task"}
+              {pendingAction === "submit" ? "Submitting..." : "Submit task"}
             </Button>
           </div>
         </form>
@@ -151,9 +165,9 @@ export function OperatorTasksClient({
           <h2 className="font-serif text-xl font-semibold" id="operator-task-history">
             Recent tasks
           </h2>
-          <Button disabled={pending} onClick={() => void refresh()} size="sm" type="button" variant="outline">
+          <Button disabled={pendingAction !== null} onClick={() => void refresh()} size="sm" type="button" variant="outline">
             <RefreshCwIcon data-icon="inline-start" />
-            Refresh
+            {pendingAction === "refresh" ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
         {tasks.length === 0 ? (
@@ -179,7 +193,7 @@ export function OperatorTasksClient({
             ) : null}
             {task.kind === "member_message" ? (
               <p className="mt-3 text-xs text-muted-foreground">
-                Handed to the normal Murph conversation. Delivery receipts remain in the messaging system.
+                The task ends when one message intent enters the normal Murph conversation. Provider delivery receipts remain in the messaging system.
               </p>
             ) : null}
             <p className="mt-3 text-xs text-muted-foreground">
@@ -207,13 +221,16 @@ function describeError(cause: unknown): string {
 
 function describeTaskStatus(task: HostedOperatorTaskView): string {
   if (task.status === "accepted") {
-    return "Handed to Murph";
+    return "Queued";
   }
   if (task.status === "running") {
-    return "Inspecting";
+    return task.kind === "member_message" ? "Preparing message" : "Inspecting";
   }
   if (task.status === "failed") {
     return "Could not complete";
   }
-  return task.status === "completed" ? "Completed" : "Queued";
+  if (task.status === "completed") {
+    return task.kind === "member_message" ? "Queued to messaging" : "Completed";
+  }
+  return "Queued";
 }

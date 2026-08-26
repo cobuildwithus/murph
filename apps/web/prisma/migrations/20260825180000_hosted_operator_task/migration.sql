@@ -3,6 +3,7 @@ CREATE TABLE "hosted_operator_task" (
     "member_id" TEXT NOT NULL,
     "requested_by_member_id" TEXT,
     "idempotency_key" TEXT NOT NULL,
+    "request_shape_hash" TEXT NOT NULL,
     "request_mailbox_item_id" TEXT NOT NULL,
     "source" TEXT NOT NULL,
     "kind" TEXT NOT NULL,

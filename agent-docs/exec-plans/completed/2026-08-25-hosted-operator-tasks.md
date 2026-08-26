@@ -84,10 +84,15 @@ Updated: 2026-08-25
 ## Decisions
 
 - One `HostedOperatorTask` row is the only new canonical state owner.
+- Its stable idempotency key is bound to a persisted digest of the normalized
+  task request, so a retry can only replay the same intent.
 - One task kind carries both diagnostic and member-message work; behavior stays
   closed and explicit rather than becoming an arbitrary command runner.
 - The Web admission function is the durable reusable primitive. UI, workflow,
   and future cron callers do not receive separate execution paths.
+- Member messages use an explicit output-only prompt profile and Web task
+  authorization at the existing provider and pre-delivery hooks; completion
+  means one intent entered normal messaging, not provider delivery.
 - Delivery disclosure is prompt semantics, not a Web-authored fixed prefix or
   a draft round trip.
 
