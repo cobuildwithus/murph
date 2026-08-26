@@ -75,6 +75,12 @@ attestation failure remains fail-closed. This boundary and its focused proof
 are specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+Direct iMessage workout apply may carry bounded rendering context and return an
+optional authoritative post-write V4/V6 card in the existing terminal receipt.
+Mutation authority remains with the locked canonical workout, and response-card
+construction adds no reread, queue, or persisted projection. This contract is
+specified by `agent-docs/RELIABILITY.md`.
+
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, one authenticated-operator/same-repository PR predicate,

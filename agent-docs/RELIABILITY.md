@@ -2619,6 +2619,20 @@ card. This action never writes the workout. Missing, duplicate, structurally
 changed, oversized, or cross-member targets fail closed as `workout_changed`,
 leaving the embedded snapshot in place. The result reuses the existing strict
 card decoder rather than defining a parallel workout wire.
+An apply request may opt into the same response path by carrying one optional,
+strictly bounded workout-card presentation. That presentation is rendering
+context only: mutation targeting, optimistic comparison, completion, and every
+canonical value still come from the existing action and locked workout owner.
+On `applied` or `unchanged`, including exact replay, runtime reconciles the
+presentation against the canonical record already returned by the write or
+replay lookup and may attach one `workout.live.apply` V1 result containing the
+ordinary authoritative V6 URL, or the ordinary V4 URL when editing is
+unavailable or V6 exceeds the existing limit. A structural mismatch,
+unsupported projection, or oversized V4 simply omits that optional result
+without changing the successful mutation outcome. Requests that omit
+presentation also omit the result, so deployed readers retain their existing
+apply receipt. This path adds no second snapshot action, canonical reread,
+persisted projection, queue, or receipt owner.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
