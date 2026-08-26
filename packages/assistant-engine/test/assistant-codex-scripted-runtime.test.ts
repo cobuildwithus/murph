@@ -2924,7 +2924,7 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
+  cmd: "sed -n '1,/^## Bounded observation runs/p' skills/food-journal/SKILL.md",
 });
 text(result.output);
 `,
