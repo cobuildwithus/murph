@@ -190,9 +190,10 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
 const ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION = [
-  'New messages arrived before delivery.',
-  'Re-evaluate all accepted messages under the group turn rules and return one final result.',
-  'Do not mention this review or repeat completed effects.',
+  'Additional group messages joined this turn.',
+  'Replace the draft with one final result under the group turn rules.',
+  'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
+  'Do not repeat completed effects or mention the draft or this instruction.',
 ].join(' ')
 
 function shouldHoldAssistantGroupReplyDraft(input: {
@@ -707,6 +708,7 @@ export async function sendAssistantMessageLocal(
       }
       let currentSession = resolved.session
       let deliverySupersededTypingIndicator = false
+      let providerRequestOrdinal = 0
 
       try {
         if (
@@ -1154,7 +1156,6 @@ export async function sendAssistantMessageLocal(
           : null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
-        let providerRequestOrdinal = 0
         let providerRequestDeliveryContextBaseOrdinal = 0
         let nextUsageRecordOrdinal = 0
         const heldGroupAcceptedTranscriptInputs: Array<{
@@ -1308,8 +1309,7 @@ export async function sendAssistantMessageLocal(
             input: previousInput,
           })
           currentInput =
-            holdGroupReplyDraft &&
-            acceptanceInput.providerRequestOrdinal === 0
+            holdGroupReplyDraft
               ? {
                   ...nextInput,
                   prompt: `${previousInput.prompt}\n\n${nextInput.prompt}`,
@@ -1805,10 +1805,12 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
             const failedProviderResumeStateAction =
-              resolveAssistantProviderResumeStateAction({
-                codexThreadId: providerOutcome.codexThreadId ?? null,
-                threadScope,
-              })
+              providerRequestOrdinal === 1
+                ? 'preserve-existing'
+                : resolveAssistantProviderResumeStateAction({
+                    codexThreadId: providerOutcome.codexThreadId ?? null,
+                    threadScope,
+                  })
             if (progressDeliveredSessionRef.value) {
               currentSession = applyAssistantProgressDeliveredSession({
                 progressDeliveredSession: progressDeliveredSessionRef.value,
@@ -2086,41 +2088,55 @@ export async function sendAssistantMessageLocal(
           })
           if (draftWindowOutcome.kind === 'review') {
             providerRequestOrdinal = 1
-            const accepted = await acceptActiveTurnInput({
-              activeTurnInput: draftWindowOutcome.acceptedInput,
-              providerRequestAcceptedInputIds,
-              providerRequestOrdinal,
-              sessionId: currentSession.sessionId,
-            })
-            replyDeliveryContexts.push(
-              pickAssistantReplyDeliveryContext(currentInput),
-            )
-            providerRequestDeliveryContextBaseOrdinal =
-              replyDeliveryContexts.length - 1
-            acceptedInputIdsByDeliveryContextOrdinal[
-              providerRequestDeliveryContextBaseOrdinal
-            ] = accepted.acceptedInputItems.map((item) => item.id)
-            currentSession = applyAssistantProviderTurnResumeInMemory({
-              providerResult,
-              session: currentSession,
-            })
-            currentInput = {
-              ...currentInput,
-              turnContext: appendAssistantTurnContext(
-                currentInput.turnContext,
-                ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
-              ),
-            }
-            const reconsiderationRequest = await runCurrentProviderRequest({
-              allowFailedNoReplyRecovery: false,
-            })
-            if (reconsiderationRequest.kind === 'completed') {
-              throw new VaultCliError(
-                'ASSISTANT_GROUP_DRAFT_RECONSIDERATION_INVALID_RECOVERY',
-                'The group reply reconsideration unexpectedly completed through provider failure recovery.',
+            try {
+              const accepted = await acceptActiveTurnInput({
+                activeTurnInput: draftWindowOutcome.acceptedInput,
+                providerRequestAcceptedInputIds,
+                providerRequestOrdinal,
+                sessionId: currentSession.sessionId,
+              })
+              replyDeliveryContexts.push(
+                pickAssistantReplyDeliveryContext(currentInput),
               )
+              providerRequestDeliveryContextBaseOrdinal =
+                replyDeliveryContexts.length - 1
+              acceptedInputIdsByDeliveryContextOrdinal[
+                providerRequestDeliveryContextBaseOrdinal
+              ] = accepted.acceptedInputItems.map((item) => item.id)
+              currentSession = applyAssistantProviderTurnResumeInMemory({
+                providerResult,
+                session: currentSession,
+              })
+              currentInput = {
+                ...currentInput,
+                turnContext: appendAssistantTurnContext(
+                  currentInput.turnContext,
+                  ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
+                ),
+              }
+              const reconsiderationRequest = await runCurrentProviderRequest({
+                allowFailedNoReplyRecovery: false,
+              })
+              if (reconsiderationRequest.kind === 'completed') {
+                throw new VaultCliError(
+                  'ASSISTANT_GROUP_DRAFT_RECONSIDERATION_INVALID_RECOVERY',
+                  'The group reply reconsideration unexpectedly completed through provider failure recovery.',
+                )
+              }
+              providerResult = reconsiderationRequest.providerResult
+            } finally {
+              currentSession = {
+                ...currentSession,
+                codexResume: null,
+                resumeState: null,
+              }
+              await runAssistantTurnBestEffort(async () => {
+                currentSession = await clearAssistantSessionCodexResumeState({
+                  session: currentSession,
+                  vault: input.vault,
+                })
+              })
             }
-            providerResult = reconsiderationRequest.providerResult
           }
           providerResult = selectAssistantGroupProviderResult(providerResult)
         }
@@ -2238,11 +2254,16 @@ export async function sendAssistantMessageLocal(
           }) ?? response
         })
         const providerResumeStateAction =
-          resolveAssistantProviderResumeStateAction({
-            codexThreadId: providerResult.codexThreadId ?? null,
-            threadScope,
-          })
-        if (providerResumeStateAction === 'clear') {
+          providerRequestOrdinal === 1
+            ? 'clear'
+            : resolveAssistantProviderResumeStateAction({
+                codexThreadId: providerResult.codexThreadId ?? null,
+                threadScope,
+              })
+        if (
+          providerRequestOrdinal === 0 &&
+          providerResumeStateAction === 'clear'
+        ) {
           currentSession = await clearAssistantSessionCodexResumeState({
             session: currentSession,
             vault: input.vault,
@@ -2601,7 +2622,10 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
         })
 
-        if (failedSession !== currentSession) {
+        if (
+          providerRequestOrdinal === 1 ||
+          failedSession !== currentSession
+        ) {
           await runAssistantTurnBestEffort(() =>
             saveAssistantSession(input.vault, failedSession),
           )

@@ -157,7 +157,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // workout graph. None of these changes alter startup topology.
 // The reviewed event, document, intake, and export recovery allowance adds
 // 17,260 B to the same lazy graph. Entry and static-startup limits stay put.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_527_943;
+// Experiment and Murph Age recovery metadata add another 8,772 B to the lazy
+// CLI graph. Entry and static-startup limits remain unchanged.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_536_715;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

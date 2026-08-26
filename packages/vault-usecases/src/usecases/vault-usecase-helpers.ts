@@ -230,6 +230,7 @@ interface VaultErrorMapping {
   code: string
   message?: string
   details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
+  preserveDetails?: boolean
 }
 
 const publicEventContractFields = new Set([
@@ -423,7 +424,7 @@ export function toVaultCliError(
     mapping?.message ?? error.message,
     {
       vaultCode: error.code,
-      ...error.details,
+      ...(mapping?.preserveDetails === false ? {} : error.details),
       ...mappedDetails,
     },
   )

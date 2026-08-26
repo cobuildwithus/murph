@@ -19,10 +19,12 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import {
+  CONNECTED_APP_COMPLETION_HOME_MARKER,
   type ConnectedAppCompletionSearchParams,
   resolveConnectedAppCompletionDialogModel,
 } from "@/src/lib/connected-apps/connect-completion";
 import {
+  DEVICE_SYNC_COMPLETION_HOME_MARKER,
   resolveDeviceSyncCompletionDialogModel,
   type DeviceSyncCompletionSearchParams,
 } from "@/src/lib/device-sync/connect-completion";
@@ -57,6 +59,55 @@ export default async function HomePage({
 
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();
+  const hasCompletionMarker = readsCompletionMarker(
+    resolvedSearchParams[DEVICE_SYNC_COMPLETION_HOME_MARKER],
+  ) || readsCompletionMarker(
+    resolvedSearchParams[CONNECTED_APP_COMPLETION_HOME_MARKER],
+  );
+  const initialVisitProjectionPromise = member
+    ? (async () => {
+        const state = await readHostedInitialOnboardingState({
+          memberId: member.id,
+          prisma,
+        });
+        return {
+          contactAction: !hasCompletionMarker && state.status === "pending"
+            ? await resolveHomeInitialVisitContactAction()
+            : null,
+          state,
+        };
+      })()
+    : Promise.resolve(null);
+  const readMessagingSetupState = () => member
+    ? readHostedMemberMessagingSetupState({
+        memberId: member.id,
+        prisma,
+      })
+    : null;
+  const messagingSetupStatePromise = hasCompletionMarker
+    ? Promise.resolve(readMessagingSetupState())
+    : initialVisitProjectionPromise.then(
+        readMessagingSetupState,
+        readMessagingSetupState,
+      );
+  const deviceCompletionPromise = Promise.resolve(
+    resolveDeviceSyncCompletionDialogModel({
+      member,
+      searchParams: resolvedSearchParams,
+    }),
+  );
+  const connectedAppCompletionPromise = deviceCompletionPromise.then(
+    (deviceCompletion) => deviceCompletion
+      ? null
+      : resolveConnectedAppCompletionDialogModel({
+          member,
+          searchParams: resolvedSearchParams,
+        }),
+    () => resolveConnectedAppCompletionDialogModel({
+      member,
+      searchParams: resolvedSearchParams,
+    }),
+  );
   const homeProjectionResults = await Promise.allSettled([
     shouldShowHomeDeviceSyncStep({
       member,
@@ -69,34 +120,10 @@ export default async function HomePage({
           prisma,
         })
       : Promise.resolve(null),
-    resolveDeviceSyncCompletionDialogModel({
-      member,
-      searchParams: resolvedSearchParams,
-    }),
-    resolveConnectedAppCompletionDialogModel({
-      member,
-      searchParams: resolvedSearchParams,
-    }),
-    member
-      ? (async () => {
-          const state = await readHostedInitialOnboardingState({
-            memberId: member.id,
-            prisma,
-          });
-          return {
-            contactAction: state.status === "pending"
-              ? await resolveHomeInitialVisitContactAction()
-              : null,
-            state,
-          };
-        })()
-      : Promise.resolve(null),
-    member
-      ? readHostedMemberMessagingSetupState({
-          memberId: member.id,
-          prisma,
-        })
-      : Promise.resolve(null),
+    deviceCompletionPromise,
+    connectedAppCompletionPromise,
+    initialVisitProjectionPromise,
+    messagingSetupStatePromise,
   ]);
   const [
     showDeviceStepResult,
@@ -244,4 +271,8 @@ async function resolveHomeInitialVisitContactAction() {
     console.warn("Home initial onboarding contact projection unavailable.");
     return null;
   }
+}
+
+function readsCompletionMarker(value: string | string[] | undefined) {
+  return (Array.isArray(value) ? value[0] : value) === "1";
 }
