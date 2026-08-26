@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-16
+Last verified: 2026-08-26
 
 ## Accepted-Message Targeting
 
@@ -858,9 +858,15 @@ checkpointing handoff serializes profile-writer transfer between the normal
 task browser and the Managed Auth browser. Saved credentials, health checks,
 and automatic reauthentication are enabled for managed connections, session
 recording is disabled, and account deletion removes connections before the
-profile. Completing a direct Live View login leaves the awaiting task browser
-as the sole profile writer so the public Done request can return without waiting
-for profile checkpoint and replacement. Only a later conversation-authorized
+profile. Kernel session identity authorizes Web-owned automation independently
+of the optional Live View capability; an unapproved Live View origin blocks
+human exposure, not automation. One code-owned Kernel host-suffix list derives
+the Live View validator and CSP for the documented `*.kernel.sh:8443` and
+`*.onkernel.com:8443` families. Direct handoff validates before link publication,
+and Managed Auth validates only when converting to its Live View fallback.
+Completing a direct Live View login leaves the
+awaiting task browser as the sole profile writer so the public Done request can
+return without waiting for profile checkpoint and replacement. Only a later conversation-authorized
 resume may atomically claim the completed handoff as the sole `checkpointing`
 provider owner. That owner stops the browser to save the profile, creates and
 durably publishes its replacement, and atomically consumes the claim while
