@@ -3105,7 +3105,22 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       },
     })
 
+    const wrappedVaultIssue = recordCommand({
+      command:
+        'bash -lc "vault-cli knowledge show private-page --format json"',
+      exitCode: 2,
+      output: 'private vault output',
+    })
+    expect(wrappedVaultIssue).toMatchObject({
+      details: {
+        commandFamily: 'vault-cli knowledge',
+        commandOrdinal: 7,
+        exitCode: 2,
+      },
+    })
+
     const commandsWithExecutableShellSyntax = [
+      'bash -lc "rg private-query /tmp/private-record"',
       'rg private-query /tmp/private-record | head',
       'rg private-query /tmp/private-record; head /tmp/private-record',
       'rg private-query /tmp/private-record && head /tmp/private-record',
@@ -3125,7 +3140,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         expect(issue).toMatchObject({
           details: {
             commandFamily: 'command',
-            commandOrdinal: index + 7,
+            commandOrdinal: index + 8,
             exitCode: 1,
           },
         })
@@ -3135,6 +3150,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     const encodedIssues = JSON.stringify([
       searchIssue,
+      wrappedVaultIssue,
       ...executableShellIssues,
     ])
     expect(encodedIssues).not.toContain('private(foo|bar)')
@@ -3143,6 +3159,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(encodedIssues).not.toContain('/tmp/private-record')
     expect(encodedIssues).not.toContain('private search output')
     expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('private vault output')
+    expect(encodedIssues).not.toContain('private-page')
     expect(encodedIssues).not.toContain('item-sensitive')
     expect(encodedIssues).not.toContain('turn-current')
   })

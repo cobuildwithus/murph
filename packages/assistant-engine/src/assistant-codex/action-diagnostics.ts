@@ -610,10 +610,22 @@ function resolveDiagnosticCommandFamily(
     return 'command'
   }
 
-  return resolveCodexCommandFamily({
+  const directFamily = resolveCodexCommandFamily({
     commandLabel: normalizedEvent.commandLabel,
     source: 'display',
   })
+  if (directFamily !== 'command') {
+    return directFamily
+  }
+
+  const wrappedFamily = resolveCodexCommandFamily({
+    allowKnownShellWrapper: true,
+    commandLabel: normalizedEvent.commandLabel,
+    source: 'display',
+  })
+  // Only a bare direct search owns no-match suppression and recovery. The
+  // bounded wrapper pass exists to attribute non-search command failures.
+  return wrappedFamily === 'search' ? 'command' : wrappedFamily
 }
 
 function readCommandExitCode(input: {
