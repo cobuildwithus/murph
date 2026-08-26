@@ -22,12 +22,16 @@ journey policy, or validation owner.
 - Review round three found operation-inferred Habitat source classification and
   shared issue-presence stage inference. Later commits classify from core-owned
   facts, preserve owner-written stages, and centralize Murph Age public paths.
-- The current head has focused proof but no post-remediation exact-head final
+- Review round four found that Habitat accepted impossible calendar dates at
+  the CLI option boundary, then misclassified the downstream core rejection as
+  stored-record corruption. The option owner now reuses `isStrictIsoDate` and
+  returns the existing value-free `recordedAt` validation error before writing.
+- The current head has focused post-remediation proof but no exact-head final
   review.
 - Current `main` was merged at `18c38c8474`; stale shared projector, prompt,
   validation, and test copies were removed so the resulting tree differs from
   `main` only in the domain slice, authored plans, and measured bundle allowance.
-- Focused verification passes: 171 domain tests, 70 prepared built-CLI tests,
+- Focused verification passes: 172 domain tests, 70 prepared built-CLI tests,
   14 runner bundle tests, all six affected package typechecks, prepared runtime,
   CLI package shape, and both docs gates.
 - Canonical runner assembly passes all eight parity probes. The Vault CLI is
@@ -51,7 +55,7 @@ journey policy, or validation owner.
 2. [done] Prove the resulting tree is current `main` plus only the domain slice.
 3. [done] Run focused tests, affected typechecks, prepared/package-shape checks, docs
    gates, and production runner bundle/parity proof.
-4. Push the exact candidate, update the PR contract, and run a sensitive full
+4. [done] Push the exact candidate, update the PR contract, and run a sensitive full
    ReviewGPT round with the complete prior finding ledger and retrospective.
-5. Resolve accepted findings, close the plan, admit the exact head to required
+5. Resolve the accepted calendar-date finding, close the plan, admit the exact head to required
    CI, prove a clean current-base merge, merge, and retire the worktree.
