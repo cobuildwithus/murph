@@ -887,7 +887,7 @@ export class JunctionClient {
         providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames,
         signal: input.signal ?? null,
-        ...(input.collectionWorkLimit
+        ...(input.resource === "electrocardiogram_voltage" && input.collectionWorkLimit
           ? {
               maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
               timeoutMs: input.collectionWorkLimit.requestTimeoutMs,

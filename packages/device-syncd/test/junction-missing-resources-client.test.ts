@@ -309,6 +309,28 @@ test("Junction ECG voltage honors the bounded collection attempt contract", asyn
   assert.equal(requests, 1);
 });
 
+test("Junction ECG attempt bounds do not change generic timeseries retries", async () => {
+  let requests = 0;
+  const client = createClient(async () => {
+    requests += 1;
+    return createJsonResponse({ error: "temporary" }, 500);
+  });
+
+  await assert.rejects(
+    client.listTimeseries({
+      ...WINDOW,
+      collectionWorkLimit: {
+        maxAttemptsPerPage: 1,
+        maxPages: 3,
+        requestTimeoutMs: 8_000,
+      },
+      resource: "fat",
+    }),
+    { code: "JUNCTION_API_REQUEST_FAILED" },
+  );
+  assert.equal(requests, 3);
+});
+
 test("Junction ECG voltage preserves bound identity across pagination", async () => {
   let page = 0;
   const client = createClient(async () => {
