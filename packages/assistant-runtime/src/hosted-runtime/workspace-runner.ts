@@ -1000,6 +1000,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     );
     input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
   };
+  const mailboxImportBeforeForegroundLoop =
+    checkpointRequestSession.latestMailboxImport();
   await startForegroundMailboxImportLoop();
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;
@@ -1172,12 +1174,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (keepForegroundImportLoopDuringAfterCheckpoint) {
       await stopForegroundMailboxImportLoopAndNotify();
     }
+    const latestMailboxImport = checkpointRequestSession.latestMailboxImport();
     pendingEffectsContinuationWakeAt =
-      await reconcilePendingEffectsContinuationWake({
-        now: input.now,
-        result: assistantPhaseResult,
-        vaultRoot: input.vaultRoot,
-      });
+      latestMailboxImport !== mailboxImportBeforeForegroundLoop
+      && (latestMailboxImport?.importResult.importedSystemMailboxItemIds?.length ?? 0) > 0
+        ? await reconcilePendingEffectsContinuationWake({
+            now: input.now,
+            result: assistantPhaseResult,
+            vaultRoot: input.vaultRoot,
+          })
+        : null;
     if (postCheckpoint) {
       try {
         await checkpointHostedWorkspacePostAssistantPhase({
