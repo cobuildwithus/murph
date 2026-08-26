@@ -2118,6 +2118,7 @@ describe("hosted web production migration guard", () => {
       contractMigrationStep,
       /if \[ "\$\{RUN_GROUP_MATERIALIZATION_BACKFILL\}" != "true" \]; then/u,
     );
+    assert.match(contractMigrationStep, /pnpm --dir apps\/web prisma:generate/u);
     assert.match(
       contractMigrationStep,
       /groups:backfill-materialization --batch-size 50/u,
@@ -2176,6 +2177,9 @@ describe("hosted web production migration guard", () => {
     const backfillGateIndex = contractMigrationStep.indexOf(
       'if [ "${RUN_GROUP_MATERIALIZATION_BACKFILL}" != "true" ]; then',
     );
+    const prismaGenerateIndex = contractMigrationStep.indexOf(
+      "pnpm --dir apps/web prisma:generate",
+    );
     const backfillCurrentProofIndex = contractMigrationStep.indexOf(
       'current_sha="$(',
       contractMigrationIndex + 1,
@@ -2195,7 +2199,8 @@ describe("hosted web production migration guard", () => {
     );
     assert.ok(
       contractMigrationIndex < backfillGateIndex
-        && backfillGateIndex < backfillCurrentProofIndex
+        && backfillGateIndex < prismaGenerateIndex
+        && prismaGenerateIndex < backfillCurrentProofIndex
         && backfillCurrentProofIndex < backfillExactProofIndex
         && backfillExactProofIndex < backfillDryRunIndex
         && backfillDryRunIndex < backfillApplyIndex
@@ -2235,6 +2240,8 @@ elif [[ "$*" == *"exec tsx scripts/verify-vercel-production-deployment.ts"* ]]; 
   printf '%s\\n' "\${DEPLOYED_SHA}"
 elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
   printf 'migrate\\n' >> "\${STUB_CALLS_FILE}"
+elif [[ "$*" == *"prisma:generate"* ]]; then
+  printf 'prisma-generate\\n' >> "\${STUB_CALLS_FILE}"
 elif [[ "$*" == *"groups:backfill-materialization"* ]]; then
   if [[ "\${DATABASE_URL:-}" != "\${DIRECT_DATABASE_URL:-}" ]]; then
     printf 'backfill did not receive the direct database URL\\n' >&2
@@ -2356,7 +2363,7 @@ fi
       assert.equal(backfillExactMatch.status, 0, backfillExactMatch.stderr);
       assert.equal(
         await readFile(callsFile, "utf8"),
-        "verify\nmigrate\nverify\nbackfill-dry\nbackfill-apply\nbackfill-check\n",
+        "verify\nmigrate\nprisma-generate\nverify\nbackfill-dry\nbackfill-apply\nbackfill-check\n",
       );
     } finally {
       await rm(shellFixture, { force: true, recursive: true });

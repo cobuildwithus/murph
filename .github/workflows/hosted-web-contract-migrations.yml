@@ -224,6 +224,8 @@ jobs:
             exit 0
           fi
 
+          pnpm --dir apps/web prisma:generate
+
           current_sha="$(
             env \
               -u DIRECT_DATABASE_URL \
