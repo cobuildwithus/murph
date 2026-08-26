@@ -1052,6 +1052,7 @@ export class RuntimeInvocationService {
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
+        assistantExecutionBlocked: input.assistantExecutionBlocked,
         forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
         hostedAssistantProviderConfigured:
           typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
@@ -1074,6 +1075,7 @@ export class RuntimeInvocationService {
         veniceCredentialBeforeMintKind,
         veniceProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
+        processingMode: input.processingMode ?? null,
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
         workspaceWriteFenceGeneration: input.token.generation,

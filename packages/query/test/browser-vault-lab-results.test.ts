@@ -12,9 +12,15 @@ import {
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
 } from "../src/browser.ts";
-import { buildMetricProjection, selectMetricGoalProgress, selectMetricValue } from "../src/index.ts";
+import {
+  buildMetricProjection,
+  selectMetricGoalProgress,
+  selectMetricValue,
+} from "../src/index.ts";
 
-type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+type CanonicalEntity = Parameters<
+  typeof createVaultReadModel
+>[0]["entities"][number];
 
 test("browser vault projects all live lab history without widening the wearable lookback", async () => {
   const vault = createVaultReadModel({
@@ -25,50 +31,64 @@ test("browser vault projects all live lab history without widening the wearable 
         unit: "bpm",
         value: 61,
       }),
-      createLabTest("evt_hba1c_2020", "2020-02-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        flag: "normal",
-        referenceRange: { high: 5.6, low: 4, text: "4.0-5.6" },
-        unit: "%",
-        value: 5.4,
-      }]),
-      createLabTest("evt_hba1c_2023", "2023-03-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        unit: "percent",
-        value: 5.6,
-      }]),
-      createLabTest("evt_hba1c_2025", "2025-04-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        comparator: "<",
-        unit: "percent",
-        value: 5.7,
-      }]),
-      createLabTest("evt_hba1c_2026", "2026-06-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        unit: "mmol/mol",
-        value: 38,
-      }]),
-      createLabTest("evt_qualitative_2021", "2021-05-01T08:00:00.000Z", [{
-        analyte: "Hepatitis B surface antigen",
-        flag: "normal",
-        note: "Private clinician note that must not enter the replica",
-        referenceRange: { text: "Negative" },
-        textValue: "Negative",
-      }]),
-      createLabTest("evt_custom_2022", "2022-05-01T08:00:00.000Z", [{
-        analyte: "Novel Marker",
-        unit: "score",
-        value: 1,
-      }]),
-      createLabTest("evt_custom_2026", "2026-05-01T08:00:00.000Z", [{
-        analyte: "Novel Marker",
-        unit: "score",
-        value: 2,
-      }]),
+      createLabTest("evt_hba1c_2020", "2020-02-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          flag: "normal",
+          referenceRange: { high: 5.6, low: 4, text: "4.0-5.6" },
+          unit: "%",
+          value: 5.4,
+        },
+      ]),
+      createLabTest("evt_hba1c_2023", "2023-03-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          unit: "percent",
+          value: 5.6,
+        },
+      ]),
+      createLabTest("evt_hba1c_2025", "2025-04-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          comparator: "<",
+          unit: "percent",
+          value: 5.7,
+        },
+      ]),
+      createLabTest("evt_hba1c_2026", "2026-06-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          unit: "mmol/mol",
+          value: 38,
+        },
+      ]),
+      createLabTest("evt_qualitative_2021", "2021-05-01T08:00:00.000Z", [
+        {
+          analyte: "Hepatitis B surface antigen",
+          flag: "normal",
+          note: "Private clinician note that must not enter the replica",
+          referenceRange: { text: "Negative" },
+          textValue: "Negative",
+        },
+      ]),
+      createLabTest("evt_custom_2022", "2022-05-01T08:00:00.000Z", [
+        {
+          analyte: "Novel Marker",
+          unit: "score",
+          value: 1,
+        },
+      ]),
+      createLabTest("evt_custom_2026", "2026-05-01T08:00:00.000Z", [
+        {
+          analyte: "Novel Marker",
+          unit: "score",
+          value: 2,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -79,12 +99,17 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 11);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 12);
   assert.equal(replica.generation, BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
 
   assert.equal(replica.labResultRows.length, 7);
-  assert.deepEqual(client.metrics.series({ metricKey: "resting-heart-rate" }), []);
+  assert.deepEqual(
+    client.metrics.series({ metricKey: "resting-heart-rate" }),
+    [],
+  );
   assert.deepEqual(client.metrics.series({ metricKey: "hba1c" }), []);
 
   const oldestHba1c = client.labResults.list({ metricKey: "HbA1c" })[0];
@@ -95,10 +120,16 @@ test("browser vault projects all live lab history without widening the wearable 
   assert.equal(oldestHba1c.normalizedValue, 5.4);
   assert.equal(oldestHba1c.normalizedUnit, "percent");
   assert.equal(oldestHba1c.specimenKind, "serum");
-  assert.deepEqual(oldestHba1c.referenceRange, { high: 5.6, low: 4, text: "4.0-5.6" });
+  assert.deepEqual(oldestHba1c.referenceRange, {
+    high: 5.6,
+    low: 4,
+    text: "4.0-5.6",
+  });
   assert.equal(oldestHba1c.labName, "Example Lab");
 
-  const qualitative = client.labResults.list({ metricKey: "hepatitis-b-surface-antigen" })[0];
+  const qualitative = client.labResults.list({
+    metricKey: "hepatitis-b-surface-antigen",
+  })[0];
   assert.ok(qualitative);
   assert.equal(qualitative.value, null);
   assert.equal(qualitative.textValue, "Negative");
@@ -116,46 +147,60 @@ test("browser vault projects all live lab history without widening the wearable 
 test("lab result selectors group measured biomarkers and chart only comparable exact values", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_hba1c_2020", "2020-02-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        unit: "%",
-        value: 5.4,
-      }]),
-      createLabTest("evt_hba1c_2023", "2023-03-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        unit: "percent",
-        value: 5.6,
-      }]),
-      createLabTest("evt_hba1c_2025", "2025-04-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        comparator: "<",
-        unit: "percent",
-        value: 5.7,
-      }]),
-      createLabTest("evt_hba1c_2026", "2026-06-01T08:00:00.000Z", [{
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        referenceRange: { high: 42, low: 31, text: "31-42 mmol/mol" },
-        unit: "mmol/mol",
-        value: 38,
-      }]),
-      createLabTest("evt_custom_2022", "2022-05-01T08:00:00.000Z", [{
-        analyte: "Novel Marker",
-        unit: "score",
-        value: 1,
-      }]),
-      createLabTest("evt_custom_2026", "2026-05-01T08:00:00.000Z", [{
-        analyte: "Novel Marker",
-        unit: "score",
-        value: 2,
-      }]),
-      createLabTest("evt_qualitative_2021", "2021-05-01T08:00:00.000Z", [{
-        analyte: "Hepatitis B surface antigen",
-        textValue: "Negative",
-      }]),
+      createLabTest("evt_hba1c_2020", "2020-02-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          unit: "%",
+          value: 5.4,
+        },
+      ]),
+      createLabTest("evt_hba1c_2023", "2023-03-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          unit: "percent",
+          value: 5.6,
+        },
+      ]),
+      createLabTest("evt_hba1c_2025", "2025-04-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          comparator: "<",
+          unit: "percent",
+          value: 5.7,
+        },
+      ]),
+      createLabTest("evt_hba1c_2026", "2026-06-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          referenceRange: { high: 42, low: 31, text: "31-42 mmol/mol" },
+          unit: "mmol/mol",
+          value: 38,
+        },
+      ]),
+      createLabTest("evt_custom_2022", "2022-05-01T08:00:00.000Z", [
+        {
+          analyte: "Novel Marker",
+          unit: "score",
+          value: 1,
+        },
+      ]),
+      createLabTest("evt_custom_2026", "2026-05-01T08:00:00.000Z", [
+        {
+          analyte: "Novel Marker",
+          unit: "score",
+          value: 2,
+        },
+      ]),
+      createLabTest("evt_qualitative_2021", "2021-05-01T08:00:00.000Z", [
+        {
+          analyte: "Hepatitis B surface antigen",
+          textValue: "Negative",
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -166,7 +211,9 @@ test("lab result selectors group measured biomarkers and chart only comparable e
     sourceBundleHash: "e".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
 
   const measured = selectBrowserVaultMeasuredBiomarkers(client);
   const hba1c = measured.find((entry) => entry.metricKey === "hba1c");
@@ -184,38 +231,58 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   assert.equal(detail.latest.flag, "normal");
   assert.equal(detail.latest.statusSource, "reporting_lab_range");
   assert.equal(detail.hasIncompatibleHistory, true);
-  assert.deepEqual(detail.chartSeries.map((point) => point.value), [5.4, 5.6]);
-
-  assert.equal(measured.some((entry) => entry.metricKey === "novel-marker"), false);
   assert.deepEqual(
-    selectBrowserVaultLabBiomarkerDetail(client, "novel-marker")?.chartSeries.map((point) => point.value),
+    detail.chartSeries.map((point) => point.value),
+    [5.4, 5.6],
+  );
+
+  assert.equal(
+    measured.some((entry) => entry.metricKey === "novel-marker"),
+    false,
+  );
+  assert.deepEqual(
+    selectBrowserVaultLabBiomarkerDetail(
+      client,
+      "novel-marker",
+    )?.chartSeries.map((point) => point.value),
     [1, 2],
   );
 
-  const qualitative = selectBrowserVaultLabBiomarkerDetail(client, "hepatitis-b-surface-antigen");
+  const qualitative = selectBrowserVaultLabBiomarkerDetail(
+    client,
+    "hepatitis-b-surface-antigen",
+  );
   assert.ok(qualitative);
   assert.deepEqual(qualitative.chartSeries, []);
   assert.deepEqual(
-    client.labResults.list({ from: "2023-01-01", metricKey: "hba1c", to: "2025-12-31" })
+    client.labResults
+      .list({ from: "2023-01-01", metricKey: "hba1c", to: "2025-12-31" })
       .map((row) => row.date),
     ["2023-03-01", "2025-04-01"],
   );
   assert.deepEqual(
-    client.labResults.list({ biomarkerKey: "biomarker:hba1c" }).map((row) => row.date),
+    client.labResults
+      .list({ biomarkerKey: "biomarker:hba1c" })
+      .map((row) => row.date),
     ["2020-02-01", "2023-03-01", "2025-04-01", "2026-06-01"],
   );
-  assert.deepEqual(client.labResults.list({ biomarkerKey: "biomarker:missing" }), []);
+  assert.deepEqual(
+    client.labResults.list({ biomarkerKey: "biomarker:missing" }),
+    [],
+  );
 });
 
 test("lab result selectors derive status from a unitless reporting-lab range", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_ag_ratio", "2026-06-01T08:00:00.000Z", [{
-        analyte: "Albumin/Globulin Ratio",
-        biomarkerSlug: "albumin-globulin-ratio",
-        referenceRange: { high: 2.5, low: 1 },
-        value: 0.8,
-      }]),
+      createLabTest("evt_ag_ratio", "2026-06-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin/Globulin Ratio",
+          biomarkerSlug: "albumin-globulin-ratio",
+          referenceRange: { high: 2.5, low: 1 },
+          value: 0.8,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -234,7 +301,10 @@ test("lab result selectors derive status from a unitless reporting-lab range", a
   assert.ok(detail);
   assert.equal(detail.latest.normalizedUnit, null);
   assert.equal(detail.latest.normalizedValue, null);
-  assert.deepEqual(detail.latest.normalizedReferenceRange, { high: 2.5, low: 1 });
+  assert.deepEqual(detail.latest.normalizedReferenceRange, {
+    high: 2.5,
+    low: 1,
+  });
   assert.equal(detail.latest.flag, "low");
   assert.equal(detail.latest.statusSource, "reporting_lab_range");
 });
@@ -253,7 +323,11 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
         { analyte: "Blood Urea Nitrogen", unit: "mg/dL", value: 16 },
         { analyte: "Thyroid Stimulating Hormone", unit: "mIU/L", value: 3.1 },
         { analyte: "Mean Corpuscular Hemoglobin", unit: "pg", value: 31 },
-        { analyte: "Mean Corpuscular Hemoglobin Concentration", unit: "g/dL", value: 34 },
+        {
+          analyte: "Mean Corpuscular Hemoglobin Concentration",
+          unit: "g/dL",
+          value: 34,
+        },
       ]),
       createLabTest("evt_urea_2026", "2026-03-01T08:00:00.000Z", [
         { analyte: "Urea Nitrogen", unit: "mmol/L", value: 5 },
@@ -293,7 +367,9 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
     sourceBundleHash: "7".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
   const measured = selectBrowserVaultMeasuredBiomarkers(client);
 
   assert.deepEqual(measured.map((entry) => entry.metricKey).sort(), [
@@ -312,7 +388,11 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
     const selection = client.metricSelections.get(metricKey);
     assert.equal(selection?.value, value, metricKey);
     assert.equal(selection?.unit, unit, metricKey);
-    assert.deepEqual(client.metrics.series({ metricKey }).map((row) => row.value), series, metricKey);
+    assert.deepEqual(
+      client.metrics.series({ metricKey }).map((row) => row.value),
+      series,
+      metricKey,
+    );
   }
 
   const experiment = selectBrowserVaultExperimentResults(client, "bun-alias");
@@ -330,7 +410,10 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.equal(bun.displayName, "Blood urea nitrogen");
   assert.equal(bun.rows.length, 4);
   assert.equal(bun.comparableUnit, "mg/dL");
-  assert.deepEqual(bun.chartSeries.map((point) => point.value), [14, 16, 14.0056]);
+  assert.deepEqual(
+    bun.chartSeries.map((point) => point.value),
+    [14, 16, 14.0056],
+  );
   const normalizedBun = bun.rows.find((row) => row.analyte === "Urea Nitrogen");
   assert.ok(normalizedBun);
   assert.equal(normalizedBun.analyte, "Urea Nitrogen");
@@ -351,7 +434,10 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.ok(tsh);
   assert.equal(tsh.rows.length, 3);
   assert.equal(tsh.comparableUnit, "mIU/L");
-  assert.deepEqual(tsh.chartSeries.map((point) => point.value), [2.5, 3.1]);
+  assert.deepEqual(
+    tsh.chartSeries.map((point) => point.value),
+    [2.5, 3.1],
+  );
   const normalizedTsh = tsh.rows[0];
   assert.ok(normalizedTsh);
   assert.equal(normalizedTsh.normalizedUnit, "mIU/L");
@@ -375,44 +461,59 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.equal(mchc.rows.length, 3);
   assert.equal(mchc.chartSeries.length, 2);
   assert.equal(mchc.rows.at(-1)?.normalizedValue, null);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "BUN/Creatinine Ratio")?.rows.length, 1);
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "BUN/Creatinine Ratio")?.rows
+      .length,
+    1,
+  );
   const urea = selectBrowserVaultLabBiomarkerDetail(client, "Urea");
   assert.ok(urea);
   assert.equal(urea.biomarkerKey, null);
   assert.equal(urea.rows.length, 1);
-  assert.deepEqual(urea.chartSeries.map((point) => point.value), [5]);
+  assert.deepEqual(
+    urea.chartSeries.map((point) => point.value),
+    [5],
+  );
 });
 
 test("lab detail normalizes result values and text-only numeric ranges without mutating source rows", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_albumin_structured", "2026-01-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { high: 50, low: 34 },
-        unit: "g/L",
-        value: 40,
-      }]),
-      createLabTest("evt_albumin_limit", "2026-01-15T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { text: "<= 50 g/L" },
-        unit: "g/L",
-        value: 45,
-      }]),
-      createLabTest("evt_albumin_gdl", "2026-02-17T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        unit: "g/dL",
-        value: 5.1,
-      }]),
-      createLabTest("evt_albumin_gl", "2026-04-23T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { text: "34 - 50" },
-        unit: "g/L",
-        value: 49,
-      }]),
+      createLabTest("evt_albumin_structured", "2026-01-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { high: 50, low: 34 },
+          unit: "g/L",
+          value: 40,
+        },
+      ]),
+      createLabTest("evt_albumin_limit", "2026-01-15T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { text: "<= 50 g/L" },
+          unit: "g/L",
+          value: 45,
+        },
+      ]),
+      createLabTest("evt_albumin_gdl", "2026-02-17T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          unit: "g/dL",
+          value: 5.1,
+        },
+      ]),
+      createLabTest("evt_albumin_gl", "2026-04-23T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { text: "34 - 50" },
+          unit: "g/L",
+          value: 49,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -423,20 +524,31 @@ test("lab detail normalizes result values and text-only numeric ranges without m
     sourceBundleHash: "7".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
   const detail = selectBrowserVaultLabBiomarkerDetail(client, "albumin");
 
   assert.ok(detail);
   assert.equal(detail.comparableUnit, "g/dL");
-  assert.deepEqual(detail.chartSeries.map((point) => point.value), [4, 4.5, 5.1, 4.9]);
-  assert.deepEqual(detail.rows[0]?.normalizedReferenceRange, { high: 5, low: 3.4 });
+  assert.deepEqual(
+    detail.chartSeries.map((point) => point.value),
+    [4, 4.5, 5.1, 4.9],
+  );
+  assert.deepEqual(detail.rows[0]?.normalizedReferenceRange, {
+    high: 5,
+    low: 3.4,
+  });
   assert.deepEqual(detail.rows[1]?.normalizedReferenceRange, {
     high: 5,
     highComparator: "<=",
   });
   assert.equal(detail.latest.normalizedValue, 4.9);
   assert.equal(detail.latest.normalizedUnit, "g/dL");
-  assert.deepEqual(detail.latest.normalizedReferenceRange, { high: 5, low: 3.4 });
+  assert.deepEqual(detail.latest.normalizedReferenceRange, {
+    high: 5,
+    low: 3.4,
+  });
 
   const sourceLatest = client.labResults.list({ metricKey: "albumin" }).at(-1);
   assert.ok(sourceLatest);
@@ -448,36 +560,48 @@ test("lab detail normalizes result values and text-only numeric ranges without m
 test("lab detail uses canonical units for conversion-owned and dimensionally universal mixed histories", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_calcium_si", "2025-01-01T08:00:00.000Z", [{
-        analyte: "Calcium",
-        unit: "mmol/L",
-        value: 2.5,
-      }]),
-      createLabTest("evt_calcium_us", "2026-01-01T08:00:00.000Z", [{
-        analyte: "Calcium",
-        unit: "mg/dL",
-        value: 10,
-      }]),
-      createLabTest("evt_protein_si", "2025-02-01T08:00:00.000Z", [{
-        analyte: "Total Protein",
-        unit: "g/L",
-        value: 70,
-      }]),
-      createLabTest("evt_protein_us", "2026-02-01T08:00:00.000Z", [{
-        analyte: "Total Protein",
-        unit: "g/dL",
-        value: 7,
-      }]),
-      createLabTest("evt_neutrophils_cells", "2025-03-01T08:00:00.000Z", [{
-        analyte: "Neutrophils absolute",
-        unit: "cells/uL",
-        value: 4_000,
-      }]),
-      createLabTest("evt_neutrophils_billions", "2026-03-01T08:00:00.000Z", [{
-        analyte: "Neutrophils absolute",
-        unit: "x10^9/L",
-        value: 4,
-      }]),
+      createLabTest("evt_calcium_si", "2025-01-01T08:00:00.000Z", [
+        {
+          analyte: "Calcium",
+          unit: "mmol/L",
+          value: 2.5,
+        },
+      ]),
+      createLabTest("evt_calcium_us", "2026-01-01T08:00:00.000Z", [
+        {
+          analyte: "Calcium",
+          unit: "mg/dL",
+          value: 10,
+        },
+      ]),
+      createLabTest("evt_protein_si", "2025-02-01T08:00:00.000Z", [
+        {
+          analyte: "Total Protein",
+          unit: "g/L",
+          value: 70,
+        },
+      ]),
+      createLabTest("evt_protein_us", "2026-02-01T08:00:00.000Z", [
+        {
+          analyte: "Total Protein",
+          unit: "g/dL",
+          value: 7,
+        },
+      ]),
+      createLabTest("evt_neutrophils_cells", "2025-03-01T08:00:00.000Z", [
+        {
+          analyte: "Neutrophils absolute",
+          unit: "cells/uL",
+          value: 4_000,
+        },
+      ]),
+      createLabTest("evt_neutrophils_billions", "2026-03-01T08:00:00.000Z", [
+        {
+          analyte: "Neutrophils absolute",
+          unit: "x10^9/L",
+          value: 4,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -488,57 +612,109 @@ test("lab detail uses canonical units for conversion-owned and dimensionally uni
     sourceBundleHash: "5".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
 
   assert.deepEqual(
-    selectBrowserVaultLabBiomarkerDetail(client, "calcium")?.chartSeries
-      .map(({ unit, value }) => ({ unit, value })),
-    [{ unit: "mg/dL", value: 10 }, { unit: "mg/dL", value: 10 }],
+    selectBrowserVaultLabBiomarkerDetail(client, "calcium")?.chartSeries.map(
+      ({ unit, value }) => ({ unit, value }),
+    ),
+    [
+      { unit: "mg/dL", value: 10 },
+      { unit: "mg/dL", value: 10 },
+    ],
   );
   assert.deepEqual(
-    selectBrowserVaultLabBiomarkerDetail(client, "total-protein")?.chartSeries
-      .map(({ unit, value }) => ({ unit, value })),
-    [{ unit: "g/dL", value: 7 }, { unit: "g/dL", value: 7 }],
+    selectBrowserVaultLabBiomarkerDetail(
+      client,
+      "total-protein",
+    )?.chartSeries.map(({ unit, value }) => ({ unit, value })),
+    [
+      { unit: "g/dL", value: 7 },
+      { unit: "g/dL", value: 7 },
+    ],
   );
   assert.equal(
-    selectBrowserVaultLabBiomarkerDetail(client, "total-protein")?.latest.specimenKind,
+    selectBrowserVaultLabBiomarkerDetail(client, "total-protein")?.latest
+      .specimenKind,
     "serum",
   );
   assert.deepEqual(
-    selectBrowserVaultLabBiomarkerDetail(client, "neutrophils-absolute")?.chartSeries
-      .map(({ unit, value }) => ({ unit, value })),
-    [{ unit: "10^3/uL", value: 4 }, { unit: "10^3/uL", value: 4 }],
+    selectBrowserVaultLabBiomarkerDetail(
+      client,
+      "neutrophils-absolute",
+    )?.chartSeries.map(({ unit, value }) => ({ unit, value })),
+    [
+      { unit: "10^3/uL", value: 4 },
+      { unit: "10^3/uL", value: 4 },
+    ],
   );
 });
 
 test("lab result projection exposes only an allowlisted fallback specimen kind", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_serum", "2026-01-01T08:00:00.000Z", [{
-        analyte: "Chloride",
-        unit: "mmol/L",
-        value: 101,
-      }], "serum"),
-      createLabTest("evt_plasma", "2026-02-01T08:00:00.000Z", [{
-        analyte: "Chloride",
-        unit: "mmol/L",
-        value: 102,
-      }], "plasma"),
-      createLabTest("evt_whole_blood", "2026-02-15T08:00:00.000Z", [{
-        analyte: "White blood cells",
-        unit: "10^3/uL",
-        value: 3,
-      }], "whole_blood"),
-      createLabTest("evt_urine", "2026-03-01T08:00:00.000Z", [{
-        analyte: "Chloride",
-        unit: "mmol/L",
-        value: 103,
-      }], "urine"),
-      createLabTest("evt_missing", "2026-04-01T08:00:00.000Z", [{
-        analyte: "Chloride",
-        unit: "mmol/L",
-        value: 104,
-      }], null),
+      createLabTest(
+        "evt_serum",
+        "2026-01-01T08:00:00.000Z",
+        [
+          {
+            analyte: "Chloride",
+            unit: "mmol/L",
+            value: 101,
+          },
+        ],
+        "serum",
+      ),
+      createLabTest(
+        "evt_plasma",
+        "2026-02-01T08:00:00.000Z",
+        [
+          {
+            analyte: "Chloride",
+            unit: "mmol/L",
+            value: 102,
+          },
+        ],
+        "plasma",
+      ),
+      createLabTest(
+        "evt_whole_blood",
+        "2026-02-15T08:00:00.000Z",
+        [
+          {
+            analyte: "White blood cells",
+            unit: "10^3/uL",
+            value: 3,
+          },
+        ],
+        "whole_blood",
+      ),
+      createLabTest(
+        "evt_urine",
+        "2026-03-01T08:00:00.000Z",
+        [
+          {
+            analyte: "Chloride",
+            unit: "mmol/L",
+            value: 103,
+          },
+        ],
+        "urine",
+      ),
+      createLabTest(
+        "evt_missing",
+        "2026-04-01T08:00:00.000Z",
+        [
+          {
+            analyte: "Chloride",
+            unit: "mmol/L",
+            value: 104,
+          },
+        ],
+        null,
+      ),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -554,9 +730,14 @@ test("lab result projection exposes only an allowlisted fallback specimen kind",
     replica.labResultRows.map((row) => row.specimenKind),
     ["serum", "plasma", "whole_blood", null, null],
   );
-  assert.doesNotMatch(JSON.stringify(replica.labResultRows), /specimenType|testCategory/u);
+  assert.doesNotMatch(
+    JSON.stringify(replica.labResultRows),
+    /specimenType|testCategory/u,
+  );
 
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
   const whiteBloodCells = selectBrowserVaultLabBiomarkerDetail(
     client,
     "white-blood-cell-count",
@@ -570,21 +751,27 @@ test("lab result projection exposes only an allowlisted fallback specimen kind",
 test("unitless lab values remain raw and are excluded from normalized presentation", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_cholesterol_mg", "2024-01-01T08:00:00.000Z", [{
-        analyte: "Total Cholesterol",
-        unit: "mg/dL",
-        value: 201.1,
-      }]),
-      createLabTest("evt_cholesterol_mmol", "2025-01-01T08:00:00.000Z", [{
-        analyte: "Total Cholesterol",
-        unit: "mmol/L",
-        value: 5.2,
-      }]),
-      createLabTest("evt_cholesterol_unitless", "2026-01-01T08:00:00.000Z", [{
-        analyte: "Total Cholesterol",
-        referenceRange: { high: 6, text: "<6 mmol/L" },
-        value: 5.2,
-      }]),
+      createLabTest("evt_cholesterol_mg", "2024-01-01T08:00:00.000Z", [
+        {
+          analyte: "Total Cholesterol",
+          unit: "mg/dL",
+          value: 201.1,
+        },
+      ]),
+      createLabTest("evt_cholesterol_mmol", "2025-01-01T08:00:00.000Z", [
+        {
+          analyte: "Total Cholesterol",
+          unit: "mmol/L",
+          value: 5.2,
+        },
+      ]),
+      createLabTest("evt_cholesterol_unitless", "2026-01-01T08:00:00.000Z", [
+        {
+          analyte: "Total Cholesterol",
+          referenceRange: { high: 6, text: "<6 mmol/L" },
+          value: 5.2,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -595,8 +782,13 @@ test("unitless lab values remain raw and are excluded from normalized presentati
     sourceBundleHash: "4".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
-  const detail = selectBrowserVaultLabBiomarkerDetail(client, "total-cholesterol");
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
+  const detail = selectBrowserVaultLabBiomarkerDetail(
+    client,
+    "total-cholesterol",
+  );
 
   assert.ok(detail);
   assert.equal(detail.latest.value, 5.2);
@@ -604,7 +796,10 @@ test("unitless lab values remain raw and are excluded from normalized presentati
   assert.equal(detail.latest.normalizedValue, null);
   assert.equal(detail.latest.normalizedUnit, null);
   assert.equal(detail.latest.normalizedReferenceRange, null);
-  assert.deepEqual(detail.latest.referenceRange, { high: 6, text: "<6 mmol/L" });
+  assert.deepEqual(detail.latest.referenceRange, {
+    high: 6,
+    text: "<6 mmol/L",
+  });
   assert.deepEqual(
     detail.chartSeries.map(({ unit, value }) => ({ unit, value })),
     [
@@ -618,7 +813,7 @@ test("unitless lab values remain raw and are excluded from normalized presentati
     labResultRows: replica.labResultRows.map((row) =>
       row.id === detail.latest.id
         ? { ...row, normalizedUnit: "mg/dL", normalizedValue: 5.2 }
-        : row
+        : row,
     ),
   });
   const legacyDetail = selectBrowserVaultLabBiomarkerDetail(
@@ -636,34 +831,46 @@ test("unitless lab values remain raw and are excluded from normalized presentati
 test("structured lab bounds normalize only when accompanying text is exactly equivalent", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_exact", "2023-01-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { high: 50, low: 34, text: "34-50 g/L" },
-        unit: "g/L",
-        value: 45,
-      }]),
-      createLabTest("evt_qualified", "2024-01-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { high: 50, low: 34, text: "34-50 fasting; <60 non-fasting" },
-        unit: "g/L",
-        value: 46,
-      }]),
-      createLabTest("evt_conflicting_unit", "2025-01-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { high: 50, low: 34, text: "3.4-5 g/dL" },
-        unit: "g/L",
-        value: 47,
-      }]),
-      createLabTest("evt_conflicting_bound", "2026-01-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { high: 50, low: 34, text: "35-50 g/L" },
-        unit: "g/L",
-        value: 48,
-      }]),
+      createLabTest("evt_exact", "2023-01-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { high: 50, low: 34, text: "34-50 g/L" },
+          unit: "g/L",
+          value: 45,
+        },
+      ]),
+      createLabTest("evt_qualified", "2024-01-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: {
+            high: 50,
+            low: 34,
+            text: "34-50 fasting; <60 non-fasting",
+          },
+          unit: "g/L",
+          value: 46,
+        },
+      ]),
+      createLabTest("evt_conflicting_unit", "2025-01-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { high: 50, low: 34, text: "3.4-5 g/dL" },
+          unit: "g/L",
+          value: 47,
+        },
+      ]),
+      createLabTest("evt_conflicting_bound", "2026-01-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { high: 50, low: 34, text: "35-50 g/L" },
+          unit: "g/L",
+          value: 48,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -680,47 +887,56 @@ test("structured lab bounds normalize only when accompanying text is exactly equ
   );
 
   assert.ok(detail);
-  assert.deepEqual(detail.rows.map((row) => row.normalizedReferenceRange), [
-    { high: 5, low: 3.4 },
-    null,
-    null,
-    null,
-  ]);
-  assert.deepEqual(detail.rows.slice(1).map((row) => row.referenceRange?.text), [
-    "34-50 fasting; <60 non-fasting",
-    "3.4-5 g/dL",
-    "35-50 g/L",
-  ]);
+  assert.deepEqual(
+    detail.rows.map((row) => row.normalizedReferenceRange),
+    [{ high: 5, low: 3.4 }, null, null, null],
+  );
+  assert.deepEqual(
+    detail.rows.slice(1).map((row) => row.referenceRange?.text),
+    ["34-50 fasting; <60 non-fasting", "3.4-5 g/dL", "35-50 g/L"],
+  );
 });
 
 test("lab detail preserves qualitative and incompatible ranges without false conversion", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_albumin_narrative_range", "2025-03-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { text: "Expected for adults" },
-        unit: "g/L",
-        value: 45,
-      }]),
-      createLabTest("evt_albumin_incompatible_range", "2026-03-01T08:00:00.000Z", [{
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        referenceRange: { text: "34 - 50 mg/dL" },
-        unit: "g/L",
-        value: 49,
-      }]),
-      createLabTest("evt_custom_score", "2025-01-01T08:00:00.000Z", [{
-        analyte: "Custom marker",
-        referenceRange: { text: "Negative" },
-        textValue: "Negative",
-      }]),
-      createLabTest("evt_custom_index", "2026-01-01T08:00:00.000Z", [{
-        analyte: "Custom marker",
-        referenceRange: { text: "1 - 3 index" },
-        unit: "index",
-        value: 2,
-      }]),
+      createLabTest("evt_albumin_narrative_range", "2025-03-01T08:00:00.000Z", [
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          referenceRange: { text: "Expected for adults" },
+          unit: "g/L",
+          value: 45,
+        },
+      ]),
+      createLabTest(
+        "evt_albumin_incompatible_range",
+        "2026-03-01T08:00:00.000Z",
+        [
+          {
+            analyte: "Albumin",
+            biomarkerSlug: "albumin",
+            referenceRange: { text: "34 - 50 mg/dL" },
+            unit: "g/L",
+            value: 49,
+          },
+        ],
+      ),
+      createLabTest("evt_custom_score", "2025-01-01T08:00:00.000Z", [
+        {
+          analyte: "Custom marker",
+          referenceRange: { text: "Negative" },
+          textValue: "Negative",
+        },
+      ]),
+      createLabTest("evt_custom_index", "2026-01-01T08:00:00.000Z", [
+        {
+          analyte: "Custom marker",
+          referenceRange: { text: "1 - 3 index" },
+          unit: "index",
+          value: 2,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -739,19 +955,28 @@ test("lab detail preserves qualitative and incompatible ranges without false con
   assert.ok(detail);
   assert.equal(detail.rows[0]?.normalizedReferenceRange, null);
   assert.deepEqual(detail.rows[0]?.referenceRange, { text: "Negative" });
-  assert.deepEqual(detail.rows[1]?.normalizedReferenceRange, { high: 3, low: 1 });
+  assert.deepEqual(detail.rows[1]?.normalizedReferenceRange, {
+    high: 3,
+    low: 1,
+  });
 
   const albumin = selectBrowserVaultLabBiomarkerDetail(
     createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)),
     "albumin",
   );
   assert.ok(albumin);
-  assert.deepEqual(albumin.rows.map((row) => row.normalizedValue), [4.5, 4.9]);
-  assert.deepEqual(albumin.rows.map((row) => row.normalizedReferenceRange), [null, null]);
-  assert.deepEqual(albumin.rows.map((row) => row.referenceRange), [
-    { text: "Expected for adults" },
-    { text: "34 - 50 mg/dL" },
-  ]);
+  assert.deepEqual(
+    albumin.rows.map((row) => row.normalizedValue),
+    [4.5, 4.9],
+  );
+  assert.deepEqual(
+    albumin.rows.map((row) => row.normalizedReferenceRange),
+    [null, null],
+  );
+  assert.deepEqual(
+    albumin.rows.map((row) => row.referenceRange),
+    [{ text: "Expected for adults" }, { text: "34 - 50 mg/dL" }],
+  );
 });
 
 test("calculation methods remain separate longitudinal identities", async () => {
@@ -781,7 +1006,9 @@ test("calculation methods remain separate longitudinal identities", async () => 
     sourceBundleHash: "9".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
   const measured = selectBrowserVaultMeasuredBiomarkers(client);
 
   assert.deepEqual(measured.map((entry) => entry.metricKey).sort(), [
@@ -793,33 +1020,67 @@ test("calculation methods remain separate longitudinal identities", async () => 
     "vldl-cholesterol",
     "vldl-cholesterol-calculated",
   ]);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR")?.rows.length, 1);
-  const ckdEpi = selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR CKD-EPI");
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR")?.rows.length,
+    1,
+  );
+  const ckdEpi = selectBrowserVaultLabBiomarkerDetail(
+    client,
+    "Estimated GFR CKD-EPI",
+  );
   assert.equal(ckdEpi?.rows.length, 2);
   assert.equal(ckdEpi?.chartSeries.length, 2);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL Cholesterol")?.rows.length, 2);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL Calculated")?.rows.length, 1);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL CHOL CALC (NIH)")?.rows.length, 1);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "VLDL Cholesterol")?.rows.length, 1);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "VLDL Cholesterol Cal")?.rows.length, 2);
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "LDL Cholesterol")?.rows
+      .length,
+    2,
+  );
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "LDL Calculated")?.rows.length,
+    1,
+  );
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "LDL CHOL CALC (NIH)")?.rows
+      .length,
+    1,
+  );
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "VLDL Cholesterol")?.rows
+      .length,
+    1,
+  );
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "VLDL Cholesterol Cal")?.rows
+      .length,
+    2,
+  );
 });
 
 test("lab-only aliases preserve manual metric selection and goal authority", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createEvent("evt_manual_testosterone", "measurement", "2026-02-01T08:00:00.000Z", {
-        measurements: [{ metric: "testosterone", unit: "ng/dL", value: 500 }],
-        source: "manual",
-      }),
-      createMetricSample("smp_manual_testosterone", "2026-02-02T08:00:00.000Z", {
-        dayKey: "2026-02-02",
-        metric: "testosterone",
-        quality: "raw",
-        recordedAt: "2026-02-02T08:00:00.000Z",
-        source: "manual",
-        unit: "ng/dL",
-        value: 525,
-      }),
+      createEvent(
+        "evt_manual_testosterone",
+        "measurement",
+        "2026-02-01T08:00:00.000Z",
+        {
+          measurements: [{ metric: "testosterone", unit: "ng/dL", value: 500 }],
+          source: "manual",
+        },
+      ),
+      createMetricSample(
+        "smp_manual_testosterone",
+        "2026-02-02T08:00:00.000Z",
+        {
+          dayKey: "2026-02-02",
+          metric: "testosterone",
+          quality: "raw",
+          recordedAt: "2026-02-02T08:00:00.000Z",
+          source: "manual",
+          unit: "ng/dL",
+          value: 525,
+        },
+      ),
       createLabTest("evt_testosterone_2024", "2024-03-01T08:00:00.000Z", [
         { analyte: "Testosterone", unit: "ng/dL", value: 480 },
       ]),
@@ -831,12 +1092,22 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
     vaultRoot: "browser://vault",
   });
   const points = buildMetricProjection(vault).metricPoints;
-  const manualPoints = points.filter((point) => point.metricKey === "testosterone");
-  const labPoints = points.filter((point) => point.metricKey === "total-testosterone");
+  const manualPoints = points.filter(
+    (point) => point.metricKey === "testosterone",
+  );
+  const labPoints = points.filter(
+    (point) => point.metricKey === "total-testosterone",
+  );
 
-  assert.deepEqual(manualPoints.map((point) => point.source.kind).sort(), ["measurement", "metric-sample"]);
+  assert.deepEqual(manualPoints.map((point) => point.source.kind).sort(), [
+    "measurement",
+    "metric-sample",
+  ]);
   assert.equal(labPoints.length, 2);
-  assert.equal(labPoints.every((point) => point.source.kind === "test-result"), true);
+  assert.equal(
+    labPoints.every((point) => point.source.kind === "test-result"),
+    true,
+  );
 
   const selection = selectMetricValue({
     metricKey: "testosterone",
@@ -871,11 +1142,18 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
     vault,
   });
   assert.equal(replica.generation, BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
-  const indexed = selectBrowserVaultMeasuredBiomarkers(client)
-    .find((entry) => entry.metricKey === "total-testosterone");
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
+  const indexed = selectBrowserVaultMeasuredBiomarkers(client).find(
+    (entry) => entry.metricKey === "total-testosterone",
+  );
   assert.ok(indexed);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, indexed.metricKey)?.rows.length, 2);
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, indexed.metricKey)?.rows
+      .length,
+    2,
+  );
 });
 
 test("expanded lab definitions stay at the test-result boundary", () => {
@@ -884,10 +1162,17 @@ test("expanded lab definitions stay at the test-result boundary", () => {
       createLabTest("evt_egfr_lab", "2025-03-01T08:00:00.000Z", [
         { analyte: "Estimated GFR CKD-EPI", unit: "mL/min/1.73m^2", value: 89 },
       ]),
-      createEvent("evt_egfr_manual", "measurement", "2026-02-01T08:00:00.000Z", {
-        measurements: [{ metric: "egfr-ckd-epi", unit: "mL/min/1.73m^2", value: 80 }],
-        source: "manual",
-      }),
+      createEvent(
+        "evt_egfr_manual",
+        "measurement",
+        "2026-02-01T08:00:00.000Z",
+        {
+          measurements: [
+            { metric: "egfr-ckd-epi", unit: "mL/min/1.73m^2", value: 80 },
+          ],
+          source: "manual",
+        },
+      ),
       createMetricSample("smp_egfr_manual", "2026-02-02T08:00:00.000Z", {
         dayKey: "2026-02-02",
         metric: "egfr-ckd-epi",
@@ -901,18 +1186,27 @@ test("expanded lab definitions stay at the test-result boundary", () => {
     metadata: null,
     vaultRoot: "browser://vault",
   });
-  const points = buildMetricProjection(vault).metricPoints
-    .filter((point) => point.metricKey === "egfr-ckd-epi");
+  const points = buildMetricProjection(vault).metricPoints.filter(
+    (point) => point.metricKey === "egfr-ckd-epi",
+  );
   const labPoint = points.find((point) => point.source.kind === "test-result");
-  const manualPoints = points.filter((point) =>
-    point.source.kind === "measurement" || point.source.kind === "metric-sample"
+  const manualPoints = points.filter(
+    (point) =>
+      point.source.kind === "measurement" ||
+      point.source.kind === "metric-sample",
   );
 
   assert.equal(labPoint?.canonicalUnit, "mL/min/1.73m^2");
   assert.equal(labPoint?.canonicalValue, 89);
   assert.equal(manualPoints.length, 2);
-  assert.equal(manualPoints.every((point) => point.canonicalUnit === null), true);
-  assert.equal(manualPoints.every((point) => point.canonicalValue === null), true);
+  assert.equal(
+    manualPoints.every((point) => point.canonicalUnit === null),
+    true,
+  );
+  assert.equal(
+    manualPoints.every((point) => point.canonicalValue === null),
+    true,
+  );
 
   const selection = selectMetricValue({
     metricKey: "egfr-ckd-epi",
@@ -962,31 +1256,43 @@ test("the measured index excludes unclassified lab-record fields without deletin
     sourceBundleHash: "8".repeat(64),
     vault,
   });
-  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const client = createBrowserVaultQueryClient(
+    parseBrowserVaultReplica(replica),
+  );
 
   assert.equal(replica.labResultRows.length, 5);
   assert.deepEqual(
-    selectBrowserVaultMeasuredBiomarkers(client).map((entry) => entry.metricKey),
+    selectBrowserVaultMeasuredBiomarkers(client).map(
+      (entry) => entry.metricKey,
+    ),
     ["hemoglobin"],
   );
   assert.equal(client.labResults.list({ metricKey: "ecg-axis" }).length, 1);
   assert.equal(client.labResults.list({ metricKey: "urine-color" }).length, 1);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "report-sequence")?.rows.length, 1);
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "report-sequence")?.rows
+      .length,
+    1,
+  );
 });
 
 test("lab projection ignores test-result points whose collapsed live event is absent", async () => {
-  const liveTest = createLabTest("evt_live", "2026-01-01T08:00:00.000Z", [{
-    analyte: "Hemoglobin A1c",
-    biomarkerSlug: "hba1c",
-    unit: "percent",
-    value: 5.5,
-  }]);
-  const removedTest = createLabTest("evt_removed", "2025-01-01T08:00:00.000Z", [{
-    analyte: "Hemoglobin A1c",
-    biomarkerSlug: "hba1c",
-    unit: "percent",
-    value: 9.9,
-  }]);
+  const liveTest = createLabTest("evt_live", "2026-01-01T08:00:00.000Z", [
+    {
+      analyte: "Hemoglobin A1c",
+      biomarkerSlug: "hba1c",
+      unit: "percent",
+      value: 5.5,
+    },
+  ]);
+  const removedTest = createLabTest("evt_removed", "2025-01-01T08:00:00.000Z", [
+    {
+      analyte: "Hemoglobin A1c",
+      biomarkerSlug: "hba1c",
+      unit: "percent",
+      value: 9.9,
+    },
+  ]);
   const liveVault = createVaultReadModel({
     entities: [liveTest],
     metadata: null,
@@ -1004,28 +1310,33 @@ test("lab projection ignores test-result points whose collapsed live event is ab
     vault: liveVault,
   });
 
-  assert.deepEqual(replica.labResultRows.map((row) => row.value), [5.5]);
+  assert.deepEqual(
+    replica.labResultRows.map((row) => row.value),
+    [5.5],
+  );
 });
 
 test("lab projection keeps every analyte from one multi-result panel joined by result index", async () => {
   const vault = createVaultReadModel({
-    entities: [createLabTest("evt_panel", "2026-02-01T08:00:00.000Z", [
-      {
-        analyte: "Hemoglobin A1c",
-        biomarkerSlug: "hba1c",
-        referenceRange: { high: 5.6, low: 4 },
-        unit: "percent",
-        value: 5.5,
-      },
-      {
-        analyte: "Apolipoprotein B",
-        biomarkerSlug: "apob",
-        flag: "high",
-        referenceRange: { high: 90 },
-        unit: "mg/dL",
-        value: 94,
-      },
-    ])],
+    entities: [
+      createLabTest("evt_panel", "2026-02-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          referenceRange: { high: 5.6, low: 4 },
+          unit: "percent",
+          value: 5.5,
+        },
+        {
+          analyte: "Apolipoprotein B",
+          biomarkerSlug: "apob",
+          flag: "high",
+          referenceRange: { high: 90 },
+          unit: "mg/dL",
+          value: 94,
+        },
+      ]),
+    ],
     metadata: null,
     vaultRoot: "browser://vault",
   });
@@ -1037,13 +1348,15 @@ test("lab projection keeps every analyte from one multi-result panel joined by r
   });
 
   assert.deepEqual(
-    replica.labResultRows.map((row) => ({
-      analyte: row.analyte,
-      flag: row.flag,
-      metricKey: row.metricKey,
-      referenceRange: row.referenceRange,
-      value: row.value,
-    })).sort((left, right) => left.metricKey.localeCompare(right.metricKey)),
+    replica.labResultRows
+      .map((row) => ({
+        analyte: row.analyte,
+        flag: row.flag,
+        metricKey: row.metricKey,
+        referenceRange: row.referenceRange,
+        value: row.value,
+      }))
+      .sort((left, right) => left.metricKey.localeCompare(right.metricKey)),
     [
       {
         analyte: "Apolipoprotein B",
@@ -1066,21 +1379,27 @@ test("lab projection keeps every analyte from one multi-result panel joined by r
 test("custom analyte detail charts the latest comparable unit without hiding other units", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_custom_score_2024", "2024-02-01T08:00:00.000Z", [{
-        analyte: "Dual Unit Marker",
-        unit: "score",
-        value: 1,
-      }]),
-      createLabTest("evt_custom_score_2025", "2025-02-01T08:00:00.000Z", [{
-        analyte: "Dual Unit Marker",
-        unit: "score",
-        value: 2,
-      }]),
-      createLabTest("evt_custom_index_2026", "2026-02-01T08:00:00.000Z", [{
-        analyte: "Dual Unit Marker",
-        unit: "index",
-        value: 3,
-      }]),
+      createLabTest("evt_custom_score_2024", "2024-02-01T08:00:00.000Z", [
+        {
+          analyte: "Dual Unit Marker",
+          unit: "score",
+          value: 1,
+        },
+      ]),
+      createLabTest("evt_custom_score_2025", "2025-02-01T08:00:00.000Z", [
+        {
+          analyte: "Dual Unit Marker",
+          unit: "score",
+          value: 2,
+        },
+      ]),
+      createLabTest("evt_custom_index_2026", "2026-02-01T08:00:00.000Z", [
+        {
+          analyte: "Dual Unit Marker",
+          unit: "index",
+          value: 3,
+        },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -1099,34 +1418,48 @@ test("custom analyte detail charts the latest comparable unit without hiding oth
   assert.ok(detail);
   assert.equal(detail.comparableUnit, "index");
   assert.equal(detail.hasIncompatibleHistory, true);
-  assert.deepEqual(detail.chartSeries.map((point) => point.value), [3]);
-  assert.deepEqual(detail.rows.map((row) => row.value), [1, 2, 3]);
+  assert.deepEqual(
+    detail.chartSeries.map((point) => point.value),
+    [3],
+  );
+  assert.deepEqual(
+    detail.rows.map((row) => row.value),
+    [1, 2, 3],
+  );
 });
 
 test("custom analytes with no normalized characters keep a deterministic private route key", async () => {
   const vault = createVaultReadModel({
     entities: [
-      createLabTest("evt_custom_unicode", "2026-03-01T08:00:00.000Z", [{
-        analyte: "β?!",
-        unit: "index",
-        value: 1.25,
-      }]),
-      createEvent("evt_custom_unicode_obs", "observation", "2026-04-01T08:00:00.000Z", {
-        metric: "β?!",
-        source: "manual",
-        unit: "index",
-        value: 1.5,
-      }),
+      createLabTest("evt_custom_unicode", "2026-03-01T08:00:00.000Z", [
+        {
+          analyte: "β?!",
+          unit: "index",
+          value: 1.25,
+        },
+      ]),
+      createEvent(
+        "evt_custom_unicode_obs",
+        "observation",
+        "2026-04-01T08:00:00.000Z",
+        {
+          metric: "β?!",
+          source: "manual",
+          unit: "index",
+          value: 1.5,
+        },
+      ),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
   });
-  const createReplica = () => createBrowserVaultReplica({
-    generatedAt: "2026-07-16T12:00:00.000Z",
-    metricPoints: buildMetricProjection(vault).metricPoints,
-    sourceBundleHash: "9".repeat(64),
-    vault,
-  });
+  const createReplica = () =>
+    createBrowserVaultReplica({
+      generatedAt: "2026-07-16T12:00:00.000Z",
+      metricPoints: buildMetricProjection(vault).metricPoints,
+      sourceBundleHash: "9".repeat(64),
+      vault,
+    });
   const first = await createReplica();
   const second = await createReplica();
   const metricKey = first.labResultRows[0]?.metricKey;
@@ -1136,21 +1469,31 @@ test("custom analytes with no normalized characters keep a deterministic private
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(first));
   const measured = selectBrowserVaultMeasuredBiomarkers(client);
   assert.deepEqual(measured, []);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, metricKey)?.rows.length, 1);
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, metricKey)?.rows.length,
+    1,
+  );
   // The hashed fallback is one identity across every scalar source: an
   // observation with the same non-normalizable name lands on the same key.
   assert.equal(
-    client.metrics.series({ metricKey }).map((row) => row.value).at(-1),
+    client.metrics
+      .series({ metricKey })
+      .map((row) => row.value)
+      .at(-1),
     1.5,
   );
 });
 
 test("qualitative rows cannot become comparable through normalized fields alone", async () => {
   const vault = createVaultReadModel({
-    entities: [createLabTest("evt_qualitative_guard", "2026-04-01T08:00:00.000Z", [{
-      analyte: "Custom Screen",
-      textValue: "Negative",
-    }])],
+    entities: [
+      createLabTest("evt_qualitative_guard", "2026-04-01T08:00:00.000Z", [
+        {
+          analyte: "Custom Screen",
+          textValue: "Negative",
+        },
+      ]),
+    ],
     metadata: null,
     vaultRoot: "browser://vault",
   });
@@ -1169,10 +1512,11 @@ test("qualitative rows cannot become comparable through normalized fields alone"
   };
 
   assert.throws(
-    () => parseBrowserVaultReplica({
-      ...replica,
-      labResultRows: [malformedComparable],
-    }),
+    () =>
+      parseBrowserVaultReplica({
+        ...replica,
+        labResultRows: [malformedComparable],
+      }),
     /normalizedValue requires a numeric value/u,
   );
   const defensiveDetail = selectBrowserVaultLabBiomarkerDetail(
@@ -1188,12 +1532,16 @@ test("qualitative rows cannot become comparable through normalized fields alone"
 
 test("browser vault parser defaults a missing additive lab collection and rejects malformed values", async () => {
   const vault = createVaultReadModel({
-    entities: [createLabTest("evt_parser", "2026-06-01T08:00:00.000Z", [{
-      analyte: "Hemoglobin A1c",
-      biomarkerSlug: "hba1c",
-      unit: "percent",
-      value: 5.5,
-    }])],
+    entities: [
+      createLabTest("evt_parser", "2026-06-01T08:00:00.000Z", [
+        {
+          analyte: "Hemoglobin A1c",
+          biomarkerSlug: "hba1c",
+          unit: "percent",
+          value: 5.5,
+        },
+      ]),
+    ],
     metadata: null,
     vaultRoot: "browser://vault",
   });
@@ -1213,38 +1561,45 @@ test("browser vault parser defaults a missing additive lab collection and reject
   const row = replica.labResultRows[0];
   assert.ok(row);
   assert.throws(
-    () => parseBrowserVaultReplica({
-      ...legacyReplica,
-      labResultRows: [{ ...row, rowSchema: "murph.browser-vault.lab-result-row.wrong" }],
-    }),
+    () =>
+      parseBrowserVaultReplica({
+        ...legacyReplica,
+        labResultRows: [
+          { ...row, rowSchema: "murph.browser-vault.lab-result-row.wrong" },
+        ],
+      }),
     /rowSchema must be murph\.browser-vault\.lab-result-row\.v1/u,
   );
   assert.throws(
-    () => parseBrowserVaultReplica({
-      ...legacyReplica,
-      labResultRows: [{ ...row, textValue: null, value: null }],
-    }),
+    () =>
+      parseBrowserVaultReplica({
+        ...legacyReplica,
+        labResultRows: [{ ...row, textValue: null, value: null }],
+      }),
     /must include a numeric value or textValue/u,
   );
   assert.throws(
-    () => parseBrowserVaultReplica({
-      ...legacyReplica,
-      labResultRows: [{ ...row, referenceRange: {} }],
-    }),
+    () =>
+      parseBrowserVaultReplica({
+        ...legacyReplica,
+        labResultRows: [{ ...row, referenceRange: {} }],
+      }),
     /referenceRange must include low, high, or text/u,
   );
   assert.throws(
-    () => parseBrowserVaultReplica({
-      ...legacyReplica,
-      labResultRows: [{ ...row, normalizedUnit: null }],
-    }),
+    () =>
+      parseBrowserVaultReplica({
+        ...legacyReplica,
+        labResultRows: [{ ...row, normalizedUnit: null }],
+      }),
     /normalizedValue and normalizedUnit must be provided together/u,
   );
   assert.throws(
-    () => parseBrowserVaultReplica({
-      ...legacyReplica,
-      labResultRows: [{ ...row, specimenKind: "urine" }],
-    }),
+    () =>
+      parseBrowserVaultReplica({
+        ...legacyReplica,
+        labResultRows: [{ ...row, specimenKind: "urine" }],
+      }),
     /specimenKind must be plasma, serum, whole_blood, or null/u,
   );
 });
@@ -1258,7 +1613,10 @@ function createLabTest(
   return createEvent(entityId, "test", collectedAt, {
     collectedAt,
     dataOrigin: { importedAt: "2026-01-01T00:00:00.000Z" },
-    externalRef: { resourceId: `external-${entityId}`, system: "example-provider" },
+    externalRef: {
+      resourceId: `external-${entityId}`,
+      system: "example-provider",
+    },
     fastingStatus: "fasting",
     labName: "Example Lab",
     labPanelId: `external-panel-${entityId}`,
@@ -1318,7 +1676,10 @@ function createEvent(
     links: [],
     lookupIds: [entityId],
     occurredAt,
-    path: `ledger/events/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
+    path: `ledger/events/${occurredAt.slice(0, 4)}/${occurredAt.slice(
+      0,
+      7,
+    )}.jsonl`,
     primaryLookupId: entityId,
     recordClass: "ledger",
     relatedIds: [],
@@ -1346,7 +1707,9 @@ function createMetricSample(
     links: [],
     lookupIds: [entityId],
     occurredAt: recordedAt,
-    path: `ledger/metric-samples/${String(attributes.metric ?? "metric")}/2026/2026-02.jsonl`,
+    path: `ledger/metric-samples/${String(
+      attributes.metric ?? "metric",
+    )}/2026/2026-02.jsonl`,
     primaryLookupId: entityId,
     recordClass: "sample",
     relatedIds: [],

@@ -21,7 +21,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sleep-sat", "sleep", "Sleep", "2026-06-13T07:20:00.000Z", {
         details: ["91% efficiency", "HRV 58 ms", "readiness 82"],
         source: "Oura",
-        summary: "7 h 42 · score 86",
+        summary: "7 h 42 · sleep score 86",
         timing: "night",
       }),
       journalEvent("sauna", "note", "Sauna", "2026-06-13T17:45:00.000Z", {
@@ -33,7 +33,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sleep-fri", "sleep", "Sleep", "2026-06-12T07:40:00.000Z", {
         details: ["87% efficiency", "HRV 51 ms", "readiness 74"],
         source: "Oura",
-        summary: "6 h 58 · score 76",
+        summary: "6 h 58 · sleep score 76",
         timing: "night",
       }),
       journalEvent("walk", "activity", "Walking", "2026-06-12T16:15:00.000Z", {
@@ -45,7 +45,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sleep-thu", "sleep", "Sleep", "2026-06-11T07:15:00.000Z", {
         details: ["90% efficiency", "HRV 61 ms", "readiness 87"],
         source: "Oura",
-        summary: "8 h 06 · score 89",
+        summary: "8 h 06 · sleep score 89",
         timing: "night",
       }),
       journalEvent("tennis", "activity", "Tennis", "2026-06-11T18:00:00.000Z", {
@@ -58,7 +58,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sleep-wed", "sleep", "Sleep", "2026-06-10T07:30:00.000Z", {
         details: ["84% efficiency", "HRV 48 ms", "readiness 69"],
         source: "Oura",
-        summary: "6 h 31 · score 71",
+        summary: "6 h 31 · sleep score 71",
         timing: "night",
       }),
       journalEvent("nap", "nap", "Nap", "2026-06-10T14:20:00.000Z", {
@@ -80,7 +80,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sleep-tue", "sleep", "Sleep", "2026-06-09T07:10:00.000Z", {
         details: ["88% efficiency", "HRV 55 ms", "readiness 78"],
         source: "Oura",
-        summary: "7 h 18 · score 81",
+        summary: "7 h 18 · sleep score 81",
         timing: "night",
       }),
       journalEvent(
@@ -110,7 +110,7 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sleep-mon", "sleep", "Sleep", "2026-06-08T07:50:00.000Z", {
         details: ["82% efficiency", "HRV 46 ms", "readiness 65"],
         source: "Oura",
-        summary: "6 h 44 · score 70",
+        summary: "6 h 44 · sleep score 70",
         timing: "night",
       }),
     ]),

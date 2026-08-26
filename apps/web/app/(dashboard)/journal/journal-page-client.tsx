@@ -45,8 +45,14 @@ const PATTERN_LABELS: Record<
 };
 
 export default function JournalPageClient() {
-  const { client, freshness, refresh, refreshPending, status } =
-    useBrowserVault();
+  const {
+    client,
+    deviceSyncImportPending,
+    freshness,
+    refresh,
+    refreshPending,
+    status,
+  } = useBrowserVault();
   const journal = useMemo(
     () => (client ? selectBrowserVaultJournal(client) : null),
     [client],
@@ -60,6 +66,7 @@ export default function JournalPageClient() {
   );
   const journalAvailable = client?.replica.journal !== undefined;
   const isPreparing =
+    deviceSyncImportPending &&
     refreshPending &&
     (status === "empty" || (client !== null && !journalAvailable));
 

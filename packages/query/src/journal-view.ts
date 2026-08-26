@@ -1,6 +1,4 @@
-import {
-  isValidIanaTimeZone,
-} from "@murphai/contracts";
+import { isValidIanaTimeZone } from "@murphai/contracts";
 import {
   resolveAdherenceObservationActivityKind,
   resolveActivityEvidenceLocalDate,
@@ -17,8 +15,12 @@ const JOURNAL_METRICS = [
   { key: "sleep-score", label: "Sleep score", group: "sleep" },
   { key: "sleep-efficiency", label: "Sleep efficiency", group: "sleep" },
   { key: "total-sleep", label: "Total sleep", group: "sleep" },
+  { key: "deep-sleep-minutes", label: "Deep sleep", group: "sleep" },
+  { key: "rem-sleep-minutes", label: "REM sleep", group: "sleep" },
   { key: "hrv-rmssd", label: "HRV", group: "sleep" },
   { key: "resting-heart-rate", label: "Resting heart rate", group: "sleep" },
+  { key: "respiratory-rate", label: "Respiratory rate", group: "sleep" },
+  { key: "spo2", label: "SpO₂", group: "sleep" },
   { key: "readiness-score", label: "Readiness score", group: "sleep" },
   { key: "recovery-score", label: "Recovery score", group: "sleep" },
 ] as const;
@@ -71,7 +73,9 @@ export interface JournalWeekSummary {
   startDate: string;
 }
 
-export function emptyJournalView(windowDays = DEFAULT_WINDOW_DAYS): JournalView {
+export function emptyJournalView(
+  windowDays = DEFAULT_WINDOW_DAYS,
+): JournalView {
   return { days: [], eventCount: 0, recordCount: 0, weeks: [], windowDays };
 }
 
@@ -102,19 +106,23 @@ export function buildJournalView(
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const candidates = normalizeJournalCandidates([
-    ...vault.events.flatMap((event) => journalCandidateFromEvent(event, fromDate, asOfDate)),
+    ...vault.events.flatMap((event) =>
+      journalCandidateFromEvent(event, fromDate, asOfDate),
+    ),
     ...journalMetricCandidates(metricPoints, fromDate, asOfDate),
   ])
     .sort(compareCandidates)
     .slice(0, MAX_RECORDS);
   const builtEvents = groupJournalCandidates(candidates);
   const weeks = buildJournalWeekSummaries(builtEvents);
-  const events = builtEvents.map(({
-    activityMinutes: _activityMinutes,
-    sleepMinutes: _sleepMinutes,
-    sleepScore: _sleepScore,
-    ...event
-  }) => event);
+  const events = builtEvents.map(
+    ({
+      activityMinutes: _activityMinutes,
+      sleepMinutes: _sleepMinutes,
+      sleepScore: _sleepScore,
+      ...event
+    }) => event,
+  );
   const daysByDate = new Map<string, JournalEvent[]>();
   for (const event of events) {
     const dayEvents = daysByDate.get(event.date) ?? [];
@@ -147,34 +155,52 @@ function journalCandidateFromEvent(
   const date = resolveEventDate(event);
   if (!date || date < fromDate || date > toDate) return [];
   const occurredAt = normalizeOccurredAt(event.occurredAt ?? undefined, date);
-  const label = eventLabel(event);
-  const activityKey = event.kind === "activity_session"
-    ? resolveAdherenceObservationActivityKind({ attributes: event.attributes }) ?? "activity"
-    : null;
+  const observationMetric = journalObservationMetric(event);
+  const label = observationMetric?.label ?? eventLabel(event);
+  const activityKey =
+    event.kind === "activity_session"
+      ? resolveAdherenceObservationActivityKind({
+          attributes: event.attributes,
+        }) ?? "activity"
+      : null;
   const durationMinutes = readNumber(event.attributes.durationMinutes);
-  const sleepType = event.kind === "sleep_session"
-    ? readSleepType(event.attributes.sleepType)
+  const sleepType =
+    event.kind === "sleep_session"
+      ? readSleepType(event.attributes.sleepType)
+      : null;
+  const groupHint = activityKey
+    ? `activity:${date}:${activityKey.toLowerCase()}`
+    : observationMetric
+    ? `${observationMetric.group}:${date}`
     : null;
-  const groupHint = activityKey ? `activity:${date}:${activityKey.toLowerCase()}` : null;
-  return [{
-    activityKey,
-    date,
-    durationMinutes,
-    groupHint,
-    id: event.entityId,
-    kind: event.kind,
-    label,
-    metricKey: null,
-    metricValue: null,
-    occurredAt,
-    relatedIds: [...new Set([...event.relatedIds, ...event.links.map((link) => link.targetId)])],
-    sleepType,
-    source: readEventSource(event),
-    summary: eventSummary(event),
-    tags: event.tags.slice(),
-    timing: event.occurredAt ? "timed" : "all_day",
-    timeZone: readEventTimeZone(event),
-  }];
+  return [
+    {
+      activityKey,
+      date,
+      durationMinutes,
+      groupHint,
+      id: event.entityId,
+      kind: event.kind,
+      label,
+      metricKey: observationMetric?.key ?? null,
+      metricValue: observationMetric
+        ? readNumber(event.attributes.value)
+        : null,
+      occurredAt,
+      relatedIds: [
+        ...new Set([
+          ...event.relatedIds,
+          ...event.links.map((link) => link.targetId),
+        ]),
+      ],
+      sleepType,
+      source: readEventSource(event),
+      summary: eventSummary(event),
+      tags: event.tags.slice(),
+      timing: event.occurredAt ? "timed" : "all_day",
+      timeZone: readEventTimeZone(event),
+    },
+  ];
 }
 
 function journalMetricCandidates(
@@ -183,11 +209,16 @@ function journalMetricCandidates(
   toDate: string,
 ): JournalCandidate[] {
   return JOURNAL_METRICS.flatMap((metric) =>
-    selectMetricSeries({ from: fromDate, metricKey: metric.key, points, to: toDate }).rows
-      .flatMap((row) => {
-        if (row.value === null || row.confidence === "none") return [];
-        const unit = row.unit ? ` ${row.unit}` : "";
-        return [{
+    selectMetricSeries({
+      from: fromDate,
+      metricKey: metric.key,
+      points,
+      to: toDate,
+    }).rows.flatMap((row) => {
+      if (row.value === null || row.confidence === "none") return [];
+      const unit = row.unit ? ` ${row.unit}` : "";
+      return [
+        {
           activityKey: null,
           date: row.date,
           durationMinutes: null,
@@ -205,8 +236,9 @@ function journalMetricCandidates(
           tags: [metric.key],
           timing: "night",
           timeZone: null,
-        }];
-      })
+        },
+      ];
+    }),
   );
 }
 
@@ -215,6 +247,14 @@ function normalizeJournalCandidates(
 ): JournalCandidate[] {
   const normalized = candidates.map((candidate) => ({ ...candidate }));
   const sleepSessionsByDate = new Map<string, JournalCandidate[]>();
+  const canonicalObservationMetrics = new Set(
+    normalized
+      .filter(
+        (candidate) =>
+          candidate.kind === "observation" && candidate.metricKey !== null,
+      )
+      .map((candidate) => `${candidate.date}:${candidate.metricKey}`),
+  );
 
   for (const candidate of normalized) {
     if (candidate.kind !== "sleep_session") continue;
@@ -224,16 +264,23 @@ function normalizeJournalCandidates(
   }
 
   for (const [date, sessions] of sleepSessionsByDate) {
-    const explicitMain = sessions.filter((session) => session.sleepType === "main_sleep");
-    const unknown = sessions.filter((session) => session.sleepType === "unknown");
-    const selectedUnknownMain = unknown.slice().sort(compareSleepDuration)[0] ?? null;
+    const explicitMain = sessions.filter(
+      (session) => session.sleepType === "main_sleep",
+    );
+    const unknown = sessions.filter(
+      (session) => session.sleepType === "unknown",
+    );
+    const selectedUnknownMain =
+      unknown.slice().sort(compareSleepDuration)[0] ?? null;
 
     for (const session of sessions) {
-      const isLongUnknownSleep = session.sleepType === "unknown"
-        && (session.durationMinutes ?? 0) >= 180;
-      const isMain = session.sleepType === "main_sleep"
-        || session === selectedUnknownMain
-        || (explicitMain.length > 0 && isLongUnknownSleep);
+      const isLongUnknownSleep =
+        session.sleepType === "unknown" &&
+        (session.durationMinutes ?? 0) >= 180;
+      const isMain =
+        session.sleepType === "main_sleep" ||
+        session === selectedUnknownMain ||
+        (explicitMain.length > 0 && isLongUnknownSleep);
       session.groupHint = isMain ? `sleep:${date}` : `nap:${session.id}`;
       session.timing = isMain ? "night" : "timed";
     }
@@ -241,25 +288,79 @@ function normalizeJournalCandidates(
 
   const hasSleepSession = new Set(sleepSessionsByDate.keys());
   const readinessByDate = new Map<string, number>();
+  const recoveryByDate = new Map<string, number>();
+  const preferRecoveryDates = new Set<string>();
   for (const candidate of normalized) {
-    if (candidate.metricKey === "readiness-score" && candidate.metricValue !== null) {
+    if (
+      candidate.metricKey === "readiness-score" &&
+      candidate.metricValue !== null
+    ) {
       readinessByDate.set(candidate.date, candidate.metricValue);
+    }
+    if (
+      candidate.metricKey === "recovery-score" &&
+      candidate.metricValue !== null
+    ) {
+      recoveryByDate.set(candidate.date, candidate.metricValue);
+      if (candidate.source?.toLocaleLowerCase().includes("whoop")) {
+        preferRecoveryDates.add(candidate.date);
+      }
     }
   }
 
   return normalized.filter((candidate) => {
-    if (candidate.metricKey === "total-sleep" && hasSleepSession.has(candidate.date)) {
+    if (
+      candidate.kind === "metric" &&
+      candidate.metricKey &&
+      canonicalObservationMetrics.has(
+        `${candidate.date}:${candidate.metricKey}`,
+      )
+    ) {
       return false;
     }
-    if (candidate.metricKey === "recovery-score" && candidate.metricValue !== null) {
-      return readinessByDate.get(candidate.date) !== candidate.metricValue;
+    if (
+      candidate.metricKey === "total-sleep" &&
+      hasSleepSession.has(candidate.date)
+    ) {
+      return false;
+    }
+    if (
+      candidate.metricKey === "recovery-score" &&
+      candidate.metricValue !== null
+    ) {
+      return (
+        readinessByDate.get(candidate.date) !== candidate.metricValue ||
+        preferRecoveryDates.has(candidate.date)
+      );
+    }
+    if (
+      candidate.metricKey === "readiness-score" &&
+      candidate.metricValue !== null
+    ) {
+      return (
+        recoveryByDate.get(candidate.date) !== candidate.metricValue ||
+        !preferRecoveryDates.has(candidate.date)
+      );
     }
     return true;
   });
 }
 
-function groupJournalCandidates(candidates: readonly JournalCandidate[]): BuiltJournalEvent[] {
-  const parent = new Map(candidates.map((candidate) => [candidate.id, candidate.id]));
+function journalObservationMetric(
+  event: CanonicalEntity,
+): (typeof JOURNAL_METRICS)[number] | null {
+  if (event.kind !== "observation") return null;
+  const metric = readString(event.attributes.metric);
+  if (!metric) return null;
+  return JOURNAL_METRICS.find((candidate) => candidate.key === metric) ?? null;
+}
+
+function groupJournalCandidates(
+  candidates: readonly JournalCandidate[],
+): BuiltJournalEvent[] {
+  const parent = new Map(
+    candidates.map((candidate) => [candidate.id, candidate.id]),
+  );
   const candidateIds = new Set(parent.keys());
   const hintOwner = new Map<string, string>();
 
@@ -303,21 +404,26 @@ function groupJournalCandidates(candidates: readonly JournalCandidate[]): BuiltJ
       activityMinutes: presentation.activityMinutes,
       date: lead.date,
       details: presentation.details,
-      id: sorted.map((record) => record.id).sort().join(":"),
+      id: sorted
+        .map((record) => record.id)
+        .sort()
+        .join(":"),
       kind: eventGroupKind(sorted),
       occurredAt: lead.occurredAt,
-      records: sorted.map(({
-        activityKey: _activityKey,
-        date: _date,
-        durationMinutes: _durationMinutes,
-        groupHint: _hint,
-        metricKey: _metricKey,
-        metricValue: _metricValue,
-        relatedIds: _related,
-        sleepType: _sleepType,
-        timing: _timing,
-        ...record
-      }) => record),
+      records: sorted.map(
+        ({
+          activityKey: _activityKey,
+          date: _date,
+          durationMinutes: _durationMinutes,
+          groupHint: _hint,
+          metricKey: _metricKey,
+          metricValue: _metricValue,
+          relatedIds: _related,
+          sleepType: _sleepType,
+          timing: _timing,
+          ...record
+        }) => record,
+      ),
       sleepMinutes: presentation.sleepMinutes,
       sleepScore: presentation.sleepScore,
       summary: presentation.summary,
@@ -329,37 +435,50 @@ function groupJournalCandidates(candidates: readonly JournalCandidate[]): BuiltJ
 }
 
 function isJournalEventKind(kind: string): boolean {
-  return kind === "activity_session"
-    || kind === "experiment_context"
-    || kind === "intervention_session"
-    || kind === "note"
-    || kind === "observation"
-    || kind === "sleep_session"
-    || kind === "symptom"
-    || kind === "test";
+  return (
+    kind === "activity_session" ||
+    kind === "experiment_context" ||
+    kind === "intervention_session" ||
+    kind === "meal" ||
+    kind === "note" ||
+    kind === "observation" ||
+    kind === "sleep_session" ||
+    kind === "symptom" ||
+    kind === "test"
+  );
 }
 
 function resolveEventDate(event: CanonicalEntity): string | null {
-  if (event.kind === "activity_session") return resolveActivityEvidenceLocalDate(event);
-  if (event.kind === "intervention_session") return resolveInterventionSessionLocalDate(event);
+  if (event.kind === "activity_session")
+    return resolveActivityEvidenceLocalDate(event);
+  if (event.kind === "intervention_session")
+    return resolveInterventionSessionLocalDate(event);
   return event.date ?? event.occurredAt?.slice(0, 10) ?? null;
 }
 
 function eventLabel(event: CanonicalEntity): string {
   if (event.kind === "activity_session") {
     return humanize(
-      resolveAdherenceObservationActivityKind({ attributes: event.attributes })
-        ?? event.title
-        ?? "activity",
+      resolveAdherenceObservationActivityKind({
+        attributes: event.attributes,
+      }) ??
+        event.title ??
+        "activity",
     );
   }
   if (event.title) return event.title;
   if (event.kind === "intervention_session") {
-    return humanize(readString(event.attributes.interventionType) ?? "intervention");
+    return humanize(
+      readString(event.attributes.interventionType) ?? "intervention",
+    );
   }
-  if (event.kind === "observation") return humanize(readString(event.attributes.metric) ?? "observation");
-  if (event.kind === "symptom") return humanize(readString(event.attributes.symptom) ?? "symptom");
-  if (event.kind === "test") return readString(event.attributes.testName) ?? "Test result";
+  if (event.kind === "observation")
+    return humanize(readString(event.attributes.metric) ?? "observation");
+  if (event.kind === "symptom")
+    return humanize(readString(event.attributes.symptom) ?? "symptom");
+  if (event.kind === "test")
+    return readString(event.attributes.testName) ?? "Test result";
+  if (event.kind === "meal") return "Meal";
   if (event.kind === "sleep_session") return "Sleep";
   return humanize(event.kind);
 }
@@ -369,6 +488,7 @@ function eventSummary(event: CanonicalEntity): string | null {
   if (note) return note;
   const summary = readString(event.attributes.summary);
   if (summary) return summary;
+  if (event.kind === "meal") return mealSummary(event.attributes);
   if (event.kind === "observation") {
     const value = readNumber(event.attributes.value);
     if (value !== null) {
@@ -376,7 +496,10 @@ function eventSummary(event: CanonicalEntity): string | null {
       return `${value}${unit ? ` ${unit}` : ""}`;
     }
   }
-  if (event.kind === "activity_session" || event.kind === "intervention_session") {
+  if (
+    event.kind === "activity_session" ||
+    event.kind === "intervention_session"
+  ) {
     const duration = readNumber(event.attributes.durationMinutes);
     return duration === null ? null : `${duration} min`;
   }
@@ -387,11 +510,32 @@ function eventSummary(event: CanonicalEntity): string | null {
   return event.body?.trim() || null;
 }
 
+function mealSummary(attributes: Record<string, unknown>): string | null {
+  const ingredients = Array.isArray(attributes.ingredients)
+    ? attributes.ingredients
+        .map(readString)
+        .filter((value): value is string => value !== null)
+        .slice(0, 3)
+    : [];
+  const nutrition = readRecord(attributes.nutrition);
+  const totals = readRecord(nutrition?.totals);
+  const calories = readNumber(totals?.calories);
+  const protein = readNumber(totals?.proteinGrams);
+  const parts = [
+    ingredients.length > 0 ? ingredients.join(", ") : null,
+    calories === null ? null : `${formatNumber(calories)} kcal`,
+    protein === null ? null : `${formatNumber(protein)} g protein`,
+  ].filter((value): value is string => value !== null);
+  return parts.length > 0 ? parts.join(" · ") : "Meal recorded";
+}
+
 function readEventSource(event: CanonicalEntity): string | null {
   const dataOrigin = readRecord(event.attributes.dataOrigin);
-  return readString(dataOrigin?.sourceProviderSlug)
-    ?? readString(event.attributes.source)
-    ?? null;
+  return (
+    readString(dataOrigin?.sourceProviderSlug) ??
+    readString(event.attributes.source) ??
+    null
+  );
 }
 
 function readEventTimeZone(event: CanonicalEntity): string | null {
@@ -399,17 +543,24 @@ function readEventTimeZone(event: CanonicalEntity): string | null {
   return value && isValidIanaTimeZone(value) ? value : null;
 }
 
-function selectLeadRecord(records: readonly JournalCandidate[]): JournalCandidate {
-  return records.find((record) => record.kind === "activity_session")
-    ?? records.find((record) => record.kind === "sleep_session")
-    ?? records.find((record) => record.kind === "test")
-    ?? records[0]!;
+function selectLeadRecord(
+  records: readonly JournalCandidate[],
+): JournalCandidate {
+  return (
+    records.find((record) => record.kind === "activity_session") ??
+    records.find((record) => record.kind === "sleep_session") ??
+    records.find((record) => record.kind === "test") ??
+    records[0]!
+  );
 }
 
 function eventGroupKind(records: readonly JournalCandidate[]): string {
-  if (records.some((record) => record.groupHint?.startsWith("nap:"))) return "nap";
-  if (records.some((record) => record.groupHint?.startsWith("sleep:"))) return "sleep";
-  if (records.some((record) => record.kind === "activity_session")) return "activity";
+  if (records.some((record) => record.groupHint?.startsWith("nap:")))
+    return "nap";
+  if (records.some((record) => record.groupHint?.startsWith("sleep:")))
+    return "sleep";
+  if (records.some((record) => record.kind === "activity_session"))
+    return "activity";
   if (records.some((record) => record.kind === "test")) return "test";
   return records[0]?.kind ?? "event";
 }
@@ -418,8 +569,10 @@ function eventGroupTitle(
   records: readonly JournalCandidate[],
   lead: JournalCandidate,
 ): string {
-  if (records.some((record) => record.groupHint?.startsWith("nap:"))) return "Nap";
-  if (records.some((record) => record.groupHint?.startsWith("sleep:"))) return "Sleep";
+  if (records.some((record) => record.groupHint?.startsWith("nap:")))
+    return "Nap";
+  if (records.some((record) => record.groupHint?.startsWith("sleep:")))
+    return "Sleep";
   return lead.label;
 }
 
@@ -434,40 +587,101 @@ function buildEventPresentation(
   summary: string | null;
   timing: JournalEventTiming;
 } {
-  const activitySessions = records.filter((record) => record.kind === "activity_session");
+  const activitySessions = records.filter(
+    (record) => record.kind === "activity_session",
+  );
   if (activitySessions.length > 0) {
-    const activityMinutes = sumNumbers(activitySessions.map((record) => record.durationMinutes));
+    const activityMinutes = sumNumbers(
+      activitySessions.map((record) => record.durationMinutes),
+    );
     return {
       activityMinutes,
-      details: uniqueStrings(records
-        .filter((record) => record.kind === "note")
-        .map((record) => record.summary)),
+      details: uniqueStrings(
+        records
+          .filter((record) => record.kind === "note")
+          .map((record) => record.summary),
+      ),
       sleepMinutes: null,
       sleepScore: null,
-      summary: activityMinutes > 0
-        ? `${formatDuration(activityMinutes)}${activitySessions.length > 1
-          ? ` across ${activitySessions.length} sessions`
-          : ""}`
-        : lead.summary,
+      summary:
+        activityMinutes > 0
+          ? `${formatDuration(activityMinutes)}${
+              activitySessions.length > 1
+                ? ` across ${activitySessions.length} sessions`
+                : ""
+            }`
+          : lead.summary,
       timing: "timed",
     };
   }
 
-  const sleepSessions = records.filter((record) => record.kind === "sleep_session");
+  const sleepSessions = records.filter(
+    (record) => record.kind === "sleep_session",
+  );
   const isNap = records.some((record) => record.groupHint?.startsWith("nap:"));
-  if (sleepSessions.length > 0 || records.some((record) => record.groupHint?.startsWith("sleep:"))) {
-    const sleepMinutes = maxNumber(sleepSessions.map((record) => record.durationMinutes));
+  if (
+    sleepSessions.length > 0 ||
+    records.some((record) => record.groupHint?.startsWith("sleep:"))
+  ) {
+    const sleepMinutes = maxNumber(
+      sleepSessions.map((record) => record.durationMinutes),
+    );
     const sleepScore = metricValue(records, "sleep-score");
     const summaryParts = [
       sleepMinutes === null ? null : formatDuration(sleepMinutes),
-      !isNap && sleepScore !== null ? `score ${formatNumber(sleepScore)}` : null,
+      !isNap && sleepScore !== null
+        ? `sleep score ${formatNumber(sleepScore)}`
+        : null,
     ].filter((value): value is string => value !== null);
-    const details = isNap ? [] : [
-      formatMetricDetail(records, "sleep-efficiency", (value) => `${formatNumber(value)}% efficiency`),
-      formatMetricDetail(records, "hrv-rmssd", (value) => `HRV ${formatNumber(value)} ms`),
-      formatMetricDetail(records, "readiness-score", (value) => `readiness ${formatNumber(value)}`),
-      formatMetricDetail(records, "resting-heart-rate", (value) => `resting HR ${formatNumber(value)} bpm`),
-    ].filter((value): value is string => value !== null);
+    const details = isNap
+      ? []
+      : [
+          formatMetricDetail(
+            records,
+            "sleep-efficiency",
+            (value) => `${formatNumber(value)}% efficiency`,
+          ),
+          formatMetricDetail(
+            records,
+            "hrv-rmssd",
+            (value) => `HRV ${formatNumber(value)} ms`,
+          ),
+          formatMetricDetail(
+            records,
+            "readiness-score",
+            (value) => `readiness ${formatNumber(value)}`,
+          ),
+          formatMetricDetail(
+            records,
+            "recovery-score",
+            (value) => `recovery ${formatNumber(value)}`,
+          ),
+          formatMetricDetail(
+            records,
+            "resting-heart-rate",
+            (value) => `resting HR ${formatNumber(value)} bpm`,
+          ),
+          formatMetricDetail(
+            records,
+            "deep-sleep-minutes",
+            (value) => `deep sleep ${formatNumber(value)} min`,
+          ),
+          formatMetricDetail(
+            records,
+            "rem-sleep-minutes",
+            (value) => `REM sleep ${formatNumber(value)} min`,
+          ),
+          formatMetricDetail(
+            records,
+            "respiratory-rate",
+            (value) => `respiratory rate ${formatNumber(value)} breaths/min`,
+          ),
+          formatMetricDetail(
+            records,
+            "spo2",
+            (value) => `SpO₂ ${formatNumber(value)}%`,
+          ),
+        ].filter((value): value is string => value !== null);
     return {
       activityMinutes: 0,
       details,
@@ -480,9 +694,11 @@ function buildEventPresentation(
 
   return {
     activityMinutes: 0,
-    details: uniqueStrings(records
-      .filter((record) => record !== lead)
-      .map((record) => record.summary)),
+    details: uniqueStrings(
+      records
+        .filter((record) => record !== lead)
+        .map((record) => record.summary),
+    ),
     sleepMinutes: null,
     sleepScore: null,
     summary: lead.summary,
@@ -504,7 +720,9 @@ function buildJournalWeekSummaries(
   return [...byStartDate.entries()]
     .sort(([left], [right]) => right.localeCompare(left))
     .map(([startDate, weekEvents]) => {
-      const sleepEvents = weekEvents.filter((event) => event.sleepMinutes !== null);
+      const sleepEvents = weekEvents.filter(
+        (event) => event.sleepMinutes !== null,
+      );
       const sleepMinutes = sleepEvents
         .map((event) => event.sleepMinutes)
         .filter((value): value is number => value !== null);
@@ -512,7 +730,9 @@ function buildJournalWeekSummaries(
         .map((event) => event.sleepScore)
         .filter((value): value is number => value !== null);
       return {
-        activityMinutes: sumNumbers(weekEvents.map((event) => event.activityMinutes)),
+        activityMinutes: sumNumbers(
+          weekEvents.map((event) => event.activityMinutes),
+        ),
         averageSleepMinutes: averageNumbers(sleepMinutes),
         averageSleepScore: averageNumbers(sleepScores),
         endDate: addDays(startDate, 6),
@@ -523,24 +743,36 @@ function buildJournalWeekSummaries(
 }
 
 function isJournalProfileEvent(event: CanonicalEntity): boolean {
+  const title = event.title?.trim().toLowerCase() ?? null;
+  if (title === "junction profile") return true;
   if (event.kind !== "observation") return false;
-  const values = [event.title, readString(event.attributes.metric)]
-    .filter((value): value is string => value !== null)
-    .map((value) => value.trim().toLowerCase());
-  return values.some((value) => value === "profile" || value === "junction profile");
+  const metric =
+    readString(event.attributes.metric)?.trim().toLowerCase() ?? null;
+  return title === "profile" || metric === "profile";
 }
 
 function readSleepType(value: unknown): "main_sleep" | "nap" | "unknown" {
   return value === "main_sleep" || value === "nap" ? value : "unknown";
 }
 
-function compareSleepDuration(left: JournalCandidate, right: JournalCandidate): number {
-  return (right.durationMinutes ?? 0) - (left.durationMinutes ?? 0)
-    || left.id.localeCompare(right.id);
+function compareSleepDuration(
+  left: JournalCandidate,
+  right: JournalCandidate,
+): number {
+  return (
+    (right.durationMinutes ?? 0) - (left.durationMinutes ?? 0) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
-function metricValue(records: readonly JournalCandidate[], metricKey: string): number | null {
-  return records.find((record) => record.metricKey === metricKey)?.metricValue ?? null;
+function metricValue(
+  records: readonly JournalCandidate[],
+  metricKey: string,
+): number | null {
+  return (
+    records.find((record) => record.metricKey === metricKey)?.metricValue ??
+    null
+  );
 }
 
 function formatMetricDetail(
@@ -576,11 +808,15 @@ function maxNumber(values: readonly (number | null)[]): number | null {
 
 function averageNumbers(values: readonly number[]): number | null {
   if (values.length === 0) return null;
-  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  return Math.round(
+    values.reduce((sum, value) => sum + value, 0) / values.length,
+  );
 }
 
 function uniqueStrings(values: readonly (string | null)[]): string[] {
-  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+  return [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ];
 }
 
 function startOfIsoWeek(date: string): string {
@@ -589,8 +825,14 @@ function startOfIsoWeek(date: string): string {
   return addDays(date, -(day === 0 ? 6 : day - 1));
 }
 
-function compareCandidates(left: JournalCandidate, right: JournalCandidate): number {
-  return right.occurredAt.localeCompare(left.occurredAt) || left.id.localeCompare(right.id);
+function compareCandidates(
+  left: JournalCandidate,
+  right: JournalCandidate,
+): number {
+  return (
+    right.occurredAt.localeCompare(left.occurredAt) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function compareJournalEvents(left: JournalEvent, right: JournalEvent): number {
@@ -599,21 +841,26 @@ function compareJournalEvents(left: JournalEvent, right: JournalEvent): number {
     night: 1,
     timed: 2,
   };
-  return timingRank[left.timing] - timingRank[right.timing]
-    || left.occurredAt.localeCompare(right.occurredAt)
-    || left.id.localeCompare(right.id);
+  return (
+    timingRank[left.timing] - timingRank[right.timing] ||
+    left.occurredAt.localeCompare(right.occurredAt) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function resolveDate(value: Date | string | undefined): string {
   const date = value instanceof Date ? value : new Date(value ?? Date.now());
-  if (Number.isNaN(date.valueOf())) throw new TypeError("Journal asOf must be a valid date.");
+  if (Number.isNaN(date.valueOf()))
+    throw new TypeError("Journal asOf must be a valid date.");
   return date.toISOString().slice(0, 10);
 }
 
 function normalizeWindowDays(value: number | undefined): number {
   if (value === undefined) return DEFAULT_WINDOW_DAYS;
   if (!Number.isInteger(value) || value < 1 || value > 366) {
-    throw new RangeError("Journal windowDays must be an integer from 1 through 366.");
+    throw new RangeError(
+      "Journal windowDays must be an integer from 1 through 366.",
+    );
   }
   return value;
 }
@@ -641,7 +888,7 @@ function humanize(value: string): string {
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 

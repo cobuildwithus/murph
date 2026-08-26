@@ -3080,7 +3080,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         currentRedactedStatus = checkpoint.workspace.redactedStatus ?? {};
         if (checkpoint.conversationInputAhead === true) {
           checkpointReportedConversationInputAhead = true;
-          foregroundWakeObserved = true;
+          if (!assistantExecutionBlocked) {
+            foregroundWakeObserved = true;
+          }
         }
         await finishInitialImportEffectsOnce();
         return checkpoint;

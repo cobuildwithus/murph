@@ -148,20 +148,30 @@ export function createBrowserVaultSessionRoute() {
       );
     };
 
-    if (requestRefresh || (
-      freshnessAssessment.shouldRefresh
-      && !refreshObservationOnly
-    )) {
-      scheduleRefreshAfterResponse();
-    }
-
     if (!replicaRef) {
+      // A pending device import already owns the runtime wake that will create
+      // the first replica. A parallel Browser Vault refresh can otherwise keep
+      // placing newer mailbox work ahead of that import.
+      if (
+        !deviceSyncImportPending &&
+        (requestRefresh ||
+          (freshnessAssessment.shouldRefresh && !refreshObservationOnly))
+      ) {
+        scheduleRefreshAfterResponse();
+      }
       return emptyBrowserVaultSession({
         deviceSyncImportPending,
         memberId: auth.member.id,
         refreshPending: true,
         workspaceVersion,
       });
+    }
+
+    if (requestRefresh || (
+      freshnessAssessment.shouldRefresh
+      && !refreshObservationOnly
+    )) {
+      scheduleRefreshAfterResponse();
     }
 
     const knownRefMatches = browserVaultReplicaRefsMatch(knownReplicaRef, replicaRef)

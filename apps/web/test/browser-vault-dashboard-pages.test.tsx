@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -43,6 +43,7 @@ import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client
 import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
 import { EnvironmentPrintStudy } from "../app/design/environment-print-study";
 import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
+import { JournalViewContent } from "../src/components/journal/journal-view";
 import { renderClientComponent } from "./render-client-component";
 
 type BrowserVaultEntity = Parameters<
@@ -170,8 +171,8 @@ test("OverviewPage renders the dashboard overview", () => {
 test("PatternsPage renders personal comparisons on their own route", () => {
   const markup = renderToStaticMarkup(createElement(PatternsPageClient));
 
-  assert.match(markup, /Personal patterns/);
-  assert.match(markup, /What tends to move together/);
+  assert.match(markup, />Patterns</);
+  assert.doesNotMatch(markup, /What tends to move together/);
   assert.match(markup, /No comparison is ready yet/);
   assert.doesNotMatch(markup, /Weekly changes/);
 });
@@ -237,12 +238,119 @@ test("JournalPage renders the derived private health timeline", () => {
   });
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /Your Journal/u);
+  assert.doesNotMatch(markup, /Your Journal/u);
   assert.match(markup, /Journal/u);
-  assert.match(markup, /10–16 August 2026/u);
+  assert.doesNotMatch(markup, /10–16 August 2026/u);
   assert.match(markup, /Morning walk/u);
   assert.match(markup, /To add, correct, or remove an entry, tell Murph/u);
+  assert.match(markup, /journal-day-2026-08-12/u);
+  assert.doesNotMatch(markup, /journal-day-2026-08-13/u);
   assert.doesNotMatch(markup, /No data/u);
+});
+
+test("JournalPage hides future days and shows one state for a future week", async () => {
+  const journal = {
+    days: [{ date: "2026-08-12", events: [] }],
+    eventCount: 0,
+    recordCount: 0,
+    weeks: [
+      {
+        activityMinutes: 0,
+        averageSleepMinutes: null,
+        averageSleepScore: null,
+        endDate: "2026-08-16",
+        sleepNights: 0,
+        startDate: "2026-08-10",
+      },
+    ],
+    windowDays: 120,
+  };
+  const rendered = await renderClientComponent(
+    createElement(JournalViewContent, {
+      asOfDate: "2026-08-12",
+      journal,
+    }),
+    { requireButton: false },
+  );
+
+  assert.match(rendered.container.innerHTML, /journal-day-2026-08-12/u);
+  assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-13/u);
+  assert.match(
+    rendered.container.innerHTML,
+    /Good (morning|afternoon|evening)\./u,
+  );
+
+  const futureDateButton = rendered.container.querySelector(
+    'button[aria-label="Monday, August 17, 2026"]',
+  );
+  assert.ok(futureDateButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    futureDateButton.click();
+  });
+
+  assert.match(rendered.container.innerHTML, /Nothing to show yet/u);
+  assert.match(
+    rendered.container.innerHTML,
+    /Journal will fill in as this week happens\./u,
+  );
+  assert.doesNotMatch(rendered.container.innerHTML, /journal-day-2026-08-17/u);
+
+  await rendered.cleanup();
+});
+
+test("JournalPage keeps secondary sleep metrics off the main timeline", async () => {
+  const rendered = await renderClientComponent(
+    createElement(JournalViewContent, {
+      asOfDate: "2026-08-12",
+      journal: {
+        days: [
+          {
+            date: "2026-08-12",
+            events: [
+              {
+                date: "2026-08-12",
+                details: ["89% efficiency", "HRV 68 ms", "readiness 71"],
+                id: "sleep",
+                kind: "sleep",
+                occurredAt: "2026-08-12T07:00:00.000Z",
+                records: [
+                  {
+                    id: "sleep-record",
+                    kind: "sleep_session",
+                    label: "Sleep",
+                    occurredAt: "2026-08-12T07:00:00.000Z",
+                    source: "oura",
+                    summary: "7 h 30",
+                    tags: [],
+                    timeZone: "Europe/Warsaw",
+                  },
+                ],
+                summary: "7 h 30 · sleep score 78",
+                timing: "night",
+                timeZone: "Europe/Warsaw",
+                title: "Sleep",
+              },
+            ],
+          },
+        ],
+        eventCount: 1,
+        recordCount: 4,
+        weeks: [],
+        windowDays: 120,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.doesNotMatch(rendered.container.textContent ?? "", /efficiency/u);
+    const detailsButton = rendered.container.querySelector(
+      'button[aria-label="Show details for Sleep"]',
+    );
+    assert.ok(detailsButton instanceof rendered.window.HTMLButtonElement);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("JournalPage renders its empty state after Browser Vault finishes without data", () => {
@@ -266,6 +374,7 @@ test("JournalPage renders a structural skeleton while its first timeline is prep
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
+    deviceSyncImportPending: true,
     error: null,
     freshness: "stale",
     ref: null,
@@ -279,6 +388,25 @@ test("JournalPage renders a structural skeleton while its first timeline is prep
   assert.match(markup, /Preparing your Journal/u);
   assert.match(markup, /aria-busy="true"/u);
   assert.doesNotMatch(markup, /Your timeline starts with one useful detail/u);
+});
+
+test("JournalPage renders its empty state while an empty vault refreshes", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    deviceSyncImportPending: false,
+    error: null,
+    freshness: "stale",
+    ref: null,
+    refreshPending: true,
+    refresh: mocks.refresh,
+    status: "empty",
+  });
+
+  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+
+  assert.match(markup, /Your timeline starts with one useful detail/u);
+  assert.doesNotMatch(markup, /Preparing your Journal/u);
 });
 
 test("JournalPage keeps its page context and recovery action when loading fails", () => {
@@ -295,7 +423,7 @@ test("JournalPage keeps its page context and recovery action when loading fails"
 
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /Your Journal/u);
+  assert.doesNotMatch(markup, /Your Journal/u);
   assert.match(markup, /Journal could not load/u);
   assert.match(markup, /Try again/u);
   assert.doesNotMatch(markup, /Internal implementation detail/u);
@@ -328,15 +456,33 @@ test("Personal Patterns comparison controls name their factor and next-day outco
     createElement(PersonalPatternsComponentStudy),
   );
 
-  assert.match(markup, /aria-label="Running, next-day HRV\./);
-  assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
+  assert.match(
+    markup,
+    /aria-label="Next-day HRV was 12% higher after running\./,
+  );
+  assert.match(
+    markup,
+    /aria-label="Next-day total sleep was 6\.5% higher after sauna\./,
+  );
   assert.match(markup, /data-patterns-layout="mobile"/u);
   assert.match(markup, /data-patterns-layout="desktop"/u);
   assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
   assert.match(markup, /Sleep efficiency/u);
   assert.match(markup, />14 days</u);
-  assert.match(markup, /Early signal · D/u);
-  assert.match(markup, /Pattern · A/u);
+  assert.match(markup, /Early signal, grade D/u);
+  assert.match(markup, /Pattern, grade A/u);
+  assert.match(markup, /Next-day HRV was 12% higher after running\./u);
+  assert.match(markup, /9 days with running averaged 48 ms\./u);
+  assert.match(markup, /Custom tag/u);
+  assert.match(
+    markup,
+    /No clear pattern was found between custom tag and next-day HRV\./u,
+  );
+  assert.match(markup, />No clear pattern</u);
+  assert.match(markup, /data-slot="popover-trigger"/u);
+  assert.doesNotMatch(markup, />~</u);
+  assert.match(markup, /Sparse factor/u);
+  assert.match(markup, /Not enough data/u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
 });
 
@@ -361,14 +507,13 @@ test("PatternsPage explains the bounded wait when a legacy replica has no patter
   try {
     assert.match(
       rendered.container.textContent ?? "",
-      /Patterns are getting ready/u,
+      /Patterns are not ready yet/u,
     );
-    assert.match(rendered.container.textContent ?? "", /within 24 hours/u);
+    assert.match(rendered.container.textContent ?? "", /Refresh Patterns/u);
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
       /No clear comparison is ready/u,
     );
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Refresh now/u);
   } finally {
     await rendered.cleanup();
   }
@@ -393,7 +538,7 @@ test("PatternsPage keeps a legacy replica in the preparing state during refresh"
   assert.doesNotMatch(markup, /No clear comparison is ready/u);
 });
 
-test("PatternsPage keeps a stable error without a Retry action", async () => {
+test("PatternsPage keeps its heading and recovery action when loading fails", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
@@ -411,13 +556,14 @@ test("PatternsPage keeps a stable error without a Retry action", async () => {
   try {
     assert.match(
       rendered.container.textContent ?? "",
-      /Could not load your patterns/u,
+      /Patterns could not load/u,
     );
+    assert.match(rendered.container.textContent ?? "", /^Patterns/u);
     assert.equal(
       [...rendered.container.querySelectorAll("button")].some(
-        (button) => button.textContent === "Retry",
+        (button) => button.textContent === "Try again",
       ),
-      false,
+      true,
     );
     assert.equal(mocks.refresh.mock.calls.length, 0);
   } finally {

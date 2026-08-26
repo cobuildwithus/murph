@@ -1,14 +1,14 @@
 # Journal
 
-Last verified: 2026-08-25
+Last verified: 2026-08-27
 
 ## Product boundary
 
 Journal is one private timeline of useful health context. It combines existing
 canonical records for display. It is not a second health-data store.
 
-A day can show sleep, workouts, device metrics, tests, and private notes as
-human events. Source records remain separate canonical truth. Journal groups
+A day can show sleep, workouts, meals, device metrics, tests, and private notes
+as human events. Source records remain separate canonical truth. Journal groups
 them at read time through existing links and small deterministic rules.
 
 ## Capture
@@ -38,9 +38,14 @@ separate group-to-person privacy rules and explicit group consent.
 ## Read model
 
 The Journal projection reads canonical events and metric points from the last
-120 days. It includes notes, activities, sleep, observations, interventions,
-context, symptoms, and tests. It groups linked records and related sleep metrics
-into one human event. It does not copy records or write a daily summary.
+120 days. It includes notes, activities, sleep, meals, observations,
+interventions, context, symptoms, and tests. It groups linked records and
+related sleep metrics into one human event. It does not copy records or write a
+daily summary.
+
+An accepted plan can appear when its canonical note exists. A completed
+exercise or workout appears as an activity. A suggestion, reminder, or proposed
+exercise is not an event until the member accepts or completes it.
 
 Journal shows one main sleep for each local date. Main sleep has no clock time.
 Shorter sleep stays visible as a timed nap. When a provider does not label sleep
@@ -48,10 +53,11 @@ type, the longest session becomes main sleep. A long duplicate stays with main
 sleep instead of becoming a nap.
 
 Repeated activities of the same kind on one day become one display event. The
-event keeps all source sessions and shows their combined time. Personal Patterns
-still receives the full source records. Journal hides static profile records,
-duplicate recovery values, and total-sleep metrics already represented by a
-sleep session.
+event keeps all source sessions and shows their combined time. Personal
+Patterns still receives the full source records. Journal hides static profile
+records and total-sleep metrics already represented by a sleep session. When
+two providers expose the same daily score, Journal uses the provider's product
+term, such as Oura Readiness or Whoop Recovery, without showing a duplicate.
 
 Weekly sleep averages use main sleep only. Weekly activity uses the grouped
 source sessions once.

@@ -11,10 +11,7 @@ import {
   resolveActivityEvidenceLocalDate,
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
-import {
-  selectMetricSeries,
-  type MetricPoint,
-} from "./metrics/index.ts";
+import { selectMetricSeries, type MetricPoint } from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
@@ -33,19 +30,26 @@ const COMPARISON_SEARCH_DAYS = 35;
 // Product-owned and intentionally fail-closed. A new provider tag requires
 // explicit product evidence before it can acquire action semantics here.
 const PERSONAL_PATTERN_OURA_ACTION_TAG = "sauna";
-const JUNCTION_NOTE_RESOURCE_TYPE_PATTERN = /^junction-[a-z0-9]+(?:-[a-z0-9]+)*-note$/u;
+const JUNCTION_NOTE_RESOURCE_TYPE_PATTERN =
+  /^junction-[a-z0-9]+(?:-[a-z0-9]+)*-note$/u;
 const OUTCOME_LIKE_FACTOR_TOKENS = new Set([
   "heart-rate-variability",
   "hrv",
+  "deep-sleep",
+  "deep-sleep-minutes",
   "readiness",
   "readiness-score",
   "recovery",
   "recovery-score",
   "resting-heart-rate",
+  "respiratory-rate",
+  "rem-sleep",
+  "rem-sleep-minutes",
   "rhr",
   "sleep",
   "sleep-efficiency",
   "sleep-score",
+  "spo2",
   "total-sleep",
 ]);
 const BOUNDED_FACTOR_DETAIL_TAGS = new Set([
@@ -178,11 +182,7 @@ export function buildPersonalPatternReportFromWearableBundle(
   return buildPersonalPatternReportFromOutcomeSeries(
     vault,
     [
-      ...collectOutcomeSeries(
-        wearableBundle,
-        window,
-        readVaultTimeZone(vault),
-      ),
+      ...collectOutcomeSeries(wearableBundle, window, readVaultTimeZone(vault)),
       ...collectJournalOutcomeSeries(vault.events, window),
     ],
     options,
@@ -201,11 +201,17 @@ export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
     window,
     readVaultTimeZone(vault),
   );
-  const wearableOutcomeIds = new Set(wearableOutcomes.map((outcome) => outcome.id));
-  const fallbackOutcomes = collectMetricPointRecoveryOutcomeSeries(metricPoints, window)
-    .filter((outcome) => !wearableOutcomeIds.has(outcome.id));
-  const journalOutcomes = collectJournalOutcomeSeries(vault.events, window)
-    .filter((outcome) => !wearableOutcomeIds.has(outcome.id));
+  const wearableOutcomeIds = new Set(
+    wearableOutcomes.map((outcome) => outcome.id),
+  );
+  const fallbackOutcomes = collectMetricPointRecoveryOutcomeSeries(
+    metricPoints,
+    window,
+  ).filter((outcome) => !wearableOutcomeIds.has(outcome.id));
+  const journalOutcomes = collectJournalOutcomeSeries(
+    vault.events,
+    window,
+  ).filter((outcome) => !wearableOutcomeIds.has(outcome.id));
 
   return buildPersonalPatternReportFromOutcomeSeries(
     vault,
@@ -222,39 +228,35 @@ function buildPersonalPatternReportFromOutcomeSeries(
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
-  const factorAccumulators = collectFactorAccumulators(vault.events, fromDate, asOfDate);
+  const factorAccumulators = pruneRedundantFactorDetails(
+    collectFactorAccumulators(vault.events, fromDate, asOfDate),
+  );
   const candidateFactors = collectFactors(factorAccumulators);
   const candidateCells = candidateFactors.flatMap((factor) =>
-    outcomes.map((outcome) => buildPatternCell(
-      factor,
-      factorAccumulators.get(factor.id),
-      outcome,
-    ))
-  );
-  const eligibleFactorIds = new Set(
-    candidateCells
-      .filter((cell) => cell.stage !== "insufficient")
-      .map((cell) => cell.factorId),
+    outcomes.map((outcome) =>
+      buildPatternCell(factor, factorAccumulators.get(factor.id), outcome),
+    ),
   );
   const factors = candidateFactors
-    .filter((factor) => eligibleFactorIds.has(factor.id))
-    .sort((left, right) =>
-      bestFactorGradeRank(candidateCells, right.id)
-      - bestFactorGradeRank(candidateCells, left.id)
-      || right.observedDays - left.observedDays
-      || left.label.localeCompare(right.label)
+    .sort(
+      (left, right) =>
+        bestFactorGradeRank(candidateCells, right.id) -
+          bestFactorGradeRank(candidateCells, left.id) ||
+        right.observedDays - left.observedDays ||
+        left.label.localeCompare(right.label),
     )
     .slice(0, MAX_FACTORS);
   const visibleFactorIds = new Set(factors.map((factor) => factor.id));
-  const selectedCells = candidateCells.filter((cell) => visibleFactorIds.has(cell.factorId));
-  const testedCells = selectedCells.filter((cell) => cell.stage !== "insufficient");
-  const visibleOutcomeIds = new Set(testedCells.map((cell) => cell.outcomeId));
+  const selectedCells = candidateCells.filter((cell) =>
+    visibleFactorIds.has(cell.factorId),
+  );
+  const testedCells = selectedCells.filter(
+    (cell) => cell.stage !== "insufficient",
+  );
 
   return {
     asOfDate,
-    cells: selectedCells.filter((cell) =>
-      visibleFactorIds.has(cell.factorId) && visibleOutcomeIds.has(cell.outcomeId)
-    ),
+    cells: selectedCells,
     factors,
     lagDays: 1,
     notes: [
@@ -263,18 +265,27 @@ function buildPersonalPatternReportFromOutcomeSeries(
       "Low-evidence observations can use an unobserved personal baseline. They cannot become a Pattern without stronger evidence.",
       "A repeated link is still an association, not proof that the action caused the change.",
     ],
-    outcomes: outcomes
-      .filter((outcome) => visibleOutcomeIds.has(outcome.id))
-      .map(({ values: _values, meaningfulAbsoluteDelta: _absolute, meaningfulRelativeDelta: _relative, ...outcome }) => outcome),
-    repeatableCellCount: testedCells.filter((cell) =>
-      cell.classification === "early_signal" || cell.classification === "pattern"
+    outcomes: outcomes.map(
+      ({
+        values: _values,
+        meaningfulAbsoluteDelta: _absolute,
+        meaningfulRelativeDelta: _relative,
+        ...outcome
+      }) => outcome,
+    ),
+    repeatableCellCount: testedCells.filter(
+      (cell) =>
+        cell.classification === "early_signal" ||
+        cell.classification === "pattern",
     ).length,
     testedCellCount: testedCells.length,
     windowDays,
   };
 }
 
-export function emptyPersonalPatternReport(asOfDate: string): PersonalPatternReport {
+export function emptyPersonalPatternReport(
+  asOfDate: string,
+): PersonalPatternReport {
   return {
     asOfDate,
     cells: [],
@@ -300,9 +311,12 @@ function collectFactors(
         : {}),
       ...(episodeCount !== observedDays ? { episodeCount } : {}),
       id: factor.token,
-      kind: factor.kinds.size === 2
-        ? "mixed" as const
-        : factor.kinds.has("activity") ? "activity" as const : "intervention" as const,
+      kind:
+        factor.kinds.size === 2
+          ? ("mixed" as const)
+          : factor.kinds.has("activity")
+          ? ("activity" as const)
+          : ("intervention" as const),
       label: humanizeToken(factor.token),
       observedDays,
     };
@@ -325,7 +339,11 @@ function collectFactorAccumulators(
         if (candidate.state === "observed") {
           existing.dates.add(candidate.date);
           existing.episodeIds.add(candidate.episodeId);
-          addEpisodeDate(existing.episodeDates, candidate.episodeId, candidate.date);
+          addEpisodeDate(
+            existing.episodeDates,
+            candidate.episodeId,
+            candidate.date,
+          );
         } else {
           existing.absentDates.add(candidate.date);
         }
@@ -335,14 +353,18 @@ function collectFactorAccumulators(
       }
 
       factors.set(candidate.token, {
-        absentDates: new Set(candidate.state === "absent" ? [candidate.date] : []),
+        absentDates: new Set(
+          candidate.state === "absent" ? [candidate.date] : [],
+        ),
         dates: new Set(candidate.state === "observed" ? [candidate.date] : []),
         episodeDates: new Map(
           candidate.state === "observed"
             ? [[candidate.episodeId, new Set([candidate.date])]]
             : [],
         ),
-        episodeIds: new Set(candidate.state === "observed" ? [candidate.episodeId] : []),
+        episodeIds: new Set(
+          candidate.state === "observed" ? [candidate.episodeId] : [],
+        ),
         implicitAbsenceAllowed: candidate.implicitAbsenceAllowed,
         kinds: new Set([candidate.kind]),
         token: candidate.token,
@@ -353,13 +375,55 @@ function collectFactorAccumulators(
   return factors;
 }
 
-function readFactorCandidates(
-  event: CanonicalEntity,
-): FactorCandidate[] {
+function pruneRedundantFactorDetails(
+  factors: Map<string, FactorAccumulator>,
+): Map<string, FactorAccumulator> {
+  const detailsByBase = new Map<string, FactorAccumulator[]>();
+
+  for (const factor of factors.values()) {
+    const separatorIndex = factor.token.indexOf("--");
+    if (separatorIndex === -1) continue;
+    const baseToken = factor.token.slice(0, separatorIndex);
+    const details = detailsByBase.get(baseToken) ?? [];
+    details.push(factor);
+    detailsByBase.set(baseToken, details);
+  }
+
+  for (const [baseToken, details] of detailsByBase) {
+    const base = factors.get(baseToken);
+    const signatureCounts = new Map<string, number>();
+    for (const detail of details) {
+      const signature = factorExposureSignature(detail);
+      signatureCounts.set(signature, (signatureCounts.get(signature) ?? 0) + 1);
+    }
+
+    for (const detail of details) {
+      const signature = factorExposureSignature(detail);
+      const duplicatesBase =
+        base !== undefined && signature === factorExposureSignature(base);
+      const isConfoundedDuplicate = (signatureCounts.get(signature) ?? 0) > 1;
+      if (duplicatesBase || isConfoundedDuplicate) {
+        factors.delete(detail.token);
+      }
+    }
+  }
+
+  return factors;
+}
+
+function factorExposureSignature(factor: FactorAccumulator): string {
+  return `${[...factor.dates].sort().join(",")}|${[...factor.absentDates]
+    .sort()
+    .join(",")}`;
+}
+
+function readFactorCandidates(event: CanonicalEntity): FactorCandidate[] {
   if (event.kind === "activity_session") {
-    const token = canonicalFactorToken(resolveAdherenceObservationActivityKind({
-      attributes: event.attributes,
-    }));
+    const token = canonicalFactorToken(
+      resolveAdherenceObservationActivityKind({
+        attributes: event.attributes,
+      }),
+    );
     const date = resolveActivityEvidenceLocalDate(event);
     return token && date && !OUTCOME_LIKE_FACTOR_TOKENS.has(token)
       ? buildObservedFactorCandidates({ date, event, kind: "activity", token })
@@ -379,7 +443,12 @@ function readFactorCandidates(
     );
     const date = resolveInterventionSessionLocalDate(event);
     return token && date && !OUTCOME_LIKE_FACTOR_TOKENS.has(token)
-      ? buildObservedFactorCandidates({ date, event, kind: "intervention", token })
+      ? buildObservedFactorCandidates({
+          date,
+          event,
+          kind: "intervention",
+          token,
+        })
       : [];
   }
 
@@ -387,8 +456,8 @@ function readFactorCandidates(
   if (journalCandidates.length > 0) return journalCandidates;
 
   if (
-    !isEligibleJunctionOuraWearableTagNote(event)
-    || !event.tags.includes(PERSONAL_PATTERN_OURA_ACTION_TAG)
+    !isEligibleJunctionOuraWearableTagNote(event) ||
+    !event.tags.includes(PERSONAL_PATTERN_OURA_ACTION_TAG)
   ) {
     return [];
   }
@@ -413,7 +482,8 @@ function buildObservedFactorCandidates(input: {
   const base: FactorCandidate = {
     date: input.date,
     episodeId: readEpisodeId(input.event) ?? `${input.token}:${input.date}`,
-    implicitAbsenceAllowed: input.kind === "activity" || input.event.attributes.source === "device",
+    implicitAbsenceAllowed:
+      input.kind === "activity" || input.event.attributes.source === "device",
     kind: input.kind,
     state: "observed",
     token: input.token,
@@ -428,10 +498,13 @@ function buildObservedFactorCandidates(input: {
   ];
 }
 
-function readJournalNoteFactorCandidates(event: CanonicalEntity): FactorCandidate[] {
+function readJournalNoteFactorCandidates(
+  event: CanonicalEntity,
+): FactorCandidate[] {
   if (event.kind !== "note") return [];
   const noteType = readString(event.attributes.noteType);
-  if (noteType !== "journal-factor" && noteType !== "journal-context") return [];
+  if (noteType !== "journal-factor" && noteType !== "journal-context")
+    return [];
 
   const token = canonicalFactorToken(readPrefixedTag(event.tags, "key-"));
   const date = event.date ?? event.occurredAt?.slice(0, 10) ?? null;
@@ -465,57 +538,73 @@ function readBoundedFactorDetailTokens(
   factorToken: string,
 ): string[] {
   const details: string[] = [];
-  const temperature = readFiniteNumber(event.attributes.temperatureC)
-    ?? readNumericTag(event.tags, "temperature-c-");
+  const temperature =
+    readFiniteNumber(event.attributes.temperatureC) ??
+    readNumericTag(event.tags, "temperature-c-");
   if (temperature !== null && factorToken === "sauna") {
-    details.push(temperature >= 90 ? "temperature-hot" : "temperature-moderate");
+    details.push(
+      temperature >= 90 ? "temperature-hot" : "temperature-moderate",
+    );
   }
 
-  details.push(...event.tags.filter((tag) => BOUNDED_FACTOR_DETAIL_TAGS.has(tag)));
-
-  const duration = readFiniteNumber(event.attributes.durationMinutes)
-    ?? readNumericTag(event.tags, "duration-minutes-");
-  if (duration !== null && details.length < 2) {
-    details.push(duration >= 60 ? "duration-long" : duration >= 30 ? "duration-medium" : "duration-short");
-  }
+  details.push(
+    ...event.tags.filter((tag) => BOUNDED_FACTOR_DETAIL_TAGS.has(tag)),
+  );
 
   return [...new Set(details)].slice(0, 2);
 }
 
-function readPrefixedTag(tags: readonly string[], prefix: string): string | null {
-  const value = tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length) ?? "";
+function readPrefixedTag(
+  tags: readonly string[],
+  prefix: string,
+): string | null {
+  const value =
+    tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length) ?? "";
   return canonicalFactorToken(value.trim() || null);
 }
 
-function readNumericTag(tags: readonly string[], prefix: string): number | null {
-  const value = tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length);
+function readNumericTag(
+  tags: readonly string[],
+  prefix: string,
+): number | null {
+  const value = tags
+    .find((tag) => tag.startsWith(prefix))
+    ?.slice(prefix.length);
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isEligibleJunctionOuraWearableTagNote(event: CanonicalEntity): boolean {
+function isEligibleJunctionOuraWearableTagNote(
+  event: CanonicalEntity,
+): boolean {
   if (event.kind !== "note") return false;
-  if (readString(event.attributes.noteType) !== JUNCTION_WEARABLE_TAG_NOTE_TYPE) return false;
+  if (readString(event.attributes.noteType) !== JUNCTION_WEARABLE_TAG_NOTE_TYPE)
+    return false;
 
   const externalRef = readRecord(event.attributes.externalRef);
   const dataOrigin = readRecord(event.attributes.dataOrigin);
-  return readString(event.attributes.source) === "device"
-    && readString(externalRef?.system) === "junction"
-    && readString(externalRef?.resourceType) === "junction-oura-note"
-    && readString(externalRef?.facet) === JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET
-    && readString(dataOrigin?.sourceProviderSlug) === "oura";
+  return (
+    readString(event.attributes.source) === "device" &&
+    readString(externalRef?.system) === "junction" &&
+    readString(externalRef?.resourceType) === "junction-oura-note" &&
+    readString(externalRef?.facet) ===
+      JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET &&
+    readString(dataOrigin?.sourceProviderSlug) === "oura"
+  );
 }
 
 function isLegacyJunctionNoteTagIntervention(event: CanonicalEntity): boolean {
   const externalRef = readRecord(event.attributes.externalRef);
   const resourceType = readString(externalRef?.resourceType);
   const facet = readString(externalRef?.facet);
-  return readString(event.attributes.source) === "device"
-    && readString(externalRef?.system) === "junction"
-    && resourceType !== null
-    && JUNCTION_NOTE_RESOURCE_TYPE_PATTERN.test(resourceType)
-    && facet?.startsWith("tag-") === true;
+  return (
+    readString(event.attributes.source) === "device" &&
+    readString(externalRef?.system) === "junction" &&
+    resourceType !== null &&
+    JUNCTION_NOTE_RESOURCE_TYPE_PATTERN.test(resourceType) &&
+    facet?.startsWith("tag-") === true
+  );
 }
 
 function collectJournalOutcomeSeries(
@@ -526,14 +615,17 @@ function collectJournalOutcomeSeries(
 
   for (const event of events) {
     if (
-      event.kind !== "note"
-      || readString(event.attributes.noteType) !== "journal-outcome"
-    ) continue;
+      event.kind !== "note" ||
+      readString(event.attributes.noteType) !== "journal-outcome"
+    )
+      continue;
     const date = event.date ?? event.occurredAt?.slice(0, 10) ?? null;
-    if (!date || date < window.fromDate || date > window.outcomeToDate) continue;
+    if (!date || date < window.fromDate || date > window.outcomeToDate)
+      continue;
 
     const key = readPrefixedTag(event.tags, "key-");
-    const rawValue = event.tags.find((tag) => tag.startsWith("value-"))?.slice(6) ?? null;
+    const rawValue =
+      event.tags.find((tag) => tag.startsWith("value-"))?.slice(6) ?? null;
     const value = readSubjectiveOutcomeValue(rawValue);
     if (!key || value === null) continue;
 
@@ -564,15 +656,20 @@ function readSubjectiveOutcomeValue(value: string | null): number | null {
     case "awful":
     case "bad":
     case "low":
-    case "poor": return 1;
+    case "poor":
+      return 1;
     case "fair":
     case "medium":
-    case "okay": return 2;
+    case "okay":
+      return 2;
     case "good":
-    case "high": return 3;
+    case "high":
+      return 3;
     case "excellent":
-    case "great": return 4;
-    default: return null;
+    case "great":
+      return 4;
+    default:
+      return null;
   }
 }
 
@@ -585,19 +682,105 @@ function collectOutcomeSeries(
   const sleep = wearableBundle.sleepNights
     .filter(isWearableSleepPatternEligibleNight)
     .filter((day) => {
-      const outcomeDate = resolveWearableSleepAnalysisDate(day, fallbackTimeZone);
+      const outcomeDate = resolveWearableSleepAnalysisDate(
+        day,
+        fallbackTimeZone,
+      );
       return outcomeDate >= fromDate && outcomeDate <= toDate;
     });
-  const recovery = wearableBundle.recoveryDays.filter((day) => day.date >= fromDate && day.date <= toDate);
+  const recovery = wearableBundle.recoveryDays.filter(
+    (day) => day.date >= fromDate && day.date <= toDate,
+  );
 
   return [
-    outcome("total-sleep", "Total sleep", "min", 15, 0.03, sleep, (day) => day.totalSleepMinutes, (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone)),
-    outcome("sleep-score", "Sleep score", "score", 3, 0.03, sleep, (day) => day.sleepScore, (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone)),
-    outcome("sleep-efficiency", "Sleep efficiency", "%", 2, 0.02, sleep, (day) => day.sleepEfficiency, (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone)),
-    outcome("recovery-score", "Recovery score", "score", 3, 0.03, recovery, (day) => day.recoveryScore),
-    outcome("readiness-score", "Readiness score", "score", 3, 0.03, recovery, (day) => day.readinessScore),
+    outcome(
+      "total-sleep",
+      "Total sleep",
+      "min",
+      15,
+      0.03,
+      sleep,
+      (day) => day.totalSleepMinutes,
+      (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone),
+    ),
+    outcome(
+      "sleep-score",
+      "Sleep score",
+      "score",
+      3,
+      0.03,
+      sleep,
+      (day) => day.sleepScore,
+      (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone),
+    ),
+    outcome(
+      "sleep-efficiency",
+      "Sleep efficiency",
+      "%",
+      2,
+      0.02,
+      sleep,
+      (day) => day.sleepEfficiency,
+      (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone),
+    ),
+    outcome(
+      "deep-sleep",
+      "Deep sleep",
+      "min",
+      10,
+      0.05,
+      sleep,
+      (day) => day.deepMinutes,
+      (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone),
+    ),
+    outcome(
+      "rem-sleep",
+      "REM sleep",
+      "min",
+      10,
+      0.05,
+      sleep,
+      (day) => day.remMinutes,
+      (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone),
+    ),
+    outcome(
+      "recovery-score",
+      "Recovery score",
+      "score",
+      3,
+      0.03,
+      recovery,
+      (day) => day.recoveryScore,
+    ),
+    outcome(
+      "readiness-score",
+      "Readiness score",
+      "score",
+      3,
+      0.03,
+      recovery,
+      (day) => day.readinessScore,
+    ),
     outcome("hrv", "HRV", "ms", 2, 0.05, recovery, (day) => day.hrv),
-    outcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, recovery, (day) => day.restingHeartRate),
+    outcome(
+      "resting-heart-rate",
+      "Resting heart rate",
+      "bpm",
+      2,
+      0.03,
+      recovery,
+      (day) => day.restingHeartRate,
+    ),
+    outcome(
+      "respiratory-rate",
+      "Respiratory rate",
+      "breaths/min",
+      0.5,
+      0.03,
+      recovery,
+      (day) => day.respiratoryRate,
+    ),
+    outcome("spo2", "SpO₂", "%", 1, 0.01, recovery, (day) => day.spo2),
   ].filter((series) => series.values.size >= MIN_OUTCOME_DAYS);
 }
 
@@ -605,11 +788,132 @@ function collectMetricPointRecoveryOutcomeSeries(
   metricPoints: readonly MetricPoint[],
   window: PatternWindow,
 ): OutcomeSeries[] {
+  const explicitMetricKeys = new Set(
+    metricPoints.map((point) => point.metricKey),
+  );
+
   return [
-    metricPointOutcome("readiness-score", "Readiness score", "score", 3, 0.03, "readiness-score", metricPoints, window),
-    metricPointOutcome("hrv", "HRV", "ms", 2, 0.05, "hrv-rmssd", metricPoints, window),
-    metricPointOutcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, "resting-heart-rate", metricPoints, window),
-  ].filter((series) => series.values.size >= MIN_OUTCOME_DAYS);
+    metricPointOutcome(
+      "total-sleep",
+      "Total sleep",
+      "min",
+      15,
+      0.03,
+      ["total-sleep", "total-sleep-minutes", "sleep-total-minutes"],
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "sleep-score",
+      "Sleep score",
+      "score",
+      3,
+      0.03,
+      "sleep-score",
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "sleep-efficiency",
+      "Sleep efficiency",
+      "%",
+      2,
+      0.02,
+      "sleep-efficiency",
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "deep-sleep",
+      "Deep sleep",
+      "min",
+      10,
+      0.05,
+      ["deep-sleep-minutes", "sleep-deep-minutes"],
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "rem-sleep",
+      "REM sleep",
+      "min",
+      10,
+      0.05,
+      ["rem-sleep-minutes", "sleep-rem-minutes"],
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "recovery-score",
+      "Recovery score",
+      "score",
+      3,
+      0.03,
+      "recovery-score",
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "readiness-score",
+      "Readiness score",
+      "score",
+      3,
+      0.03,
+      "readiness-score",
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "hrv",
+      "HRV",
+      "ms",
+      2,
+      0.05,
+      ["hrv-rmssd", "hrv"],
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "respiratory-rate",
+      "Respiratory rate",
+      "breaths/min",
+      0.5,
+      0.03,
+      "respiratory-rate",
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "spo2",
+      "SpO₂",
+      "%",
+      1,
+      0.01,
+      "spo2",
+      metricPoints,
+      window,
+    ),
+    metricPointOutcome(
+      "resting-heart-rate",
+      "Resting heart rate",
+      "bpm",
+      2,
+      0.03,
+      "resting-heart-rate",
+      metricPoints,
+      window,
+    ),
+  ]
+    .filter((series) => series.values.size >= MIN_OUTCOME_DAYS)
+    .filter((series) => {
+      if (series.id === "recovery-score") {
+        return explicitMetricKeys.has("recovery-score");
+      }
+      if (series.id === "readiness-score") {
+        return explicitMetricKeys.has("readiness-score");
+      }
+      return true;
+    });
 }
 
 function metricPointOutcome(
@@ -618,16 +922,29 @@ function metricPointOutcome(
   unit: string,
   meaningfulAbsoluteDelta: number,
   meaningfulRelativeDelta: number,
-  metricKey: string,
+  metricKey: string | readonly string[],
   metricPoints: readonly MetricPoint[],
   window: PatternWindow,
 ): OutcomeSeries {
-  const rows = selectMetricSeries({
-    from: window.fromDate,
-    metricKey,
-    points: metricPoints,
-    to: window.outcomeToDate,
-  }).rows;
+  const metricKeys = typeof metricKey === "string" ? [metricKey] : metricKey;
+  const values = new Map<string, number>();
+  for (const key of metricKeys) {
+    const rows = selectMetricSeries({
+      from: window.fromDate,
+      metricKey: key,
+      points: metricPoints,
+      to: window.outcomeToDate,
+    }).rows;
+    for (const row of rows) {
+      if (
+        row.confidence !== "none" &&
+        row.value !== null &&
+        !values.has(row.date)
+      ) {
+        values.set(row.date, row.value);
+      }
+    }
+  }
   return {
     id,
     label,
@@ -635,13 +952,7 @@ function metricPointOutcome(
     meaningfulAbsoluteDelta,
     meaningfulRelativeDelta,
     unit,
-    values: new Map(
-      rows.flatMap((row) =>
-        row.confidence !== "none" && row.value !== null
-          ? [[row.date, row.value] as const]
-          : []
-      ),
-    ),
+    values,
   };
 }
 
@@ -662,7 +973,15 @@ function outcome<T extends { date: string }>(
     if (value === null || metric.confidence.level === "none") continue;
     values.set(selectDate(day), value);
   }
-  return { id, label, lagDays: 1, meaningfulAbsoluteDelta, meaningfulRelativeDelta, unit, values };
+  return {
+    id,
+    label,
+    lagDays: 1,
+    meaningfulAbsoluteDelta,
+    meaningfulRelativeDelta,
+    unit,
+    values,
+  };
 }
 
 function readVaultTimeZone(vault: VaultReadModel): string | null {
@@ -677,9 +996,10 @@ function buildPatternCell(
 ): PersonalPatternCell {
   const factorDates = accumulator?.dates ?? new Set<string>();
   const confirmedAbsentDates = accumulator?.absentDates ?? new Set<string>();
-  const comparisonBasis = confirmedAbsentDates.size > 0
-    ? "confirmed_absence" as const
-    : "unobserved_baseline" as const;
+  const comparisonBasis =
+    confirmedAbsentDates.size > 0
+      ? ("confirmed_absence" as const)
+      : ("unobserved_baseline" as const);
   const pairs = matchComparisonDays(
     factorDates,
     accumulator?.episodeDates ?? new Map(),
@@ -687,8 +1007,12 @@ function buildPatternCell(
     outcome.lagDays,
     comparisonBasis === "confirmed_absence" ? confirmedAbsentDates : null,
   );
-  const exposedDates = [...new Set(pairs.flatMap((pair) => pair.exposedDates))].sort();
-  const comparisonDates = [...new Set(pairs.flatMap((pair) => pair.comparisonDates))].sort();
+  const exposedDates = [
+    ...new Set(pairs.flatMap((pair) => pair.exposedDates)),
+  ].sort();
+  const comparisonDates = [
+    ...new Set(pairs.flatMap((pair) => pair.comparisonDates)),
+  ].sort();
   const base = {
     classification: null,
     comparisonBasis,
@@ -719,27 +1043,25 @@ function buildPatternCell(
   const exposedMean = mean(pairs.map((pair) => pair.exposedValue));
   const comparisonMean = mean(pairs.map((pair) => pair.comparisonValue));
   const delta = exposedMean - comparisonMean;
-  const deltaPercent = comparisonMean === 0
-    ? null
-    : (delta / Math.abs(comparisonMean)) * 100;
+  const deltaPercent =
+    comparisonMean === 0 ? null : (delta / Math.abs(comparisonMean)) * 100;
   const meaningfulDelta = Math.max(
     outcome.meaningfulAbsoluteDelta,
     Math.abs(comparisonMean) * outcome.meaningfulRelativeDelta,
   );
   const repeatedDirection = hasRepeatedDirection(pairs, delta);
-  const direction = Math.abs(delta) < meaningfulDelta
-    ? "flat"
-    : delta > 0 ? "higher" : "lower";
+  const direction =
+    Math.abs(delta) < meaningfulDelta ? "flat" : delta > 0 ? "higher" : "lower";
   const spanDays = daysBetween(base.firstExposedDate, base.lastExposedDate);
   let stage: PersonalPatternStage = "no_clear_pattern";
   let grade: PersonalPatternGrade | null = null;
 
   if (direction !== "flat") {
     if (
-      pairs.length >= 12
-      && spanDays >= 56
-      && repeatedDirection
-      && Math.abs(delta) >= meaningfulDelta * 1.5
+      pairs.length >= 12 &&
+      spanDays >= 56 &&
+      repeatedDirection &&
+      Math.abs(delta) >= meaningfulDelta * 1.5
     ) {
       grade = "A";
     } else if (pairs.length >= 8 && spanDays >= 42 && repeatedDirection) {
@@ -753,22 +1075,22 @@ function buildPatternCell(
     }
 
     if (
-      grade
-      &&
-      comparisonBasis === "unobserved_baseline"
-      && accumulator?.implicitAbsenceAllowed !== true
-      && gradeRank(grade) > gradeRank("D")
+      grade &&
+      comparisonBasis === "unobserved_baseline" &&
+      accumulator?.implicitAbsenceAllowed !== true &&
+      gradeRank(grade) > gradeRank("D")
     ) {
       grade = "D";
     }
 
-    stage = grade === "A"
-      ? "worth_testing"
-      : grade === "B" || grade === "C"
-      ? "seen_again"
-      : grade === "D" || grade === "E"
-      ? "new_clue"
-      : "no_clear_pattern";
+    stage =
+      grade === "A"
+        ? "worth_testing"
+        : grade === "B" || grade === "C"
+        ? "seen_again"
+        : grade === "D" || grade === "E"
+        ? "new_clue"
+        : "no_clear_pattern";
   }
 
   return {
@@ -796,14 +1118,19 @@ function matchComparisonDays(
   const eligibleComparisonDates = [...outcomeValues.keys()]
     .map((outcomeDate) => addDays(outcomeDate, -lagDays))
     .filter((date) => !factorDates.has(date))
-    .filter((date) => confirmedAbsentDates === null || confirmedAbsentDates.has(date));
+    .filter(
+      (date) => confirmedAbsentDates === null || confirmedAbsentDates.has(date),
+    );
   const pairs: MatchedPair[] = [];
-  const episodes = episodeDates.size > 0
-    ? [...episodeDates.entries()]
-    : [...factorDates].map((date) => [`factor:${date}`, new Set([date])] as const);
+  const episodes =
+    episodeDates.size > 0
+      ? [...episodeDates.entries()]
+      : [...factorDates].map(
+          (date) => [`factor:${date}`, new Set([date])] as const,
+        );
 
   for (const [, dates] of episodes.sort((left, right) =>
-    ([...left[1]].sort()[0] ?? "").localeCompare([...right[1]].sort()[0] ?? "")
+    ([...left[1]].sort()[0] ?? "").localeCompare([...right[1]].sort()[0] ?? ""),
   )) {
     const episodePairs: Array<{
       comparisonDate: string;
@@ -818,17 +1145,29 @@ function matchComparisonDays(
       const comparisonDate = eligibleComparisonDates
         .filter((date) => !usedComparisonDates.has(date))
         .filter((date) => weekday(date) === weekday(exposedDate))
-        .filter((date) => Math.abs(daysBetween(date, exposedDate)) <= COMPARISON_SEARCH_DAYS)
-        .sort((left, right) =>
-          Math.abs(daysBetween(left, exposedDate)) - Math.abs(daysBetween(right, exposedDate))
-          || left.localeCompare(right)
+        .filter(
+          (date) =>
+            Math.abs(daysBetween(date, exposedDate)) <= COMPARISON_SEARCH_DAYS,
+        )
+        .sort(
+          (left, right) =>
+            Math.abs(daysBetween(left, exposedDate)) -
+              Math.abs(daysBetween(right, exposedDate)) ||
+            left.localeCompare(right),
         )[0];
       if (!comparisonDate) continue;
 
-      const comparisonValue = outcomeValues.get(addDays(comparisonDate, lagDays));
+      const comparisonValue = outcomeValues.get(
+        addDays(comparisonDate, lagDays),
+      );
       if (comparisonValue === undefined) continue;
       usedComparisonDates.add(comparisonDate);
-      episodePairs.push({ comparisonDate, comparisonValue, exposedDate, exposedValue });
+      episodePairs.push({
+        comparisonDate,
+        comparisonValue,
+        exposedDate,
+        exposedValue,
+      });
     }
     if (episodePairs.length > 0) {
       pairs.push({
@@ -853,19 +1192,31 @@ function addEpisodeDate(
   episodeDates.set(episodeId, dates);
 }
 
-function hasRepeatedDirection(pairs: readonly MatchedPair[], fullDelta: number): boolean {
+function hasRepeatedDirection(
+  pairs: readonly MatchedPair[],
+  fullDelta: number,
+): boolean {
   if (pairs.length < 2 || fullDelta === 0) return false;
   if (pairs.length < 4) {
-    return pairs.every((pair) =>
-      Math.sign(pair.exposedValue - pair.comparisonValue) === Math.sign(fullDelta)
+    return pairs.every(
+      (pair) =>
+        Math.sign(pair.exposedValue - pair.comparisonValue) ===
+        Math.sign(fullDelta),
     );
   }
   const midpoint = Math.floor(pairs.length / 2);
   const first = pairs.slice(0, midpoint);
   const second = pairs.slice(midpoint);
-  const firstDelta = mean(first.map((pair) => pair.exposedValue - pair.comparisonValue));
-  const secondDelta = mean(second.map((pair) => pair.exposedValue - pair.comparisonValue));
-  return Math.sign(firstDelta) === Math.sign(fullDelta) && Math.sign(secondDelta) === Math.sign(fullDelta);
+  const firstDelta = mean(
+    first.map((pair) => pair.exposedValue - pair.comparisonValue),
+  );
+  const secondDelta = mean(
+    second.map((pair) => pair.exposedValue - pair.comparisonValue),
+  );
+  return (
+    Math.sign(firstDelta) === Math.sign(fullDelta) &&
+    Math.sign(secondDelta) === Math.sign(fullDelta)
+  );
 }
 
 function classificationForGrade(
@@ -878,11 +1229,16 @@ function classificationForGrade(
 
 function gradeRank(grade: PersonalPatternGrade): number {
   switch (grade) {
-    case "A": return 5;
-    case "B": return 4;
-    case "C": return 3;
-    case "D": return 2;
-    case "E": return 1;
+    case "A":
+      return 5;
+    case "B":
+      return 4;
+    case "C":
+      return 3;
+    case "D":
+      return 2;
+    case "E":
+      return 1;
   }
 }
 
@@ -891,16 +1247,18 @@ function bestFactorGradeRank(
   factorId: string,
 ): number {
   return cells.reduce(
-    (best, cell) => cell.factorId === factorId && cell.grade
-      ? Math.max(best, gradeRank(cell.grade))
-      : best,
+    (best, cell) =>
+      cell.factorId === factorId && cell.grade
+        ? Math.max(best, gradeRank(cell.grade))
+        : best,
     0,
   );
 }
 
-function resolveWindow(
-  options: { asOf?: Date | string; windowDays?: number },
-): PatternWindow {
+function resolveWindow(options: {
+  asOf?: Date | string;
+  windowDays?: number;
+}): PatternWindow {
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   return {
@@ -911,14 +1269,17 @@ function resolveWindow(
 
 function resolveAsOfDate(value: Date | string | undefined): string {
   const date = value instanceof Date ? value : new Date(value ?? Date.now());
-  if (Number.isNaN(date.valueOf())) throw new TypeError("Personal Patterns asOf must be a valid date.");
+  if (Number.isNaN(date.valueOf()))
+    throw new TypeError("Personal Patterns asOf must be a valid date.");
   return date.toISOString().slice(0, 10);
 }
 
 function normalizeWindowDays(value: number | undefined): number {
   if (value === undefined) return DEFAULT_WINDOW_DAYS;
   if (!Number.isInteger(value) || value < 28 || value > 366) {
-    throw new RangeError("Personal Patterns windowDays must be an integer from 28 through 366.");
+    throw new RangeError(
+      "Personal Patterns windowDays must be an integer from 28 through 366.",
+    );
   }
   return value;
 }
@@ -930,7 +1291,11 @@ function addDays(value: string, amount: number): string {
 }
 
 function daysBetween(left: string, right: string): number {
-  return Math.round((Date.parse(`${right}T00:00:00.000Z`) - Date.parse(`${left}T00:00:00.000Z`)) / 86400000);
+  return Math.round(
+    (Date.parse(`${right}T00:00:00.000Z`) -
+      Date.parse(`${left}T00:00:00.000Z`)) /
+      86400000,
+  );
 }
 
 function weekday(value: string): number {
@@ -947,7 +1312,7 @@ function round(value: number): number {
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
@@ -961,23 +1326,37 @@ function readFiniteNumber(value: unknown): number | null {
 
 function canonicalFactorToken(value: string | null): string | null {
   switch (value) {
-    case "run": return "running";
-    case "walk": return "walking";
+    case "run":
+      return "running";
+    case "walk":
+      return "walking";
     case "bike":
     case "biking":
     case "cycle":
-    case "ride": return "cycling";
-    case "swim": return "swimming";
-    case "hike": return "hiking";
-    case "row": return "rowing";
+    case "ride":
+      return "cycling";
+    case "swim":
+      return "swimming";
+    case "hike":
+      return "hiking";
+    case "row":
+      return "rowing";
     case "strength-training":
     case "weightlifting":
-    case "weights": return "strength";
-    default: return value;
+    case "weights":
+      return "strength";
+    default:
+      return value;
   }
 }
 
 function humanizeToken(value: string): string {
-  const words = value.replace(/--/gu, " · ").replace(/[-_]+/gu, " ");
+  const readableValue =
+    value === "yardwork"
+      ? "yard-work"
+      : value === "housework"
+      ? "house-work"
+      : value;
+  const words = readableValue.replace(/--/gu, " · ").replace(/[-_]+/gu, " ");
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }

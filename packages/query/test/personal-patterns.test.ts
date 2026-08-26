@@ -28,15 +28,26 @@ import {
 
 test("Personal Patterns keeps a repeated next-day link and matched comparison evidence", async () => {
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const entities: CanonicalEntity[] = [
-    ...runningDates.map((date, index) => event(`run_${index}`, date, "activity_session", {
-      activityType: index % 2 === 0 ? "run" : "running",
-    })),
+    ...runningDates.map((date, index) =>
+      event(`run_${index}`, date, "activity_session", {
+        activityType: index % 2 === 0 ? "run" : "running",
+        durationMinutes: [20, 45, 90][index % 3],
+      }),
+    ),
     ...Array.from({ length: 112 }, (_, index) => {
       const date = addDays(start, index);
       const priorDate = addDays(date, -1);
-      return observation(`hrv_${index}`, date, "hrv", runningDates.includes(priorDate) ? 70 : 50, "ms");
+      return observation(
+        `hrv_${index}`,
+        date,
+        "hrv",
+        runningDates.includes(priorDate) ? 70 : 50,
+        "ms",
+      );
     }),
   ];
   const vault = createVaultReadModel({
@@ -47,13 +58,21 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
     asOf: "2026-04-27T12:00:00.000Z",
   });
 
-  assert.deepEqual(report.factors, [{
-    id: "running",
-    kind: "activity",
-    label: "Running",
-    observedDays: 8,
-  }]);
-  const hrv = report.cells.find((cell) => cell.factorId === "running" && cell.outcomeId === "hrv");
+  assert.deepEqual(report.factors, [
+    {
+      id: "running",
+      kind: "activity",
+      label: "Running",
+      observedDays: 8,
+    },
+  ]);
+  assert.equal(
+    report.factors.some((factor) => factor.id.includes("--duration-")),
+    false,
+  );
+  const hrv = report.cells.find(
+    (cell) => cell.factorId === "running" && cell.outcomeId === "hrv",
+  );
   assert.ok(hrv);
   assert.equal(hrv.stage, "seen_again");
   assert.equal(hrv.direction, "higher");
@@ -96,95 +115,136 @@ test("Browser Vault parsing preserves a missing legacy Personal Patterns project
 
 test("Personal Patterns reuses the canonical provider activity-kind resolver", () => {
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      ...runningDates.map((date, index) => event(`provider_run_${index}`, date, "activity_session", {
-        workout: { sportName: "Run" },
-      })),
-      ...Array.from({ length: 112 }, (_, index) => {
-        const date = addDays(start, index);
-        return observation(
-          `provider_hrv_${index}`,
-          date,
-          "hrv",
-          runningDates.includes(addDays(date, -1)) ? 70 : 50,
-          "ms",
-        );
-      }),
-    ],
-    vaultRoot: "test://personal-pattern-provider-activity",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        ...runningDates.map((date, index) =>
+          event(`provider_run_${index}`, date, "activity_session", {
+            workout: { sportName: "Run" },
+          }),
+        ),
+        ...Array.from({ length: 112 }, (_, index) => {
+          const date = addDays(start, index);
+          return observation(
+            `provider_hrv_${index}`,
+            date,
+            "hrv",
+            runningDates.includes(addDays(date, -1)) ? 70 : 50,
+            "ms",
+          );
+        }),
+      ],
+      vaultRoot: "test://personal-pattern-provider-activity",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
 
   assert.equal(report.factors[0]?.id, "running");
   assert.equal(
-    report.cells.find((cell) => cell.factorId === "running" && cell.outcomeId === "hrv")?.stage,
+    report.cells.find(
+      (cell) => cell.factorId === "running" && cell.outcomeId === "hrv",
+    )?.stage,
     "seen_again",
   );
 });
 
 test("Personal Patterns admits only the product-owned Oura sauna tag from neutral notes", () => {
   const start = "2026-01-05";
-  const ouraDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const ouraDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const garminDates = ouraDates.map((date) => addDays(date, 7));
   const legacyDates = ouraDates.map((date) => addDays(date, 3));
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      ...ouraDates.map((date, index) => junctionWearableTagNote(
-        `oura_tags_${index}`,
-        date,
-        "oura",
-        ["sauna", "headache", "late-meal", "recovery", "custom-tag"],
-      )),
-      ...garminDates.map((date, index) => junctionWearableTagNote(
-        `garmin_tags_${index}`,
-        date,
-        "garmin",
-        ["sauna"],
-      )),
-      ...legacyDates.map((date, index) => legacyJunctionNoteTagIntervention(
-        `legacy_oura_tag_${index}`,
-        date,
-        "sauna",
-      )),
-      ...Array.from({ length: 112 }, (_, index) => {
-        const date = addDays(start, index);
-        return observation(
-          `oura_tag_hrv_${index}`,
-          date,
-          "hrv",
-          ouraDates.includes(addDays(date, -1)) ? 70 : 50,
-          "ms",
-        );
-      }),
-    ],
-    vaultRoot: "test://personal-pattern-oura-tags",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        ...ouraDates.map((date, index) =>
+          junctionWearableTagNote(`oura_tags_${index}`, date, "oura", [
+            "sauna",
+            "headache",
+            "late-meal",
+            "recovery",
+            "custom-tag",
+          ]),
+        ),
+        ...garminDates.map((date, index) =>
+          junctionWearableTagNote(`garmin_tags_${index}`, date, "garmin", [
+            "sauna",
+          ]),
+        ),
+        ...legacyDates.map((date, index) =>
+          legacyJunctionNoteTagIntervention(
+            `legacy_oura_tag_${index}`,
+            date,
+            "sauna",
+          ),
+        ),
+        ...Array.from({ length: 112 }, (_, index) => {
+          const date = addDays(start, index);
+          return observation(
+            `oura_tag_hrv_${index}`,
+            date,
+            "hrv",
+            ouraDates.includes(addDays(date, -1)) ? 70 : 50,
+            "ms",
+          );
+        }),
+      ],
+      vaultRoot: "test://personal-pattern-oura-tags",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
 
-  assert.deepEqual(report.factors, [{
-    id: "sauna",
-    kind: "intervention",
-    label: "Sauna",
-    observedDays: 8,
-  }]);
-  assert.equal(report.cells.find((cell) => cell.factorId === "sauna" && cell.outcomeId === "hrv")?.stage, "seen_again");
-  assert.equal(report.factors.some((factor) => factor.id === "headache"), false);
-  assert.equal(report.factors.some((factor) => factor.id === "late-meal"), false);
-  assert.equal(report.factors.some((factor) => factor.id === "recovery"), false);
-  assert.equal(report.factors.some((factor) => factor.id === "custom-tag"), false);
+  assert.deepEqual(report.factors, [
+    {
+      id: "sauna",
+      kind: "intervention",
+      label: "Sauna",
+      observedDays: 8,
+    },
+  ]);
+  assert.equal(
+    report.cells.find(
+      (cell) => cell.factorId === "sauna" && cell.outcomeId === "hrv",
+    )?.stage,
+    "seen_again",
+  );
+  assert.equal(
+    report.factors.some((factor) => factor.id === "headache"),
+    false,
+  );
+  assert.equal(
+    report.factors.some((factor) => factor.id === "late-meal"),
+    false,
+  );
+  assert.equal(
+    report.factors.some((factor) => factor.id === "recovery"),
+    false,
+  );
+  assert.equal(
+    report.factors.some((factor) => factor.id === "custom-tag"),
+    false,
+  );
 });
 
 test("Browser Vault Personal Patterns falls back to its selected metric rows", async () => {
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const vault = createVaultReadModel({
-    entities: runningDates.map((date, index) => event(`metric_run_${index}`, date, "activity_session", {
-      activityType: "running",
-    })),
+    entities: runningDates.map((date, index) =>
+      event(`metric_run_${index}`, date, "activity_session", {
+        activityType: "running",
+      }),
+    ),
     vaultRoot: "test://personal-pattern-metric-rows",
   });
   const metricPoints = Array.from({ length: 112 }, (_, index) => {
@@ -204,9 +264,12 @@ test("Browser Vault Personal Patterns falls back to its selected metric rows", a
     value: 999,
   };
 
-  assert.deepEqual(buildPersonalPatternReport(vault, {
-    asOf: "2026-04-27T12:00:00.000Z",
-  }).factors, []);
+  assert.deepEqual(
+    buildPersonalPatternReport(vault, {
+      asOf: "2026-04-27T12:00:00.000Z",
+    }).factors.map((factor) => factor.id),
+    ["running"],
+  );
 
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-04-27T12:00:00.000Z",
@@ -217,9 +280,15 @@ test("Browser Vault Personal Patterns falls back to its selected metric rows", a
   const report = parseBrowserVaultReplica(replica).personalPatterns;
 
   assert.equal(report?.factors[0]?.id, "running");
-  assert.equal(report?.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.equal(
+    report?.cells.find((cell) => cell.outcomeId === "hrv")?.stage,
+    "seen_again",
+  );
   assert.equal(report?.testedCellCount, 1);
-  assert.equal(report?.cells.find((cell) => cell.outcomeId === "hrv")?.exposedMean, 70);
+  assert.equal(
+    report?.cells.find((cell) => cell.outcomeId === "hrv")?.exposedMean,
+    70,
+  );
 
   const reversedReplica = await createBrowserVaultReplica({
     generatedAt: "2026-04-27T12:00:00.000Z",
@@ -227,16 +296,87 @@ test("Browser Vault Personal Patterns falls back to its selected metric rows", a
     sourceBundleHash: "n".repeat(64),
     vault,
   });
-  assert.deepEqual(parseBrowserVaultReplica(reversedReplica).personalPatterns, report);
+  assert.deepEqual(
+    parseBrowserVaultReplica(reversedReplica).personalPatterns,
+    report,
+  );
+});
+
+test("Browser Vault Personal Patterns includes sleep outcomes from metric rows", async () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const vault = createVaultReadModel({
+    entities: runningDates.map((date, index) =>
+      event(`sleep_metric_run_${index}`, date, "activity_session", {
+        activityType: "running",
+      }),
+    ),
+    vaultRoot: "test://personal-pattern-sleep-metric-rows",
+  });
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    const followsRunning = runningDates.includes(addDays(date, -1));
+    return [
+      metricPoint(
+        `metric_total_sleep_${index}`,
+        date,
+        "total-sleep-minutes",
+        followsRunning ? 420 : 480,
+        "min",
+      ),
+      metricPoint(
+        `metric_sleep_score_${index}`,
+        date,
+        "sleep-score",
+        followsRunning ? 70 : 80,
+        "score",
+      ),
+      metricPoint(
+        `metric_sleep_efficiency_${index}`,
+        date,
+        "sleep-efficiency",
+        followsRunning ? 84 : 90,
+        "%",
+      ),
+    ];
+  }).flat();
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints,
+    sourceBundleHash: "s".repeat(64),
+    vault,
+  });
+  const report = parseBrowserVaultReplica(replica).personalPatterns;
+
+  assert.deepEqual(report?.outcomes.map((outcome) => outcome.id), [
+    "total-sleep",
+    "sleep-score",
+    "sleep-efficiency",
+  ]);
+  assert.equal(
+    report?.cells.find((cell) => cell.outcomeId === "sleep-score")?.stage,
+    "seen_again",
+  );
+  assert.equal(
+    report?.cells.find((cell) => cell.outcomeId === "total-sleep")?.exposedMean,
+    420,
+  );
 });
 
 test("Personal Patterns does not duplicate the canonical readiness metric as recovery", async () => {
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const vault = createVaultReadModel({
-    entities: runningDates.map((date, index) => event(`readiness_run_${index}`, date, "activity_session", {
-      activityType: "running",
-    })),
+    entities: runningDates.map((date, index) =>
+      event(`readiness_run_${index}`, date, "activity_session", {
+        activityType: "running",
+      }),
+    ),
     vaultRoot: "test://personal-pattern-readiness-alias",
   });
   const metricPoints = Array.from({ length: 112 }, (_, index) => {
@@ -258,24 +398,44 @@ test("Personal Patterns does not duplicate the canonical readiness metric as rec
   });
   const report = parseBrowserVaultReplica(replica).personalPatterns;
 
-  assert.deepEqual(report?.outcomes.map((outcome) => outcome.id), ["readiness-score"]);
-  assert.deepEqual(report?.cells.map((cell) => cell.outcomeId), ["readiness-score"]);
+  assert.deepEqual(report?.outcomes.map((outcome) => outcome.id), [
+    "readiness-score",
+  ]);
+  assert.deepEqual(report?.cells.map((cell) => cell.outcomeId), [
+    "readiness-score",
+  ]);
   assert.equal(report?.cells[0]?.stage, "seen_again");
 });
 
 test("Personal Patterns keeps qualified factors within the bounded display cap", () => {
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
-  const dailyFactors = ["breathwork", "journaling", "meditation", "mobility", "stretching", "walking"];
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const dailyFactors = [
+    "breathwork",
+    "journaling",
+    "meditation",
+    "mobility",
+    "stretching",
+    "walking",
+  ];
   const entities: CanonicalEntity[] = [
     ...Array.from({ length: 112 }, (_, dayIndex) =>
       dailyFactors.map((activityType, factorIndex) =>
-        event(`daily_${factorIndex}_${dayIndex}`, addDays(start, dayIndex), "activity_session", { activityType })
-      )
+        event(
+          `daily_${factorIndex}_${dayIndex}`,
+          addDays(start, dayIndex),
+          "activity_session",
+          { activityType },
+        ),
+      ),
     ).flat(),
-    ...runningDates.map((date, index) => event(`run_cap_${index}`, date, "activity_session", {
-      activityType: "running",
-    })),
+    ...runningDates.map((date, index) =>
+      event(`run_cap_${index}`, date, "activity_session", {
+        activityType: "running",
+      }),
+    ),
     ...Array.from({ length: 112 }, (_, index) => {
       const date = addDays(start, index);
       return observation(
@@ -287,53 +447,90 @@ test("Personal Patterns keeps qualified factors within the bounded display cap",
       );
     }),
   ];
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-pattern-cap",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-pattern-cap",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
 
-  assert.deepEqual(report.factors.map((factor) => factor.id), [
-    "running",
-    "breathwork",
-    "journaling",
-    "meditation",
-    "mobility",
-    "stretching",
-    "walking",
-  ]);
+  assert.deepEqual(
+    report.factors.map((factor) => factor.id),
+    [
+      "running",
+      "breathwork",
+      "journaling",
+      "meditation",
+      "mobility",
+      "stretching",
+      "walking",
+    ],
+  );
   assert.equal(
-    report.cells.find((cell) => cell.factorId === "running" && cell.outcomeId === "hrv")?.stage,
+    report.cells.find(
+      (cell) => cell.factorId === "running" && cell.outcomeId === "hrv",
+    )?.stage,
     "seen_again",
   );
 });
 
 test("Personal Patterns uses the nearest unused same-weekday comparisons", () => {
   const start = "2026-01-05";
-  const runningDates = [0, 14, 28, 42, 56].map((offset) => addDays(start, offset));
-  const comparisonDates = [7, 21, 35, 49, 63].map((offset) => addDays(start, offset));
+  const runningDates = [0, 14, 28, 42, 56].map((offset) =>
+    addDays(start, offset),
+  );
+  const comparisonDates = [7, 21, 35, 49, 63].map((offset) =>
+    addDays(start, offset),
+  );
   const comparisonValues = [10, 50, 50, 50, 50];
-  const wrongWeekdayDates = [1, 15, 29, 43, 57].map((offset) => addDays(start, offset));
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      ...runningDates.map((date, index) => event(`run_match_${index}`, date, "activity_session", {
-        activityType: "running",
-      })),
-      ...runningDates.map((date, index) =>
-        observation(`hrv_exposed_${index}`, addDays(date, 1), "hrv", 70, "ms")
-      ),
-      ...comparisonDates.map((date, index) =>
-        observation(`hrv_control_${index}`, addDays(date, 1), "hrv", comparisonValues[index] ?? 50, "ms")
-      ),
-      ...wrongWeekdayDates.map((date, index) =>
-        observation(`hrv_wrong_weekday_${index}`, addDays(date, 1), "hrv", 95, "ms")
-      ),
-    ],
-    vaultRoot: "test://personal-pattern-matching",
-  }), {
-    asOf: addDays(start, 70),
-  });
+  const wrongWeekdayDates = [1, 15, 29, 43, 57].map((offset) =>
+    addDays(start, offset),
+  );
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        ...runningDates.map((date, index) =>
+          event(`run_match_${index}`, date, "activity_session", {
+            activityType: "running",
+          }),
+        ),
+        ...runningDates.map((date, index) =>
+          observation(
+            `hrv_exposed_${index}`,
+            addDays(date, 1),
+            "hrv",
+            70,
+            "ms",
+          ),
+        ),
+        ...comparisonDates.map((date, index) =>
+          observation(
+            `hrv_control_${index}`,
+            addDays(date, 1),
+            "hrv",
+            comparisonValues[index] ?? 50,
+            "ms",
+          ),
+        ),
+        ...wrongWeekdayDates.map((date, index) =>
+          observation(
+            `hrv_wrong_weekday_${index}`,
+            addDays(date, 1),
+            "hrv",
+            95,
+            "ms",
+          ),
+        ),
+      ],
+      vaultRoot: "test://personal-pattern-matching",
+    }),
+    {
+      asOf: addDays(start, 70),
+    },
+  );
   const hrv = report.cells.find((cell) => cell.outcomeId === "hrv");
 
   assert.ok(hrv);
@@ -344,46 +541,123 @@ test("Personal Patterns uses the nearest unused same-weekday comparisons", () =>
 
 test("Personal Patterns rejects controls on the wrong weekday or beyond 35 days", () => {
   const start = "2026-03-02";
-  const runningDates = [0, 7, 14, 21, 28].map((offset) => addDays(start, offset));
-  const remoteDates = [-70, -63, -56, -49, -42].map((offset) => addDays(start, offset));
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      ...runningDates.map((date, index) => event(`run_guard_${index}`, date, "activity_session", {
-        activityType: "running",
-      })),
-      ...runningDates.map((date, index) =>
-        observation(`hrv_guard_exposed_${index}`, addDays(date, 1), "hrv", 70, "ms")
-      ),
-      ...runningDates.map((date, index) =>
-        observation(`hrv_guard_wrong_${index}`, addDays(date, 2), "hrv", 40, "ms")
-      ),
-      ...remoteDates.map((date, index) =>
-        observation(`hrv_guard_remote_${index}`, addDays(date, 1), "hrv", 50, "ms")
-      ),
-    ],
-    vaultRoot: "test://personal-pattern-control-guards",
-  }), {
-    asOf: addDays(start, 35),
-    windowDays: 120,
-  });
+  const runningDates = [0, 7, 14, 21, 28].map((offset) =>
+    addDays(start, offset),
+  );
+  const remoteDates = [-70, -63, -56, -49, -42].map((offset) =>
+    addDays(start, offset),
+  );
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        ...runningDates.map((date, index) =>
+          event(`run_guard_${index}`, date, "activity_session", {
+            activityType: "running",
+          }),
+        ),
+        ...runningDates.map((date, index) =>
+          observation(
+            `hrv_guard_exposed_${index}`,
+            addDays(date, 1),
+            "hrv",
+            70,
+            "ms",
+          ),
+        ),
+        ...runningDates.map((date, index) =>
+          observation(
+            `hrv_guard_wrong_${index}`,
+            addDays(date, 2),
+            "hrv",
+            40,
+            "ms",
+          ),
+        ),
+        ...remoteDates.map((date, index) =>
+          observation(
+            `hrv_guard_remote_${index}`,
+            addDays(date, 1),
+            "hrv",
+            50,
+            "ms",
+          ),
+        ),
+      ],
+      vaultRoot: "test://personal-pattern-control-guards",
+    }),
+    {
+      asOf: addDays(start, 35),
+      windowDays: 120,
+    },
+  );
 
-  assert.deepEqual(report.factors, []);
-  assert.deepEqual(report.cells, []);
+  assert.deepEqual(
+    report.factors.map((factor) => factor.id),
+    ["running"],
+  );
+  assert.deepEqual(
+    report.outcomes.map((outcome) => outcome.id),
+    ["hrv"],
+  );
+  assert.equal(report.cells.length, 1);
+  assert.equal(report.cells[0]?.stage, "insufficient");
 });
 
 test("Personal Patterns keeps the evidence-stage boundaries and repeated-direction guard", () => {
   const cases = [
-    { count: 5, expected: "seen_again", exposed: () => 70, name: "five over 21 days", span: 21 },
-    { count: 5, expected: "new_clue", exposed: () => 70, name: "five under 21 days", span: 20 },
-    { count: 8, expected: "seen_again", exposed: () => 70, name: "eight over 42 days", span: 42 },
-    { count: 8, expected: "seen_again", exposed: () => 70, name: "eight under 42 days", span: 41 },
-    { count: 12, expected: "worth_testing", exposed: () => 53.75, name: "twelve over 56 days at 1.5x", span: 56 },
-    { count: 12, expected: "seen_again", exposed: () => 53.74, name: "twelve over 56 days under 1.5x", span: 56 },
-    { count: 12, expected: "seen_again", exposed: () => 53.75, name: "twelve under 56 days", span: 55 },
+    {
+      count: 5,
+      expected: "seen_again",
+      exposed: () => 70,
+      name: "five over 21 days",
+      span: 21,
+    },
+    {
+      count: 5,
+      expected: "new_clue",
+      exposed: () => 70,
+      name: "five under 21 days",
+      span: 20,
+    },
+    {
+      count: 8,
+      expected: "seen_again",
+      exposed: () => 70,
+      name: "eight over 42 days",
+      span: 42,
+    },
+    {
+      count: 8,
+      expected: "seen_again",
+      exposed: () => 70,
+      name: "eight under 42 days",
+      span: 41,
+    },
+    {
+      count: 12,
+      expected: "worth_testing",
+      exposed: () => 53.75,
+      name: "twelve over 56 days at 1.5x",
+      span: 56,
+    },
+    {
+      count: 12,
+      expected: "seen_again",
+      exposed: () => 53.74,
+      name: "twelve over 56 days under 1.5x",
+      span: 56,
+    },
+    {
+      count: 12,
+      expected: "seen_again",
+      exposed: () => 53.75,
+      name: "twelve under 56 days",
+      span: 55,
+    },
     {
       count: 8,
       expected: "no_clear_pattern",
-      exposed: (index: number) => index < 4 ? 80 : 45,
+      exposed: (index: number) => (index < 4 ? 80 : 45),
       name: "conflicting historical halves",
       span: 42,
     },
@@ -397,31 +671,73 @@ test("Personal Patterns keeps the evidence-stage boundaries and repeated-directi
 });
 
 test("Personal Patterns labels one result as an Observation and repeated results as an Early signal", () => {
-  const one = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      event("single_run", "2026-01-05", "activity_session", { activityType: "running" }),
-      observation("single_exposed", "2026-01-06", "hrv", 70, "ms"),
-      observation("single_control", "2026-01-13", "hrv", 50, "ms"),
-    ],
-    vaultRoot: "test://personal-pattern-observation",
-  }), { asOf: "2026-01-20", windowDays: 28 });
+  const one = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        event("single_run", "2026-01-05", "activity_session", {
+          activityType: "running",
+        }),
+        observation("single_exposed", "2026-01-06", "hrv", 70, "ms"),
+        observation("single_control", "2026-01-13", "hrv", 50, "ms"),
+      ],
+      vaultRoot: "test://personal-pattern-observation",
+    }),
+    { asOf: "2026-01-20", windowDays: 28 },
+  );
   const observationCell = one.cells.find((cell) => cell.factorId === "running");
   assert.equal(observationCell?.grade, "E");
   assert.equal(observationCell?.classification, "observation");
 
-  const repeated = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      journalFactor("coffee_1", "2026-01-05", "coffee", "happened"),
-      journalFactor("coffee_2", "2026-01-19", "coffee", "happened"),
-      journalFactor("coffee_absent_1", "2026-01-12", "coffee", "did-not-happen"),
-      journalFactor("coffee_absent_2", "2026-01-26", "coffee", "did-not-happen"),
-      observation("coffee_exposed_1", "2026-01-06", "sleep-score", 55, "score"),
-      observation("coffee_exposed_2", "2026-01-20", "sleep-score", 54, "score"),
-      observation("coffee_control_1", "2026-01-13", "sleep-score", 80, "score"),
-      observation("coffee_control_2", "2026-01-27", "sleep-score", 82, "score"),
-    ],
-    vaultRoot: "test://personal-pattern-early-signal",
-  }), { asOf: "2026-02-01", windowDays: 35 });
+  const repeated = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        journalFactor("coffee_1", "2026-01-05", "coffee", "happened"),
+        journalFactor("coffee_2", "2026-01-19", "coffee", "happened"),
+        journalFactor(
+          "coffee_absent_1",
+          "2026-01-12",
+          "coffee",
+          "did-not-happen",
+        ),
+        journalFactor(
+          "coffee_absent_2",
+          "2026-01-26",
+          "coffee",
+          "did-not-happen",
+        ),
+        observation(
+          "coffee_exposed_1",
+          "2026-01-06",
+          "sleep-score",
+          55,
+          "score",
+        ),
+        observation(
+          "coffee_exposed_2",
+          "2026-01-20",
+          "sleep-score",
+          54,
+          "score",
+        ),
+        observation(
+          "coffee_control_1",
+          "2026-01-13",
+          "sleep-score",
+          80,
+          "score",
+        ),
+        observation(
+          "coffee_control_2",
+          "2026-01-27",
+          "sleep-score",
+          82,
+          "score",
+        ),
+      ],
+      vaultRoot: "test://personal-pattern-early-signal",
+    }),
+    { asOf: "2026-02-01", windowDays: 35 },
+  );
   const earlyCell = repeated.cells.find((cell) => cell.factorId === "coffee");
   assert.equal(earlyCell?.grade, "D");
   assert.equal(earlyCell?.classification, "early_signal");
@@ -430,21 +746,40 @@ test("Personal Patterns labels one result as an Observation and repeated results
 });
 
 test("Personal Patterns counts a multi-day context as one episode", () => {
-  const tripDates = ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09"];
+  const tripDates = [
+    "2026-01-05",
+    "2026-01-06",
+    "2026-01-07",
+    "2026-01-08",
+    "2026-01-09",
+  ];
   const entities = tripDates.flatMap((date, index) => [
-    journalFactor(`trip_${index}`, date, "travel", "happened", ["episode-winter-trip"]),
+    journalFactor(`trip_${index}`, date, "travel", "happened", [
+      "episode-winter-trip",
+    ]),
     observation(`trip_hrv_${index}`, addDays(date, 1), "hrv", 40, "ms"),
-    journalFactor(`home_${index}`, addDays(date, 14), "travel", "did-not-happen"),
+    journalFactor(
+      `home_${index}`,
+      addDays(date, 14),
+      "travel",
+      "did-not-happen",
+    ),
     observation(`home_hrv_${index}`, addDays(date, 15), "hrv", 60, "ms"),
   ]);
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-pattern-episode",
-  }), { asOf: "2026-02-15", windowDays: 60 });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-pattern-episode",
+    }),
+    { asOf: "2026-02-15", windowDays: 60 },
+  );
 
-  assert.equal(report.factors.find((factor) => factor.id === "travel")?.episodeCount, 1);
-  const hrv = report.cells.find((cell) =>
-    cell.factorId === "travel" && cell.outcomeId === "hrv"
+  assert.equal(
+    report.factors.find((factor) => factor.id === "travel")?.episodeCount,
+    1,
+  );
+  const hrv = report.cells.find(
+    (cell) => cell.factorId === "travel" && cell.outcomeId === "hrv",
   );
   assert.equal(hrv?.exposedDays, 1);
   assert.equal(hrv?.comparisonDays, 1);
@@ -452,48 +787,103 @@ test("Personal Patterns counts a multi-day context as one episode", () => {
 });
 
 test("Personal Patterns keeps explicit absence for a bounded factor detail", () => {
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      journalFactor("coffee_late_1", "2026-01-05", "coffee", "happened", ["timing-late", "amount-high"]),
-      journalFactor("coffee_late_2", "2026-01-19", "coffee", "happened", ["timing-late", "amount-high"]),
-      journalFactor("coffee_early_1", "2026-01-12", "coffee", "did-not-happen", ["timing-late", "amount-high"]),
-      journalFactor("coffee_early_2", "2026-01-26", "coffee", "did-not-happen", ["timing-late", "amount-high"]),
-      observation("late_sleep_1", "2026-01-06", "sleep-score", 55, "score"),
-      observation("late_sleep_2", "2026-01-20", "sleep-score", 54, "score"),
-      observation("early_sleep_1", "2026-01-13", "sleep-score", 80, "score"),
-      observation("early_sleep_2", "2026-01-27", "sleep-score", 82, "score"),
-    ],
-    vaultRoot: "test://personal-pattern-factor-detail-absence",
-  }), { asOf: "2026-02-01", windowDays: 35 });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        journalFactor("coffee_late_1", "2026-01-05", "coffee", "happened", [
+          "timing-late",
+          "amount-high",
+        ]),
+        journalFactor("coffee_late_2", "2026-01-19", "coffee", "happened", [
+          "timing-late",
+          "amount-high",
+        ]),
+        journalFactor("coffee_late_3", "2026-01-08", "coffee", "happened", [
+          "timing-late",
+        ]),
+        journalFactor(
+          "coffee_early_1",
+          "2026-01-12",
+          "coffee",
+          "did-not-happen",
+          ["timing-late", "amount-high"],
+        ),
+        journalFactor(
+          "coffee_early_2",
+          "2026-01-26",
+          "coffee",
+          "did-not-happen",
+          ["timing-late", "amount-high"],
+        ),
+        observation("late_sleep_1", "2026-01-06", "sleep-score", 55, "score"),
+        observation("late_sleep_2", "2026-01-20", "sleep-score", 54, "score"),
+        observation("early_sleep_1", "2026-01-13", "sleep-score", 80, "score"),
+        observation("early_sleep_2", "2026-01-27", "sleep-score", 82, "score"),
+      ],
+      vaultRoot: "test://personal-pattern-factor-detail-absence",
+    }),
+    { asOf: "2026-02-01", windowDays: 35 },
+  );
 
-  const detailedCell = report.cells.find((cell) =>
-    cell.factorId === "coffee--timing-late"
+  const detailedCell = report.cells.find(
+    (cell) => cell.factorId === "coffee--amount-high",
   );
   assert.equal(detailedCell?.grade, "D");
   assert.equal(detailedCell?.comparisonBasis, "confirmed_absence");
-  assert.equal(report.cells.find((cell) =>
-    cell.factorId === "coffee--amount-high"
-  )?.grade, "D");
+  assert.equal(
+    report.cells.some((cell) => cell.factorId === "coffee--timing-late"),
+    false,
+  );
+});
+
+test("Personal Patterns removes detail rows that repeat the base exposure", () => {
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        journalFactor("coffee_1", "2026-01-05", "late-caffeine", "happened", [
+          "timing-afternoon",
+        ]),
+        journalFactor("coffee_2", "2026-01-19", "late-caffeine", "happened", [
+          "timing-afternoon",
+        ]),
+        observation("sleep_1", "2026-01-06", "sleep-score", 60, "score"),
+        observation("sleep_2", "2026-01-20", "sleep-score", 62, "score"),
+      ],
+      vaultRoot: "test://personal-pattern-redundant-detail",
+    }),
+    { asOf: "2026-02-01", windowDays: 35 },
+  );
+
+  assert.deepEqual(
+    report.factors.map((factor) => factor.id),
+    ["late-caffeine"],
+  );
 });
 
 test("Personal Patterns uses same-day subjective outcomes", () => {
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities: [
-      journalFactor("tennis_1", "2026-01-05", "tennis", "happened"),
-      journalOutcome("soreness_1", "2026-01-05", "soreness", "high"),
-      journalFactor("rest_1", "2026-01-12", "tennis", "did-not-happen"),
-      journalOutcome("baseline_1", "2026-01-12", "soreness", "low"),
-      journalFactor("tennis_2", "2026-01-19", "tennis", "happened"),
-      journalOutcome("soreness_2", "2026-01-19", "soreness", "high"),
-      journalFactor("rest_2", "2026-01-26", "tennis", "did-not-happen"),
-      journalOutcome("baseline_2", "2026-01-26", "soreness", "low"),
-    ],
-    vaultRoot: "test://personal-pattern-same-day-outcome",
-  }), { asOf: "2026-02-01", windowDays: 35 });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        journalFactor("tennis_1", "2026-01-05", "tennis", "happened"),
+        journalOutcome("soreness_1", "2026-01-05", "soreness", "high"),
+        journalFactor("rest_1", "2026-01-12", "tennis", "did-not-happen"),
+        journalOutcome("baseline_1", "2026-01-12", "soreness", "low"),
+        journalFactor("tennis_2", "2026-01-19", "tennis", "happened"),
+        journalOutcome("soreness_2", "2026-01-19", "soreness", "high"),
+        journalFactor("rest_2", "2026-01-26", "tennis", "did-not-happen"),
+        journalOutcome("baseline_2", "2026-01-26", "soreness", "low"),
+      ],
+      vaultRoot: "test://personal-pattern-same-day-outcome",
+    }),
+    { asOf: "2026-02-01", windowDays: 35 },
+  );
 
-  const outcome = report.outcomes.find((entry) => entry.id === "subjective-soreness");
-  const cell = report.cells.find((entry) =>
-    entry.factorId === "tennis" && entry.outcomeId === "subjective-soreness"
+  const outcome = report.outcomes.find(
+    (entry) => entry.id === "subjective-soreness",
+  );
+  const cell = report.cells.find(
+    (entry) =>
+      entry.factorId === "tennis" && entry.outcomeId === "subjective-soreness",
   );
   assert.equal(outcome?.lagDays, 0);
   assert.equal(cell?.grade, "D");
@@ -502,10 +892,34 @@ test("Personal Patterns uses same-day subjective outcomes", () => {
 
 test("Personal Patterns keeps common synthetic health links as regression baselines", () => {
   const scenarios = [
-    { baseline: 440, exposed: 380, factor: "late-caffeine", outcome: "total-sleep", unit: "min" },
-    { baseline: 82, exposed: 64, factor: "alcohol", outcome: "sleep-score", unit: "score" },
-    { baseline: 54, exposed: 60, factor: "late-meal", outcome: "resting-heart-rate", unit: "bpm" },
-    { baseline: 74, exposed: 84, factor: "exercise", outcome: "readiness-score", unit: "score" },
+    {
+      baseline: 440,
+      exposed: 380,
+      factor: "late-caffeine",
+      outcome: "total-sleep",
+      unit: "min",
+    },
+    {
+      baseline: 82,
+      exposed: 64,
+      factor: "alcohol",
+      outcome: "sleep-score",
+      unit: "score",
+    },
+    {
+      baseline: 54,
+      exposed: 60,
+      factor: "late-meal",
+      outcome: "resting-heart-rate",
+      unit: "bpm",
+    },
+    {
+      baseline: 74,
+      exposed: 84,
+      factor: "exercise",
+      outcome: "readiness-score",
+      unit: "score",
+    },
     { baseline: 52, exposed: 40, factor: "travel", outcome: "hrv", unit: "ms" },
     { baseline: 44, exposed: 56, factor: "sauna", outcome: "hrv", unit: "ms" },
   ] as const;
@@ -516,18 +930,45 @@ test("Personal Patterns keeps common synthetic health links as regression baseli
       const exposedDate = addDays(start, index * 14);
       const baselineDate = addDays(exposedDate, 7);
       return [
-        journalFactor(`${scenario.factor}_yes_${index}`, exposedDate, scenario.factor, "happened"),
-        observation(`${scenario.factor}_exposed_${index}`, addDays(exposedDate, 1), scenario.outcome, scenario.exposed, scenario.unit),
-        journalFactor(`${scenario.factor}_no_${index}`, baselineDate, scenario.factor, "did-not-happen"),
-        observation(`${scenario.factor}_baseline_${index}`, addDays(baselineDate, 1), scenario.outcome, scenario.baseline, scenario.unit),
+        journalFactor(
+          `${scenario.factor}_yes_${index}`,
+          exposedDate,
+          scenario.factor,
+          "happened",
+        ),
+        observation(
+          `${scenario.factor}_exposed_${index}`,
+          addDays(exposedDate, 1),
+          scenario.outcome,
+          scenario.exposed,
+          scenario.unit,
+        ),
+        journalFactor(
+          `${scenario.factor}_no_${index}`,
+          baselineDate,
+          scenario.factor,
+          "did-not-happen",
+        ),
+        observation(
+          `${scenario.factor}_baseline_${index}`,
+          addDays(baselineDate, 1),
+          scenario.outcome,
+          scenario.baseline,
+          scenario.unit,
+        ),
       ];
     }).flat();
-    const report = buildPersonalPatternReport(createVaultReadModel({
-      entities,
-      vaultRoot: `test://personal-pattern-regression-${scenario.factor}`,
-    }), { asOf: "2026-03-15", windowDays: 84 });
-    const cell = report.cells.find((entry) =>
-      entry.factorId === scenario.factor && entry.outcomeId === scenario.outcome
+    const report = buildPersonalPatternReport(
+      createVaultReadModel({
+        entities,
+        vaultRoot: `test://personal-pattern-regression-${scenario.factor}`,
+      }),
+      { asOf: "2026-03-15", windowDays: 84 },
+    );
+    const cell = report.cells.find(
+      (entry) =>
+        entry.factorId === scenario.factor &&
+        entry.outcomeId === scenario.outcome,
     );
 
     assert.equal(cell?.grade, "C", scenario.factor);
@@ -540,27 +981,37 @@ test("Personal Patterns keeps common synthetic health links as regression baseli
 });
 
 test("Personal Patterns anchors sleep outcomes to the localized sleep-end date in direct and runtime reads", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-personal-pattern-sleep-date-"));
-  const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
-  const canonicalEntities: CanonicalEntity[] = runningDates.map((date, index) =>
-    event(`run_sleep_${index}`, date, "activity_session", { activityType: "running" })
+  const vaultRoot = await mkdtemp(
+    path.join(os.tmpdir(), "murph-personal-pattern-sleep-date-"),
   );
-  const ledgerEvents: Array<Record<string, unknown>> = runningDates.map((date, index) => ({
-    activityType: "running",
-    dayKey: date,
-    id: `evt_sleep_date_run_${index}`,
-    kind: "activity_session",
-    occurredAt: `${date}T12:00:00.000Z`,
-    schemaVersion: "murph.event.v1",
-    source: "manual",
-    title: "Running",
-  }));
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const canonicalEntities: CanonicalEntity[] = runningDates.map((date, index) =>
+    event(`run_sleep_${index}`, date, "activity_session", {
+      activityType: "running",
+    }),
+  );
+  const ledgerEvents: Array<Record<string, unknown>> = runningDates.map(
+    (date, index) => ({
+      activityType: "running",
+      dayKey: date,
+      id: `evt_sleep_date_run_${index}`,
+      kind: "activity_session",
+      occurredAt: `${date}T12:00:00.000Z`,
+      schemaVersion: "murph.event.v1",
+      source: "manual",
+      title: "Running",
+    }),
+  );
 
   for (let index = 0; index < 112; index += 1) {
     const localEndDate = addDays(start, index);
     const storedDate = addDays(localEndDate, -1);
-    const sleepScore = runningDates.includes(addDays(localEndDate, -1)) ? 90 : 70;
+    const sleepScore = runningDates.includes(addDays(localEndDate, -1))
+      ? 90
+      : 70;
     const sleepAttributes = {
       durationMinutes: 480,
       endAt: `${storedDate}T23:00:00.000Z`,
@@ -574,8 +1025,19 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
       timeZone: "Asia/Tokyo",
     };
     canonicalEntities.push(
-      event(`sleep_date_${index}`, storedDate, "sleep_session", sleepAttributes),
-      observation(`sleep_score_date_${index}`, storedDate, "sleep-score", sleepScore, "score"),
+      event(
+        `sleep_date_${index}`,
+        storedDate,
+        "sleep_session",
+        sleepAttributes,
+      ),
+      observation(
+        `sleep_score_date_${index}`,
+        storedDate,
+        "sleep-score",
+        sleepScore,
+        "score",
+      ),
     );
     ledgerEvents.push(
       {
@@ -611,28 +1073,39 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
     );
   }
 
-  const direct = buildPersonalPatternReport(createVaultReadModel({
-    entities: canonicalEntities,
-    metadata: { timezone: "UTC" },
-    vaultRoot: "test://personal-pattern-sleep-date",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
-  const directCell = direct.cells.find((cell) => cell.outcomeId === "sleep-score");
+  const direct = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: canonicalEntities,
+      metadata: { timezone: "UTC" },
+      vaultRoot: "test://personal-pattern-sleep-date",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
+  const directCell = direct.cells.find(
+    (cell) => cell.outcomeId === "sleep-score",
+  );
   assert.ok(directCell);
   assert.equal(directCell.exposedMean, 90);
   assert.equal(directCell.comparisonMean, 70);
   assert.equal(directCell.stage, "seen_again");
 
   try {
-    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
-    await writeFile(path.join(vaultRoot, "vault.json"), `${JSON.stringify({
-      createdAt: "2026-01-01T00:00:00.000Z",
-      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
-      timezone: "UTC",
-      title: "Personal Patterns localized sleep fixture",
-      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4S",
-    })}\n`, "utf8");
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Personal Patterns localized sleep fixture",
+        vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4S",
+      })}\n`,
+      "utf8",
+    );
     await writeFile(
       path.join(vaultRoot, "ledger/events/2026/2026-01.jsonl"),
       `${ledgerEvents.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
@@ -640,8 +1113,12 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
     );
     await rebuildQueryProjection(vaultRoot);
 
-    const runtime = await buildPersonalPatternReportRuntime(vaultRoot, { asOf: "2026-04-27" });
-    const runtimeCell = runtime.cells.find((cell) => cell.outcomeId === "sleep-score");
+    const runtime = await buildPersonalPatternReportRuntime(vaultRoot, {
+      asOf: "2026-04-27",
+    });
+    const runtimeCell = runtime.cells.find(
+      (cell) => cell.outcomeId === "sleep-score",
+    );
     assert.ok(runtimeCell);
     assert.equal(runtimeCell.exposedMean, directCell.exposedMean);
     assert.equal(runtimeCell.comparisonMean, directCell.comparisonMean);
@@ -653,7 +1130,9 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
 
 test("Personal Patterns uses the intended local date for retroactively logged interventions", () => {
   const start = "2026-01-05";
-  const sessionDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const sessionDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const entities: CanonicalEntity[] = [
     ...sessionDates.map((sessionLocalDate, index) =>
       event(
@@ -665,7 +1144,7 @@ test("Personal Patterns uses the intended local date for retroactively logged in
           sessionLocalDate,
           sessionStatus: "completed",
         },
-      )
+      ),
     ),
     ...Array.from({ length: 112 }, (_, index) => {
       const date = addDays(start, index);
@@ -678,13 +1157,18 @@ test("Personal Patterns uses the intended local date for retroactively logged in
       );
     }),
   ];
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-pattern-intervention-local-date",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
-  const hrv = report.cells.find((cell) => cell.factorId === "dry-sauna" && cell.outcomeId === "hrv");
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-pattern-intervention-local-date",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
+  const hrv = report.cells.find(
+    (cell) => cell.factorId === "dry-sauna" && cell.outcomeId === "hrv",
+  );
 
   assert.ok(hrv);
   assert.equal(hrv.exposedMean, 70);
@@ -695,11 +1179,15 @@ test("Personal Patterns uses the intended local date for retroactively logged in
 
 test("Personal Patterns excludes explicit nap-only days from sleep outcomes", () => {
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const entities: CanonicalEntity[] = [
-    ...runningDates.map((date, index) => event(`run_nap_${index}`, date, "activity_session", {
-      activityType: "running",
-    })),
+    ...runningDates.map((date, index) =>
+      event(`run_nap_${index}`, date, "activity_session", {
+        activityType: "running",
+      }),
+    ),
   ];
 
   for (let index = 0; index < 112; index += 1) {
@@ -727,42 +1215,66 @@ test("Personal Patterns excludes explicit nap-only days from sleep outcomes", ()
     );
   }
 
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-pattern-nap-only",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-pattern-nap-only",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
 
-  assert.equal(report.outcomes.some((outcome) => outcome.id === "sleep-score"), false);
-  assert.equal(report.cells.some((cell) => cell.outcomeId === "sleep-score"), false);
+  assert.equal(
+    report.outcomes.some((outcome) => outcome.id === "sleep-score"),
+    false,
+  );
+  assert.equal(
+    report.cells.some((cell) => cell.outcomeId === "sleep-score"),
+    false,
+  );
 });
 
 test("Personal Patterns reports a tested but unclear link without calling it a finding", () => {
   const start = "2026-01-05";
-  const saunaDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const saunaDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const entities: CanonicalEntity[] = [
-    ...saunaDates.map((date, index) => event(`sauna_${index}`, date, "intervention_session", {
-      interventionType: "dry-sauna",
-      sessionStatus: "completed",
-    })),
+    ...saunaDates.map((date, index) =>
+      event(`sauna_${index}`, date, "intervention_session", {
+        interventionType: "dry-sauna",
+        sessionStatus: "completed",
+      }),
+    ),
     event("missed_sauna", addDays(start, 3), "intervention_session", {
       interventionType: "dry-sauna",
       sessionStatus: "missed",
     }),
     ...Array.from({ length: 112 }, (_, index) =>
-      observation(`sleep_${index}`, addDays(start, index), "sleep-score", 80, "score")
+      observation(
+        `sleep_${index}`,
+        addDays(start, index),
+        "sleep-score",
+        80,
+        "score",
+      ),
     ),
   ];
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-patterns",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-patterns",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
 
   assert.equal(report.factors[0]?.observedDays, 8);
-  const cell = report.cells.find((candidate) => candidate.outcomeId === "sleep-score");
+  const cell = report.cells.find(
+    (candidate) => candidate.outcomeId === "sleep-score",
+  );
   assert.ok(cell);
   assert.equal(cell.stage, "no_clear_pattern");
   assert.equal(cell.direction, "flat");
@@ -770,32 +1282,52 @@ test("Personal Patterns reports a tested but unclear link without calling it a f
   assert.equal(report.testedCellCount, 1);
 });
 
-test("Personal Patterns suppresses factors without enough matched history", () => {
+test("Personal Patterns keeps recognized factors when matched history is insufficient", () => {
   const start = "2026-03-02";
   const entities: CanonicalEntity[] = [
-    ...[0, 7, 14].map((offset, index) => event(`walk_${index}`, addDays(start, offset), "activity_session", {
-      activityType: "walking",
-    })),
     ...Array.from({ length: 35 }, (_, index) =>
-      sample(`recovery_${index}`, addDays(start, index), "recovery_score", 70 + (index % 2), "%")
+      event(`yard_${index}`, addDays(start, index), "activity_session", {
+        activityType: "yardwork",
+      }),
+    ),
+    ...Array.from({ length: 34 }, (_, index) =>
+      observation(
+        `recovery_${index}`,
+        addDays(start, index + 1),
+        "hrv",
+        70 + (index % 2),
+        "ms",
+      ),
     ),
   ];
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-patterns",
-  }), {
-    asOf: "2026-04-05T12:00:00.000Z",
-  });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-patterns",
+    }),
+    {
+      asOf: "2026-04-05T12:00:00.000Z",
+    },
+  );
 
-  assert.deepEqual(report.factors, []);
-  assert.deepEqual(report.outcomes, []);
-  assert.deepEqual(report.cells, []);
+  assert.deepEqual(
+    report.factors.map((factor) => [factor.id, factor.label]),
+    [["yardwork", "Yard work"]],
+  );
+  assert.deepEqual(
+    report.outcomes.map((outcome) => outcome.id),
+    ["hrv"],
+  );
+  assert.equal(report.cells.length, 1);
+  assert.equal(report.cells[0]?.stage, "insufficient");
   assert.equal(report.testedCellCount, 0);
 });
 
 test("Personal Patterns suppresses outcome-like activity and intervention factors", () => {
   const start = "2026-01-05";
-  const factorDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const factorDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const entities: CanonicalEntity[] = [
     ...factorDates.flatMap((date, index) => [
       event(`sleep_${index}`, date, "intervention_session", {
@@ -817,12 +1349,15 @@ test("Personal Patterns suppresses outcome-like activity and intervention factor
       );
     }),
   ];
-  const report = buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: "test://personal-patterns",
-  }), {
-    asOf: "2026-04-27T12:00:00.000Z",
-  });
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-patterns",
+    }),
+    {
+      asOf: "2026-04-27T12:00:00.000Z",
+    },
+  );
 
   assert.deepEqual(report.factors, []);
   assert.deepEqual(report.cells, []);
@@ -830,9 +1365,13 @@ test("Personal Patterns suppresses outcome-like activity and intervention factor
 });
 
 test("Personal Patterns runtime and Browser Vault reuse the same projected metric samples", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-personal-pattern-runtime-"));
+  const vaultRoot = await mkdtemp(
+    path.join(os.tmpdir(), "murph-personal-pattern-runtime-"),
+  );
   const start = "2026-01-05";
-  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
   const events = runningDates.map((date, index) => ({
     activityType: "running",
     dayKey: date,
@@ -859,24 +1398,37 @@ test("Personal Patterns runtime and Browser Vault reuse the same projected metri
   });
 
   try {
-    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
-    await mkdir(path.join(vaultRoot, "ledger/metric-samples/hrv-rmssd/2026"), { recursive: true });
-    await writeFile(path.join(vaultRoot, "vault.json"), `${JSON.stringify({
-      createdAt: "2026-01-01T00:00:00.000Z",
-      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
-      timezone: "UTC",
-      title: "Personal Patterns runtime fixture",
-      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4P",
-    })}\n`, "utf8");
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), {
+      recursive: true,
+    });
+    await mkdir(path.join(vaultRoot, "ledger/metric-samples/hrv-rmssd/2026"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Personal Patterns runtime fixture",
+        vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4P",
+      })}\n`,
+      "utf8",
+    );
     await writeFile(
       path.join(vaultRoot, "ledger/events/2026/2026-01.jsonl"),
       `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
       "utf8",
     );
     for (const month of ["01", "02", "03", "04"]) {
-      const monthSamples = metricSamples.filter((sample) => sample.dayKey.startsWith(`2026-${month}`));
+      const monthSamples = metricSamples.filter((sample) =>
+        sample.dayKey.startsWith(`2026-${month}`),
+      );
       await writeFile(
-        path.join(vaultRoot, `ledger/metric-samples/hrv-rmssd/2026/2026-${month}.jsonl`),
+        path.join(
+          vaultRoot,
+          `ledger/metric-samples/hrv-rmssd/2026/2026-${month}.jsonl`,
+        ),
         `${monthSamples.map((sample) => JSON.stringify(sample)).join("\n")}\n`,
         "utf8",
       );
@@ -887,7 +1439,9 @@ test("Personal Patterns runtime and Browser Vault reuse the same projected metri
       asOf: "2026-04-27",
     });
     const snapshot = await loadProjectedVaultSource(vaultRoot);
-    const metricPoints = await listMetricPointsRuntime(vaultRoot, { limit: null });
+    const metricPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+    });
     assert.equal(metricPoints.length, 112);
     assert.ok(metricPoints.every((point) => point.metricKey === "hrv-rmssd"));
     const replica = await createBrowserVaultReplica({
@@ -903,7 +1457,10 @@ test("Personal Patterns runtime and Browser Vault reuse the same projected metri
     const browserReport = parseBrowserVaultReplica(replica).personalPatterns;
 
     assert.equal(runtimeReport.factors[0]?.id, "running");
-    assert.equal(runtimeReport.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+    assert.equal(
+      runtimeReport.cells.find((cell) => cell.outcomeId === "hrv")?.stage,
+      "seen_again",
+    );
     assert.deepEqual(browserReport, runtimeReport);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
@@ -1140,7 +1697,7 @@ function buildHrvStageFixture(
 ) {
   const start = "2026-01-05";
   const offsets = Array.from({ length: count }, (_, index) =>
-    Math.round(index * spanDays / (count - 1))
+    Math.round((index * spanDays) / (count - 1)),
   );
   const factorIndexByDate = new Map(
     offsets.map((offset, index) => [addDays(start, offset), index] as const),
@@ -1149,9 +1706,14 @@ function buildHrvStageFixture(
   const entities: CanonicalEntity[] = [
     ...offsets.map((offset, index) => {
       const date = addDays(start, offset);
-      return event(`run_stage_${count}_${spanDays}_${index}`, date, "activity_session", {
-        activityType: "running",
-      });
+      return event(
+        `run_stage_${count}_${spanDays}_${index}`,
+        date,
+        "activity_session",
+        {
+          activityType: "running",
+        },
+      );
     }),
     ...Array.from({ length: asOfOffset + 1 }, (_, offset) => {
       const date = addDays(start, offset);
@@ -1166,11 +1728,14 @@ function buildHrvStageFixture(
     }),
   ];
 
-  return buildPersonalPatternReport(createVaultReadModel({
-    entities,
-    vaultRoot: `test://personal-pattern-stage-${count}-${spanDays}`,
-  }), {
-    asOf: addDays(start, asOfOffset),
-    windowDays: Math.max(28, asOfOffset + 1),
-  });
+  return buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: `test://personal-pattern-stage-${count}-${spanDays}`,
+    }),
+    {
+      asOf: addDays(start, asOfOffset),
+      windowDays: Math.max(28, asOfOffset + 1),
+    },
+  );
 }

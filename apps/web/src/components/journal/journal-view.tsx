@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -18,6 +18,7 @@ import {
   Stethoscope,
   Sun,
   Trees,
+  Utensils,
   type LucideIcon,
 } from "lucide-react";
 import type {
@@ -25,8 +26,25 @@ import type {
   JournalView,
 } from "@murphai/query/browser-overview";
 
+import { DashboardPageStatus } from "@/src/components/dashboard/dashboard-page-status";
 import { Button } from "@/src/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/src/components/ui/popover";
+import { Separator } from "@/src/components/ui/separator";
 import { Skeleton } from "@/src/components/ui/skeleton";
+import { usePointerPopoverAnchor } from "@/src/components/ui/use-pointer-popover-anchor";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/src/components/ui/tooltip";
 import { cn } from "@/src/lib/utils";
 
 const WEEK_DAY_COUNT = 7;
@@ -54,10 +72,16 @@ export function JournalViewContent({
   journal: JournalView;
   onRefresh?: () => void;
 }) {
+  const headingId = useId();
   const today = asOfDate ?? new Date().toISOString().slice(0, 10);
   const latestWeekStart = startOfIsoWeek(today);
   const earliestWeekStart = journal.weeks.at(-1)?.startDate ?? latestWeekStart;
   const [selectedWeekStart, setSelectedWeekStart] = useState(latestWeekStart);
+  const todayGreeting = useSyncExternalStore(
+    subscribeToClock,
+    currentGreeting,
+    serverGreeting,
+  );
   const daysByDate = useMemo(
     () => new Map(journal.days.map((day) => [day.date, day])),
     [journal.days],
@@ -69,23 +93,44 @@ export function JournalViewContent({
       ),
     [selectedWeekStart],
   );
+  const visibleDates = useMemo(
+    () => selectedDates.filter((date) => date <= today),
+    [selectedDates, today],
+  );
+  const isFutureWeek = visibleDates.length === 0;
   const week =
     journal.weeks.find((entry) => entry.startDate === selectedWeekStart) ??
     null;
 
   return (
     <section
-      aria-labelledby="journal-page-heading"
+      aria-labelledby={headingId}
       aria-busy={isRefreshing}
-      className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 lg:gap-[2.125rem] lg:px-[4.5rem] lg:py-16 lg:pb-[4.5rem]"
+      className="flex w-full flex-col gap-8 lg:gap-[2.125rem]"
     >
-      <JournalPageHeader>
+      <JournalPageHeader headingId={headingId}>
         {journal.days.length > 0 ? (
-          <div className="flex flex-col items-start gap-2 sm:items-end">
+          <div className="flex items-center gap-2">
             {isRefreshing ? (
-              <p className="text-xs text-muted-foreground" role="status">
-                Updating latest data
-              </p>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        aria-label="Updating latest data"
+                        className="inline-flex size-8 items-center justify-center text-muted-foreground"
+                        role="status"
+                      >
+                        <RefreshCw
+                          aria-hidden="true"
+                          className="size-3.5 animate-spin"
+                        />
+                      </span>
+                    }
+                  />
+                  <TooltipContent>Updating latest data</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : isStale && onRefresh ? (
               <Button
                 className="h-auto gap-1.5 px-0 text-xs"
@@ -113,38 +158,22 @@ export function JournalViewContent({
         <JournalEmptyState />
       ) : (
         <>
-          <section
-            aria-labelledby="journal-week-heading"
-            className="flex flex-col gap-6 border-b border-border pb-6 pt-5 lg:flex-row lg:items-end lg:justify-between"
-          >
-            <div className="flex max-w-[45rem] flex-col gap-[7px]">
-              <p className="text-[13px] font-semibold leading-[18px] text-primary">
-                This week
-              </p>
-              <h2
-                id="journal-week-heading"
-                className="font-serif text-[1.75rem] font-semibold leading-[2.0625rem] tracking-[-0.018em] text-foreground"
-              >
-                {formatWeekRange(selectedWeekStart)}
-              </h2>
-              <p className="text-[15px] leading-[23px] text-muted-foreground">
-                {summarizeWeek(week)}
-              </p>
-            </div>
-            <WeekStats week={week} />
-          </section>
-
           <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1fr)_21.375rem] lg:gap-16">
             <section className="min-w-0" aria-label="Journal timeline">
               <div className="flex flex-col">
-                {selectedDates.map((date) => (
-                  <JournalDaySection
-                    date={date}
-                    events={daysByDate.get(date)?.events ?? []}
-                    isToday={date === today}
-                    key={date}
-                  />
-                ))}
+                {isFutureWeek ? (
+                  <JournalFutureWeekState />
+                ) : (
+                  visibleDates.map((date) => (
+                    <JournalDaySection
+                      date={date}
+                      events={daysByDate.get(date)?.events ?? []}
+                      isToday={date === today}
+                      key={date}
+                      todayGreeting={todayGreeting}
+                    />
+                  ))
+                )}
               </div>
             </section>
 
@@ -156,6 +185,7 @@ export function JournalViewContent({
                 selectedWeekStart={selectedWeekStart}
                 today={today}
               />
+              <WeekStats week={week} />
               {insights.length > 0 ? (
                 <WeeklyInsights insights={insights} />
               ) : null}
@@ -177,13 +207,14 @@ export function JournalViewContent({
 }
 
 export function JournalLoadingState() {
+  const headingId = useId();
   return (
     <section
       aria-busy="true"
-      aria-labelledby="journal-page-heading"
-      className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 lg:gap-[2.125rem] lg:px-[4.5rem] lg:py-16 lg:pb-[4.5rem]"
+      aria-labelledby={headingId}
+      className="flex w-full flex-col gap-8 lg:gap-[2.125rem]"
     >
-      <JournalPageHeader>
+      <JournalPageHeader headingId={headingId}>
         <span className="sr-only" role="status">
           Preparing your Journal
         </span>
@@ -252,24 +283,21 @@ export function JournalUnavailableState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function JournalPageHeader({ children }: { children?: React.ReactNode }) {
+function JournalPageHeader({
+  children,
+  headingId,
+}: {
+  children?: React.ReactNode;
+  headingId: string;
+}) {
   return (
     <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-      <div className="flex max-w-[43.75rem] flex-col gap-2">
-        <p className="font-mono text-[11px] uppercase leading-4 tracking-[0.12em] text-muted-foreground">
-          Your Journal
-        </p>
-        <h1
-          id="journal-page-heading"
-          className="font-serif text-[2.625rem] font-semibold leading-[2.875rem] tracking-[-0.025em] text-foreground"
-        >
-          Journal
-        </h1>
-        <p className="text-[15px] leading-[23px] text-muted-foreground">
-          A clear record of what happened, how you felt, and what your health
-          data recorded.
-        </p>
-      </div>
+      <h1
+        id={headingId}
+        className="font-serif text-[2.625rem] font-semibold leading-[2.875rem] tracking-[-0.025em] text-foreground"
+      >
+        Journal
+      </h1>
       {children}
     </header>
   );
@@ -316,35 +344,17 @@ function JournalStatusState({
   title: string;
   tone: "error" | "neutral";
 }) {
+  const headingId = useId();
   return (
-    <section
-      aria-labelledby="journal-page-heading"
-      className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 lg:px-[4.5rem] lg:py-16"
-    >
-      <JournalPageHeader />
-      <div
-        className={cn(
-          "max-w-2xl rounded-2xl border bg-card p-6 sm:p-8",
-          tone === "error" ? "border-destructive/30" : "border-border",
-        )}
-      >
-        <CircleAlert
-          className={cn(
-            "size-7",
-            tone === "error" ? "text-destructive" : "text-primary",
-          )}
-          aria-hidden="true"
-        />
-        <h2 className="mt-4 font-serif text-2xl font-semibold tracking-tight text-foreground">
-          {title}
-        </h2>
-        <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
-          {description}
-        </p>
-        <Button className="mt-5" onClick={onAction} size="sm" variant="outline">
-          {actionLabel}
-        </Button>
-      </div>
+    <section aria-labelledby={headingId} className="flex w-full flex-col gap-8">
+      <JournalPageHeader headingId={headingId} />
+      <DashboardPageStatus
+        actionLabel={actionLabel}
+        description={description}
+        onAction={onAction}
+        title={title}
+        tone={tone}
+      />
     </section>
   );
 }
@@ -394,6 +404,19 @@ function JournalEmptyState() {
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         Tell Murph what happened, how you felt, or what context mattered. Sleep
         and activity from connected devices will appear automatically.
+      </p>
+    </section>
+  );
+}
+
+function JournalFutureWeekState() {
+  return (
+    <section className="max-w-xl py-10">
+      <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+        Nothing to show yet
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        Journal will fill in as this week happens.
       </p>
     </section>
   );
@@ -453,10 +476,12 @@ function JournalDaySection({
   date,
   events,
   isToday,
+  todayGreeting,
 }: {
   date: string;
   events: JournalEvent[];
   isToday: boolean;
+  todayGreeting: string;
 }) {
   const headingId = `journal-day-${date}`;
   const dayContext = describeDayContext(events);
@@ -466,7 +491,7 @@ function JournalDaySection({
       className="grid gap-4 border-b border-border/70 py-[26px] first:pt-2 last:border-b-0 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-7"
     >
       <div className="flex items-center gap-3 sm:flex-col sm:items-start sm:gap-0.5 sm:pt-0.5">
-        <h3
+        <h2
           id={headingId}
           className={cn(
             "text-sm font-semibold leading-5 text-foreground",
@@ -474,7 +499,7 @@ function JournalDaySection({
           )}
         >
           {formatDayHeading(date)}
-        </h3>
+        </h2>
         <span
           className={cn(
             "font-serif text-[2.125rem] font-semibold leading-9 tracking-[-0.02em] text-foreground",
@@ -493,9 +518,16 @@ function JournalDaySection({
 
       <div className="min-w-0 pt-0.5">
         {events.length === 0 ? (
-          <p className="py-1 text-sm text-muted-foreground">
-            Nothing recorded.
-          </p>
+          isToday ? (
+            <div className="flex items-center gap-2.5 py-1 text-sm text-muted-foreground">
+              <Sun className="size-4 text-primary/70" aria-hidden="true" />
+              <p>{todayGreeting}</p>
+            </div>
+          ) : (
+            <p className="py-1 text-sm text-muted-foreground">
+              Nothing recorded.
+            </p>
+          )
         ) : (
           <ol className="flex flex-col gap-[15px]">
             {events.map((event) => (
@@ -511,6 +543,7 @@ function JournalDaySection({
 }
 
 function JournalEventRow({ event }: { event: JournalEvent }) {
+  const pointerAnchor = usePointerPopoverAnchor();
   const sources = [
     ...new Set(
       event.records
@@ -527,14 +560,40 @@ function JournalEventRow({ event }: { event: JournalEvent }) {
     (detail) =>
       !summary || !normalizeText(summary).includes(normalizeText(detail)),
   );
+  const inlineDetails = event.kind === "sleep" ? [] : details;
+  const hasDetails = details.length > 0 || sources.length > 0;
+  const content = (
+    <span className="block min-w-0">
+      <span className="flex min-h-[30px] flex-wrap items-center gap-x-2.5 gap-y-0.5">
+        <span
+          className={cn(
+            "text-[15px] font-semibold leading-[21px] text-foreground",
+            isConcern && "text-destructive",
+          )}
+        >
+          {event.title}
+        </span>
+        {summary ? (
+          <span className="text-sm leading-[21px] text-muted-foreground">
+            {summary}
+          </span>
+        ) : null}
+      </span>
+      {inlineDetails.length > 0 ? (
+        <span className="mt-[3px] block text-[13px] leading-[19px] text-muted-foreground">
+          {inlineDetails.join(" · ")}
+        </span>
+      ) : null}
+      {sources.length > 0 ? (
+        <span className="sr-only">Source: {sources.join(", ")}</span>
+      ) : null}
+    </span>
+  );
 
   return (
-    <article
-      className="group grid grid-cols-[3.375rem_1.875rem_minmax(0,1fr)] items-start gap-x-3.5"
-      title={sources.length > 0 ? `Source: ${sources.join(", ")}` : undefined}
-    >
+    <article className="group grid grid-cols-[3.375rem_1.875rem_minmax(0,1fr)] items-start gap-x-3.5">
       <time
-        className="pt-0.5 text-right font-mono text-[10px] uppercase leading-[18px] text-muted-foreground"
+        className="text-right font-mono text-[10px] uppercase leading-[30px] text-muted-foreground"
         dateTime={event.occurredAt}
       >
         {formatEventTime(event)}
@@ -547,32 +606,196 @@ function JournalEventRow({ event }: { event: JournalEvent }) {
       >
         {renderEventIcon(event)}
       </span>
-      <div className="min-w-0 pt-0.5">
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-          <h4
-            className={cn(
-              "text-[15px] font-semibold leading-[21px] text-foreground",
-              isConcern && "text-destructive",
-            )}
-          >
-            {event.title}
-          </h4>
-          {summary ? (
-            <p className="text-sm leading-[21px] text-muted-foreground">
-              {summary}
-            </p>
-          ) : null}
-        </div>
-        {details.length > 0 ? (
-          <p className="mt-[3px] text-[13px] leading-[19px] text-muted-foreground">
-            {details.join(" · ")}
-          </p>
-        ) : null}
-        {sources.length > 0 ? (
-          <span className="sr-only">Source: {sources.join(", ")}</span>
-        ) : null}
-      </div>
+      {hasDetails ? (
+        <Popover>
+          <PopoverTrigger
+            closeDelay={200}
+            delay={150}
+            openOnHover
+            render={
+              <button
+                aria-label={`Show details for ${event.title}`}
+                className="-mx-2 -my-1 min-w-0 rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onKeyDown={pointerAnchor.onKeyDown}
+                onPointerMove={pointerAnchor.onPointerMove}
+                type="button"
+              >
+                {content}
+              </button>
+            }
+          />
+          <JournalEventPopoverContent
+            anchor={pointerAnchor.anchor}
+            details={details}
+            event={event}
+            sources={sources}
+          />
+        </Popover>
+      ) : (
+        content
+      )}
     </article>
+  );
+}
+
+function JournalEventPopoverContent({
+  anchor,
+  details,
+  event,
+  sources,
+}: {
+  anchor: () => { getBoundingClientRect: () => DOMRect } | null;
+  details: string[];
+  event: JournalEvent;
+  sources: string[];
+}) {
+  const sleepDetails =
+    event.kind === "sleep" ? parseSleepPopoverDetails(event, details) : null;
+
+  return (
+    <PopoverContent
+      align="center"
+      anchor={anchor}
+      className="w-[min(24rem,calc(100vw-2rem))]"
+      positionMethod="fixed"
+      side="right"
+      sideOffset={12}
+    >
+      {sleepDetails ? (
+        <SleepPopoverPresentation details={sleepDetails} />
+      ) : (
+        <GenericJournalPopoverPresentation details={details} event={event} />
+      )}
+      {sources.length > 0 ? (
+        <>
+          <Separator />
+          <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+            Source: {sources.join(", ")}
+          </p>
+        </>
+      ) : null}
+    </PopoverContent>
+  );
+}
+
+interface SleepPopoverMetric {
+  description: string;
+  label: string;
+  value: string;
+}
+
+interface SleepPopoverDetails {
+  duration: string | null;
+  extraDetails: string[];
+  metrics: SleepPopoverMetric[];
+  score: string | null;
+}
+
+function SleepPopoverPresentation({
+  details,
+}: {
+  details: SleepPopoverDetails;
+}) {
+  const primaryMetrics = [
+    details.duration ? { label: "Total sleep", value: details.duration } : null,
+    details.score ? { label: "Sleep score", value: details.score } : null,
+  ].filter(
+    (metric): metric is { label: string; value: string } => metric !== null,
+  );
+
+  return (
+    <>
+      <PopoverHeader className="gap-0">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+          Night sleep
+        </p>
+        <PopoverTitle className="sr-only">Sleep details</PopoverTitle>
+      </PopoverHeader>
+      {primaryMetrics.length > 0 ? (
+        <dl className="grid grid-cols-2 gap-6">
+          {primaryMetrics.map((metric) => (
+            <div key={metric.label}>
+              <dt className="text-xs leading-4 text-muted-foreground">
+                {metric.label}
+              </dt>
+              <dd className="mt-1 font-serif text-[1.75rem] font-semibold leading-8 tracking-[-0.02em] text-foreground">
+                {metric.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {details.metrics.length > 0 ? (
+        <>
+          <Separator />
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
+            {details.metrics.map((metric) => (
+              <div key={metric.label}>
+                <dt className="text-xs font-medium leading-4 text-foreground">
+                  {metric.label}
+                </dt>
+                <dd className="mt-1 font-serif text-xl font-semibold leading-6 text-foreground">
+                  {metric.value}
+                </dd>
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  {metric.description}
+                </p>
+              </div>
+            ))}
+          </dl>
+        </>
+      ) : null}
+      {details.extraDetails.length > 0 ? (
+        <>
+          <Separator />
+          <div className="flex flex-col gap-2">
+            {details.extraDetails.map((detail) => (
+              <p className="text-[13px] leading-5 text-foreground" key={detail}>
+                {capitalizeDetail(detail)}
+              </p>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function GenericJournalPopoverPresentation({
+  details,
+  event,
+}: {
+  details: string[];
+  event: JournalEvent;
+}) {
+  return (
+    <>
+      <PopoverHeader className="gap-1">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+          {event.timing === "night" ? "Night sleep" : "Journal entry"}
+        </p>
+        <PopoverTitle className="font-serif text-xl font-semibold leading-6">
+          {event.title}
+        </PopoverTitle>
+        {event.summary ? (
+          <PopoverDescription className="text-sm leading-5">
+            {event.summary}
+          </PopoverDescription>
+        ) : null}
+      </PopoverHeader>
+      {details.length > 0 ? (
+        <>
+          <Separator />
+          <div className="flex flex-col gap-2">
+            {details.map((detail) => (
+              <p className="text-[13px] leading-5 text-foreground" key={detail}>
+                {capitalizeDetail(detail)}
+              </p>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -679,7 +902,7 @@ function WeekStats({ week }: { week: JournalView["weeks"][number] | null }) {
 
   return (
     <section aria-label="Week at a glance">
-      <dl className="flex flex-wrap items-end gap-x-8 gap-y-4 lg:gap-x-10">
+      <dl className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
           <div className="flex min-w-0 flex-col" key={stat.label}>
             <dt className="order-2 mt-[3px] text-xs leading-[17px] text-muted-foreground">
@@ -705,6 +928,7 @@ function resolveEventIcon(event: JournalEvent): LucideIcon {
   if (event.kind === "sleep" || event.kind === "nap")
     return event.kind === "nap" ? Sun : Moon;
   if (event.kind === "test") return Beaker;
+  if (event.kind === "meal") return Utensils;
   if (event.kind === "symptom") return CircleAlert;
   if (value.includes("tennis") || value.includes("strength")) return Dumbbell;
   if (value.includes("walk") || value.includes("hike")) return Footprints;
@@ -732,26 +956,6 @@ function formatEventTime(event: JournalEvent): string {
   }).format(new Date(event.occurredAt));
 }
 
-function summarizeWeek(week: JournalView["weeks"][number] | null): string {
-  if (!week) return "Nothing has been recorded for this week yet.";
-  const parts: string[] = [];
-  if (week.averageSleepMinutes !== null) {
-    parts.push(
-      `Sleep averaged ${formatDuration(week.averageSleepMinutes)} across ${
-        week.sleepNights
-      } ${week.sleepNights === 1 ? "night" : "nights"}`,
-    );
-  }
-  if (week.activityMinutes > 0) {
-    parts.push(
-      `${formatDuration(week.activityMinutes)} of activity was recorded`,
-    );
-  }
-  return parts.length > 0
-    ? `${parts.join(", and ")}.`
-    : "A few notes were recorded this week.";
-}
-
 function formatDayHeading(date: string): string {
   return new Intl.DateTimeFormat("en", {
     weekday: "long",
@@ -764,31 +968,6 @@ function formatDayAccessible(date: string): string {
     dateStyle: "full",
     timeZone: "UTC",
   }).format(new Date(`${date}T12:00:00.000Z`));
-}
-
-function formatWeekRange(startDate: string): string {
-  const endDate = addDays(startDate, 6);
-  const start = new Date(`${startDate}T12:00:00.000Z`);
-  const end = new Date(`${endDate}T12:00:00.000Z`);
-  const sameMonth = startDate.slice(0, 7) === endDate.slice(0, 7);
-  const startDay = start.getUTCDate();
-  const endDay = end.getUTCDate();
-  const endMonth = new Intl.DateTimeFormat("en", {
-    month: "long",
-    timeZone: "UTC",
-  }).format(end);
-  const endYear = end.getUTCFullYear();
-  if (sameMonth) return `${startDay}–${endDay} ${endMonth} ${endYear}`;
-  const startMonth = new Intl.DateTimeFormat("en", {
-    month: "long",
-    timeZone: "UTC",
-  }).format(start);
-  const startYear = start.getUTCFullYear();
-  const startLabel =
-    startYear === endYear
-      ? `${startDay} ${startMonth}`
-      : `${startDay} ${startMonth} ${startYear}`;
-  return `${startLabel}–${endDay} ${endMonth} ${endYear}`;
 }
 
 function daysInMonth(date: string): number {
@@ -828,6 +1007,146 @@ function normalizeText(value: string): string {
     .trim()
     .toLowerCase()
     .replace(/[.!]+$/gu, "");
+}
+
+function capitalizeDetail(value: string): string {
+  return value.length === 0
+    ? value
+    : `${value.charAt(0).toLocaleUpperCase()}${value.slice(1)}`;
+}
+
+function parseSleepPopoverDetails(
+  event: JournalEvent,
+  details: readonly string[],
+): SleepPopoverDetails {
+  const summaryParts = event.summary
+    ? event.summary.split(" · ").map((part) => part.trim())
+    : [];
+  const scorePart = summaryParts.find((part) =>
+    /^(?:sleep )?score\s+/iu.test(part),
+  );
+  const duration =
+    summaryParts.find((part) => !/^(?:sleep )?score\s+/iu.test(part)) ?? null;
+  const score = scorePart?.replace(/^(?:sleep )?score\s+/iu, "") ?? null;
+  const metrics: SleepPopoverMetric[] = [];
+  const extraDetails: string[] = [];
+
+  for (const detail of details) {
+    const efficiency = detail.match(/^([\d.]+)% efficiency$/iu);
+    if (efficiency?.[1]) {
+      metrics.push({
+        description: "Time asleep while in bed",
+        label: "Sleep efficiency",
+        value: `${efficiency[1]}%`,
+      });
+      continue;
+    }
+
+    const hrv = detail.match(/^HRV ([\d.]+) ms$/iu);
+    if (hrv?.[1]) {
+      metrics.push({
+        description: "Beat-to-beat variation",
+        label: "HRV",
+        value: `${hrv[1]} ms`,
+      });
+      continue;
+    }
+
+    const readiness = detail.match(/^readiness ([\d.]+)$/iu);
+    if (readiness?.[1]) {
+      metrics.push({
+        description: "Recovery and strain score",
+        label: "Readiness",
+        value: readiness[1],
+      });
+      continue;
+    }
+
+    const recovery = detail.match(/^recovery ([\d.]+)$/iu);
+    if (recovery?.[1]) {
+      metrics.push({
+        description: "Recovery and strain score",
+        label: "Recovery",
+        value: recovery[1],
+      });
+      continue;
+    }
+
+    const restingHeartRate = detail.match(/^resting HR ([\d.]+) bpm$/iu);
+    if (restingHeartRate?.[1]) {
+      metrics.push({
+        description: "Beats per minute at rest",
+        label: "Resting heart rate",
+        value: `${restingHeartRate[1]} bpm`,
+      });
+      continue;
+    }
+
+    const deepSleep = detail.match(/^deep sleep ([\d.]+) min$/iu);
+    if (deepSleep?.[1]) {
+      metrics.push({
+        description: "Slow-wave sleep",
+        label: "Deep sleep",
+        value: `${deepSleep[1]} min`,
+      });
+      continue;
+    }
+
+    const remSleep = detail.match(/^REM sleep ([\d.]+) min$/iu);
+    if (remSleep?.[1]) {
+      metrics.push({
+        description: "Dream and memory sleep",
+        label: "REM sleep",
+        value: `${remSleep[1]} min`,
+      });
+      continue;
+    }
+
+    const respiratoryRate = detail.match(
+      /^respiratory rate ([\d.]+) breaths\/min$/iu,
+    );
+    if (respiratoryRate?.[1]) {
+      metrics.push({
+        description: "Breaths per minute during sleep",
+        label: "Respiratory rate",
+        value: respiratoryRate[1],
+      });
+      continue;
+    }
+
+    const spo2 = detail.match(/^SpO₂ ([\d.]+)%$/iu);
+    if (spo2?.[1]) {
+      metrics.push({
+        description: "Average blood oxygen",
+        label: "SpO₂",
+        value: `${spo2[1]}%`,
+      });
+      continue;
+    }
+
+    extraDetails.push(detail);
+  }
+
+  return { duration, extraDetails, metrics, score };
+}
+
+function greetingForHour(hour: number): string {
+  if (hour < 12) return "Good morning.";
+  if (hour < 18) return "Good afternoon.";
+  return "Good evening.";
+}
+
+function subscribeToClock(onChange: () => void): () => void {
+  const interval = window.setInterval(onChange, 60_000);
+  return () => window.clearInterval(interval);
+}
+
+function currentGreeting(): string {
+  return greetingForHour(new Date().getHours());
+}
+
+function serverGreeting(): string {
+  return "Welcome back.";
 }
 
 function startOfIsoWeek(date: string): string {

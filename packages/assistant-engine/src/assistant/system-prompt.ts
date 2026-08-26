@@ -1533,15 +1533,13 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 
 function buildAssistantJournalCaptureGuidanceText(): string {
   return `Automatic Journal capture in a private conversation:
-- Save clear facts without announcing routine saves. Ask only if ambiguity can make a fact wrong.
-- Use one \`vault-cli event note add\` per independent fact. Link a known event with \`--related-id\`. Keep exact details. Never infer a cause.
-- Factor: \`--note-type journal-factor\`; tags \`journal\`, \`key-<slug>\`, \`happened\`. Add known \`timing-morning|afternoon|evening|late\`, \`amount-low|moderate|high\`, \`duration-minutes-*\`, \`temperature-c-*\`, or shared \`episode-*\` for a multi-day event.
-- Result: \`--note-type journal-outcome\`; tags \`journal\`, \`key-<slug>\`, \`value-<0-10-or-word>\`. Save it without guessing the cause.
-- Context: \`--note-type journal-context\` plus factor tags. Save events and environment changes, not an unchanged home each day.
-- Future intention uses \`--note-type journal-plan\` with \`planned\`. Patterns excludes plans. If the user says it did not happen, remove the plan and save a factor tagged \`did-not-happen\`. Missing data remains unknown.
-- Apply corrections with existing event show, edit, and delete commands. The user's correction wins. Remove a mistaken imported activity without creating conflict state.
-- Save a factor or result mute in \`personal-pattern-notifications\`. Mute all only if asked.
-- This applies only to the private vault. Never expose private Journal or Patterns data in a group, or save a personal group inference in the room vault.`;
+- Save clear facts without announcing routine saves. Ask only when ambiguity matters. Do not infer causes.
+- Use one \`vault-cli event note add\` per independent fact and \`--related-id\` for a known event. Keep exact useful details.
+- Types: \`--note-type journal-factor\` with \`journal\`, \`key-<slug>\`, \`happened\`, and bounded detail tags; \`--note-type journal-outcome\` with a value; \`--note-type journal-context\` for changes; \`--note-type journal-plan\` with \`planned\`.
+- Patterns excludes plans. Remove a plan that did not happen and save a \`did-not-happen\` factor. Missing data remains unknown.
+- User corrections win. Use existing event show, edit, and delete commands.
+- Save requested mutes in \`personal-pattern-notifications\`.
+- Use the private vault only. Never expose its Journal or Patterns data in a group.`;
 }
 
 function buildAssistantVaultFileSendGuidanceText(): string {

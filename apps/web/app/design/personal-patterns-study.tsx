@@ -23,6 +23,12 @@ const POPULATED_REPORT: PersonalPatternReport = {
       label: "Custom tag",
       observedDays: 6,
     },
+    {
+      id: "sparse-factor",
+      kind: "intervention",
+      label: "Sparse factor",
+      observedDays: 2,
+    },
   ],
   outcomes: [
     { id: "hrv", label: "HRV", unit: "ms" },
@@ -231,6 +237,49 @@ const POPULATED_REPORT: PersonalPatternReport = {
       88,
       5,
     ),
+    cell("sparse-factor", "total-sleep", "insufficient", "flat", 0, 0, 0, 2),
+    cell(
+      "sparse-factor",
+      "resting-heart-rate",
+      "insufficient",
+      "flat",
+      0,
+      0,
+      0,
+      2,
+    ),
+    cell("sparse-factor", "hrv", "insufficient", "flat", 0, 0, 0, 2),
+    cell(
+      "sparse-factor",
+      "readiness-score",
+      "insufficient",
+      "flat",
+      0,
+      0,
+      0,
+      2,
+    ),
+    cell("sparse-factor", "deep-sleep", "insufficient", "flat", 0, 0, 0, 2),
+    cell(
+      "sparse-factor",
+      "respiratory-rate",
+      "insufficient",
+      "flat",
+      0,
+      0,
+      0,
+      2,
+    ),
+    cell(
+      "sparse-factor",
+      "sleep-efficiency",
+      "insufficient",
+      "flat",
+      0,
+      0,
+      0,
+      2,
+    ),
   ],
   lagDays: 1,
   notes: ["Synthetic design data."],
@@ -270,7 +319,7 @@ export function PersonalPatternsStudy() {
       </div>
       <div data-design-state="error">
         <PersonalPatternsSection
-          error="We couldn't unlock your pattern data right now."
+          onRetry={() => undefined}
           report={null}
           state="error"
         />
@@ -289,20 +338,26 @@ export function PersonalPatternsComponentStudy() {
 function cell(
   factorId: string,
   outcomeId: string,
-  stage: "new_clue" | "seen_again" | "worth_testing" | "no_clear_pattern",
+  stage:
+    | "insufficient"
+    | "new_clue"
+    | "seen_again"
+    | "worth_testing"
+    | "no_clear_pattern",
   direction: "higher" | "lower" | "flat",
   deltaPercent: number,
   exposedMean: number,
   comparisonMean: number,
   exposedDays: number,
 ): PersonalPatternCell {
-  const evidence = stage === "worth_testing"
-    ? { classification: "pattern" as const, grade: "A" as const }
-    : stage === "seen_again"
+  const evidence =
+    stage === "worth_testing"
+      ? { classification: "pattern" as const, grade: "A" as const }
+      : stage === "seen_again"
       ? { classification: "pattern" as const, grade: "B" as const }
       : stage === "new_clue"
-        ? { classification: "early_signal" as const, grade: "D" as const }
-        : { classification: null, grade: null };
+      ? { classification: "early_signal" as const, grade: "D" as const }
+      : { classification: null, grade: null };
   return {
     ...evidence,
     comparisonBasis: "unobserved_baseline" as const,

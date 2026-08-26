@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 ## Product boundary
 
@@ -45,10 +45,12 @@ Independent facts use independent notes. One message can therefore create more
 than one note. A multi-day trip, illness, or holiday uses one `episode-*` tag so
 the query counts it as one episode, not several independent events.
 
-Eligible outcomes include canonical sleep and recovery metrics plus private
-`journal-outcome` notes. Subjective outcomes keep the member's wording and use
-a bounded value tag for calculation. They use the same-day window. Sleep and
-recovery metrics use the next-day window.
+Eligible outcomes include total sleep, sleep score, sleep efficiency, deep
+sleep, REM sleep, Readiness or Recovery score, HRV, resting heart rate,
+respiratory rate, SpO₂, and private `journal-outcome` notes when the canonical
+data exists. Subjective outcomes keep the member's wording and use a bounded
+value tag for calculation. They use the same-day window. Sleep and recovery
+metrics use the next-day window.
 
 ## Bounded comparisons
 
@@ -71,13 +73,13 @@ repeated-evidence grade.
 
 The report uses one scale in the product:
 
-| Grade | Product name | Minimum evidence |
-| --- | --- | --- |
-| E | Observation | One meaningful comparison case |
-| D | Early signal | Two repeated comparison cases |
-| C | Pattern | Five cases across 21 days |
-| B | Pattern | Eight cases across 42 days |
-| A | Pattern | Twelve cases across 56 days and a larger effect |
+| Grade | Product name | Minimum evidence                                |
+| ----- | ------------ | ----------------------------------------------- |
+| E     | Observation  | One meaningful comparison case                  |
+| D     | Early signal | Two repeated comparison cases                   |
+| C     | Pattern      | Five cases across 21 days                       |
+| B     | Pattern      | Eight cases across 42 days                      |
+| A     | Pattern      | Twelve cases across 56 days and a larger effect |
 
 Grades describe evidence strength, not certainty or medical importance.
 Legacy `new_clue`, `seen_again`, and `worth_testing` values remain compatibility
@@ -102,9 +104,11 @@ disappear.
 ## Presentation
 
 The current `/patterns` matrix remains the main view. It shows up to 15 factors
-and the supported outcomes. Observations can appear with grade E. The page shows
-the evidence count, comparison basis, date range, and the factor and comparison
-dates needed to inspect the result.
+and every supported outcome present in the member's data. A recognized factor
+stays visible when it has no suitable comparison day. Its cells explain that
+Murph needs more comparable data. Observations can appear with grade E. The
+page shows the evidence count, comparison basis, date range, and the factor and
+comparison dates needed to inspect the result.
 
 An empty report says that Murph needs more comparable data. The page does not
 start a calculation. It reads the latest Browser Vault report.
