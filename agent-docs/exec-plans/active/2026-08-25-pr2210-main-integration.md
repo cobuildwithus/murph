@@ -29,6 +29,17 @@ truthful stages, and no duplicate projector, repair transport, or state owner.
 - Canonical hosted-runner assembly passes all eight CLI parity probes. The CLI
   measures 9,523,956 B total, 805 B entry, and 25,155 B static startup against
   the composed guard; the runner measures 11,353,283 B total.
+- Final ReviewGPT round three required the size retrospective now recorded in
+  the PR contract. The decision keeps one owner-complete slice because splitting
+  it would duplicate the same mappings, bundle allowance, schemas, and tests;
+  nested parser and duplicate projector machinery remain deleted.
+- Parent review found one residual raw-detail channel: event and assessment
+  contract mappings added sanitized issues but still retained the original
+  `details.errors`. Both mappings now set `preserveDetails: false`, so the
+  existing fixed stage, owner code, and safe issues are the complete context.
+  Vault-usecase projection/formatter proof passes 8/8 and the affected built-CLI
+  event/document recovery suite passes 10/10. Vault-usecases typecheck and
+  `git diff --check` pass.
 
 ## Design
 

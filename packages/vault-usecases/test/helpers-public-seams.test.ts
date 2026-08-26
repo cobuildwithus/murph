@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { healthEntityDefinitions } from "@murphai/contracts";
 import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
+import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
@@ -48,6 +49,7 @@ import {
   resolveVaultRelativePath,
   stringArray,
   toAssessmentProjectVaultCliError,
+  toAssessmentImportVaultCliError,
   toEventUpsertVaultCliError,
   toImporterInputFileVaultCliError,
   toRegimenUpsertVaultCliError,
@@ -453,7 +455,6 @@ describe("helper barrel exports", () => {
         code: "contract_invalid",
         context: expect.objectContaining({
           vaultCode: "EVENT_CONTRACT_INVALID",
-          field: "kind",
           stage: "validation",
         }),
       }),
@@ -481,6 +482,31 @@ describe("helper barrel exports", () => {
         },
     ]);
     expect(JSON.stringify(eventContractError.context?.issues)).not.toContain("private-submitted");
+    expect(eventContractError.context).not.toHaveProperty("errors");
+    expect(formatStructuredErrorMessage(eventContractError)).not.toContain("private-submitted");
+
+    const assessmentContractError = toAssessmentImportVaultCliError(
+      Object.assign(new Error("Bad assessment"), {
+        name: "VaultError",
+        code: "ASSESSMENT_RESPONSE_INVALID",
+        details: {
+          errors: ["$.title: private-assessment-value is invalid"],
+        },
+      }),
+      "/input.json",
+    );
+    expect(assessmentContractError).toBeInstanceOf(VaultCliError);
+    expect((assessmentContractError as VaultCliError).context).toEqual(
+      expect.objectContaining({
+        issues: [{ code: "custom", publicPath: ["title"] }],
+        stage: "validation",
+        vaultCode: "ASSESSMENT_RESPONSE_INVALID",
+      }),
+    );
+    expect((assessmentContractError as VaultCliError).context).not.toHaveProperty("errors");
+    expect(formatStructuredErrorMessage(assessmentContractError)).not.toContain(
+      "private-assessment-value",
+    );
 
     const missingEventTitle = toEventUpsertVaultCliError(
       Object.assign(new Error("Event payload requires a title."), {

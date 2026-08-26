@@ -363,6 +363,7 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   EVENT_CONTRACT_INVALID: {
     code: 'contract_invalid',
     details: contractValidationDetails,
+    preserveDetails: false,
   },
   EVENT_ID_NOT_ALLOWED: {
     code: 'invalid_option',
@@ -580,6 +581,7 @@ export function toAssessmentImportVaultCliError(error: unknown, inputFilePath: s
     ASSESSMENT_RESPONSE_INVALID: {
       code: 'contract_invalid',
       details: contractValidationDetails,
+      preserveDetails: false,
     },
   })
 }
