@@ -3799,6 +3799,27 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             groupTool: {
               request: async (request) => {
                 groupRequests.push(request)
+                if (request.action === 'list_memberships') {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [],
+                      memberships: [{
+                        displayName: 'Trail Crew',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 8,
+                        membershipId: 'membership_trail_crew',
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
                 return {
                   action: 'handoff',
                   result: {
@@ -3843,6 +3864,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                 : null,
             memoryCommands,
             reply: result.finalMessage.trim(),
+            toolActions: groupRequests.flatMap((request) =>
+              request
+              && typeof request === 'object'
+              && 'action' in request
+              && typeof request.action === 'string'
+                ? [request.action]
+                : []
+            ),
             toolCallCount: groupRequests.length,
           })}\n`,
         )

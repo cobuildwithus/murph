@@ -1254,7 +1254,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask or hand off; the host binds group/member/sender authority. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
+    'Ask/hand off; host binds group/member/sender. Pass named group as groupLabel; never list first. Before handoff, if name absent, run vault-cli memory show; use "a member" only if none. Complete current-sender request: message_current_sender. Follow-up: clarify_current_sender, then continue_current_sender_privately or continue_current_sender_in_group; never continue a fresh request. Accepted handoff: say queued, not sent/told/shared/posted.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({

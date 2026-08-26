@@ -684,6 +684,7 @@ function buildAssistantHostedGroupGuidanceText(
     "Hosted groups:",
     ...(conversationScope === "direct" && toolSurface === "families"
       ? [
+          "- For a direct ask or handoff that already names a visible group, pass that name as `groupLabel` to `murph.group_consult` without calling `list_memberships`. The host resolves the exact normalized target or returns clarification. Before handoff, use a preferred name already established in the current conversation; otherwise run `vault-cli memory show` and use \"a member\" only when canonical memory has no preferred name.",
           "- When `murph.group_membership action=\"list_memberships\"` is available and an otherwise unclear request includes a possible group cue, such as a club, team, community, or shared challenge, use it once as a last-resort disambiguation check before guessing or asking. Resolve a generic group reference only when exactly one membership exists, or a name-like reference only when one exact normalized visible label matches; then use `murph.group_consult action=\"ask\"` when the answer belongs to group context. With no memberships, offer the existing paste-or-screenshot fallback. Otherwise ask one narrow clarification using only distinct nonblank visible labels; duplicate or unnamed labels require the member to name or rename one. Never fuzzy-match, select by role or newness, expose identifiers, or fan out. Do not use this lookup for ordinary ambiguity without a group cue.",
         ]
       : []),

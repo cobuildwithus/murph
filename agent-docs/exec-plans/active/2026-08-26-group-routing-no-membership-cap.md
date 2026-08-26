@@ -55,9 +55,9 @@ Updated: 2026-08-26
    Mitigation: use one slim membership query with no per-membership fanout only
    for an explicit label, preserving the exact JavaScript normalization
    contract and duplicate detection. Retain the existing 26-row query for
-   unnamed clarification. At current production cardinality this changes the
-   largest observed read from 26 to 27 rows; query count and peak pooled
-   connections remain one.
+   unnamed clarification. The current production maximum remains a 26-row
+   named read, while the deterministic regression proves selection at row 27;
+   query count and peak pooled connections remain one.
 2. Risk: A case/Unicode mismatch changes which group is selected.
    Mitigation: prove persisted display-name normalization and add exact,
    whitespace, case, out-of-window, and duplicate-label regressions.
@@ -73,8 +73,8 @@ Updated: 2026-08-26
    `too_many_groups` availability branch.
 3. Update the private-group consultation contract and add the member-visible
    changelog entry.
-4. Add and run a focused real-Codex journey with synthetic 26+ memberships;
-   inspect the exact tool call and reply.
+4. Add and run a focused real-Codex journey that exposes both group tools;
+   inspect the exact tool call and reply and forbid membership-list preflight.
 5. Run focused tests, Web typecheck, diff/privacy checks, preliminary
    specialists, final ReviewGPT, and required PR CI.
 
@@ -100,9 +100,16 @@ Updated: 2026-08-26
 - The adjacent Assistant Engine slice passes 115 tests. Its unrelated
   512-receipt continuation stress test repeatedly reaches its existing
   60-second timeout on this shared host.
-- The focused real-Codex journey is `Hold`: the default local subscription
-  returned `ASSISTANT_CODEX_USAGE_LIMIT` before any provider action, and no
-  explicitly authorized alternate home was available.
+- The focused real-Codex journey is `Ready` on the authorized alternate local
+  subscription home: it made one named handoff, made no membership-list call,
+  read the canonical preferred name once, supplied third-person context, and
+  replied truthfully that the update was queued.
+- The first live samples exposed a real model-layer preflight plus independent
+  attribution and pending-state wording misses. The correction makes an
+  explicit visible name a direct `groupLabel` path in resident hosted-group
+  guidance, keeps `list_memberships` last-resort only, names the exact preferred
+  name read, requires queued wording, and gives the journey a production-shaped
+  membership-list response instead of a false handoff result.
 - Draft PR: #2361.
 - Final ReviewGPT round 1 returned one accepted `Complexity Collapse`: exact
   handoff replay already owns a pinned membership and route, so repeating the
@@ -114,6 +121,9 @@ Updated: 2026-08-26
   coverage finding was accepted: the focused journey now exposes both group
   tools so its exactly-one-handoff assertion forbids `list_memberships`. Its
   replay finding was superseded by deleting replay membership selection.
+- The corrected preliminary specialist finding is resolved by the successful
+  live journey. A final ReviewGPT correction round remains required for the
+  behavior-bearing prompt and journey-harness correction.
 
 ## Verification
 
