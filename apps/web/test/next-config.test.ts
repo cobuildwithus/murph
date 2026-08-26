@@ -368,12 +368,15 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
 });
 
-test("production static generation stays within the configured build CPU budget", () => {
+test("production static generation composes to at most four concurrent renders", () => {
+  const exportWorkers = productionNextConfig.experimental?.cpus;
+  const rendersPerWorker =
+    productionNextConfig.experimental?.staticGenerationMaxConcurrency;
+
   assert.equal(HOSTED_WEB_PRODUCTION_BUILD_CPUS, 2);
-  assert.equal(
-    productionNextConfig.experimental?.staticGenerationMaxConcurrency,
-    HOSTED_WEB_PRODUCTION_BUILD_CPUS,
-  );
+  assert.equal(exportWorkers, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
+  assert.equal(rendersPerWorker, 2);
+  assert.equal(exportWorkers * rendersPerWorker, 4);
 });
 
 test("production build skips only the duplicate typecheck after the runner proves it", () => {

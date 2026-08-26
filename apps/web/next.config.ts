@@ -306,8 +306,8 @@ export function buildHostedWebNextConfig(
     env: buildHostedWebClientEnv(environment),
     experimental: {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
-      // Next otherwise renders up to eight static pages per export worker.
-      // Keep per-worker fanout aligned with the production-build CPU budget.
+      // Next otherwise renders up to eight static pages in each of two export
+      // workers. Cap each worker at two pages, for four composed renders.
       staticGenerationMaxConcurrency: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       // Next 16.3 enables persistent production-build caching by default.
       // Keep builds independent until that new state owner is evaluated
