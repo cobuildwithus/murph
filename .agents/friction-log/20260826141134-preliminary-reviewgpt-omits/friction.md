@@ -1,6 +1,7 @@
 ---
 title: 'Preliminary ReviewGPT omits required assistant verification skill'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2364'
 ---
 
 ## Expected
