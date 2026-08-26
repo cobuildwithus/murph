@@ -1962,9 +1962,10 @@ export function buildParentReviewArchive(
     0o700,
   );
   const config = path.join(reviewRoot, "review-gpt.config.sh");
+  const sharedReviewConfig = path.join(primary, "scripts", "review-gpt.config.sh");
   writePrivateFileAtomically(
     config,
-    `#!/bin/bash\nname_prefix="frog-autofix-parent"\nout_dir=""\ninclude_tests=0\ninclude_docs=0\nchatgpt_url="https://chatgpt.com"\npackage_script=${safeShellLiteral(emitScript)}\nattach_artifacts=1\nmanaged_browser_user_data_dir="$HOME/Library/Application Support/BraveSoftware/Brave-Browser"\nmanaged_browser_profile="Default"\nmanaged_browser_port="9452"\nmanaged_browser_background_mode="balanced"\nbrowser_binary_path="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"\nmodel="gpt-5.6-sol"\nthinking="current"\napp_connector="current"\nresponse_timeout_ms="10800000"\nsnapshot_attachment_name="codebase.zip"\n`,
+    `#!/bin/bash\nsource ${safeShellLiteral(sharedReviewConfig)}\nname_prefix="frog-autofix-parent"\nout_dir=""\npackage_script=${safeShellLiteral(emitScript)}\nresponse_timeout_ms="10800000"\nsnapshot_attachment_name="codebase.zip"\n`,
     0o600,
   );
   return { config, reviewRoot };

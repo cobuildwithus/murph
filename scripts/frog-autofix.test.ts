@@ -2184,6 +2184,7 @@ describe("Frog autofix guards", () => {
         "package-audit-context-full.sh",
         "repo-tools.config.sh",
         "review-gpt-context-policy.sh",
+        "review-gpt.config.sh",
       ]) {
         copyFileSync(
           path.join(targetReviewControlRoot, "scripts", script),
@@ -2230,6 +2231,9 @@ case "$json" in
 esac
 `);
       chmodSync(gh, 0o700);
+      const curl = path.join(fakeBin, "curl");
+      writeFileSync(curl, "#!/bin/bash\nexit 1\n");
+      chmodSync(curl, 0o700);
       const task = committedFrictionTask(root, 42);
       const body = bodyWithParentMetadata(renderRecoveredPullRequestBody(42), {
         firstHead: head,
@@ -2294,6 +2298,67 @@ esac
         task,
       );
       archiveContents(path.join(implementation.reviewRoot, "codebase.zip"));
+      const implementationConfig = readFileSync(implementation.config, "utf8");
+      expect(implementationConfig).toContain("/scripts/review-gpt.config.sh'");
+      expect(implementationConfig).not.toContain("BraveSoftware/Brave-Browser");
+      expect(implementationConfig).not.toContain('managed_browser_port="9452"');
+
+      const reviewHome = path.join(runRoot, "review-home");
+      const reviewConfigHome = path.join(runRoot, "review-config");
+      mkdirSync(reviewHome, { recursive: true });
+      mkdirSync(reviewConfigHome, { recursive: true });
+      const mainBrowserProfile = path.join(
+        reviewHome,
+        "Library",
+        "Application Support",
+        "BraveSoftware",
+        "Brave-Browser",
+      );
+      mkdirSync(mainBrowserProfile, { recursive: true });
+      writeFileSync(
+        path.join(mainBrowserProfile, "SingletonLock"),
+        "interactive-browser\n",
+      );
+      const configProbe = spawnSync(
+        "bash",
+        [
+          "-c",
+          [
+            "set -euo pipefail",
+            "review_gpt_register_dir_preset() { :; }",
+            "review_gpt_register_preset_group() { :; }",
+            'source "$FROG_REVIEW_CONFIG"',
+            "printf 'pool-count=%s\\n' \"${#review_gpt_browser_lanes[@]}\"",
+            "printf 'selected=%s\\n' \"$REVIEW_GPT_SELECTED_BROWSER_LANE\"",
+            "printf 'data-dir=%s\\n' \"$managed_browser_user_data_dir\"",
+            "printf 'port=%s\\n' \"$managed_browser_port\"",
+          ].join("\n"),
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            FROG_REVIEW_CONFIG: implementation.config,
+            HOME: reviewHome,
+            LANG: "C",
+            LC_ALL: "C",
+            PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+            XDG_CONFIG_HOME: reviewConfigHome,
+          },
+        },
+      );
+      expect(configProbe.status, configProbe.stderr).toBe(0);
+      const configValues = new Map(
+        configProbe.stdout.trim().split("\n").map((line) => {
+          const separator = line.indexOf("=");
+          return [line.slice(0, separator), line.slice(separator + 1)] as const;
+        }),
+      );
+      expect(configValues.get("pool-count")).toBe("6");
+      expect(configValues.get("selected")).not.toBe("main");
+      expect(configValues.get("data-dir")).toContain(
+        path.join(reviewHome, "Library", "Application Support", "MurphReviewGPT"),
+      );
+      expect(configValues.get("port")).not.toBe("9452");
 
       const packageCanonical = (
         kind: "final" | "specialist",
