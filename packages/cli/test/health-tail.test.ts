@@ -2392,41 +2392,6 @@ test("goal list preserves status filters after explicit adapter migration", asyn
   }
 });
 
-test("health list status options reject unsupported values with native field guidance", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-status-"));
-  const privateStatus = "private-unsupported-status";
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-
-    for (const { noun, allowedStatus } of [
-      { noun: "goal", allowedStatus: "active" },
-      { noun: "condition", allowedStatus: "resolved" },
-      { noun: "allergy", allowedStatus: "inactive" },
-      { noun: "blood-test", allowedStatus: "mixed" },
-      { noun: "genetics", allowedStatus: "risk_factor" },
-    ]) {
-      const result = await runCli([
-        noun,
-        "list",
-        "--status",
-        privateStatus,
-        "--vault",
-        vaultRoot,
-      ]);
-
-      assert.equal(result.ok, false, noun);
-      assert.equal(result.error?.code, "VALIDATION_ERROR", noun);
-      assert.equal(result.error?.fieldErrors?.[0]?.path, "status", noun);
-      assert.equal(result.error?.fieldErrors?.[0]?.received, "", noun);
-      assert.match(result.error?.message ?? "", new RegExp(allowedStatus, "u"), noun);
-      assert.equal(JSON.stringify(result).includes(privateStatus), false, noun);
-    }
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
 test("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
 

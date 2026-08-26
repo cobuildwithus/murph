@@ -11,7 +11,7 @@ declare module 'incur' {
       'age report': { args: {}; options: { requestId?: string; asOf: string; chronologicalAgeYears: number; sex: "female" | "male"; mode: "product" | "research"; cardId?: "l1b_glycemia_body_10y_acm_research" | "l1_tiny_glycemia_10y_acm_research" | "lab5_bp_bmi_transport_research" | "lab9_bp_body_10y_acm_research" | "r399_nhis_proxy_10y_acm_research"; modelCardArtifactRoot?: string } }
       'age scaffold': { args: {}; options: {} }
       'allergy import-json': { args: {}; options: { requestId?: string; input: string } }
-      'allergy list': { args: {}; options: { requestId?: string; status?: "active" | "inactive" | "resolved"; limit: number } }
+      'allergy list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
       'allergy save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { requestId?: string } }
       'allergy show': { args: { id: string }; options: { requestId?: string } }
@@ -49,7 +49,7 @@ declare module 'incur' {
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
       'batch': { args: {}; options: { requestId?: string; command: string[]; compact: boolean; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
-      'blood-test list': { args: {}; options: { requestId?: string; status?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; from?: string; to?: string; text?: string; limit: number } }
+      'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; text?: string; limit: number } }
       'blood-test payload-schema': { args: {}; options: {} }
       'blood-test save': { args: { title: string }; options: { requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }
       'blood-test scaffold': { args: {}; options: { requestId?: string } }
@@ -69,7 +69,7 @@ declare module 'incur' {
       'commons protocol list': { args: {}; options: { query?: string; status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community" | "*"; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
       'condition import-json': { args: {}; options: { requestId?: string; input: string } }
-      'condition list': { args: {}; options: { requestId?: string; status?: "active" | "inactive" | "resolved"; limit: number } }
+      'condition list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
       'condition payload-schema': { args: {}; options: {} }
       'condition save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { requestId?: string } }
@@ -157,12 +157,12 @@ declare module 'incur' {
       'food show': { args: { id: string }; options: { requestId?: string } }
       'food unschedule': { args: { id: string }; options: { requestId?: string } }
       'genetics import-json': { args: {}; options: { requestId?: string; input: string } }
-      'genetics list': { args: {}; options: { requestId?: string; status?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; limit: number } }
+      'genetics list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
       'genetics save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; gene: string; zygosity?: "heterozygous" | "homozygous" | "compound_heterozygous" | "unknown"; significance?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; inheritance?: string; sourceFamilyMemberId?: string[]; note?: string } }
       'genetics scaffold': { args: {}; options: { requestId?: string } }
       'genetics show': { args: { id: string }; options: { requestId?: string } }
       'goal import-json': { args: {}; options: { requestId?: string; input: string } }
-      'goal list': { args: {}; options: { requestId?: string; status?: "active" | "paused" | "completed" | "abandoned"; limit: number } }
+      'goal list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }

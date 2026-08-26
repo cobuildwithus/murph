@@ -93,7 +93,6 @@ interface HealthCrudConfig<
   hints?: CrudHints
   listFilterCapabilities?: readonly HealthCrudListFilterCapability[]
   listStatusDescription?: string
-  listStatusSchema?: z.ZodType<string | undefined>
   noun: string
   outputs: CrudOutputs<TScaffold, TUpsert, TShow, TList>
   payloadSchema?: HealthPayloadSchemaConfig
@@ -526,9 +525,7 @@ export function registerHealthCrudCommands<
           : undefined,
         limit: commonListLimitOptionSchema,
         status: config.listStatusDescription
-          ? (config.listStatusSchema ?? statusOptionSchema).describe(
-              config.listStatusDescription,
-            )
+          ? statusOptionSchema.describe(config.listStatusDescription)
           : undefined,
         text: config.listFilterCapabilities?.includes('text')
           ? z

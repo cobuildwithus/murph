@@ -13868,12 +13868,7 @@
                         "status": {
                           "description": "Optional goal status to filter by.",
                           "type": "string",
-                          "enum": [
-                            "active",
-                            "paused",
-                            "completed",
-                            "abandoned"
-                          ]
+                          "minLength": 1
                         },
                         "limit": {
                           "default": 10,
@@ -14070,11 +14065,7 @@
                         "status": {
                           "description": "Optional condition status to filter by.",
                           "type": "string",
-                          "enum": [
-                            "active",
-                            "inactive",
-                            "resolved"
-                          ]
+                          "minLength": 1
                         },
                         "limit": {
                           "default": 10,
@@ -14270,11 +14261,7 @@
                         "status": {
                           "description": "Optional allergy status to filter by.",
                           "type": "string",
-                          "enum": [
-                            "active",
-                            "inactive",
-                            "resolved"
-                          ]
+                          "minLength": 1
                         },
                         "limit": {
                           "default": 10,
@@ -14455,13 +14442,7 @@
                         "status": {
                           "description": "Optional blood-test result status to filter by.",
                           "type": "string",
-                          "enum": [
-                            "pending",
-                            "normal",
-                            "abnormal",
-                            "mixed",
-                            "unknown"
-                          ]
+                          "minLength": 1
                         },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
@@ -15125,14 +15106,7 @@
                         "status": {
                           "description": "Optional genetic-variant status to filter by.",
                           "type": "string",
-                          "enum": [
-                            "pathogenic",
-                            "likely_pathogenic",
-                            "risk_factor",
-                            "vus",
-                            "benign",
-                            "unknown"
-                          ]
+                          "minLength": 1
                         },
                         "limit": {
                           "default": 10,

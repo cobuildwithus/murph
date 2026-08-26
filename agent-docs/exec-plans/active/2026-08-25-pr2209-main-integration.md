@@ -59,6 +59,28 @@ generic projector, validation framework, or recovery state owner.
   fixed leaves, missing value/text alternatives, a genuinely empty reference
   range, and invalid flags. Every case retains value non-echo and zero ledger
   writes.
+- ReviewGPT round five found that the first-reviewed candidate also added strict
+  enum schemas for five read-only `list --status` filters. That behavior is
+  unrelated to validation-before-write recovery and duplicated the existing
+  query owners plus generic non-empty status option. The finding is accepted.
+- The correction deletes `listStatusSchema` across the descriptor, registry,
+  and command-factory layers, the five-family enum switch, and the dedicated
+  unsupported-status test. Valid filters continue through the existing generic
+  option and unchanged query services. Regenerated schema, command types, and
+  skill hash now describe a non-empty string instead of a second enum owner.
+  The correction is 12 additions and 104 deletions before this plan update and
+  adds no replacement concept, branch, service, state, or compatibility path.
+- Focused correction proof passes 40/40 health descriptor, valid status-filter,
+  clinical recovery, non-echo, and no-write journeys; 24/24 built blood-test
+  recovery cases; 14/14 bundle-boundary cases; Vault Usecases and CLI
+  typechecks; prepared runtime; package shape; and both docs gates.
+- The exact production runner assembly remains blocked before packaging by the
+  pre-existing assistant-engine CLI-manifest subprocess deadline: both the full
+  assembly and one unmodified isolated owner retry timed out after 60 seconds
+  loading `vault-cli --llms-full --format json`. No timeout or production source
+  was changed. The focused bundle owner is green, and the prior exact reviewed
+  production head passed all eight assembly parity probes; required CI remains
+  the next broad proof for the corrected candidate.
 
 ## Round-four retrospective
 

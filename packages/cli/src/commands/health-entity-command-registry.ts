@@ -121,7 +121,6 @@ function createHealthEntityCrudConfig(
       : undefined,
     listFilterCapabilities: descriptor.query.genericListFilterCapabilities,
     listStatusDescription: descriptor.command.listStatusDescription,
-    listStatusSchema: descriptor.query.listStatusSchema,
     noun: descriptor.noun,
     outputs: {
       list: healthListResultSchema,

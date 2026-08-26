@@ -1,9 +1,4 @@
 import {
-  ALLERGY_STATUSES,
-  CONDITION_CLINICAL_STATUSES,
-  GOAL_STATUSES,
-  TEST_RESULT_STATUSES,
-  VARIANT_SIGNIFICANCES,
   bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitions,
@@ -56,7 +51,6 @@ export interface HealthCoreDescriptor {
 
 export interface HealthQueryDescriptor {
   genericListFilterCapabilities: readonly HealthListFilterCapability[];
-  listStatusSchema?: z.ZodType<string | undefined>;
   listServiceMethod: HealthQueryListServiceMethodName;
   notFoundLabel: string;
   runtimeListMethod: HealthQueryRuntimeListMethodName;
@@ -145,7 +139,6 @@ interface StatusFilteredRegistryDescriptorInput {
   commandName: StatusFilteredRegistryDescriptorCommandName;
   listServiceMethod: HealthQueryListServiceMethodName;
   listStatusDescription?: string;
-  listStatusSchema?: z.ZodType<string | undefined>;
   noun: string;
   payloadFile: string;
   pluralNoun: string;
@@ -186,7 +179,6 @@ function buildStatusFilteredRegistryDescriptorExtension(
     },
     query: {
       genericListFilterCapabilities: ["status"],
-      listStatusSchema: input.listStatusSchema,
       listServiceMethod: input.listServiceMethod,
       notFoundLabel: input.noun,
       runtimeListMethod: input.runtimeListMethod,
@@ -207,7 +199,6 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
     commandName: command.commandName,
     listServiceMethod: command.listServiceMethod,
     listStatusDescription: family.supportsStatusFilter ? command.listStatusDescription : undefined,
-    listStatusSchema: registryListStatusSchema(kind),
     noun: definition.noun,
     payloadFile: command.payloadFile,
     pluralNoun: definition.plural,
@@ -234,23 +225,6 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
         }
       : undefined,
   };
-}
-
-function registryListStatusSchema(
-  kind: StatusFilteredRegistryDescriptorCommandName,
-): z.ZodType<string | undefined> | undefined {
-  switch (kind) {
-    case "goal":
-      return z.enum(GOAL_STATUSES).optional();
-    case "condition":
-      return z.enum(CONDITION_CLINICAL_STATUSES).optional();
-    case "allergy":
-      return z.enum(ALLERGY_STATUSES).optional();
-    case "genetics":
-      return z.enum(VARIANT_SIGNIFICANCES).optional();
-    default:
-      return undefined;
-  }
 }
 
 function buildSharedStatusFilteredRegistryDescriptorExtensions(): Record<
@@ -305,7 +279,6 @@ const checkedHealthEntityDescriptorExtensions = {
     },
     query: {
       genericListFilterCapabilities: ["date-range", "status", "text"],
-      listStatusSchema: z.enum(TEST_RESULT_STATUSES).optional(),
       listServiceMethod: "listBloodTests",
       notFoundLabel: "blood test",
       runtimeListMethod: "listBloodTests",
