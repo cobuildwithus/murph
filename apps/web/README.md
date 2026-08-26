@@ -1749,6 +1749,14 @@ used by the Vercel package build and the CI memory-observation lane. Forced-cold
 Standard previews remain the direct acceptance evidence, and a Next upgrade
 must revalidate the heap boundary.
 
+Next's static-generation export loop defaults to eight concurrent pages in each
+of the two configured export workers, allowing up to sixteen page renders at
+once. Hosted Web derives `staticGenerationMaxConcurrency` from the existing
+two-CPU production build constant, capping each worker at two concurrent pages
+and the composed build at four. This keeps page-render fanout explicit without
+skipping any static output; exact-head Vercel builds remain the duration and
+capacity proof.
+
 Production builds use Next 16.3's supported Webpack fallback. The production
 script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
 integration contributes custom Webpack configuration, so Next's canonical
