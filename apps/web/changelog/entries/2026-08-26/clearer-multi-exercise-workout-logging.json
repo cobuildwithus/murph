@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "clearer-multi-exercise-workout-logging",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer multi-exercise workout logging",
+    "summary": "Murph now keeps distinct exercise variations separate when several are described together in one workout message.",
+    "details": "Clearly shared set and repetition instructions carry to each variation. Murph still asks when the exercise identity or quantity split is genuinely unclear.",
+    "relevanceTags": ["assistant", "workouts", "messaging", "tracking"],
+    "sourcePullRequests": [2340]
+  }
+}
