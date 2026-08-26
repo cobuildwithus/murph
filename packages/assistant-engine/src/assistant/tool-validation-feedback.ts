@@ -11,6 +11,10 @@ const MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 60_000
 
 export interface ToolCallValidationFeedbackOptions {
   error: string
+  recovery?: {
+    action: 'correct_validation_issues_and_retry'
+    retryLimit: 1
+  }
 }
 
 interface ToolCallRepairHint {
@@ -34,6 +38,7 @@ export function buildToolCallValidationFeedback(
   if (modelValidationIssues) {
     const detailedFeedback = JSON.stringify({
       error,
+      ...(options.recovery ? { recovery: options.recovery } : {}),
       validationIssues: modelValidationIssues,
     })
     if (Buffer.byteLength(detailedFeedback, 'utf8')
@@ -65,7 +70,10 @@ export function buildToolCallValidationFeedback(
     `${hint.field}:${hint.code}:${hint.expected ?? ''}`,
     hint,
   ])).values()].slice(0, MAX_TOOL_CALL_REPAIR_HINTS)
-  const genericFeedback = JSON.stringify({ error })
+  const genericFeedback = JSON.stringify({
+    error,
+    ...(options.recovery ? { recovery: options.recovery } : {}),
+  })
   if (uniqueHints.length === 0) {
     return genericFeedback
   }
@@ -73,6 +81,7 @@ export function buildToolCallValidationFeedback(
   const feedback = JSON.stringify({
     error,
     hints: uniqueHints,
+    ...(options.recovery ? { recovery: options.recovery } : {}),
   })
   return feedback.length <= MAX_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH
     ? feedback

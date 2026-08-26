@@ -2179,6 +2179,7 @@ export async function executeMurphDynamicToolRequest(input: {
         ? 'invalid_progress_update_arguments'
         : input.request.kind.replaceAll('-', '_'),
       input.request.validationDigest,
+      input.request.kind === 'invalid-product-feedback-arguments',
     )
   }
 
@@ -6737,10 +6738,21 @@ function physicalNoteRecoveryAcceptedCopy(
 function invalidDynamicToolArgumentsResult(
   error: string,
   validationDigest: SafeToolCallValidationDigest,
+  retryValidationOnce = false,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     false,
-    buildToolCallValidationFeedback(validationDigest, { error }),
+    buildToolCallValidationFeedback(validationDigest, {
+      error,
+      ...(retryValidationOnce
+        ? {
+            recovery: {
+              action: 'correct_validation_issues_and_retry' as const,
+              retryLimit: 1 as const,
+            },
+          }
+        : {}),
+    }),
   )
 }
 

@@ -10,6 +10,10 @@ import {
 } from "../src/parsers.js";
 
 describe("hosted product feedback contracts", () => {
+  it("allows summaries up to five thousand characters", () => {
+    expect(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH).toBe(5_000);
+  });
+
   it("requires a written issue after the reserved support prefix", () => {
     expect(isHostedProductSupportEscalationSummary(
       "Support escalation: a connected source reports success but Murph does not finish the connection.",

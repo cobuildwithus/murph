@@ -1181,15 +1181,17 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain('Still help with the immediate request or best fallback')
     expect(prompt).toContain(
-      'Otherwise, when the problem is clear or Murph observed the friction, capture it silently',
-    )
-    expect(prompt).toContain(
-      'select the single most material gap and call the tool at most once for the accepted request',
+      'capture the single most material gap silently; at most one accepted call',
     )
     expect(prompt).toContain('Do not mention ordinary acceptance')
-    expect(prompt).toContain('persistence is best-effort after the reply')
-    expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
-    expect(prompt).toContain('Never retry after any tool result')
+    expect(prompt).toContain('Persistence is best-effort after the reply')
+    expect(prompt).toContain('Reserved support follows Support; skip discovery')
+    expect(prompt).toContain(
+      'On input-schema rejection, correct only the returned issues and retry once',
+    )
+    expect(prompt).toContain(
+      'Accepted, already accepted, unavailable, and callback-failure results are terminal',
+    )
     expect(prompt).toContain('external/transient failures')
     expect(prompt).toContain('Use `feature_request` for missing paths')
     expect(prompt).toContain(

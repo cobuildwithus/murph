@@ -7663,6 +7663,92 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
 
 describeRealCodex('real Codex support escalation e2e', () => {
   it(
+    'recovers once from a real product-feedback schema error',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-schema-recovery-e2e-'),
+      )
+      const recordedFeedback: Array<{
+        kind: string
+        summary: string
+      }> = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+          env: config.env,
+          hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          productFeedbackRecorder: {
+            async recordProductFeedback(feedback) {
+              recordedFeedback.push({
+                kind: feedback.kind,
+                summary: feedback.summary,
+              })
+              return { recorded: true }
+            },
+            discardProductFeedback() {},
+            readProductFeedback() {
+              return null
+            },
+          },
+          prompt: [
+            'This is a synthetic validation-recovery probe in a verified private conversation.',
+            'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+            'On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+            'After the tool returns its real validation error, correct only the reported issue and retry once.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+        )
+
+        expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+        const firstCall = calls[0]
+        const correctedCall = calls[1]
+        if (firstCall?.kind !== 'dynamic' || correctedCall?.kind !== 'dynamic') {
+          throw new Error('Expected two product-feedback dynamic tool calls.')
+        }
+        expect(firstCall.argumentsValue.supportArea).toBe('automation')
+        expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+        expect(correctedCall.argumentsValue.kind).toBe('frustration')
+        expect(correctedCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+        expect(correctedCall.argumentsValue.summary).toMatch(
+          /^Support escalation: \S/iu,
+        )
+        expect(readString(correctedCall.argumentsValue.summary)?.length)
+          .toBeLessThanOrEqual(5_000)
+        expect(recordedFeedback).toHaveLength(1)
+        expect(result.finalMessage).toMatch(
+          /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+        )
+        expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
     'sends once from an explicit private request and never from a group',
     async () => {
       const config = await resolveRealCodexE2eConfig()

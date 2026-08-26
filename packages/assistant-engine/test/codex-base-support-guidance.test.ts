@@ -49,7 +49,10 @@ describe("Murph Codex base support guidance", () => {
       "promise a ticket/response/fix/follow-up/timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "or retry",
+      "correct only the returned validation issues and retry once",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Do not retry accepted, already accepted, unavailable, or callback-failure results",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "For Murph product problems, give support@withmurph.ai directly",
