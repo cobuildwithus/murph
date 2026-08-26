@@ -846,6 +846,16 @@ Last verified: 2026-08-23
   failure cannot change the original checkout, webhook, retry, poison, or
   entitlement outcome. There is no new queue, cursor, retry loop, or persisted
   alert state.
+- Positive Stripe payment email is a receipt-completion obligation, not the
+  best-effort failure-alert projection. A positive `invoice.paid` amount or a
+  fulfilled usage-credit Checkout or saved-card PaymentIntent sends once after
+  canonical reconciliation. The existing receipt remains the only retry owner:
+  missing configuration or provider failure leaves it claimable without
+  rolling back billing, entitlement, or usage credit. A receipt-local sent
+  marker is written only after provider success, while an event-derived Resend
+  idempotency key covers response loss before that marker. Receipt replay after
+  the marker must skip send and finish remaining work. Zero-dollar invoices and
+  no-charge plan changes complete without notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.

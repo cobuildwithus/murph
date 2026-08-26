@@ -1360,6 +1360,17 @@ Last verified: 2026-08-26
   submitted Session ID's unique blind lookup key still resolves to a current
   checkout attempt; syntax alone, an unknown ID, or a cleared/stale binding
   cannot create an operator email.
+- Resend-backed positive Stripe payment notifications must use that same
+  environment-owned operational sender, recipient allowlist, and API key. They
+  may be emitted only after the verified receipt owner accepts a positive
+  `invoice.paid` amount or fulfills a usage-credit Checkout or saved-card
+  PaymentIntent. The plain-text body is limited to amount and currency, a
+  bounded payment category, event type and time, live/test mode, and the opaque
+  Stripe event id. It must not read or include member/customer identity,
+  contact details, checkout contents, invoice line items, raw provider objects,
+  or webhook payloads. The receipt-local sent timestamp is an operational
+  delivery marker only; it is not payment, entitlement, or usage-credit
+  authority.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.
 - Do not clear or abandon provider-native assistant thread continuity merely because a tool returned authenticated private data or because provider history differs slightly from delivered output. Session invalidation is not a privacy boundary. Protect private data through authorization, bounded tool results, output and logging policy, and the normal encrypted snapshot boundary.

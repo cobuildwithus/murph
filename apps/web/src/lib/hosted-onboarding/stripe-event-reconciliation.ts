@@ -90,6 +90,10 @@ import {
 } from "./stripe-error-log";
 import { scheduleHostedStripeReconciliationFailureAlert } from "./stripe-alert-email";
 import {
+  resolveHostedStripePaymentNotificationCandidate,
+  sendHostedStripePaymentNotificationEmail,
+} from "./stripe-payment-notification-email";
+import {
   HostedStripeCheckoutLoserCleanupPendingError,
   refundHostedExactOrdinaryInvoicePayment,
 } from "./stripe-checkout-loser-cleanup";
@@ -216,6 +220,15 @@ class HostedStripeRuntimeRecheckPendingError extends Error {
   constructor(cause: unknown) {
     super("Hosted runtime recheck remains pending.", { cause });
     this.name = "HostedStripeRuntimeRecheckPendingError";
+  }
+}
+
+class HostedStripePaymentNotificationPendingError extends Error {
+  readonly code = "HOSTED_STRIPE_PAYMENT_NOTIFICATION_PENDING";
+
+  constructor(cause: unknown) {
+    super("Stripe payment notification email remains pending.", { cause });
+    this.name = "HostedStripePaymentNotificationPendingError";
   }
 }
 
@@ -1058,6 +1071,34 @@ async function processClaimedHostedStripeEvent(
         }
       }
     }
+    const paymentNotificationCandidate =
+      resolveHostedStripePaymentNotificationCandidate({
+        event: stripeEvent,
+        usageCreditEventHandled: usageCreditReconciliation.handled,
+      });
+    let paymentNotificationSent = false;
+    if (
+      paymentNotificationCandidate &&
+      !claimed.paymentNotificationEmailSentAt
+    ) {
+      let paymentNotificationOutcome;
+      try {
+        paymentNotificationOutcome =
+          await sendHostedStripePaymentNotificationEmail({
+            candidate: paymentNotificationCandidate,
+          });
+      } catch (error) {
+        throw new HostedStripePaymentNotificationPendingError(error);
+      }
+      if (paymentNotificationOutcome === "sent") {
+        await markHostedStripePaymentNotificationEmailSent({
+          eventId: claimed.eventId,
+          prisma,
+          sentAt: new Date(),
+        });
+        paymentNotificationSent = true;
+      }
+    }
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
         attemptCount: claimed.attemptCount,
@@ -1084,6 +1125,8 @@ async function processClaimedHostedStripeEvent(
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
       subscriptionCancellationEmailCandidate:
         Boolean(result.subscriptionCancellationEmail),
+      paymentNotificationCandidate: Boolean(paymentNotificationCandidate),
+      paymentNotificationSent,
       usageCreditGranted:
         usageCreditReconciliation.handled && usageCreditReconciliation.granted,
       welcomeEmailCandidate: Boolean(result.welcomeEmailMemberId),
@@ -1117,6 +1160,7 @@ async function processClaimedHostedStripeEvent(
       !(error instanceof HostedStripeFamilySponsoredCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
+      !(error instanceof HostedStripePaymentNotificationPendingError) &&
       !(error instanceof HostedStripeRuntimeRecheckPendingError) &&
       !isHostedStripeEffectPendingError(error) &&
       !usageCreditEventHandled &&
@@ -1523,6 +1567,22 @@ async function markHostedStripeSubscriptionCancellationEmailSent(input: {
     },
     data: {
       subscriptionCancellationEmailSentAt: input.sentAt,
+    },
+  });
+}
+
+async function markHostedStripePaymentNotificationEmailSent(input: {
+  eventId: string;
+  prisma: PrismaClient;
+  sentAt: Date;
+}): Promise<void> {
+  await input.prisma.hostedStripeEvent.updateMany({
+    where: {
+      eventId: input.eventId,
+      paymentNotificationEmailSentAt: null,
+    },
+    data: {
+      paymentNotificationEmailSentAt: input.sentAt,
     },
   });
 }

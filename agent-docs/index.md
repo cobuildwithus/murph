@@ -7,6 +7,13 @@ Last verified: 2026-08-26
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Receipt-owned positive Stripe payment notifications cover subscription starts
+and renewals, paid plan-change and recurring-usage invoices, and fulfilled
+usage-credit payments without exposing member or customer identity. Their
+retry, privacy, configuration, and deploy-skew contracts are specified by
+`ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, `agent-docs/SECURITY.md`,
+`agent-docs/product-specs/hosted-usage-topups.md`, and `apps/web/README.md`.
+
 Markdown-only pull requests keep their seven existing required contexts, while
 flat, dated release-note records may use base-trusted exact-inventory receipts
 instead of runtime-heavy proof. Every other Markdown path retains full CI, and

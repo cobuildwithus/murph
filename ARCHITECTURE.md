@@ -2306,6 +2306,21 @@ receipts retain retry authority, and alert configuration or delivery failure
 cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
+Positive Stripe payment email is a separate receipt-owned operational
+projection. After canonical reconciliation accepts a positive `invoice.paid`
+amount or fulfills a usage-credit Checkout or saved-card PaymentIntent, the
+same receipt must send one plain-text email before completion. This covers
+subscription creation and renewal, paid plan-change invoices, recurring usage
+invoices, and one-time or automatic usage purchases. Zero-dollar invoices and
+plan changes that collect no money remain silent. A receipt-local sent marker
+and event-derived Resend idempotency key prevent replay after provider success;
+configuration or provider failure leaves that receipt retryable while the
+already-committed billing, entitlement, and usage-credit result remains intact.
+The projection includes only amount, currency, a bounded payment category,
+event type and time, live/test mode, and the opaque Stripe event id. It never
+reads or includes member/customer identity, contact details, checkout contents,
+or raw provider payloads.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve
