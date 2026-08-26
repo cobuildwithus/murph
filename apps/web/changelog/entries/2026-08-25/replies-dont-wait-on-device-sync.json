@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "replies-dont-wait-on-device-sync",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Replies no longer wait on device sync",
+    "summary": "When you message Murph during background connected-data work, your reply now starts first.",
+    "details": "Interrupted background work stays durable and resumes after the foreground reply.",
+    "relevanceTags": ["assistant", "devices", "messaging", "reliability"],
+    "sourcePullRequests": [2314]
+  }
+}
