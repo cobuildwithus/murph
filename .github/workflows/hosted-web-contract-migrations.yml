@@ -12,6 +12,11 @@ on:
         description: Exact ready Vercel production deployment URL to prove.
         required: true
         type: string
+      run_group_materialization_backfill:
+        description: Temporarily run the bounded routed-group materialization repair after contract migrations.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -175,6 +180,7 @@ jobs:
           DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
           MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
           MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"
+          RUN_GROUP_MATERIALIZATION_BACKFILL: ${{ inputs.run_group_materialization_backfill || 'false' }}
         run: |
           set -euo pipefail
 
@@ -213,3 +219,41 @@ jobs:
           fi
 
           pnpm --dir apps/web release:production:contract-migrate
+
+          if [ "${RUN_GROUP_MATERIALIZATION_BACKFILL}" != "true" ]; then
+            exit 0
+          fi
+
+          current_sha="$(
+            env \
+              -u DIRECT_DATABASE_URL \
+              -u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS \
+              -u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS \
+              pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
+          )"
+          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "::error::Vercel production changed before the hosted group materialization backfill."
+            exit 1
+          fi
+
+          verified_sha="$(
+            env \
+              -u DIRECT_DATABASE_URL \
+              -u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS \
+              -u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS \
+              pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
+          )"
+          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "::error::Exact Vercel production verification failed before the hosted group materialization backfill."
+            exit 1
+          fi
+
+          DATABASE_URL="${DIRECT_DATABASE_URL}" \
+            NODE_OPTIONS=--conditions=react-server \
+            pnpm --dir apps/web groups:backfill-materialization --batch-size 50
+          DATABASE_URL="${DIRECT_DATABASE_URL}" \
+            NODE_OPTIONS=--conditions=react-server \
+            pnpm --dir apps/web groups:backfill-materialization --apply --batch-size 50
+          DATABASE_URL="${DIRECT_DATABASE_URL}" \
+            NODE_OPTIONS=--conditions=react-server \
+            pnpm --dir apps/web groups:backfill-materialization --check

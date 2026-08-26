@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 ## Goal
 
@@ -101,6 +101,16 @@ Updated: 2026-08-25
 5. Resolve accepted findings, merge and deploy, run dry-run/apply/check until
    production reports zero missing groups, then remove the temporary backfill
    command and its operator-only documentation in a cleanup PR.
+
+## Rollout note
+
+- PR #2303 merged and its replacement Web build passed the exact production
+  alias proof and prior-function drain.
+- The documented local Vercel operator path exposed protected production
+  database variable names with empty values, so it could not execute even the
+  dry-run. The repair now reuses the existing protected contract-migration
+  workflow and production environment for one bounded dispatch; that temporary
+  input is removed with the backfill command after convergence.
 
 ## Verification
 
