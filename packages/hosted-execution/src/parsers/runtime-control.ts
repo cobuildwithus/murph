@@ -363,6 +363,7 @@ const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
+  "deviceSyncJobTimingSummaries",
 ]);
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
@@ -884,6 +885,10 @@ export function parseHostedRuntimeUsageRecordResponse(
   const record = requireObject(value, "Hosted runtime usage record response");
 
   return {
+    platformAiUsageAllowedAfter: requireBoolean(
+      record.platformAiUsageAllowedAfter,
+      "Hosted runtime usage record response platformAiUsageAllowedAfter",
+    ),
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
   };
@@ -6709,6 +6714,13 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
         record.platformAiUsageAllowed,
         "Hosted workspace read response platformAiUsageAllowed",
       );
+  const hostedAssistantSubagentModelOverridesAllowed =
+    record.hostedAssistantSubagentModelOverridesAllowed === undefined
+      ? null
+      : requireBoolean(
+          record.hostedAssistantSubagentModelOverridesAllowed,
+          "Hosted workspace read response hostedAssistantSubagentModelOverridesAllowed",
+        );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
@@ -6724,6 +6736,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
+    ...(hostedAssistantSubagentModelOverridesAllowed === null
+      ? {}
+      : { hostedAssistantSubagentModelOverridesAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   searchSupplementLabels,
@@ -401,6 +402,41 @@ describe('searchSupplementLabels', () => {
     assert.equal(requestUrl.searchParams.get('q'), '82118')
   })
 
+  it('classifies malformed successful responses without exposing their body', async () => {
+    const providerBody = 'private-malformed-provider-body'
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ items: providerBody }),
+      {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 200,
+      },
+    ))
+
+    const error = await searchSupplementLabels(
+      { q: 'private-supplement-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'supplement_labels_api_invalid_response')
+    assert.equal(error.context?.failureStage, 'response_validation')
+    assert.equal(error.context?.retryable, false)
+    assert.equal(error.context?.stage, 'response')
+    assert.equal(error.context?.status, 200)
+    assert.equal(error.context?.issues, undefined)
+    assert.match(error.message, /expected label schema \(HTTP 200\)/u)
+    assert.equal('repair' in error, false)
+    assert.doesNotMatch(
+      JSON.stringify({
+        context: error.context,
+        message: error.message,
+      }),
+      /private-malformed-provider-body|private-supplement-query/u,
+    )
+  })
+
   it('fails explicitly outside hosted assistant runtime', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
 
@@ -634,6 +670,10 @@ describe('searchSupplementLabelsBatch', () => {
       ),
     ).rejects.toMatchObject({
       code: 'supplement_labels_api_credential_missing',
+      context: {
+        retryable: false,
+        stage: 'configuration',
+      },
       message: 'Supplement label search requires the hosted Murph data API provider credential.',
     })
     assert.equal(fetchMock.mock.calls.length, 0)

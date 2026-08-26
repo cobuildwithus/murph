@@ -547,6 +547,63 @@ describe("markdown document primitives", () => {
     })).resolves.toEqual(created.record);
   });
 
+  it("uses generated ids for create-only automation paths so titles can repeat", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const archived = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2031-02-14T12:00:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "archived",
+        title: "Mobility reminder",
+      }),
+    });
+    const {
+      slug: _firstSlug,
+      ...firstPayload
+    } = createAutomationPayload({
+      status: "active",
+      title: "Mobility reminder",
+    });
+    const first = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:00:00.000Z"),
+      ...firstPayload,
+    });
+    const {
+      slug: _secondSlug,
+      ...secondPayload
+    } = createAutomationPayload({
+      status: "active",
+      title: "Mobility reminder",
+    });
+    const second = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:01:00.000Z"),
+      ...secondPayload,
+    });
+
+    expect(first.record.automationId).not.toBe(second.record.automationId);
+    expect(first.record.slug).toBe(
+      first.record.automationId.toLowerCase().replace("_", "-"),
+    );
+    expect(second.record.slug).toBe(
+      second.record.automationId.toLowerCase().replace("_", "-"),
+    );
+    expect(first.record.relativePath).toBe(
+      `bank/automations/${first.record.slug}.md`,
+    );
+    expect(second.record.relativePath).toBe(
+      `bank/automations/${second.record.slug}.md`,
+    );
+    await expect(showAutomation({
+      automationId: archived.record.automationId,
+      vaultRoot,
+    })).resolves.toEqual(archived.record);
+  });
+
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
     const vaultRoot = await makeVaultRoot();
     const supportSeriesTag = buildAutomationSupportSeriesTag("experiment:exp_sleep");

@@ -295,6 +295,26 @@ async function runBuiltCliProcess(args: string[]): Promise<{
   })
 }
 
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const snapshot: Array<[string, string]> = []
+
+  async function visit(directory: string, relativeDirectory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relativePath = path.posix.join(relativeDirectory, entry.name)
+      const absolutePath = path.join(directory, entry.name)
+
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath)
+      } else {
+        snapshot.push([relativePath, (await readFile(absolutePath)).toString('base64')])
+      }
+    }
+  }
+
+  await visit(vaultRoot, '')
+  return snapshot.sort(([left], [right]) => left.localeCompare(right))
+}
+
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
   const help = await runSourceCliRaw(['--help'])
 
@@ -430,6 +450,103 @@ test('built duplicate-vault failures emit one safe machine document in every mod
       mode.envelope,
       mode.args.join(' '),
     )
+  }
+}, INCUR_HELP_TIMEOUT_MS)
+
+test('built CLI preserves nutrition validation fields without submitted-value echoes', async () => {
+  const privateTitle = 'Private Built Food Title'
+  const privateTag = 'PrivateBuiltFoodTag'
+  const envelope = await runCli([
+    'food',
+    'save',
+    privateTitle,
+    '--tag',
+    privateTag,
+    '--vault',
+    './vault',
+  ])
+
+  assert.equal(envelope.ok, false)
+  if (!envelope.ok) {
+    assert.equal(envelope.error.code, 'contract_invalid')
+    assert.equal(envelope.error.retryable, false)
+    assert.equal(envelope.error.stage, 'validation')
+    assert.equal(envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    assert.equal(envelope.error.hint, undefined)
+  }
+  assert.doesNotMatch(
+    JSON.stringify(envelope),
+    /Private Built Food Title|PrivateBuiltFoodTag/u,
+  )
+}, INCUR_HELP_TIMEOUT_MS)
+
+test('built protocol import hides identifier-shaped unknown keys and writes no state', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-protocol-unknown-key-'))
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const payloadPath = path.join(tempRoot, 'protocol.json')
+  const privateKey = 'PrivateField123'
+  const privateValue = 'PrivateValue456'
+
+  try {
+    await initializeVault({ vaultRoot })
+    const before = await snapshotVaultFiles(vaultRoot)
+    await writeFile(payloadPath, JSON.stringify({
+      slug: 'unknown-key-candidate',
+      title: 'Unknown Key Candidate',
+      commonsProtocolRef: {
+        key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        pageRevisionId: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+        runSpecRevisionId: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
+      },
+      lineage: {
+        sourceKind: 'health_commons_protocol',
+      },
+      diff: [],
+      effectiveSpec: {
+        doseSignature: 'Synthetic protocol dose',
+      },
+      personalization: {},
+      [privateKey]: privateValue,
+    }))
+
+    const result = await runBuiltCliProcess([
+      'protocol',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const envelope = JSON.parse(result.stdout) as CliEnvelope
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(envelope.ok, false)
+    if (envelope.ok) {
+      assert.fail('Expected protocol import with an unknown key to fail.')
+    }
+    assert.equal(envelope.error.code, 'contract_invalid')
+    assert.equal(envelope.error.retryable, false)
+    assert.equal(envelope.error.stage, 'validation')
+    assert.equal(envelope.error.hint, undefined)
+    assert.deepEqual(envelope.error.fieldErrors?.map((field) => ({
+      code: field.code,
+      path: field.path,
+    })), [{
+      code: 'unrecognized_keys',
+      path: '$',
+    }])
+
+    const serialized = `${result.stdout}\n${result.stderr}`
+    assert.equal(serialized.includes(privateKey), false)
+    assert.equal(serialized.includes(privateValue), false)
+    assert.equal(serialized.includes(payloadPath), false)
+    assert.equal(serialized.includes('bank/protocols'), false)
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
   }
 }, INCUR_HELP_TIMEOUT_MS)
 

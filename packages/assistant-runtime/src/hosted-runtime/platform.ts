@@ -120,6 +120,8 @@ import type {
   HostedExecutionDeviceSyncDirtyAckResponse,
   HostedExecutionDeviceSyncDirtyPendingRequest,
   HostedExecutionDeviceSyncDirtyPendingResponse,
+  HostedExecutionDeviceSyncNoDataOutreachRequest,
+  HostedExecutionDeviceSyncNoDataOutreachResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
@@ -481,6 +483,9 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  configureNoDataOutreach?(input: HostedExecutionDeviceSyncNoDataOutreachRequest & {
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse>;
   completeFitbitMigration?(input: {
     connectionId: string;
     signal?: AbortSignal | null;

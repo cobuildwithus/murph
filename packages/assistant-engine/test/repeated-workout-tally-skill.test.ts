@@ -54,7 +54,7 @@ describe('repeated workout tally guidance', () => {
       'Choose one canonical write path before loading an execution skill',
     )
     expect(strength).toContain('Read `tracked-table` and no repeated-routine execution skill')
-    expect(strength).toContain('never redirects an established live workout')
+    expect(strength).toContain('never redirects a verified live workout')
     expect(strength).toContain(
       'even when that reminder also carries a `workout_format` template reference',
     )

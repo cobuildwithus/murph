@@ -377,12 +377,13 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     }
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
-    const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
+    const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(
       ({ label, pattern }) =>
-        pattern.test(sql) && !compatibleReasons?.has(label),
+        !compatibleReasons?.has(label)
+        && sqlStatements.some((statement) => pattern.test(statement)),
     );
 
     if (destructivePattern !== undefined) {
@@ -424,8 +425,135 @@ function nonEmptyEnv(value: string | undefined): string | undefined {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
-function stripSqlComments(sql: string): string {
-  return sql.replace(/--.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let statement = "";
+  let index = 0;
+
+  while (index < sql.length) {
+    const character = sql[index];
+    const nextCharacter = sql[index + 1];
+
+    if (character === "-" && nextCharacter === "-") {
+      statement += " ";
+      index += 2;
+      while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "*") {
+      statement += " ";
+      index = skipSqlBlockComment(sql, index + 2);
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      const end = findQuotedSqlTokenEnd(sql, index, character);
+      statement += sql.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (character === "$") {
+      const delimiter = readDollarQuoteDelimiter(sql, index);
+      if (delimiter !== undefined) {
+        const bodyStart = index + delimiter.length;
+        const bodyEnd = sql.indexOf(delimiter, bodyStart);
+        const end = bodyEnd === -1 ? sql.length : bodyEnd + delimiter.length;
+        statement += sql.slice(index, end);
+        index = end;
+        continue;
+      }
+    }
+
+    if (character === ";") {
+      if (statement.trim().length > 0) {
+        statements.push(statement);
+      }
+      statement = "";
+      index += 1;
+      continue;
+    }
+
+    statement += character;
+    index += 1;
+  }
+
+  if (statement.trim().length > 0) {
+    statements.push(statement);
+  }
+
+  return statements;
+}
+
+function skipSqlBlockComment(sql: string, start: number): number {
+  let depth = 1;
+  let index = start;
+
+  while (index < sql.length && depth > 0) {
+    if (sql[index] === "/" && sql[index + 1] === "*") {
+      depth += 1;
+      index += 2;
+      continue;
+    }
+
+    if (sql[index] === "*" && sql[index + 1] === "/") {
+      depth -= 1;
+      index += 2;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return index;
+}
+
+function findQuotedSqlTokenEnd(
+  sql: string,
+  start: number,
+  quote: "'" | '"',
+): number {
+  const prefix = sql[start - 1];
+  const characterBeforePrefix = sql[start - 2];
+  const usesBackslashEscapes =
+    quote === "'"
+    && (prefix === "E" || prefix === "e")
+    && (characterBeforePrefix === undefined
+      || !/[A-Za-z0-9_$]/u.test(characterBeforePrefix));
+  let index = start + 1;
+
+  while (index < sql.length) {
+    if (usesBackslashEscapes && sql[index] === "\\") {
+      index += 2;
+      continue;
+    }
+
+    if (sql[index] !== quote) {
+      index += 1;
+      continue;
+    }
+
+    if (sql[index + 1] === quote) {
+      index += 2;
+      continue;
+    }
+
+    return index + 1;
+  }
+
+  return sql.length;
+}
+
+function readDollarQuoteDelimiter(sql: string, start: number): string | undefined {
+  const previousCharacter = sql[start - 1];
+  if (previousCharacter !== undefined && /[A-Za-z0-9_$]/u.test(previousCharacter)) {
+    return undefined;
+  }
+
+  return /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u.exec(sql.slice(start))?.[0];
 }
 
 function runCommandInherited(

@@ -612,6 +612,49 @@ describe('assistant accepted active-turn input journal', () => {
     })
   })
 
+  it('materializes accepted-input transcript refs after commit starts', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-commit-ref-update-',
+    )
+
+    await appendTestAcceptedTurnInputItems({
+      inputs: [{ id: 'input_initial', source: 'manual' }],
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      sessionId: 'session_commit_ref_update',
+      turnId: 'turn_commit_ref_update',
+      vault: vaultRoot,
+    })
+    await updateAssistantAcceptedTurnInputAdmissionState({
+      admissionState: 'commit-started',
+      now: new Date('2026-04-22T10:00:01.000Z'),
+      turnId: 'turn_commit_ref_update',
+      vault: vaultRoot,
+    })
+
+    const updated = await updateAssistantAcceptedTurnInputTranscriptRefs({
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      refs: [{
+        inputId: 'input_initial',
+        transcriptRef: {
+          entryCreatedAt: '2026-04-22T10:00:00.000Z',
+          entryIndex: 0,
+          entryKind: 'user',
+          sessionId: 'session_commit_ref_update',
+        },
+      }],
+      turnId: 'turn_commit_ref_update',
+      vault: vaultRoot,
+    })
+
+    expect(updated?.admissionState).toBe('commit-started')
+    expect(updated?.inputs[0]?.transcriptRef).toEqual({
+      entryCreatedAt: '2026-04-22T10:00:00.000Z',
+      entryIndex: 0,
+      entryKind: 'user',
+      sessionId: 'session_commit_ref_update',
+    })
+  })
+
   it('records flat prompt replay provider request metadata', async () => {
     const { vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-flat-prompt-',

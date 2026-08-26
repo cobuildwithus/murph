@@ -212,7 +212,6 @@ async function queryElevationAtPoint(input: {
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: 'terrain elevation',
   })
 
   if (!payload) {

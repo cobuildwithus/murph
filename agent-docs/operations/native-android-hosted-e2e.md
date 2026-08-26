@@ -18,6 +18,17 @@ the shared identity concurrently. The Android postcondition is platform
 specific and requires Junction provider slug `health_connect`; the existing iOS
 postcondition remains `apple_health_kit`.
 
+PR admission uses stable Web ownership boundaries rather than a per-file list.
+It selects every top-level Web config/build entrypoint, the complete `scripts`,
+`prisma`, and `src/lib` trees, the companion API subtree, the current workspace
+package closure, and the shared/native Android controller owners. New files in
+those owners select automatically, and renamed paths are evaluated. Nested Web
+UI, content, and tests plus unrelated workspace packages publish a path-filtered
+success without consuming the shared live slot. Android and iOS retain the same
+Web and package boundaries because both native journeys exercise the same hosted
+companion surface; Android additionally selects its private dispatcher and
+controller files.
+
 Production deployment events run a separate non-destructive canary. The
 controller proves the deployment SHA is protected-main history and that the
 current production alias still resolves to that exact SHA before dispatching.
