@@ -7,6 +7,10 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
+- drain each hosted device-sync pass through one bounded worker call so
+  canonical imports can safely reuse a pass-local event identity index, while
+  cumulative progress remains observable and the service-owned foreground
+  yield check still runs between jobs
 - run inbox media retention during existing idle checkpoint maintenance so raw inbox image/audio bytes expire at their ordinary deadline, while unprotected hosted video bytes expire immediately and stay outside every new snapshot without a separate scheduler
 - run bounded post-device-sync dense raw retention through the core dense-prune primitive, logging only counts, byte totals, and tombstone totals
 - build the encrypted hosted browser-vault replica from one strict canonical source snapshot, with its metric projection derived in memory instead of through local SQLite, plus schema-valid saved experiment outcomes referenced by canonical experiment frontmatter; referenced outcome bytes participate in source freshness, while invalid, escaping, missing, or mismatched references are omitted fail-closed

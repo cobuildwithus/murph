@@ -117,6 +117,24 @@ test.each([
   });
 });
 
+test("hosted runtime device-sync preserves bounded import execution options", async () => {
+  const importDeviceProviderSnapshot = vi.fn(async () => ({ ok: true }));
+  const importer = captureHostedDeviceSyncImporter({ importDeviceProviderSnapshot });
+  const importSession = { kind: "device_batch_import_session" as const };
+
+  await importer.importDeviceProviderSnapshot({
+    provider: "demo",
+    snapshot: {},
+    vaultRoot: "/tmp/vault-root",
+  }, { importSession });
+
+  expect(importDeviceProviderSnapshot).toHaveBeenCalledWith({
+    provider: "demo",
+    snapshot: {},
+    vaultRoot: "/tmp/vault-root",
+  }, { importSession });
+});
+
 function captureHostedDeviceSyncImporter(
   importer: DeviceSyncImporterPort,
 ): DeviceSyncImporterPort {

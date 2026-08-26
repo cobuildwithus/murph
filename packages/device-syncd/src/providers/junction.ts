@@ -1,4 +1,5 @@
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
+import { performance } from "node:perf_hooks";
 
 import type { Junction } from "@junction-api/sdk";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
@@ -1393,11 +1394,15 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
   ): Promise<JunctionHistoricalPullSnapshot | null> {
     try {
-      return await client.introspectHistoricalPull({
-        signal: context.signal ?? null,
-        userId: context.account.externalAccountId,
-        userLimit: 1,
-      });
+      return await measureJunctionProviderRequest(
+        context,
+        "inventory",
+        () => client.introspectHistoricalPull({
+          signal: context.signal ?? null,
+          userId: context.account.externalAccountId,
+          userLimit: 1,
+        }),
+      );
     } catch (error) {
       if (context.signal?.aborted) {
         throw error;
@@ -1480,10 +1485,14 @@ export function createJunctionDeviceSyncProvider(
     let failureCode: string | null = null;
 
     try {
-      ({ endpointUnavailable } = await client.bulkTriggerHistoricalPull({
-        sourceProviderSlug,
-        userIds: [context.account.externalAccountId],
-      }));
+      ({ endpointUnavailable } = await measureJunctionProviderRequest(
+        context,
+        "inventory",
+        () => client.bulkTriggerHistoricalPull({
+          sourceProviderSlug,
+          userIds: [context.account.externalAccountId],
+        }),
+      ));
     } catch (error) {
       failureCode = isDeviceSyncError(error)
         ? error.code
@@ -1563,14 +1572,18 @@ export function createJunctionDeviceSyncProvider(
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
-    const listedSourceProviders = await client.listUserProviders(
-      context.account.externalAccountId,
-      {
-        ...(job.kind === "reconcile" && context.shouldYield
-          ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
-          : {}),
-        signal: context.signal ?? null,
-      },
+    const listedSourceProviders = await measureJunctionProviderRequest(
+      context,
+      "inventory",
+      () => client.listUserProviders(
+        context.account.externalAccountId,
+        {
+          ...(job.kind === "reconcile" && context.shouldYield
+            ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+            : {}),
+          signal: context.signal ?? null,
+        },
+      ),
     );
     await projectJunctionSources(context, listedSourceProviders);
     const sourceProviders = sourceProviderSlug
@@ -2553,9 +2566,13 @@ export function createJunctionDeviceSyncProvider(
         return listedSourceProviders;
       }
 
-      const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
-        signal: context.signal ?? null,
-      });
+      const sourceProviders = await measureJunctionProviderRequest(
+        context,
+        "inventory",
+        () => client.listUserProviders(context.account.externalAccountId, {
+          signal: context.signal ?? null,
+        }),
+      );
       listedSourceProviders = sourceProviders;
       return sourceProviders;
     };
@@ -4145,7 +4162,11 @@ export function createJunctionDeviceSyncProvider(
         if (options.requireStructurallyCompleteCollection) {
           request.requireStructurallyCompleteCollection = true;
         }
-        const chunkRecords = await fetchJunctionTimeseriesWindow(client, request);
+        const chunkRecords = await measureJunctionProviderRequest(
+          context,
+          "resource",
+          () => fetchJunctionTimeseriesWindow(client, request),
+        );
         providerRecordsSeen ||= chunkRecords.length > 0;
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
@@ -4791,9 +4812,13 @@ export function createJunctionDeviceSyncProvider(
     const policy = resolveJunctionTimeseriesResourcePolicy(resource);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const sourceProviders = sourceProviderSlug
-      ? (await client.listUserProviders(context.account.externalAccountId, {
-          signal: context.signal ?? null,
-        })).filter((provider) => areJunctionProviderSlugsDataEquivalent(
+      ? (await measureJunctionProviderRequest(
+          context,
+          "inventory",
+          () => client.listUserProviders(context.account.externalAccountId, {
+            signal: context.signal ?? null,
+          }),
+        )).filter((provider) => areJunctionProviderSlugsDataEquivalent(
           provider.origin.sourceProviderSlug ?? provider.slug,
           sourceProviderSlug,
         ))
@@ -5453,7 +5478,7 @@ export function createJunctionDeviceSyncProvider(
     load: () => Promise<unknown[]>,
   ): Promise<unknown[]> {
     try {
-      return await load();
+      return await measureJunctionProviderRequest(context, "resource", load);
     } catch (error) {
       const failure = classifyOptionalJunctionResourceFailure(
         error,
@@ -5472,6 +5497,22 @@ export function createJunctionDeviceSyncProvider(
         resourceCategory,
       });
       return [];
+    }
+  }
+
+  async function measureJunctionProviderRequest<T>(
+    context: Pick<ProviderJobContext, "recordProviderRequestTiming">,
+    category: "inventory" | "resource",
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const startedAt = performance.now();
+    try {
+      return await load();
+    } finally {
+      context.recordProviderRequestTiming?.(
+        category,
+        Math.max(0, performance.now() - startedAt),
+      );
     }
   }
 

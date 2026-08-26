@@ -15,7 +15,10 @@ import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
 } from "@murphai/importers/device-providers/provider-descriptors";
-import type { CompleteDeviceProviderSourceDay } from "@murphai/importers";
+import type {
+  CompleteDeviceProviderSourceDay,
+  DeviceBatchImportExecutionOptions,
+} from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 export type { DeviceSyncAccountSetupPhase } from "./client.ts";
@@ -194,10 +197,19 @@ export interface DeviceSyncJobTimingDiagnostic {
   outcome: DeviceSyncJobTimingOutcome;
   provider: string;
   providerExecutionElapsedMs: number | null;
+  providerInventoryRequestCount: number;
+  providerInventoryRequestElapsedMs: number;
+  providerResourceRequestCount: number;
+  providerResourceRequestElapsedMs: number;
   providerUnattributedElapsedMs: number | null;
   resource?: string;
   snapshotImportCount: number;
   snapshotImportElapsedMs: number;
+  snapshotCanonicalCoreElapsedMs: number;
+  snapshotCanonicalWriteElapsedMs: number;
+  snapshotEventIdentityIndexCacheHitCount: number;
+  snapshotEventIdentityIndexElapsedMs: number;
+  snapshotNormalizationElapsedMs: number;
 }
 
 export interface DeviceSyncHttpConfig {
@@ -981,6 +993,10 @@ export interface ProviderJobContext {
   connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
+  recordProviderRequestTiming?(
+    category: "inventory" | "resource",
+    elapsedMs: number,
+  ): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(
@@ -1251,6 +1267,8 @@ export interface DeviceSyncImporterPort {
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;
+  }, options?: {
+    importSession?: DeviceBatchImportExecutionOptions["session"];
   }): Promise<unknown>;
   resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
     vaultRoot?: string;
