@@ -1216,10 +1216,10 @@ describe('assistant execution prompt contract', () => {
       ),
     ).toHaveLength(2)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Only for that support call',
+      'For support, follow the Product feedback contract',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'keep every ordinary result silent',
+      'ordinary results stay silent',
     )
   })
 
@@ -1252,7 +1252,7 @@ describe('assistant execution prompt contract', () => {
       'Use tools directly instead of telling the user',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Assume for reversible low-risk work',
+      'Make reasonable assumptions for reversible, low-risk work',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'ask only when a missing choice materially changes the result',

@@ -19,13 +19,13 @@ describe("Murph Codex base support guidance", () => {
       "de-identified non-`Support escalation:` summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "keep every ordinary result silent",
+      "ordinary results stay silent",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Give support@withmurph.ai only when asked.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Human support: only in a verified-private conversation",
+      "Human support: verified-private only",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'kind: "frustration"`, no changelog IDs',
@@ -46,13 +46,10 @@ describe("Murph Codex base support guidance", () => {
       "promise a ticket, response, fix, follow-up, or timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Only for that support call",
+      "For support, follow the Product feedback contract",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "correct the first schema rejection once from its returned issues",
-    );
-    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "All other results are terminal; never retry",
+      "terminal validation failure: say direct notification failed",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "For Murph product problems, give support@withmurph.ai directly",
