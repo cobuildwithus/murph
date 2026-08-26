@@ -608,7 +608,7 @@ describe("Hosted private-to-group context handoff admission", () => {
 
   it("queues one expiring target-authored notification for the only group", async () => {
     const { prisma } = createPrisma();
-    const context = "Sunny logged a 405 lb deadlift personal record today.";
+    const context = "The member set a personal record today.";
     const eventId = createHostedGroupContextHandoffEventId({
       memberId: ORIGIN_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,

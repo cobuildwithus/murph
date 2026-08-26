@@ -1003,7 +1003,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         description:
-          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs, including who they concern when needed for comprehension. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
+          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs. Attribute member actions, claims, and experiences in third person, using a name the member already uses in that group only when known and otherwise "a member"; never write them as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
       },
       question: {
         type: 'string',

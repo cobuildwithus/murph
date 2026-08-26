@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MURPH_GROUP_TOOL_PROPERTIES,
+} from "../src/assistant-codex/dynamic-tool-catalog.ts";
+import {
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
@@ -87,6 +90,20 @@ describe("assistant tool description call contracts", () => {
   it("keeps group handoff discovery and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("queued, not sent");
+  });
+
+  it("keeps member attribution explicit in private-to-group handoffs", () => {
+    const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
+
+    expect(contextDescription).toContain(
+      "Attribute member actions, claims, and experiences in third person",
+    );
+    expect(contextDescription).toContain(
+      'using a name the member already uses in that group only when known and otherwise "a member"',
+    );
+    expect(contextDescription).toContain(
+      "never write them as if Murph did, said, or experienced them",
+    );
   });
 
   it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
