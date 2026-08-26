@@ -51,4 +51,8 @@ permanently pending because the provider lookup request is malformed.
 
 ## Verification
 
-- Pending implementation.
+- Lob runtime and physical-note service: 109 focused tests pass.
+- PostgreSQL recovery atomicity: the focused aged-absence scenario passes.
+- Web typecheck passes.
+- Changelog generation and the 9-test archive rendering suite pass.
+- ReviewGPT specialist/final gates and exact-head CI remain pending.
