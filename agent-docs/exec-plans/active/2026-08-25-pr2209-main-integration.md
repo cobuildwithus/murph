@@ -32,6 +32,16 @@ generic projector, validation framework, or recovery state owner.
   9,512,634 bytes against a 9,519,180-byte budget; entry is 805 bytes and the
   static startup closure is 25,155 bytes. The runner is 11,348,803 bytes
   against an 11,393,617-byte budget.
+- ReviewGPT round three found four hand-maintained public-field/index catalogs
+  duplicated facts already owned by strict Zod schemas. The finding is accepted
+  and corrected by deleting those catalogs, retaining Zod-produced finite path
+  segments, and stopping only at the dynamic `qualifiers` and
+  `requiredQualifiers` record boundaries.
+- The correction deletes 63 net production lines and removes the unused
+  per-call issue-mapper branch. Focused proof covers fixed nested `slug`,
+  `targetId`, evidence, and condition-history paths plus unknown-key and dynamic
+  qualifier non-echo/no-write behavior. Fourteen focused tests and the affected
+  Vault Usecases and CLI typechecks pass.
 
 ## Design
 
@@ -52,5 +62,6 @@ generic projector, validation framework, or recovery state owner.
    prepared/package-shape checks, docs gates, and canonical runner parity proof.
 4. Push the exact candidate, retarget the PR to `main`, update the PR contract,
    and run a sensitive full ReviewGPT round with the prior finding ledger.
+   [done through the round-three finding and local correction]
 5. Resolve accepted findings, close the plan, admit the exact head to required
    CI, prove a clean current-base merge, merge, and retire the worktree.

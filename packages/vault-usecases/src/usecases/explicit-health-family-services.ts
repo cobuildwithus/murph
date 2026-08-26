@@ -138,46 +138,17 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "body",
 ]);
 
-const HEALTH_PUBLIC_FIELDS = new Set(`
-  active allergyId amount analyte assertedOn biomarkerKey biomarkerSlug bodySites brand certainty chunkId
-  clinicalStatus code codeSystem collectedAt comparator compound condition conditionHistory conditionId conditions
-  confidence criticality deceased deceasedCause domains dose evaluation eventId evidence excerpt externalRef facet
-  familyMemberId fastingStatus flag gene goalId group high highValue horizon inheritance ingredients kind label
-  labName labPanelId latestWindowDays links lotNumber low manufacturer metricKey metricTargets minimumPoints note
-  occurredAt onsetAge onsetText page parentGoalId preferCollectedAt preferFasting priority rawRef rawRefs reaction
-  recordedAt recordedOn referenceRange relatedConditionIds relatedExperimentIds relatedGoalIds relatedRegimenIds
-  relatedVariantIds relationship reportedAt requiredQualifiers resolvedOn resourceId resourceType resultStatus
-  results route schedule selectionPolicyOverride series servingSize severity significance site slug source
-  sourceDocumentId sourceFamilyMemberIds sourceLabel spanEnd spanStart specimenType staleAfterDays startAt startedOn
-  statistic status stoppedOn substance summary system tags targetAt targetDiseases targetId testName text textValue
-  timeZone title type unit value vaccineName variantId verificationStatus version window windowDays zygosity
-`.trim().split(/\s+/u));
-const HEALTH_INDEXED_FIELDS = new Set(`
-  bodySites conditionHistory conditions domains evidence ingredients links metricTargets rawRefs relatedConditionIds
-  relatedExperimentIds relatedGoalIds relatedRegimenIds relatedVariantIds results sourceFamilyMemberIds tags
-  targetDiseases
-`.trim().split(/\s+/u));
-
 function finiteHealthPublicPath(path: readonly PropertyKey[]): Array<string | number> {
   const publicPath: Array<string | number> = [];
 
   for (const segment of path) {
-    if (typeof segment === "number") {
-      const parent = publicPath.at(-1);
-      if (
-        !Number.isSafeInteger(segment) ||
-        segment < 0 ||
-        typeof parent !== "string" ||
-        !HEALTH_INDEXED_FIELDS.has(parent)
-      ) {
-        return publicPath;
-      }
+    if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
       publicPath.push(segment);
       continue;
     }
 
-    if (typeof segment !== "string" || !HEALTH_PUBLIC_FIELDS.has(segment)) {
-      return publicPath;
+    if (typeof segment !== "string") {
+      continue;
     }
     publicPath.push(segment);
     if (segment === "requiredQualifiers") {

@@ -275,12 +275,11 @@ function parsePayload<TPayload>(
   schema: z.ZodType<TPayload>,
   value: unknown,
   label: string,
-  mapIssue: (issue: z.ZodIssue) => unknown = sanitizeClinicalValidationIssue,
 ): TPayload {
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
     throw new VaultCliError('invalid_payload', `${label} payload is invalid.`, {
-      issues: parsed.error.issues.map(mapIssue),
+      issues: parsed.error.issues.map(sanitizeClinicalValidationIssue),
       stage: 'validation',
     })
   }
@@ -292,49 +291,21 @@ async function loadPayload<TPayload>(
   inputFile: string,
   schema: z.ZodType<TPayload>,
   label: string,
-  mapIssue?: (issue: z.ZodIssue) => unknown,
 ): Promise<TPayload> {
-  return parsePayload(
-    schema,
-    await loadJsonInputObject(inputFile, `${label} payload`),
-    label,
-    mapIssue,
-  )
+  return parsePayload(schema, await loadJsonInputObject(inputFile, `${label} payload`), label)
 }
-
-const CLINICAL_PUBLIC_FIELDS = new Set(`
-  analyte assertedOn assertion assertionText author authoredAt biomarkerSlug bodySite category chunkId
-  code codeSystem collectedAt comparator confidence domain encounterId endedOn entries evidence excerpt
-  externalRef facet facility fastingStatus flag frequency heading high kind labName labPanelId links low
-  measurements method metric note noteType occurredAt page polarity providerId qualifiers quantity rawRef
-  rawRefs recordedAt referenceRange reportedAt resourceId resourceType resultStatus results sections signedAt
-  source sourceDocumentId sourceLabel spanEnd spanStart specimenType startedOn statement status subject substance
-  summary system tags testCategory testName text textValue timeZone title type unit value version
-`.trim().split(/\s+/u))
-const CLINICAL_INDEXED_FIELDS = new Set(
-  'entries evidence links measurements rawRefs results sections tags'.split(' '),
-)
 
 function finiteClinicalPublicPath(path: readonly PropertyKey[]): Array<string | number> {
   const publicPath: Array<string | number> = []
 
   for (const segment of path) {
-    if (typeof segment === 'number') {
-      const parent = publicPath.at(-1)
-      if (
-        !Number.isSafeInteger(segment) ||
-        segment < 0 ||
-        typeof parent !== 'string' ||
-        !CLINICAL_INDEXED_FIELDS.has(parent)
-      ) {
-        return publicPath
-      }
+    if (typeof segment === 'number' && Number.isSafeInteger(segment) && segment >= 0) {
       publicPath.push(segment)
       continue
     }
 
-    if (typeof segment !== 'string' || !CLINICAL_PUBLIC_FIELDS.has(segment)) {
-      return publicPath
+    if (typeof segment !== 'string') {
+      continue
     }
     publicPath.push(segment)
     if (segment === 'qualifiers') {
@@ -709,12 +680,7 @@ export async function saveVitalsPayload(input: {
 }
 
 export async function importVitalsRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
-  const payload = await loadPayload(
-    input.inputFile,
-    vitalsImportPayloadSchema,
-    'vitals',
-    sanitizeClinicalValidationIssue,
-  )
+  const payload = await loadPayload(input.inputFile, vitalsImportPayloadSchema, 'vitals')
   return importSingleClinicalEventPayload({
     vault: input.vault,
     payload: buildVitalsEventPayload(payload),
