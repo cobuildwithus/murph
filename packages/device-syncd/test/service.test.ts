@@ -183,22 +183,17 @@ function createJunctionWorkoutStreamServiceProvider(
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
       if (url.pathname === "/v2/user/providers/junction-workout-stream-service") {
-        const includesOrdinaryTimeseries = options.timeseriesResources?.some(
-          (resource) => resource !== "workout_stream",
-        ) ?? false;
         return createJsonResponse({
-          providers: includesOrdinaryTimeseries
-            ? [{
-                id: "provider-garmin-1",
-                slug: "garmin",
-                name: "Garmin",
-                status: "connected",
-                resource_availability: Object.fromEntries(
-                  (options.timeseriesResources ?? ["workout_stream"])
-                    .map((resource) => [resource, true]),
-                ),
-              }]
-            : [],
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: Object.fromEntries(
+              (options.timeseriesResources ?? ["workout_stream"])
+                .map((resource) => [resource, true]),
+            ),
+          }],
         });
       }
       if (url.pathname === "/v2/summary/workouts/junction-workout-stream-service") {
@@ -251,6 +246,24 @@ function readJunctionWorkoutStreamImportId(input: {
   };
   const workoutId = snapshot.timeseries?.workout_stream?.[0]?.workoutId;
   return typeof workoutId === "string" ? workoutId : null;
+}
+
+function admitJunctionWorkoutStreamSource(
+  store: SqliteDeviceSyncStore,
+  connectionId: string,
+): void {
+  store.upsertConnectionSource({
+    connectionId,
+    firstSeenAt: "2026-01-01T00:00:00.000Z",
+    lastSeenAt: "2030-04-03T12:00:00.000Z",
+    resourceAvailabilitySummary: {
+      workouts: true,
+      workout_stream: true,
+    },
+    sourceInstanceKey: "garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+  });
 }
 
 function assertJunctionWorkoutStreamRetryCoordinate(
@@ -2719,6 +2732,7 @@ test.each(["resource"] as const)(
         },
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
+      admitJunctionWorkoutStreamSource(store, account.id);
       const input = buildJunctionWorkoutStreamServiceJob(
         jobKind,
         JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW,
@@ -2837,6 +2851,111 @@ test.each(["resource"] as const)(
   },
 );
 
+test("Junction workout-stream source-authority retry preserves completed-day progress", async () => {
+  let now = new Date("2030-04-03T12:00:00.000Z");
+  let sourceAuthorityFailurePending = true;
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-workout-stream-source-authority");
+  const streamRequests: string[] = [];
+  const workoutSummaryRequests: JunctionWorkoutSummaryRequestWindow[] = [];
+  const importedWorkoutIds: string[] = [];
+  const hostedSource: ProviderJobConnectionSource = {
+    displayName: "Garmin",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: now.toISOString(),
+    resourceAvailabilitySummary: { workouts: true, workout_stream: true },
+    sourceInstanceKey: "garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const workoutId = readJunctionWorkoutStreamImportId(input);
+        if (workoutId) {
+          importedWorkoutIds.push(workoutId);
+        }
+        return { events: workoutId ? [{ kind: "measurement" }] : [] };
+      },
+    },
+    listConnectionSourcesForJob: ({ sourceProviderSlug, status }) => {
+      if (importedWorkoutIds.includes("day-one-workout") && sourceAuthorityFailurePending) {
+        sourceAuthorityFailurePending = false;
+        throw new DeviceSyncError({
+          code: "TEST_WORKOUT_STREAM_SOURCE_AUTHORITY_UNAVAILABLE",
+          message: "Synthetic source-authority outage.",
+          retryable: true,
+        });
+      }
+      return [hostedSource].filter((source) =>
+        (sourceProviderSlug == null || source.sourceProviderSlug === sourceProviderSlug)
+        && (status == null || source.status === status)
+      );
+    },
+    providers: [createJunctionWorkoutStreamServiceProvider(streamRequests, {
+      workoutSummaryRequests,
+      workoutsByWindowStart: {
+        [JUNCTION_WORKOUT_STREAM_DAY_ONE]: ["day-one-workout"],
+        [JUNCTION_WORKOUT_STREAM_DAY_TWO]: ["day-two-workout"],
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-workout-stream-service",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const activeJob = store.enqueueJob({
+      ...buildJunctionWorkoutStreamServiceJob(
+        "resource",
+        JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW,
+      ),
+      accountId: account.id,
+      provider: "junction",
+      availableAt: now.toISOString(),
+      maxAttempts: 3,
+    });
+
+    assert.equal((await service.runWorkerOnce())?.id, activeJob.id);
+    const retry = store.getJobById(activeJob.id);
+    assert.ok(retry);
+    assert.equal(retry.status, "queued");
+    assert.equal(retry.lastErrorCode, "TEST_WORKOUT_STREAM_SOURCE_AUTHORITY_UNAVAILABLE");
+    assert.equal(retry.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_TWO);
+    assert.equal(retry.payload.windowEnd, JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW.windowEnd);
+
+    now = new Date(retry.availableAt);
+    assert.equal((await service.runWorkerOnce())?.id, activeJob.id);
+    assert.equal(store.getJobById(activeJob.id)?.status, "succeeded");
+    assert.deepEqual(importedWorkoutIds, ["day-one-workout", "day-two-workout"]);
+    assert.deepEqual(streamRequests, ["day-one-workout", "day-two-workout"]);
+    assert.deepEqual(workoutSummaryRequests, [
+      [JUNCTION_WORKOUT_STREAM_DAY_ONE, JUNCTION_WORKOUT_STREAM_DAY_TWO],
+      [JUNCTION_WORKOUT_STREAM_DAY_TWO, JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW.windowEnd],
+    ]);
+  } finally {
+    close();
+  }
+});
+
 test("Junction workout-stream retry retains empty-day replay ownership in the stored job", async () => {
   let now = new Date("2030-04-03T12:00:00.000Z");
   let allowImport = false;
@@ -2895,6 +3014,7 @@ test("Junction workout-stream retry retains empty-day replay ownership in the st
       },
       connectedAt: "2030-04-03T00:00:00.000Z",
     });
+    admitJunctionWorkoutStreamSource(store, account.id);
     const activeJob = store.enqueueJob({
       ...buildJunctionWorkoutStreamServiceJob("resource"),
       accountId: account.id,
@@ -2997,6 +3117,7 @@ test.each(["resource"] as const)(
         },
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
+      admitJunctionWorkoutStreamSource(store, account.id);
       const input = buildJunctionWorkoutStreamServiceJob(
         jobKind,
         JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW,
@@ -3141,6 +3262,7 @@ test.each(["resource"] as const)(
         },
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
+      admitJunctionWorkoutStreamSource(store, account.id);
       const activeJob = store.enqueueJob({
         ...buildJunctionWorkoutStreamServiceJob(
           jobKind,
@@ -3275,6 +3397,7 @@ test("Junction workout-stream cooperative yield stays immediate without consumin
       },
       connectedAt: "2026-01-01T00:00:00.000Z",
     });
+    admitJunctionWorkoutStreamSource(store, account.id);
     const input = buildJunctionWorkoutStreamServiceJob("resource");
     const initial = store.enqueueJob({
       ...input,

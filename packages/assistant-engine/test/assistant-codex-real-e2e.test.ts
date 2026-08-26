@@ -1062,9 +1062,18 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 })
 
+const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
+  'Additional group messages joined this turn.',
+  'Replace the draft with one final result under the group turn rules.',
+  'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
+  'If the latest accepted message gives another human the floor, finish without a reply.',
+  'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result. Response text is not a completed effect.',
+  'Do not repeat completed effects or mention the draft or this instruction.',
+].join(' ')
+
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
-    'answers every still-relevant request after same-thread reconsideration',
+    'answers every human request after same-thread reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -1081,6 +1090,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [],
           env: config.env,
           excludeResumeTurns: true,
           model: config.model,
@@ -1097,9 +1107,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
         const first = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: 'Murph, what is 13 plus 8?',
+          prompt: 'Murph, what is 17 plus 14?',
         })
-        expect(first.finalMessage).toMatch(/\b21\b/u)
+        expect(first.finalMessage).toMatch(/\b31\b/u)
         expect(
           extractCodexAssistantProviderUsage({
             providerConfig,
@@ -1109,22 +1119,19 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           requestedModel: config.model,
           servedModel: config.model,
         })
-
-        const reconsiderationInstruction = [
-          'New messages arrived before delivery; no response text from this group beat has been delivered.',
-          'Treat requests answered only in earlier undelivered response text as unanswered and include their still-relevant answers in the final result; response text is not a completed effect.',
-          'Re-evaluate all accepted messages under the group turn rules and return one final result.',
-          'Do not mention this review or repeat completed effects.',
-        ].join(' ')
         const second = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: `${reconsiderationInstruction}\n\nMurph, what is 7 times 6?`,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            'Murph, what is 8 times 9?',
+          ].join('\n\n'),
           resumeSessionId: first.sessionId,
         })
         process.stdout.write(
           `[group-reconsideration-e2e] ${JSON.stringify({
             finalMessage: second.finalMessage,
-            scenario: 'two still-relevant requests',
+            scenario: 'two human requests',
           })}\n`,
         )
 
@@ -1138,11 +1145,103 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           requestedModel: config.model,
           servedModel: config.model,
         })
-        expect(second.finalMessage).toMatch(/\b21\b/u)
-        expect(second.finalMessage).toMatch(/\b42\b/u)
+        expect(second.finalMessage).toMatch(/\b31\b/u)
+        expect(second.finalMessage).toMatch(/\b72\b/u)
         expect(second.finalMessage).not.toMatch(
-          /held|not sent|previous response|re-?evaluat|review/iu,
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'yields when another human takes the floor during reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-floor-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const providerConfig = normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          oss: false,
+        })
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 17 plus 14?',
+        })
+        expect(first.finalMessage).toMatch(/\b31\b/u)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: first.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
+
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            '@roommate, did you find the missing keys?',
+          ].join('\n\n'),
+          resumeSessionId: first.sessionId,
+        })
+        process.stdout.write(
+          `[group-reconsideration-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'another human takes the floor',
+          })}\n`,
+        )
+        const finishCalls = readCapabilityRoutingActions(second.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+          )
+
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: second.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
+        expect(second.finalMessage.trim()).toBe('')
+        expect(finishCalls).toHaveLength(1)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

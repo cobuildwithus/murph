@@ -23,6 +23,7 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -154,6 +155,74 @@ export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
 
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v3:";
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
+const HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX = 7;
+
+type HostedGroupJoinOfferScopeCategory =
+  | "activity"
+  | "connections"
+  | "heart-and-fitness"
+  | "nutrition"
+  | "profile"
+  | "sleep"
+  | "workouts";
+
+const HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_BY_PROJECTION_KIND = {
+  "active-calories-days.v0": "activity",
+  "activity-days.v0": "activity",
+  "activity-distance-days.v1": "activity",
+  "activity-minutes-days.v1": "activity",
+  "activity-score-days.v0": "activity",
+  "activity-session-count-days.v1": "activity",
+  "calories-days.v0": "nutrition",
+  "carbs-days.v0": "nutrition",
+  "day-strain-days.v0": "activity",
+  "deep-sleep-days.v0": "sleep",
+  "deep-sleep-sources-days.v1": "sleep",
+  "device-sync-status.v0": "connections",
+  "distance-days.v0": "activity",
+  "elevation-gain-days.v0": "activity",
+  "fat-days.v0": "nutrition",
+  "fiber-days.v0": "nutrition",
+  "floors-climbed-days.v0": "activity",
+  "group-email.v0": "profile",
+  "heart-rate-zones-days.v0": "heart-and-fitness",
+  "hrv-days.v0": "heart-and-fitness",
+  "max-heart-rate-days.v0": "heart-and-fitness",
+  "profile-name.v0": "profile",
+  "protein-days.v0": "nutrition",
+  "rem-sleep-days.v0": "sleep",
+  "rem-sleep-sources-days.v1": "sleep",
+  "resting-heart-rate-days.v0": "heart-and-fitness",
+  "sleep-duration-days.v0": "sleep",
+  "sleep-times.v0": "sleep",
+  "steps-days.v0": "activity",
+  "time-zone.v0": "profile",
+  "vo2-max-days.v0": "heart-and-fitness",
+  "workout-days.v0": "workouts",
+  "workout-strain-days.v0": "workouts",
+  "workouts.v0": "workouts",
+} as const satisfies Record<HostedVaultShareProjectionKind, HostedGroupJoinOfferScopeCategory>;
+
+const HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_ORDER = [
+  "sleep",
+  "activity",
+  "workouts",
+  "heart-and-fitness",
+  "nutrition",
+  "connections",
+] as const satisfies readonly Exclude<HostedGroupJoinOfferScopeCategory, "profile">[];
+
+const HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_LABEL = {
+  activity: "activity",
+  connections: "health source connections",
+  "heart-and-fitness": "heart and fitness",
+  nutrition: "nutrition",
+  sleep: "sleep",
+  workouts: "workouts",
+} as const satisfies Record<
+  Exclude<HostedGroupJoinOfferScopeCategory, "profile">,
+  string
+>;
 
 export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   groupId: string;
@@ -1753,9 +1822,20 @@ async function readHostedLinqExplicitGroupDisplayName(
 function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
-  const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
-    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
-  const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const displays = projectHostedVaultShareProjectionDisplays(projectionScopes);
+  const useCategories = displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
+  const shareScopeLabels = useCategories
+    ? renderHostedGroupJoinOfferScopeCategories(projectionScopes)
+      : [
+          "Murph profile name",
+          ...displays.map((display) =>
+            formatHostedGroupJoinOfferShareScopeLabel(display.label)
+          ),
+        ];
+  const sentence = `your ${formatHumanList(shareScopeLabels)}`;
+  if (useCategories) {
+    return sentence;
+  }
   const disclosures: string[] = [];
   if (projectionScopes.some((scope) =>
     isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
@@ -1808,6 +1888,39 @@ function renderHostedGroupJoinOfferScopeSentence(
   return disclosures.length > 0
     ? `${sentence} (${disclosures.join("; ")})`
     : sentence;
+}
+
+function renderHostedGroupJoinOfferScopeCategories(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): string[] {
+  const categories = new Set(
+    projectionScopes.map(
+      (scope) => HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_BY_PROJECTION_KIND[
+        scope.projectionKind
+      ],
+    ),
+  );
+  const hasEmail = projectionScopes.some(
+    (scope) => scope.projectionKind === "group-email.v0",
+  );
+  const hasTimeZone = projectionScopes.some(
+    (scope) => scope.projectionKind === "time-zone.v0",
+  );
+  const profileDetails = [
+    "name",
+    ...(hasEmail ? ["email"] : []),
+    ...(hasTimeZone ? ["time zone"] : []),
+  ];
+  return [
+    profileDetails.length === 1
+      ? "Murph profile name"
+      : `Murph profile (${formatHumanList(profileDetails)})`,
+    ...HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_ORDER.flatMap((category) =>
+      categories.has(category)
+        ? [HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_LABEL[category]]
+        : []
+    ),
+  ];
 }
 
 function isHostedGroupMealNutritionProjectionScope(

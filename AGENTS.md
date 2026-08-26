@@ -70,6 +70,7 @@ Always read these before repo code/docs/test/config work:
 ## Hard Rules (Non-Negotiable)
 
 - Never expose secrets, raw credentials, private keys, tokens, full `Authorization` headers, or downloaded secret values in commits, code, docs, generated files, comments, logs, examples, quoted output, or external artifacts. Keep legal names, local account usernames, and home-directory paths out of committed or published artifacts; for local debugging, prefer repo-relative paths and do not let identifier redaction block root-cause proof.
+- The canonical product domain is `withmurph.ai`. Use `https://www.withmurph.ai` when an absolute hosted Web production URL is required; never use `murph.ai`.
 - Treat screenshots, chat transcripts, and user feedback as confidential evidence, not repository-ready source material. Never copy, closely paraphrase, or hardcode them, including names, handles, images, identifying details, distinctive wording, or exact scenarios, into system prompts, tests, fixtures, snapshots, evals, docs, comments, PR descriptions, or any source that may become public.
 - Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
 - Do not pull remote environment variables into local files for inspection. Use provider CLI list/status commands that show names/scopes only, and ask before any operation that would download secret values.

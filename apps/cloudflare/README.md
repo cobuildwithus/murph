@@ -218,6 +218,13 @@ to retain 30 days of:
 - per-region connection-error counters and positive deltas for direct port 5432
   and pooled application port 6432.
 
+Each retained sample stores both the scheduled Cron slot and the actual
+post-collection check time. Legacy rows expose a null check time rather than
+pretending the scheduled slot was the collection instant. Primary-only
+Postgres and PgBouncer families require the provider's explicit
+`planetscale_role="primary"` label; missing role metadata makes that family
+incomplete instead of treating mixed or replica data as primary.
+
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
 metric series. Both selectors are required because one organization can have
