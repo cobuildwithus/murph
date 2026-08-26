@@ -61,7 +61,7 @@ export function ReferralSection({
               Choose your way
             </p>
             <p className="mt-2 font-serif text-2xl font-semibold tracking-[-0.025em] text-[#3f4c2e]">
-              More Murph starts here.
+              Referral rewards, your way.
             </p>
           </div>
 

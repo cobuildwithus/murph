@@ -285,6 +285,9 @@ test.describe("homepage referral design proof", () => {
           study.getByText(expected.description, { exact: true }),
         ).toBeVisible();
         await expect(
+          study.getByText("Referral rewards, your way.", { exact: true }),
+        ).toBeVisible();
+        await expect(
           study.getByRole("link", { name: "See ways to earn" }),
         ).toBeVisible();
         for (const title of expected.titles) {
