@@ -62,8 +62,9 @@ Updated: 2026-08-26
    add a failing request-bound regression.
 3. [x] Reject and delete the reviewed multi-hour coalescing design; retain the
    canonical one-hour owner and apply the request-bound correction only.
-4. [x] Prove an expired consented-member Ask at the durable head lets later
-   device wakes overtake it; add the exact system-mailbox integration regression.
+4. [x] Prove the route-wide detached worker can drain a later Ask across an
+   intervening device wake; bind the handoff to the exact durable-head item and
+   preserve foreground-message preemption and durable retry.
 5. [x] Finish focused verification, affected typechecks, privacy/diff review,
    Frog logging, and Product UX walkthrough.
 6. [ ] Commit, push, run final review with required CI, deploy, and prove live
@@ -81,8 +82,11 @@ Updated: 2026-08-26
   it and restore one-hour canonical ownership.
 - Accepted production root cause: after device jobs became fast, a ten-minute
   consented-member Ask remained at the durable head while later device wakes
-  each forced a large workspace checkpoint. Ordinary head ownership, not queue
-  deletion or a second scheduler, is the correction.
+  each forced a large workspace checkpoint. The detached worker claimed by
+  route class and auto-drained later Asks while the ordinary assistant phase
+  still admitted device maintenance. Bind the handoff to the already-selected
+  item and hold only model-free maintenance until that item terminalizes or
+  durably requeues; queue deletion or a second scheduler is unnecessary.
 - Rejected: increasing hosted timeouts, changing resource admission, deleting
   queued work, or locally expiring the Ask without its Web-owned terminal result.
 
@@ -104,5 +108,6 @@ Updated: 2026-08-26
   the detached read-only owner revalidates and either completes or terminalizes
   it before later model-free work.
 - A foreground message still preempts background device maintenance under the
-  existing rules.
+  existing rules, aborting and durably requeuing an in-flight exact Ask before
+  the conversation proceeds.
 - Provider failure preserves the same one-hour cursor and outer retry path.

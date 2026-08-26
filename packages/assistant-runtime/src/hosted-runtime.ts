@@ -1376,10 +1376,24 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
+  let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
   let imageGenerationController: HostedImageGenerationController | null = null;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
+  const pauseDetachedAssistantAskOnRuntimeAbort = () => {
+    detachedAssistantAskController?.requestPauseAndRequeue();
+  };
+  runtimeAbortController.signal.addEventListener(
+    "abort",
+    pauseDetachedAssistantAskOnRuntimeAbort,
+    { once: true },
+  );
+  options.shutdownSignal?.addEventListener(
+    "abort",
+    pauseDetachedAssistantAskOnRuntimeAbort,
+    { once: true },
+  );
   let codexProcessPreparationStart:
     | Promise<HostedCodexAssistantProcessPreparation | null>
     | null = null;
@@ -1926,6 +1940,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
+      awaitBackgroundMaintenanceBarrier: async () => {
+        await exactDetachedAssistantAskCompletion;
+      },
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
       expectedUserId: input.request.userId,
@@ -1933,6 +1950,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+      onForegroundConversationWorkObserved: () => {
+        detachedAssistantAskController?.requestPauseAndRequeue();
+      },
       trackDeferredUsageCapture,
       trackLocalWorkspaceMutationCompletion,
       platform: runnerPlatform,
@@ -3943,9 +3963,22 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     closeDetachedAssistantAskBeforeWorkspaceRelease = async () => {
       await detachedAssistantAskController?.closeAndRequeue();
     };
-    // Resume an exact request retained by an interrupted earlier invocation.
-    // kick() only owns the invocation-local promise; it never awaits the ask.
-    detachedAssistantAskController.kick();
+    if (
+      selectedSystemMailboxOwnerItem?.routeAction === "run-assistant-ask"
+      && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
+      && !isHostedApprovedContinuationSystemMailboxItem(
+        selectedSystemMailboxOwnerItem,
+      )
+    ) {
+      exactDetachedAssistantAskCompletion =
+        detachedAssistantAskController.kickExact(
+          selectedSystemMailboxOwnerItem.itemId,
+        );
+      void exactDetachedAssistantAskCompletion.catch(() => undefined);
+    } else {
+      // Approved continuations retain their foreground-priority drain behavior.
+      detachedAssistantAskController.kick();
+    }
     const runDurableCheckpointEffectsBestEffort = async (effectOptions: {
       vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
       withholdVaultShareDependentEffects?: boolean;
@@ -6622,6 +6655,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       failedRuntimePhases[0] ?? "runtime",
     );
   } finally {
+    runtimeAbortController.signal.removeEventListener(
+      "abort",
+      pauseDetachedAssistantAskOnRuntimeAbort,
+    );
+    options.shutdownSignal?.removeEventListener(
+      "abort",
+      pauseDetachedAssistantAskOnRuntimeAbort,
+    );
     try {
       await drainOwnedVaultShareProjection();
     } finally {

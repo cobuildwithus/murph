@@ -378,6 +378,7 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
+  awaitBackgroundMaintenanceBarrier?: (() => Promise<void>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -411,6 +412,7 @@ export interface HostedWorkspaceRunnerInput {
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
   now?: () => string;
+  onForegroundConversationWorkObserved?: (() => void) | null;
 }
 
 interface HostedMailboxPostCheckpointEffectsResult {
@@ -994,6 +996,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         },
         onForegroundConversationWorkObserved: () => {
           foregroundConversationWorkObserved = true;
+          input.onForegroundConversationWorkObserved?.();
         },
         checkpointCanonicalMailboxImportProgress,
       }),
@@ -1003,6 +1006,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const mailboxImportBeforeForegroundLoop =
     checkpointRequestSession.latestMailboxImport();
   await startForegroundMailboxImportLoop();
+  await input.awaitBackgroundMaintenanceBarrier?.();
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;
     if (!activeLoop) {
