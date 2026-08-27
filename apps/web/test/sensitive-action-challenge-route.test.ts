@@ -78,7 +78,7 @@ describe("settings sensitive-action challenge route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("rejects account deletion because it no longer uses secure approval", async () => {
+  it("keeps the legacy account-delete challenge available to already-loaded clients", async () => {
     vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
 
     const response = await route.POST(new Request(
@@ -93,14 +93,18 @@ describe("settings sensitive-action challenge route", () => {
       },
     ));
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "SENSITIVE_ACTION_KIND_INVALID",
-      },
+    expect(response.status).toBe(200);
+    expect(mocks.buildSettingsSensitiveActionBinding).toHaveBeenCalledWith({
+      kind: "account.delete",
+      memberId: "member_123",
+      sessionId: "session_123",
     });
-    expect(mocks.buildSettingsSensitiveActionBinding).not.toHaveBeenCalled();
-    expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(mocks.createSensitiveActionChallenge).toHaveBeenCalledWith({
+      bindingHash: "a".repeat(64),
+      kind: "account.delete",
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
   });
 
   it("rejects action kinds outside the closed settings union", async () => {

@@ -18,8 +18,10 @@ Updated: 2026-08-27
   confirmation phrase.
 - Wrong phrases, missing sessions, cross-origin mutations, oversized bodies,
   and downstream cleanup failures retain their existing behavior.
-- `account.delete` is removed from the settings sensitive-action union; vault
-  export and Assistant approvals retain passkey-protected authorization.
+- The current deletion client and server have no sensitive-action dependency;
+  a legacy challenge kind remains only so already-loaded Settings clients can
+  finish during rollout. Vault export and Assistant approvals retain
+  passkey-protected authorization.
 - Focused deletion, settings UI, challenge, and sensitive-action tests pass;
   the Web typecheck passes.
 - The member-visible improvement has an accurate public changelog fragment and
@@ -29,7 +31,7 @@ Updated: 2026-08-27
 
 - In scope:
   - Account deletion client submission and server route authorization.
-  - The closed settings sensitive-action kind union and focused tests.
+  - The settings sensitive-action compatibility boundary and focused tests.
   - A narrow member-facing changelog entry.
 - Out of scope:
   - Vault export and Assistant approval authentication.
@@ -60,14 +62,15 @@ Updated: 2026-08-27
 2. Risk: Broad edits weaken vault export or Assistant approval authorization.
    Mitigation: Delete only the `account.delete` branch and retain focused
    sensitive-action tests for the remaining kinds.
-3. Risk: Client and server drift leaves an unused challenge surface or an
-   authorization payload dependency.
-   Mitigation: Remove the kind from the closed settings union and assert the
-   challenge route rejects it while the deletion request omits authorization.
+3. Risk: A Settings page already open during deployment cannot delete because
+   it still requests the old challenge before submitting.
+   Mitigation: Keep the legacy challenge kind admitted for rollout compatibility
+   while proving the deletion route does not consume its authorization and the
+   current client sends none.
 4. Risk: Auth/backend and Web deploy skew causes interruption.
-   Mitigation: The new client request is accepted only by the new Web route in
-   the same Next.js deployment; no Cloudflare contract changes and no
-   independently deployed compatibility window are introduced.
+   Mitigation: The new client and route ship in the same Next.js deployment,
+   while the new route accepts the old client's extra authorization payload.
+   No Cloudflare contract changes or independently deployed services apply.
 
 ## Tasks
 
@@ -89,6 +92,9 @@ Updated: 2026-08-27
   another step-up challenge is required.
 - Vault export remains passkey-protected because this request is limited to
   account deletion.
+- `account.delete` remains a legacy-only challenge kind for already-loaded Web
+  clients; it is no longer deletion authority and can be removed after old
+  clients have drained.
 
 ## Verification
 
@@ -107,15 +113,20 @@ Updated: 2026-08-27
 
 ## Progress
 
-- Removed `account.delete` from the closed settings sensitive-action union and
-  deleted its client wallet-signature and server verification paths.
+- Deleted the deletion client's wallet-signature call and the server's
+  verification path. Retained the legacy challenge kind only for already-loaded
+  Settings clients; the deletion route ignores that authorization.
 - Preserved authenticated session resolution, browser mutation-origin
   admission, exact typed confirmation, cleanup ordering, retry guidance, and
   session invalidation.
 - Focused pre-fix proof ran 47 tests with the expected seven deletion-path
-  failures; after implementation, the focused suite passes 46 tests.
+  failures; after implementation and rollout proof, the focused suite passes
+  47 tests.
 - Web typecheck passes after the implementation and changelog fragment.
 - Changelog archive proof passes 9 tests after its generated registry is
   prepared.
+- The Product UX walkthrough and parent candidate review are complete: the
+  confirmation, recovery, and responsive presentation are unchanged, with one
+  unrelated setup action removed.
 - Draft PR #2435 is open; preliminary specialist review, final ReviewGPT, exact
-  PR CI, Product UX walkthrough, parent final review, and plan closure remain.
+  PR CI, parent final review, and plan closure remain.

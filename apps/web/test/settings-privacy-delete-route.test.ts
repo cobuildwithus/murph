@@ -132,6 +132,35 @@ describe("settings privacy delete route", () => {
     });
   });
 
+  it("accepts the legacy authorization payload without making it deletion authority", async () => {
+    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
+      body: JSON.stringify({
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        confirmationPhrase: "DELETE MY ACCOUNT",
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await settingsPrivacyDeleteRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.parseHostedAccountDeletionRequest).toHaveBeenCalledWith({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
+      confirmationPhrase: "DELETE MY ACCOUNT",
+    });
+    expect(mocks.deleteHostedAccountData).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a wrong typed phrase before deleting account data", async () => {
     mocks.parseHostedAccountDeletionRequest.mockImplementationOnce(() => {
       throw hostedOnboardingError({
