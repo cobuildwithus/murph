@@ -157,9 +157,8 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
           <DesktopPatternMatrix report={report} />
 
           <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
-            Marker size shows evidence strength. Sage and sienna mark favorable
-            and unfavorable changes. Results show associations, not proof of
-            cause.
+            Green marks favorable changes. Red marks unfavorable changes.
+            Results show associations, not proof of cause.
           </div>
         </div>
       </TooltipProvider>
@@ -541,18 +540,10 @@ function PatternBubble({
   }
 
   const isFlat = cell.stage === "no_clear_pattern" || cell.direction === "flat";
-  const tone = getPatternEffectTone(outcomeId, cell.deltaPercent);
-  const indicatorSize = compact
-    ? cell.stage === "worth_testing"
-      ? 18
-      : cell.stage === "seen_again"
-      ? 17
-      : 16
-    : cell.stage === "worth_testing"
-    ? 20
-    : cell.stage === "seen_again"
-    ? 18
-    : 16;
+  const tone = isFlat
+    ? "neutral"
+    : getPatternEffectTone(outcomeId, cell.deltaPercent);
+  const indicatorSize = compact ? 16 : 18;
   const label =
     cell.deltaPercent === null || isFlat
       ? "No clear pattern"
@@ -605,11 +596,11 @@ function PatternBubble({
                 !isFlat &&
                   tone === "negative" &&
                   cell.classification === "pattern" &&
-                  "bg-destructive/80 text-card",
+                  "bg-red-700/80 text-white dark:bg-red-500/80",
                 !isFlat &&
                   tone === "negative" &&
                   cell.classification !== "pattern" &&
-                  "bg-destructive/10 text-destructive",
+                  "bg-red-700/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
                 !isFlat &&
                   tone === "neutral" &&
                   "bg-muted text-muted-foreground",
@@ -683,7 +674,9 @@ function PatternPopoverContent({
   outcomeUnit: string;
 }) {
   const factor = factorLabel.toLocaleLowerCase();
-  const tone = getPatternEffectTone(outcomeId, cell.deltaPercent);
+  const tone = isFlat
+    ? "neutral"
+    : getPatternEffectTone(outcomeId, cell.deltaPercent);
   const exposedLabel =
     outcomeLagDays === 0 ? `With ${factor}` : `After ${factor}`;
   const comparisonLabel =
@@ -722,7 +715,7 @@ function PatternPopoverContent({
           )}
         >
           {isFlat
-            ? `We did not find a consistent change in ${formatSentenceTerm(
+            ? `No consistent change in ${formatSentenceTerm(
                 outcomeLabel,
               )} after ${factor}.`
             : "Comparison details for this personal pattern"}
@@ -782,7 +775,7 @@ function PatternComparisonBars({
       <ComparisonBar
         className={cn(
           tone === "positive" && "bg-primary",
-          tone === "negative" && "bg-destructive/75",
+          tone === "negative" && "bg-red-700/75 dark:bg-red-500/75",
           tone === "neutral" && "bg-muted-foreground/60",
         )}
         label={exposedLabel}
@@ -849,7 +842,8 @@ function buildOutcomeColumns(
         {
           description: getOutcomeDescription(outcome.id),
           id: outcome.id,
-          label: outcome.id === "total-sleep" ? "Sleep" : outcome.label,
+          label:
+            outcome.id === "total-sleep" ? "Sleep duration" : outcome.label,
           outcomes: [outcome],
         },
       ];
@@ -860,7 +854,7 @@ function buildOutcomeColumns(
     return [
       {
         description:
-          "Your device's sleep score or sleep efficiency. Each result names the measure that changed.",
+          "How restful and continuous your sleep was, based on score or efficiency.",
         id: "sleep-quality",
         label: "Sleep quality",
         outcomes: sleepQualityOutcomes,
@@ -872,19 +866,19 @@ function buildOutcomeColumns(
 function getOutcomeDescription(outcomeId: string): string {
   switch (outcomeId) {
     case "total-sleep":
-      return "The total time you slept.";
+      return "How long you slept. More time can support recovery when it matches your needs.";
     case "deep-sleep":
-      return "Estimated time in deep non-REM sleep.";
+      return "The restorative sleep stage most linked with physical recovery.";
     case "rem-sleep":
-      return "Estimated time in rapid-eye-movement sleep.";
+      return "The sleep stage linked with memory, learning, and emotional processing.";
     case "readiness-score":
-      return "Your device's daily recovery and strain score.";
+      return "Your device's estimate of how prepared your body is for strain.";
     case "hrv":
-      return "Beat-to-beat variation, compared with your own baseline.";
+      return "A recovery signal based on variation between heartbeats. Your own trend matters most.";
     case "resting-heart-rate":
-      return "Your heart rate while resting.";
+      return "Your heart rate at rest. Changes can reflect recovery, stress, or illness.";
     case "respiratory-rate":
-      return "Your average breathing rate.";
+      return "How many breaths you took each minute while resting or sleeping.";
     default:
       return "A personal health result compared across recorded days.";
   }
@@ -935,11 +929,11 @@ function ObservedDaysMeter({
         )}
         data-observed-days={days}
       >
-        <span aria-hidden="true" className="flex items-center gap-1">
+        <span aria-hidden="true" className="flex items-center gap-0.5">
           {Array.from({ length: 5 }, (_, index) => (
             <span
               className={cn(
-                "h-[11px] w-[3px] rounded-full",
+                "h-[5px] w-2 rounded-[2px]",
                 index < level ? "bg-primary" : "bg-border",
               )}
               key={index}
@@ -948,8 +942,12 @@ function ObservedDaysMeter({
         </span>
       </TooltipTrigger>
       <TooltipContent className="max-w-52 flex-col items-start gap-0.5">
-        <p className="font-medium">Data coverage</p>
-        <p className="text-xs opacity-80">Based on {formatCaseCount(days)}.</p>
+        <div className="flex flex-col gap-0.5">
+          <p className="font-medium">Data coverage</p>
+          <p className="text-xs opacity-80">
+            Based on {formatCaseCount(days)}.
+          </p>
+        </div>
       </TooltipContent>
     </Tooltip>
   );

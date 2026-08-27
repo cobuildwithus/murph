@@ -758,16 +758,17 @@ Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room 
 
 ### Personal Patterns Matrix
 
-Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and outcomes on columns. Circle size shows evidence strength. The arrow shows direction, and the percentage shows the size of the difference. Color reflects the meaning of the outcome, not the arrow alone: sage for a favorable change, sienna for an unfavorable change, and a warm neutral when higher or lower is contextual.
+Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and outcomes on columns. Use one marker size. The arrow shows direction, and the percentage shows the size of the difference. Color reflects the meaning of the outcome, not the arrow alone: sage for a favorable change, red for an unfavorable change, and a warm neutral when higher or lower is contextual.
 
 Keep the matrix focused on usable comparisons. Hide a factor row or outcome
 column when every cell still needs more data. Use distinct compact icons for
 `No clear pattern` and `Not enough data`, with details on hover or focus. Show
-factor coverage as a five-tick meter. Its tooltip uses `Data coverage` as the
+factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` as the
 title and gives the exact recorded-case count below it. Label total sleep time
-as `Sleep`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
+as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
 their calculations separate and identify the metric in each result popover.
-Outcome headings reveal one short definition on hover, focus, or press.
+Outcome headings reveal a short explanation of why each result matters on hover,
+focus, or press. Keep `No clear pattern` descriptions to one short sentence.
 
 Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 

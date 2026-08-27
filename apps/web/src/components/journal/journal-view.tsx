@@ -615,7 +615,7 @@ function JournalEventRow({ event }: { event: JournalEvent }) {
             render={
               <button
                 aria-label={`Show details for ${event.title}`}
-                className="-mx-2 -my-1 min-w-0 rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="-mx-2 -my-1 w-fit max-w-full min-w-0 justify-self-start rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onKeyDown={pointerAnchor.onKeyDown}
                 onPointerMove={pointerAnchor.onPointerMove}
                 type="button"
@@ -704,7 +704,7 @@ function SleepPopoverPresentation({
   );
 
   return (
-    <>
+    <TooltipProvider>
       <PopoverHeader className="gap-0">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
           Night sleep
@@ -715,9 +715,14 @@ function SleepPopoverPresentation({
         <dl className="grid grid-cols-2 gap-6">
           {primaryMetrics.map((metric) => (
             <div key={metric.label}>
-              <dt className="text-xs leading-4 text-muted-foreground">
-                {metric.label}
-              </dt>
+              <SleepMetricLabel
+                description={
+                  metric.label === "Total sleep"
+                    ? "How long you slept during the main sleep period."
+                    : "Your device's overall rating of that night's sleep."
+                }
+                label={metric.label}
+              />
               <dd className="mt-1 font-serif text-[1.75rem] font-semibold leading-8 tracking-[-0.02em] text-foreground">
                 {metric.value}
               </dd>
@@ -728,18 +733,16 @@ function SleepPopoverPresentation({
       {details.metrics.length > 0 ? (
         <>
           <Separator />
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
             {details.metrics.map((metric) => (
               <div key={metric.label}>
-                <dt className="text-xs font-medium leading-4 text-foreground">
-                  {metric.label}
-                </dt>
+                <SleepMetricLabel
+                  description={metric.description}
+                  label={metric.label}
+                />
                 <dd className="mt-1 font-serif text-xl font-semibold leading-6 text-foreground">
                   {metric.value}
                 </dd>
-                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                  {metric.description}
-                </p>
               </div>
             ))}
           </dl>
@@ -757,7 +760,35 @@ function SleepPopoverPresentation({
           </div>
         </>
       ) : null}
-    </>
+    </TooltipProvider>
+  );
+}
+
+function SleepMetricLabel({
+  description,
+  label,
+}: {
+  description: string;
+  label: string;
+}) {
+  return (
+    <dt className="text-xs leading-4 text-muted-foreground">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              className="rounded-sm text-left underline decoration-border underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+            >
+              {label}
+            </button>
+          }
+        />
+        <TooltipContent className="max-w-56 leading-4">
+          {description}
+        </TooltipContent>
+      </Tooltip>
+    </dt>
   );
 }
 
@@ -1035,7 +1066,7 @@ function parseSleepPopoverDetails(
     const efficiency = detail.match(/^([\d.]+)% efficiency$/iu);
     if (efficiency?.[1]) {
       metrics.push({
-        description: "Time asleep while in bed",
+        description: "The share of time in bed that you spent asleep.",
         label: "Sleep efficiency",
         value: `${efficiency[1]}%`,
       });
@@ -1045,7 +1076,8 @@ function parseSleepPopoverDetails(
     const hrv = detail.match(/^HRV ([\d.]+) ms$/iu);
     if (hrv?.[1]) {
       metrics.push({
-        description: "Beat-to-beat variation",
+        description:
+          "Variation between heartbeats. Your own trend matters most.",
         label: "HRV",
         value: `${hrv[1]} ms`,
       });
@@ -1055,7 +1087,7 @@ function parseSleepPopoverDetails(
     const readiness = detail.match(/^readiness ([\d.]+)$/iu);
     if (readiness?.[1]) {
       metrics.push({
-        description: "Recovery and strain score",
+        description: "How prepared your body appears for today's strain.",
         label: "Readiness",
         value: readiness[1],
       });
@@ -1065,7 +1097,7 @@ function parseSleepPopoverDetails(
     const recovery = detail.match(/^recovery ([\d.]+)$/iu);
     if (recovery?.[1]) {
       metrics.push({
-        description: "Recovery and strain score",
+        description: "How recovered your body appears after recent strain.",
         label: "Recovery",
         value: recovery[1],
       });
@@ -1075,7 +1107,7 @@ function parseSleepPopoverDetails(
     const restingHeartRate = detail.match(/^resting HR ([\d.]+) bpm$/iu);
     if (restingHeartRate?.[1]) {
       metrics.push({
-        description: "Beats per minute at rest",
+        description: "Your heart rate while your body was resting.",
         label: "Resting heart rate",
         value: `${restingHeartRate[1]} bpm`,
       });
@@ -1085,7 +1117,7 @@ function parseSleepPopoverDetails(
     const deepSleep = detail.match(/^deep sleep ([\d.]+) min$/iu);
     if (deepSleep?.[1]) {
       metrics.push({
-        description: "Slow-wave sleep",
+        description: "The sleep stage most linked with physical recovery.",
         label: "Deep sleep",
         value: `${deepSleep[1]} min`,
       });
@@ -1095,7 +1127,7 @@ function parseSleepPopoverDetails(
     const remSleep = detail.match(/^REM sleep ([\d.]+) min$/iu);
     if (remSleep?.[1]) {
       metrics.push({
-        description: "Dream and memory sleep",
+        description: "The sleep stage linked with memory and learning.",
         label: "REM sleep",
         value: `${remSleep[1]} min`,
       });
@@ -1107,7 +1139,7 @@ function parseSleepPopoverDetails(
     );
     if (respiratoryRate?.[1]) {
       metrics.push({
-        description: "Breaths per minute during sleep",
+        description: "How many breaths you took each minute during sleep.",
         label: "Respiratory rate",
         value: respiratoryRate[1],
       });
@@ -1117,7 +1149,7 @@ function parseSleepPopoverDetails(
     const spo2 = detail.match(/^SpO₂ ([\d.]+)%$/iu);
     if (spo2?.[1]) {
       metrics.push({
-        description: "Average blood oxygen",
+        description: "Your estimated average blood oxygen during sleep.",
         label: "SpO₂",
         value: `${spo2[1]}%`,
       });

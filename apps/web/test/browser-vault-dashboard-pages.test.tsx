@@ -471,7 +471,7 @@ test("Personal Patterns comparison controls use plain result language", () => {
     /data-pattern-outcome-column="sleep-(?:score|efficiency)"/u,
   );
   assert.match(markup, /data-pattern-outcome-column="total-sleep"/u);
-  assert.match(markup, />Sleep</u);
+  assert.match(markup, />Sleep duration</u);
   assert.match(markup, />Sleep quality</u);
   assert.doesNotMatch(markup, />Score<\/span>/u);
   assert.doesNotMatch(markup, />Efficiency<\/span>/u);
@@ -498,7 +498,7 @@ test("Personal Patterns comparison controls use plain result language", () => {
     markup,
     /No clear pattern was found between custom tag and HRV\./u,
   );
-  assert.match(markup, /bg-destructive\/10 text-destructive/u);
+  assert.match(markup, /bg-red-700\/10 text-red-700/u);
   assert.match(markup, /data-pattern-state="no-clear-pattern"/u);
   assert.match(markup, /data-pattern-state="insufficient"/u);
   assert.match(markup, /aria-label="Not enough comparable data/u);
