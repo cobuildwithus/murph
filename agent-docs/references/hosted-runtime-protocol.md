@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 ## Decision
 
@@ -1023,8 +1023,10 @@ follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools. Once Temporal accepts the completion's
 pointer-only signal, Web starts the same payloadless direct ensure so an active
 private runtime can import it immediately. A typed `cannot_answer` bypasses the
-private provider continuation and queues the fixed unavailable-evidence response
-exactly; it cannot be paraphrased into an expiry or execution-failure claim.
+private provider continuation and queues one fixed, self-contained
+earlier-question failure response exactly; it cannot be paraphrased into an
+expiry or execution-failure claim. The completion mailbox outcome carries that
+new intent id into the same foreground-causal collection pass.
 
 If that joined-group completion and private input are both pending, the
 completion uses the existing foreground-causal mailbox lane only when its

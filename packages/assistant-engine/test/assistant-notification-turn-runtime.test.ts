@@ -3933,6 +3933,7 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
     instructions: 'Use the bounded handoff context in this group.',
     notificationPromptProfile: 'context-handoff',
     responsePolicy: { kind: 'require_send' },
+    sandbox: 'danger-full-access',
     threadIsDirect: false,
     vault: '/vaults/context-handoff',
   })
@@ -3948,6 +3949,9 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       allowFinishWithoutReply: false,
+      input: expect.objectContaining({
+        sandbox: 'danger-full-access',
+      }),
       profile: {
         nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
@@ -3962,7 +3966,10 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
     }),
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
-    expect.objectContaining({ assistantTranscriptText: response }),
+    expect.objectContaining({
+      assistantTranscriptText: response,
+      providerResumeStateAction: 'clear',
+    }),
   )
   expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
   expect(mocks.recordAdditionalAssistantUsageEvents).toHaveBeenCalledTimes(1)

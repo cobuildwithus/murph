@@ -616,11 +616,14 @@ async function executeAssistantCodexAttempt(input: {
         provider: attemptPlan.route.provider,
         reasoningEffort,
         sandbox:
-          nativeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          groupEmailTurn
-          ? 'read-only'
-          : attemptPlan.route.providerOptions.sandbox,
+          outputOnlyTurn
+            ? null
+            : hostedImageCompletionNativeCapabilitiesRestrictedTurn ||
+                creativeNotificationSongTurn ||
+                readOnlyAutomationTurn ||
+                groupEmailTurn
+              ? 'read-only'
+              : attemptPlan.route.providerOptions.sandbox,
       },
       turn: {
         abortSignal: serviceTier

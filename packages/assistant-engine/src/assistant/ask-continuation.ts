@@ -175,7 +175,6 @@ export function buildAssistantAskContinuationMessageInput(
     ...(input.reviewedAssistantAskCompletionExpiresAt
       ? { reviewedAssistantAskCompletionExpiresAt: input.reviewedAssistantAskCompletionExpiresAt }
       : {}),
-    sandbox: 'read-only',
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,

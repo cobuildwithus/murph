@@ -178,6 +178,7 @@ describe("murph.group current-sender intent", () => {
             "clarify_current_sender",
             "continue_current_sender_in_group",
             "continue_current_sender_privately",
+            "message_current_sender",
           ]),
         },
         message_ref: { pattern: "^ain_[0-9a-f]{32}$" },

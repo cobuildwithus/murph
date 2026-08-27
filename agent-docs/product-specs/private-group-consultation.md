@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 ## Decision
 
@@ -56,6 +56,13 @@ with prompt-delimiter characters Unicode-escaped, uses its own committed group
 conversation and tone, and authors one ordinary group message through the
 existing notification and outbox owners.
 
+After membership and route admission, Web reads only the sharing member's
+existing consented `profile-name.v0` projection. The sanitized group-safe name
+is stored with the existing handoff proof and placed in trusted prompt text
+outside the untrusted context wrapper; when no safe name is available, the
+prompt uses the neutral `a member`. The model never infers attribution from the
+private context or group history.
+
 The model supplies only `context` and an optional visible `groupLabel`. It never
 supplies member, membership, runtime, thread, route, provider, callback,
 idempotency, or mailbox identifiers. Exact replay reuses one global event/item
@@ -76,15 +83,20 @@ root unwraps are disabled; a root change retries the existing preparation owner
 rather than performing provider work under locks.
 
 The target turn uses the conversation prompt with an isolated output-only
-provider thread. It has no tools, private-vault access, filesystem capability,
-follow-up effect, recursion, or second delivery protocol. Fresh foreground
-conversation input still preempts it, while the exact bounded handoff family may
-run before the normal idle-checkpoint floor so it cannot starve indefinitely.
-The provider returns only one ordinary natural-language group message. The
-runtime validates that required text, constructs the minimal internal send
-lifecycle value, and passes the text through the existing notification and
-outbox owners without requesting or parsing a model-authored notification
-decision.
+provider thread. The attempt keeps the existing native capability restriction
+without adding a legacy sandbox override and has no dynamic tools,
+private-vault access, follow-up effect,
+recursion, or second delivery protocol. It inherits the canonical group's
+ordinary session target instead of persisting a synthetic read-only target.
+After the standalone handoff transcript commits, the runtime clears the stale
+native resume pointer so the next ordinary group turn reconstructs from that
+same durable transcript. Fresh foreground conversation input still preempts the
+handoff, while the exact bounded family may run before the normal idle-checkpoint
+floor so it cannot starve indefinitely. The provider returns only one ordinary
+natural-language group message. The runtime validates that required text,
+constructs the minimal internal send lifecycle value, and passes the text
+through the existing notification and outbox owners without requesting or
+parsing a model-authored notification decision.
 
 Do not add a table, queue, workflow, callback registry, delivery ledger, target
 selector API, or generalized cross-context message type for this action.
@@ -281,9 +293,11 @@ If private Murph is already replying, the completion waits in the normal
 mailbox and becomes a later follow-up. It never steals foreground authority.
 
 A legacy joined-group `cannot_answer` is not provider-authored private copy. The
-private runtime queues the fixed unavailable-evidence response exactly and does
-not let another model reinterpret it as an expiry, provider error, or execution
-failure.
+private runtime queues one fixed, self-contained earlier-question failure
+response exactly and does not let another model reinterpret it as an expiry,
+provider error, or execution failure. Mailbox completion returns the exact
+newly created outbox intent to the existing foreground-causal collector so a
+later user message cannot overtake that completion before dispatch.
 
 After Web durably appends either side of the joined-group request/reply pair, it
 signals the existing Temporal runtime workflow. Only after that signal is
@@ -510,6 +524,9 @@ requests drain or expire for ten minutes, then rolls back consumers.
     joined-group shapes and never overtakes older personal input.
 15. Question and answer content stays out of normalized rows, logs, and
     analytics.
+16. A private-to-group handoff attributes a consenting member by the existing
+    group-safe profile projection when available, commits into the canonical
+    group transcript, and leaves the next ordinary group turn able to use it.
 
 The production-faithful concurrency test pauses an active group provider turn,
 imports an ask, starts the child, delivers a new group message, and proves both

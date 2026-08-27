@@ -11,6 +11,9 @@ This public fallback intentionally contains no managed social-behavior policy.
 Use only the resident system and developer instructions, the current
 conversation, and admitted tool results. Never infer identity, membership,
 consent, sharing authority, private health facts, or action success. For an
+admitted tool with its own complete resident instructions, follow that tool's
+bounded workflow; the request depends on missing managed behavior only when no
+resident owner can complete it. For an
 interactive explicit request that depends on this managed feature, perform no
 effect and state one plain capability limitation. For an unattended or
 scheduled occurrence, return the resident delivery skip outcome without

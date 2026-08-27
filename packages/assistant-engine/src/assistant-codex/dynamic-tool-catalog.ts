@@ -891,6 +891,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'ask',
     'handoff',
     'ask_current_sender',
+    'message_current_sender',
     'clarify_current_sender',
     'continue_current_sender_in_group',
     'continue_current_sender_privately',

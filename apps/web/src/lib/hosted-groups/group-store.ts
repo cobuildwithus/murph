@@ -1124,7 +1124,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
 function parseHostedGroupSharedReadProjectionScopes(
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedVaultShareSelectableProjectionScope[] {
-  if (projectionScopes.length < 1 || projectionScopes.length > 3) {
+  if (projectionScopes.length > 3) {
     throw new TypeError("Hosted group shared read projection scope count is invalid.");
   }
   const seen = new Set<string>();

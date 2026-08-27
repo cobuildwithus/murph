@@ -22,6 +22,12 @@ import {
   upsertHabitatAspect,
 } from '@murphai/core'
 import {
+  buildHostedExecutionGroupContextHandoffInstructions,
+} from '@murphai/hosted-execution'
+import {
+  createAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
+import {
   assistantOnboardingResumeContextResultSchema,
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -149,6 +155,7 @@ import {
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
 import {
+  sendAssistantNotificationLocal,
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
 import {
@@ -5039,6 +5046,237 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'routes a complete group request to the current sender private Murph',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-current-sender-consult-e2e-'),
+      )
+      const messageRef = `ain_${'7'.repeat(32)}`
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-group-current-sender-consult',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox-group-current-sender-consult'],
+              originSessionId: 'session-group-current-sender-consult',
+              recipientKey: 'recipient-group-current-sender-consult',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'ask_current_sender',
+                  result: { status: 'accepted' },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            'Sender: participant-delta',
+            'Current member message:',
+            '"Murph, ask my private Murph to analyze all of my recorded sleep history and bring the answer back here."',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const consultCall = readDynamicToolAttempts(
+          result.jsonEvents,
+        ).find((action) =>
+          action.tool === MURPH_GROUP_CONSULT_TOOL.name
+        )
+
+        process.stdout.write(
+          `[group-current-sender-consult-e2e] ${JSON.stringify({
+            action: consultCall?.argumentsValue ?? null,
+            effect: groupRequests[0] ?? null,
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
+
+        expect(consultCall).toMatchObject({
+          argumentsValue: {
+            action: 'message_current_sender',
+            message_ref: messageRef,
+          },
+        })
+        expect(groupRequests).toEqual([
+          expect.objectContaining({
+            action: 'ask_current_sender',
+            audience: 'current_sender',
+            mode: 'new',
+            origin: {
+              assistantInputId: messageRef,
+              kind: 'accepted_input',
+              sessionId: 'session-group-current-sender-consult',
+            },
+          }),
+        ])
+        expect(result.finalMessage).not.toMatch(
+          /can(?:not|'t) (?:inspect|access|see).*(?:private|history)|send this request to your private/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a named private handoff in a synthetic group follow-up',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-private-handoff-flow-e2e-'),
+      )
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never',
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: config.codexHome,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        provider: 'codex-cli',
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+      })
+      if (!modelTarget) {
+        throw new Error('Expected a real Codex group handoff target.')
+      }
+      const route = {
+        actorId: null,
+        bindingDeliveryTarget: 'synthetic-group-handoff-thread',
+        channel: 'linq' as const,
+        deliveryKind: 'thread' as const,
+        deliveryTarget: 'synthetic-group-handoff-thread',
+        identityId: 'synthetic-group-handoff-identity',
+        threadId: 'synthetic-group-handoff-thread',
+        threadIsDirect: false,
+      }
+      const executionContext = {
+        hosted: {
+          defaultTarget: modelTarget,
+          memberId: 'synthetic-group-handoff-runtime',
+          userEnvKeys: [],
+        },
+      } as const
+      const turnEnvironment = {
+        currentWorkingDirectory: workingDirectory,
+        env: config.env,
+      }
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const handoff = await sendAssistantNotificationLocal({
+          ...route,
+          deliveryDedupeToken: 'synthetic-group-handoff-flow',
+          deliveryDispatchMode: 'queue-only',
+          deliveryIdempotencyKey: 'synthetic-group-handoff-flow',
+          executionContext,
+          instructions: buildHostedExecutionGroupContextHandoffInstructions({
+            context:
+              'The member averaged 6 hours 32 minutes of sleep across 247 usable nights.',
+            sourceDisplayName: 'Member Delta',
+          }),
+          notificationPromptProfile: 'context-handoff',
+          outboxExternalThreadRouteAuthority: {
+            accountLookupKey: 'synthetic-group-handoff-account',
+            channel: 'linq',
+            containerMemberId: 'synthetic-group-handoff-runtime',
+            threadId: 'synthetic-group-handoff-thread',
+          },
+          responsePolicy: { kind: 'require_send' },
+          turnEnvironment,
+          vault: workingDirectory,
+          workingDirectory,
+        })
+        expect(handoff.response).toMatch(/Member Delta/iu)
+        expect(handoff.response).toMatch(
+          /6 hours?(?: and)? 32 minutes?|6:32/iu,
+        )
+        expect(handoff.response).not.toMatch(/\ba member\b/iu)
+        expect(handoff.session.target).toEqual(modelTarget)
+        expect(handoff.session.codexResume).toBeNull()
+
+        await stopWarmCodexAppServer(
+          'group-private-handoff-flow-e2e-cold-follow-up',
+        )
+        const followUp = await sendAssistantMessageLocal({
+          ...route,
+          deliverResponse: false,
+          includeEarlySessionOnboarding: false,
+          persistUserPromptOnFailure: false,
+          prompt: 'What do you think about 6.5 over 250 days?',
+          sessionId: handoff.session.sessionId,
+          turnEnvironment,
+          vault: workingDirectory,
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[group-private-handoff-flow-e2e] ${JSON.stringify({
+            followUp: followUp.response.trim(),
+            handoff: handoff.response?.trim() ?? null,
+          })}\n`,
+        )
+        expect(followUp.session.sessionId).toBe(handoff.session.sessionId)
+        expect(followUp.response).toMatch(/sleep|hours?|night|long-term|pattern/iu)
+        expect(followUp.response).not.toMatch(
+          /6\.5 of what|of what, averaged|what does 6\.5 refer to|can you clarify what 6\.5/iu,
+        )
+      } finally {
+        await stopWarmCodexAppServer('group-private-handoff-flow-e2e-complete')
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    600_000,
   )
 
   it(

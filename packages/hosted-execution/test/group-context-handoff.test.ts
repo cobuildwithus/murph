@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedExecutionGroupContextHandoffInstructions,
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "../src/builders.ts";
 import {
@@ -48,6 +49,7 @@ function createHandoffWake() {
       groupContextHandoff: {
         membershipId: "membership-generation-one",
         originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        sourceDisplayName: "Member Delta",
       },
       instructions: "Use the bounded handoff context.",
       notificationPromptProfile: "context-handoff",
@@ -73,6 +75,7 @@ describe("private-to-group context handoff contracts", () => {
       groupContextHandoff: {
         membershipId: "membership-generation-one",
         originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        sourceDisplayName: "Member Delta",
       },
       instructions: "Use the bounded handoff context.",
       notificationPromptProfile: "context-handoff" as const,
@@ -91,6 +94,7 @@ describe("private-to-group context handoff contracts", () => {
     expect(wake.notification.groupContextHandoff).toEqual({
       membershipId: "membership-generation-one",
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      sourceDisplayName: "Member Delta",
     });
     expect(parseHostedExecutionWake(wake)).toEqual(wake);
     expect(HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES)
@@ -116,6 +120,27 @@ describe("private-to-group context handoff contracts", () => {
       action: "handoff",
       result: { status: "accepted", targetLabel: "Lifting Club" },
     });
+  });
+
+  it("keeps trusted attribution outside quoted context", () => {
+    const named = buildHostedExecutionGroupContextHandoffInstructions({
+      context: "The member completed the planned session.",
+      sourceDisplayName: "Member Delta",
+    });
+    const neutral = buildHostedExecutionGroupContextHandoffInstructions({
+      context: "The member completed the planned session.",
+      sourceDisplayName: null,
+    });
+
+    expect(named).toContain(
+      'Trusted attribution: the sharing member\'s group-safe display name is "Member Delta".',
+    );
+    expect(named.indexOf("Trusted attribution:")).toBeLessThan(
+      named.indexOf("<untrusted_private_murph_handoff>"),
+    );
+    expect(neutral).toContain(
+      'Refer to the sharing person as "a member" and do not infer their identity.',
+    );
   });
 
   it("rejects widened requests and malformed durable proof", () => {

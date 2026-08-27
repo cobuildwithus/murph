@@ -696,6 +696,11 @@ function buildAssistantHostedGroupGuidanceText(
           `- ${ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION}`,
         ]
       : []),
+    ...(conversationScope === "group" && toolSurface === "families"
+      ? [
+          "- When the current sender's accepted message is a complete request for their private Murph whose result should return here, call `murph.group_consult action=\"message_current_sender\"` with that message's exact `Message ref`; do not tell them to switch chats or claim the room cannot route it. If one necessary detail is missing, call `clarify_current_sender`; use a continuation action only on that sender's later answer.",
+        ]
+      : []),
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
     "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact, text you to get set up, and come back and say hi in the group once setup is done. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks you to resend the card, share it again. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. SMS supports the same roster and group-access workflow; only provider-specific reactions, attachments, and chat customization may be unavailable. `action=\"offer_access\"` is the sole model-facing join or permission action. The trusted host returns `presentation=\"native\"` when it handled the native consent path; this does not prove UI was newly posted or is currently visible. It returns `presentation=\"link\"` with the exact first-party URL to include once, or `status=\"unavailable\"` when no consent surface is proven. Existing members keep their membership and other grants unchanged.",
     ...(conversationScope === "group"

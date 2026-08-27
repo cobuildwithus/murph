@@ -195,6 +195,23 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
+  it('routes complete current-sender requests through the admitted group workflow', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        conversationScope: 'group',
+        hostedRuntime: true,
+      })).stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(section).toContain(
+      '`murph.group_consult action="message_current_sender"`',
+    )
+    expect(section).toContain("that message's exact `Message ref`")
+    expect(section).toContain('do not tell them to switch chats')
+    expect(section).toContain('call `clarify_current_sender`')
+  })
+
   it('uses memberships only as bounded last-resort direct disambiguation', () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),

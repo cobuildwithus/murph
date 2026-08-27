@@ -48,8 +48,9 @@ export async function executeHostedAssistantAskCompletedWake(input: {
   vaultRoot: string;
   wake: HostedExecutionAssistantAskCompletedWake;
 }): Promise<HostedMailboxOutcome> {
-  const createOutcome = () => createNoopMailboxEffect({
+  const createOutcome = (deliveryIntentIds?: readonly string[]) => createNoopMailboxEffect({
     conversationMetrics: null,
+    ...(deliveryIntentIds ? { deliveryIntentIds } : {}),
     mailboxLane: "assistant-ask-completion",
   });
   const shouldYield = input.shouldYield ?? null;
@@ -164,9 +165,10 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     | "expired"
     | "origin_session_unavailable"
     | null = null;
+  let deliveryIntentIds: string[] = [];
   try {
     if (result.outcome === "cannot_answer") {
-      await sendAssistantNotification({
+      const notification = await sendAssistantNotification({
         ...deliveryInput,
         approvalPolicy: "never",
         ...(reviewedDisclosure
@@ -205,9 +207,12 @@ export async function executeHostedAssistantAskCompletedWake(input: {
                 reviewedTelegramRouteAuthority,
             }
           : {}),
-        sandbox: "read-only",
         turnTrigger: "automation-auto-reply",
       });
+      const intentId = readHostedAssistantAskDeliveryIntentId(
+        notification?.deliveryOutcome,
+      );
+      deliveryIntentIds = intentId ? [intentId] : [];
     } else if (reviewedDisclosure) {
       const continuation = await sendAssistantAskContinuation({
         ...deliveryInput,
@@ -235,6 +240,11 @@ export async function executeHostedAssistantAskCompletedWake(input: {
           input.wake.ask.expiresAt,
       });
       continuationStatus = continuation.status;
+      deliveryIntentIds = continuation.status === "completed"
+        ? [readHostedAssistantAskDeliveryIntentId(
+            continuation.deliveryOutcome,
+          )].filter((intentId): intentId is string => intentId !== null)
+        : [];
     } else {
       const continuation = await sendAssistantAskContinuation({
         ...deliveryInput,
@@ -253,6 +263,11 @@ export async function executeHostedAssistantAskCompletedWake(input: {
         requestId: input.wake.ask.requestId,
       });
       continuationStatus = continuation.status;
+      deliveryIntentIds = continuation.status === "completed"
+        ? [readHostedAssistantAskDeliveryIntentId(
+            continuation.deliveryOutcome,
+          )].filter((intentId): intentId is string => intentId !== null)
+        : [];
     }
   } catch (error) {
     if (error === expiredBeforeCommit) {
@@ -282,7 +297,7 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     throw new HostedAssistantAskCompletionPreemptedError();
   }
 
-  return createOutcome();
+  return createOutcome(deliveryIntentIds);
 }
 
 export function buildHostedAssistantAskContinuationInstructions(input: {
@@ -427,4 +442,13 @@ function normalizeHostedAssistantAskCompletionRouteValue(
 ): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function readHostedAssistantAskDeliveryIntentId(
+  outcome: object | null | undefined,
+): string | null {
+  if (!outcome || !("intentId" in outcome)) {
+    return null;
+  }
+  return typeof outcome.intentId === "string" ? outcome.intentId : null;
 }

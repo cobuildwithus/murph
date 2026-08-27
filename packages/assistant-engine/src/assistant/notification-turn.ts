@@ -1555,9 +1555,6 @@ function buildAssistantNotificationMessageInput(
   )
   const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
   const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
-  const firstContactExactText =
-    input.responsePolicy?.kind === 'require_send_exact_text' &&
-    input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
   // One overlay for each non-user turn boundary, so provider-audit policy
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
@@ -1623,13 +1620,7 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    // First-contact exact text does not start a provider. Keep its durable
-    // conversation session on the ordinary target so the next attended turn
-    // continues from the welcome that was already delivered.
-    sandbox:
-      scheduledOccurrence || firstContactExactText
-        ? input.sandbox
-        : 'read-only',
+    sandbox: input.sandbox,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
@@ -1764,6 +1755,9 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
+  if (input.input.notificationPromptProfile === 'context-handoff') {
+    return 'clear'
+  }
   if (
     isAssistantNotificationMaintenanceExactSkip(input.input) ||
     isAssistantOnboardingGoalCheckinNotification(input.input) ||
