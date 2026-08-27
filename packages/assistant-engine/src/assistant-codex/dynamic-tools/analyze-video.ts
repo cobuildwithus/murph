@@ -23,7 +23,7 @@ export const MURPH_ANALYZE_VIDEO_TOOL = {
   namespace: 'murph',
   name: 'analyze_video',
   description:
-    'Analyze one video attached to an accepted message when the user explicitly asks about it, requests rep counting, or requests visible exercise-form feedback. Pass the exact Message ref and a focused question containing only the task needed to answer the member. When the message has multiple videos, also pass its video attachment ordinal. Omit sampling_mode for general descriptions, persistent objects, speech, or slow action. Use detailed_motion when the answer depends on rapid movement, exercise phases, quick scene changes, or a possibly brief event. Make one analysis call and do not retry at another mode. Answer naturally from the returned observations; mention visibility, sampling, camera-angle, or health limits only when they materially affect the answer. A negative means not observed in sampled frames, and detailed motion is denser sampling rather than every source frame. Describe form without diagnosis, injury prediction, or treatment advice. The runtime owns the model, FPS mapping, credentials, file paths, and URLs.',
+    'Analyze one video attached to an accepted message when the user explicitly asks about it, requests rep counting, or requests visible exercise-form feedback. Pass the exact Message ref and the member\'s complete video question. Preserve every task-defining qualifier, including side, time, repetition range, comparison, and condition; omit only unrelated conversational wrapper or unrelated context. When the member states a video question directly, pass it verbatim. When the message has multiple videos, also pass its video attachment ordinal. Omit sampling_mode for general descriptions, persistent objects, speech, or slow action. Use detailed_motion when the answer depends on rapid movement, exercise phases, quick scene changes, or a possibly brief event. Make one analysis call and do not retry at another mode. Answer naturally from the returned observations; mention visibility, sampling, camera-angle, audio-quality, or health limits only when they materially affect the answer. Treat a visual negative as not observed in sampled frames only when temporal sampling matters. Treat an audible negative as not heard, with an audio-quality limit only when material. Detailed motion is denser sampling rather than every source frame. Describe form without diagnosis, injury prediction, or treatment advice. The runtime owns the model, FPS mapping, credentials, file paths, and URLs.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -42,7 +42,8 @@ export const MURPH_ANALYZE_VIDEO_TOOL = {
         type: 'string',
         minLength: 1,
         maxLength: 1000,
-        description: 'The user question to answer from the video.',
+        description:
+          'The member\'s complete video question with every task-defining qualifier preserved.',
       },
       sampling_mode: {
         type: 'string',

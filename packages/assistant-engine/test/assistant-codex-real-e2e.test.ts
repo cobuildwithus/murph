@@ -1236,9 +1236,46 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
 ].join(' ')
 
 describeRealCodex('real Codex video-analysis detail e2e', () => {
-  it(
-    'selects detailed motion for visible push-up form and answers naturally',
-    async () => {
+  it.each([
+    {
+      expectedFinalPattern: /left elbow|elbow/iu,
+      expectedFps: 5,
+      expectedSamplingMode: 'detailed_motion' as const,
+      forbiddenFinalPattern:
+        /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?',
+      ].join(' '),
+      providerObservation:
+        'During repetitions 3 through 5, the left elbow moves farther outward on the way down than on the way up.',
+      providerQuestion:
+        'During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?',
+      scenarioLabel: 'private member requests constrained push-up form feedback',
+      testName:
+        'selects detailed motion for visible push-up form and answers naturally',
+    },
+    {
+      expectedFinalPattern: /rabbit|hear|heard/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern:
+        /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: Did anyone say "rabbit" between 00:03 and 00:06?',
+      ].join(' '),
+      providerObservation:
+        'I did not hear the word "rabbit" between 00:03 and 00:06.',
+      providerQuestion:
+        'Did anyone say "rabbit" between 00:03 and 00:06?',
+      scenarioLabel: 'private member asks about a timed spoken phrase',
+      testName:
+        'keeps a speech question on standard sampling and calibrates an audible negative',
+    },
+  ] as const)(
+    '$testName',
+    async (scenario) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-video-detail-e2e-'),
@@ -1319,7 +1356,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
             senderHandle: 'synthetic-member',
           },
           telegramMetadata: null,
-          text: 'Murph, check my push-up form in this video. What is visibly happening with my hip position?',
+          text: scenario.memberText,
         }])
         expect(promptResult.kind).toBe('ready')
         if (promptResult.kind !== 'ready') {
@@ -1362,7 +1399,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
                   content: {
                     parts: [{
                       text:
-                        'The torso stays mostly straight, while the hips rise slightly ahead of the shoulders on the final two repetitions.',
+                        scenario.providerObservation,
                     }],
                     role: 'model',
                   },
@@ -1418,22 +1455,39 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           `[video-detail-e2e] ${JSON.stringify({
             finalMessage: result.finalMessage,
             providerCallCount: providerBodies.length,
-            scenario: 'private member requests visible push-up form feedback',
+            scenario: scenario.scenarioLabel,
             toolCallCount: videoCalls.length,
           })}\n`,
         )
         expect(videoCalls).toHaveLength(1)
-        expect(videoCalls[0]).toMatchObject({
+        const videoCall = videoCalls[0]
+        if (videoCall?.kind !== 'dynamic') {
+          throw new Error('Expected one dynamic video-analysis call.')
+        }
+        expect(videoCall).toMatchObject({
           argumentsValue: {
             message_ref: messageRef,
-            sampling_mode: 'detailed_motion',
+            question: scenario.providerQuestion,
           },
           kind: 'dynamic',
         })
+        if (scenario.expectedSamplingMode === null) {
+          expect(videoCall.argumentsValue).not.toHaveProperty(
+            'sampling_mode',
+          )
+        } else {
+          expect(videoCall.argumentsValue).toHaveProperty(
+            'sampling_mode',
+            scenario.expectedSamplingMode,
+          )
+        }
         expect(providerBodies).toHaveLength(1)
         expect(providerBodies[0]).toMatchObject({
           contents: [{
-            parts: [{ videoMetadata: { fps: 5 } }],
+            parts: [
+              { videoMetadata: { fps: scenario.expectedFps } },
+              { text: scenario.providerQuestion },
+            ],
           }],
           generationConfig: {
             thinkingConfig: { thinkingLevel: 'medium' },
@@ -1442,10 +1496,8 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         expect(providerBodies[0]).not.toHaveProperty(
           'generationConfig.maxOutputTokens',
         )
-        expect(result.finalMessage).toMatch(/hip/iu)
-        expect(result.finalMessage).not.toMatch(
-          /Gemini|frames per second|sampled frames|untrusted|policy|sorry/iu,
-        )
+        expect(result.finalMessage).toMatch(scenario.expectedFinalPattern)
+        expect(result.finalMessage).not.toMatch(scenario.forbiddenFinalPattern)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

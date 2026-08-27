@@ -141,6 +141,24 @@ describe('murph.analyze_video arguments and availability', () => {
     })
   })
 
+  it('preserves task qualifiers and scopes negative evidence by channel', () => {
+    expect(MURPH_ANALYZE_VIDEO_TOOL.description).toContain(
+      'Preserve every task-defining qualifier',
+    )
+    expect(MURPH_ANALYZE_VIDEO_TOOL.description).toContain(
+      'When the member states a video question directly, pass it verbatim',
+    )
+    expect(MURPH_ANALYZE_VIDEO_TOOL.description).toContain(
+      'Treat a visual negative as not observed in sampled frames only when temporal sampling matters',
+    )
+    expect(MURPH_ANALYZE_VIDEO_TOOL.description).toContain(
+      'Treat an audible negative as not heard',
+    )
+    expect(
+      MURPH_ANALYZE_VIDEO_TOOL.inputSchema.properties.question.description,
+    ).toContain('every task-defining qualifier preserved')
+  })
+
   it('rejects provider, sampling, path, and URL overrides', () => {
     for (const extra of [
       { fps: 5 },
