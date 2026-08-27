@@ -99,6 +99,7 @@ apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
 .vercel
 .gstack/
+/graft/
 
 # Local staged research artifacts
 research-artifacts/

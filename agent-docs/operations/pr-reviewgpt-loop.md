@@ -240,8 +240,7 @@ above. The completion-specialists preset delegates detailed lens criteria to
 the canonical files already inside `codebase.zip`; do not paste the PR body or
 those lens documents into the composer. The wrapper rejects an assembled
 completion-specialists prompt above 6,500 UTF-8 bytes, counting the preset plus
-every `--prompt` and `--prompt-file` value; both the canonical command and
-Frog's strict marker-bearing command must remain under that shared budget. Run
+every `--prompt` and `--prompt-file` value. Run
 completion-specialists as the only preset so another preset cannot escape the
 assembled-size check. If the ZIP tile is ready while Send remains disabled,
 treat that as composer validation, not a second hydration lifecycle: remove

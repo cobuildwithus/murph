@@ -238,10 +238,38 @@ function invalidPayload(message: string) {
   return new VaultCliError('invalid_payload', message)
 }
 
+function staticEncounterValidationPath(
+  path: readonly PropertyKey[],
+): Array<string | number> {
+  const qualifierIndex = path.indexOf('qualifiers')
+  const rawPath = qualifierIndex < 0
+    ? [...path]
+    : path.slice(0, qualifierIndex + 1)
+  return rawPath.flatMap((segment) =>
+    typeof segment === 'string' || typeof segment === 'number' ? [segment] : [],
+  )
+}
+
+function sanitizeEncounterValidationIssue(issue: z.ZodIssue) {
+  const expected =
+    'expected' in issue && typeof issue.expected === 'string'
+      ? issue.expected
+      : undefined
+
+  return {
+    code: issue.code,
+    publicPath: staticEncounterValidationPath(issue.path),
+    ...(expected === undefined ? {} : { expected }),
+  }
+}
+
 function parseEncounterPayloadInput(payload: unknown): ParsedEncounterBundlePayload {
   const result = encounterBundlePayloadSchema.safeParse(payload)
   if (!result.success) {
-    throw new VaultCliError('invalid_payload', 'encounter payload failed validation.')
+    throw new VaultCliError('invalid_payload', 'encounter payload failed validation.', {
+      issues: result.error.issues.map(sanitizeEncounterValidationIssue),
+      stage: 'validation',
+    })
   }
 
   return result.data

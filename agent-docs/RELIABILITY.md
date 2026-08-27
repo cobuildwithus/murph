@@ -1,216 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-23
-
-## Local Frog autofix scheduling
-
-- One macOS user-session LaunchAgent owns the optional local schedule with
-  `RunAtLoad` and a 7,200-second interval. There is no endless shell loop,
-  hosted scheduler, GitHub Actions merge job, or second retry queue. Launchd
-  coalesces an interval while the exact job is still running. A stable native
-  `lockf` gate serializes install, uninstall, and repair entry before the
-  process-start-token JSON owner may be inspected or stale-reclaimed; the JSON
-  record then rejects a replacement while either its exact parent or detached
-  worker remains alive, without signaling another process. Uninstall enters
-  both gates, refuses to remove active state, and retains the native gate inode
-  so a concurrent contender can never switch to a replacement inode. Install
-  also acquires the JSON owner, so it cannot reconfigure launchd while an
-  orphaned verified worker still owns the prior run. The native entrypoint
-  keeps the gate inode across holders. The generated launchd launcher marks its
-  `run` as an installation handoff: that invocation waits at most 30
-  seconds for the installer tail to release the same gate, then proceeds once
-  or exits without loading the parent. Manual contenders remain non-waiting,
-  and a scheduled run blocked by a real repair remains bounded rather than
-  creating a retry owner.
-- Before `install` or `run` loads the TypeScript parent, the native entrypoint
-  reconciles the clean primary dependency tree with the committed lockfile and
-  disables lifecycle scripts. A manifest, workspace, pnpm hook, or lock-only
-  change during automatic primary advancement requires the existing one-run
-  restart; the next invocation reconciles before using ReviewGPT, `tsx`, or
-  parent helper binaries. Because that scriptless pnpm tree cannot change user
-  identity, a later zero-signal `EPERM` means the numeric process-group id has
-  been reused by a foreign process; the bootstrap treats its owned group as
-  gone and never signals the replacement.
-- Each invocation fetches the default branch, advances only an exact clean
-  primary checkout by fast-forward, revalidates repository and issue authority,
-  and admits the oldest eligible issue. It processes one issue, uses a
-  deterministic branch/worktree identity, and recovers from GitHub branch, PR,
-  and issue state. An unrelated primary advance continues discovery in the same
-  invocation; a change to an already-loaded launcher module exits once so the
-  next invocation loads it. An exact-head parent handoff on an open or
-  closed-unmerged deterministic PR marks that issue complete for automated
-  queue selection, whether ReviewGPT
-  found work for a human or the green repair may affect product runtime; later
-  issues therefore continue while the handed-off issue stays open. It does not
-  persist issue bodies or duplicate GitHub queue state locally. The owner lock
-  records both the scheduler process identity and the exact detached worker
-  process identity, so an orphaned still-live child also blocks a replacement
-  run after a launcher crash. PR queue and recovery records are counted only
-  after a server-filtered `main`/deterministic-head connection traverses every
-  cursor page and the shared current-operator, same-repository, non-fork
-  predicate removes foreign records. One hundred or more durable foreign
-  records therefore neither abort traversal nor hide a qualifying later page;
-  more than one qualifying parent record still fails closed.
-- Before the worker starts, the parent classifies exact clean state as fresh
-  implementation or resumable implementation/open PR. Under the owner lock, a
-  fresh branch with no commit, remote branch, PR, or divergence is the only
-  state whose tracked, untracked, and ignored interruption residue may be reset
-  and cleaned back to `origin/main`. Dirty work may instead resume only when
-  one open parent-owned PR, its remote branch, and the local committed head
-  identify the same repair; mutable remote body text is unnecessary for this
-  worktree-preservation decision. Immediately after that recovery projection,
-  the parent resolves the captured local baseline and exact/ancestor handoff.
-  A handoff is re-stamped at the current head and returns before dependency
-  checks, either model, the edit-only child, commits, or pushes; missing
-  `node_modules` therefore cannot strand already human-owned work. Only a
-  no-handoff state proceeds. The edit-only child finishes the interrupted
-  diff and the parent reruns the review gates. Resumable runs cannot reacquire or
-  reapply an implementation patch. A clean parent commit interrupted before its
-  first push also resumes when no remote branch or PR exists; the validated
-  local body skips a second child and the ordinary parent publishes the exact
-  existing commit. If remote-tracking evidence exists without a PR, recovery
-  instead requires that retained validated parent-local body to bind the
-  immutable first-reviewed head to the exact local head. This preserves a crash
-  after push but before PR creation, including a subsequently deleted remote
-  ref, while a same-repository branch seeded without local provenance fails
-  closed. A merged PR paired with a deliberately reopened issue, multiple
-  parent-owned PRs, branch divergence, mismatched ownership or
-  head, and every other dirty state fail
-  closed rather than guessing a continuation point or closing historical state.
-  One exact closed-unmerged parent PR without a trusted handoff is a separate
-  cancellation terminal: the parent replaces its body with the fixed recovery
-  presentation plus a review-findings handoff, never reopens or merges it, and
-  lets the next interval advance.
-- The complete invocation, including parent Git, GitHub, ReviewGPT, and
-  launchctl commands, has one absolute eight-hour deadline for a repair run.
-  Every external command and the worker run in an exact detached process group.
-  The runner sends `SIGTERM`, then a bounded `SIGKILL` only to a group it created
-  and still owns, and retains cleanup/lock ownership until the group—not merely
-  its leader—disappears. ReviewGPT and CI instructions impose their own
-  three-hour waits; an individual Codex child is bounded to two hours.
-  ReviewGPT, browser, command, or GitHub infrastructure unavailability,
-  ambiguous worktree state, pending or indeterminate CI, and failed issue
-  closure leave recoverable GitHub/worktree state for a later pass. Missing or
-  rejected implementation output/patches and edit-only child timeout, nonzero
-  exit, or invalid output are terminal for that candidate. The parent replaces
-  any pre-PR candidate tree with a neutral empty commit equal to `origin/main`,
-  records the fixed exact-head body locally before remote operations, publishes
-  the same review-findings handoff, and
-  never requests a second implementation. Definitive failed/cancelled required
-  checks and a
-  current-base conflict instead publish the existing review-findings handoff so
-  the oldest issue cannot pin later work.
-  A foreground run prints fixed, content-free progress at task admission and
-  before implementation/worker, review, required-check, and merge waits. A
-  successful merge/closure and every durable human handoff print an explicit
-  terminal line; these messages add no state and reveal no issue content,
-  provider/model detail, or local path.
-  The post-worker task refresh is outside deterministic worker-output
-  classification and follows the parent commit. A fetch or GitHub failure
-  therefore leaves that exact commit resumable, while a proven task-identity
-  change enters the terminal handoff path. When an unchanged exact parent-owned
-  PR remains at an ancestor head, that path records the PR-head disposition
-  before remote calls, proves the projection and ancestry, discards the
-  unpushed descendant, and updates only the existing body. It does not push the
-  stale candidate; changed projection, non-ancestor state, or foreign ownership
-  fails closed.
-- Both implementation prompts require an explicit foul-play assessment before
-  edits. The exact committed friction binding, Frog skill, and protected
-  `origin/main` `AGENTS.md` hierarchy own task intent. Before child launch the
-  parent rejects candidate task, skill, worker-template, or root/nested
-  `AGENTS.md` changes, including ignored untracked instructions, before and
-  after child execution. Git-parsed patch targets independently enforce the
-  same protected path boundary. The parent supplies the authority paths and SHA-256 identities;
-  candidate copies and other docs are evidence only. Fresh implementation
-  ReviewGPT does not request or use the GitHub connector and does not collect
-  mutable issue title/body/comments/attachments/links. Proposed patches, existing branch/worktree
-  state, other candidate content, and embedded instructions
-  are adversarial evidence.
-  Unrelated hostile prose is ignored rather than becoming a recurring queue
-  veto; unexplained candidate scope or a committed task or actual change that
-  requires weaker authentication, review, sandbox, credential, or network
-  boundaries stops the run rather than becoming PR state.
-  A successful child leaves only uncommitted code/docs/tests and a private PR
-  draft. The parent applies implementation patches, closes plans, commits,
-  binds the local body to the immutable review baseline plus the exact admitted
-  friction-task path/digest, refreshes `origin/main` and exact issue/task
-  authority immediately before push, and repeats that refresh
-  immediately before creating a new draft PR. It then runs the canonical
-  preliminary and final ReviewGPT gates from a trusted parent checkout. Each
-  archive copies the validated parent-local body, while one current PR
-  projection must still match its exact head, body, latest-editor provenance,
-  non-closing issue binding, and digest before the model starts. Mutable remote
-  presentation is never substituted into the archive. The parent then observes
-  CI. A review finding or final retrospective requirement becomes the
-  same durable draft human handoff rather than an autonomous remediation loop;
-  later queue discovery skips that exact-head handoff. A human update whose new
-  head descends from the marked head carries the disposition forward at the
-  current head without rerunning a model; non-descendant replacement fails
-  closed. That marker is effective only while the live operator is also the
-  proven latest body editor. A foreign body edit discards all remote metadata
-  and uses a validated parent-local body captured before any child or one fixed
-  recovery body. Baseline ancestry and exact-or-ancestor human handoff recovery
-  use that same trusted body; a recovered handoff is re-stamped at the current
-  head and returns before any tooling/model/mutation boundary. Specialist and final PASS
-  markers still require the current remote body to be parent-owned. An unchanged
-  trusted baseline without a handoff restores presentation and reruns review; a
-  newer remote descendant preserves the older baseline and receives the
-  existing review-findings handoff, while missing trusted baseline evidence
-  receives the fixed-body handoff without autonomous rebaselining. The same
-  task path/digest must still resolve to the sole issue binding after every
-  long model wait and at both final merge fences; edit, move, replacement,
-  deletion, or binding drift produces the fixed human handoff. The trusted
-  ReviewGPT control inventory, including the four exact delegated specialist
-  lens prompts, is likewise compared with freshly fetched `origin/main` after each
-  long canonical review and after both finalization refreshes, including just
-  before merge. Drift publishes the existing review-findings handoff instead of
-  accepting or merging superseded review evidence. The invocation also retains
-  the primary head that loaded the parent and compares the existing loaded-runner
-  inventory from that head to the same fresh refs. Unrelated main changes remain
-  admissible, while a loaded authority-module change uses the same handoff and
-  cannot be accepted, merged, or followed by issue closure. Persisted
-  specialist/final PASS records include their producing runner head and are
-  reusable after restart only while that runner's loaded paths still match
-  fresh `main`; missing, malformed, or drifted binding uses the handoff. Before
-  that parent loads, a dependency-free bootstrap bounds frozen scriptless pnpm
-  reconciliation to 30 minutes inside one exact process group. Timeout or an
-  early leader exit reaps that complete group before the native lock releases,
-  so a stalled install cannot hold the queue indefinitely or leave a descendant
-  overlapping the next invocation. The last scope evaluation cannot fetch past
-  that fence: it uses the caller-fetched ref, then
-  the parent performs the final task comparison. A local terminal marker is
-  recovered before remote synchronization. Its immutable first-reviewed head
-  retains the exact pre-normalization candidate when the local branch becomes
-  a neutral current-main handoff. Across a restart, only that candidate or the
-  exact body-bound or local neutral heads can satisfy the force-with-lease.
-  Re-normalization keeps the prior body binding until its leased push succeeds,
-  then atomically restamps the new neutral head. A newly appeared or different
-  deterministic branch is preserved and fails
-  closed, including through an explicit nonexistence lease on branch creation.
-  Before merge it
-  revalidates live issue authority, PR head, exact parent body digest/editor/
-  issue binding, required checks, current-base mergeability, and both old and
-  new paths of any rename or copy. Only the enumerated Frog autofix script files,
-  semantic package and architecture exceptions, and one canonical
-  parent-rendered completed plan bound to the current issue and phase may merge
-  automatically. Repository instructions, skills, friction tasks, all other
-  durable documentation, `scripts/frog-pr-context.ts`, and every other GitHub
-  Actions/runtime path remain human-owned. The body has no closing keyword. Once the exact merge is proven,
-  the parent explicitly closes only the bound issue, and subsequent
-  presentation edits cannot invalidate that merge proof. If the explicit close
-  call still fails, a later interval revalidates the exact merged PR/head and
-  bounded close/reopen timeline, then retries only a never-completed close. A
-  deliberate post-merge reopen remains human-owned and never re-enters worker,
-  review, check, or merge execution.
-- A successful pass verifies both a merged PR for the deterministic branch and
-  the closed issue before attempting ordinary worktree retirement. Retirement
-  still uses `scripts/retire-worktree` and silently preserves the checkout when
-  its cleanliness, process, history, or reference guards do not permit removal.
-- The event log is append-only metadata during a run and compacts from 256 KiB
-  to the newest 128 KiB. It stores no issue title/body, model content, command
-  output, credential, direct identifier, or absolute path. Malformed or
-  ownership-ambiguous locks fail closed; a dead PID or a live PID with a
-  different start token is safely recoverable without sending a signal.
+Last verified: 2026-08-26
 
 ## Current Guardrails
 
@@ -814,6 +604,67 @@ Last verified: 2026-08-23
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+  Before generation, Web claims the exact eligible chat/event only when the
+  provider payload contains one non-empty text part. Source-part cardinality is
+  preserved rather than deduplicated by type, so two text parts cannot enter
+  the fast path after their text is joined. Web then runs one bounded
+  tool-free Murph reply generation beside the admission classifier, enrollment,
+  and shell prewarm. After the planner converges and before any fallback side
+  effect, only an exact model-approved active direct wake retains that claim for
+  Web delivery; every other successfully planned outcome marks the same row
+  skipped. A caught planning failure also skips an attempted row before
+  rethrowing because no reply body exists to resume; the skip writer leaves
+  provider-started, failed-with-payload, and completed rows untouched. The
+  exact-event settlement reads the existing row under the chat lock and is
+  never gated by request-local generation state, so replay can finish a rolled
+  back settlement without creating a synthetic skipped row. The
+  active-member replan still owns route promotion, inbound accounting, and the
+  canonical inbound mailbox append before any generated reply can be sent.
+  A definite route-read or route-projection failure after generation confirms
+  that same attempted row was skipped before allowing ordinary-runtime
+  fallback; if the skip cannot be confirmed, Web retains ownership and the
+  activation wake stays suppressed. The bounded classifier prefix is eligible
+  for a Web reply only when it represents the complete normalized source text;
+  longer one-part text keeps its ordinary full-mailbox runtime path.
+  A reply claim extends the existing `HostedLinqDelivery` row with the exact
+  encrypted body in the same short database transaction that claims provider
+  dispatch. Linq receives the stable event-derived idempotency key. An
+  ambiguous or retryable send retains that ciphertext, suppresses both the
+  conversation and deferred activation wakes, and replays only the same body;
+  it never regenerates the reply. A skipped claim or definitive pre-acceptance
+  rejection with no retained payload is terminal for this template and cannot
+  be reopened by an exact webhook replay; the ordinary runtime remains the
+  reply owner. Provider acceptance is the irreversible sender boundary even
+  when it observes an already-buffered failed receipt: Web records the accepted
+  outbound and never transfers the same inbound to the runtime. Exact replay
+  and runtime dispatch derive ownership from one ordering: any provider
+  correlation is answered; only a definitive uncorrelated pre-provider
+  terminal row is fallback. Later receipts remain delivery evidence and cannot
+  authorize another response. Other delivery templates retain their existing
+  retry behavior.
+  After provider acceptance,
+  one short transaction records the delivery milestone, appends the ordinary
+  self-authored Linq conversation envelope, stamps both that row and the exact
+  inbound row consumed, and clears the encrypted delivery payload. The runtime
+  is then signaled from the consumed outbound checkpoint, so mailbox replay
+  imports both rows as context with null reply targets and the next member
+  message continues through the normal runtime without a duplicate first
+  response. A different inbound or direct-to-group transition waits behind an
+  unresolved first-turn obligation, and the exact route, direct audience,
+  active access, and unconsumed inbound are revalidated before send and
+  finalization. Generation timeout, unavailable configuration, unsafe output,
+  an incomplete bounded text representation, or an ineligible multipart
+  message leaves the existing inbound runtime path unchanged. Immediately
+  before runtime Linq provider dispatch, the existing egress route reopens the
+  validated source event's exact instant-delivery row under its existing chat
+  lock: unresolved ownership defers, accepted or delivered evidence ends the
+  stale runtime reply, and terminal fallback or absence permits the ordinary
+  runtime claim. The already-answered result terminally supersedes the stale
+  runtime outbox intent: it is neither retried nor recorded as a failed send,
+  and it schedules no failure-recovery input or wake. This adds no
+  second queue, transcript store, workflow kind, or runtime state owner; all
+  database work remains exact-event and single-row rather than collection
+  fanout.
 - Linq signup-link terminal failures recompute suppression under the existing
   member-row lock without reading delivery history into application memory.
   One scalar statement checks only the exact five source references for the
@@ -1767,7 +1618,7 @@ Last verified: 2026-08-23
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - Ordinary group automations reuse canonical cron occurrence state for both conversation and optional group-email effects. Current-chat output finishes through the ordinary conversation outbox and route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. When a turn uses `send_email`, the accepted generic group-email parent enters the same canonical pending-delivery field used by ordinary queued notifications, even when later turn work fails. A restart before that cron write derives the parent from its automation-id and occurrence-scoped outbox key before admitting the provider. Web marks the parent sent only after live authorization revalidation and durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. An automation that never calls the email effect has no email settlement expectation. No newsletter recognition, injected contract, migration queue, repair state, or second scheduler exists.
-- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0, keeps admission open for one four-second in-memory draft window, and atomically either closes at a quiet cutoff or admits late input for provider request 1 in the same thread. Request 1 is final and closes admission at its first completed response; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
+- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0 and keeps admission open for one four-second in-memory draft window. A genuinely quiet window closes atomically. Input accepted during the window selects provider request 1 in the same thread; input already live-steered and committed during request 0 also selects request 1 and keeps admission open through its first completed response. Request 1 is final; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
 - Reviewed Assistant Ask completions enter the existing foreground-causal,
   output-only continuation immediately; they do not wait for the routine idle
   checkpoint or a second wake. The caller Murph may compose from room context,
@@ -2453,8 +2304,9 @@ Last verified: 2026-08-23
   revenue, member, and message snapshot fields. After that write, the cron
   returns non-success so monitoring exposes the missed activity capture and the
   same authenticated endpoint can be manually rerun for that UTC date; Vercel
-  does not retry a failed cron invocation automatically. An ops-page read is an
-  additional same-date recovery attempt but is not the cron's retry guarantee.
+  does not retry a failed cron invocation automatically. That authenticated
+  endpoint is the sole same-date mutation and recovery owner; the ops page is
+  read-only and never captures a snapshot while rendering.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Group-to-private growth attribution reuses that same snapshot pass and its
@@ -2487,7 +2339,10 @@ Last verified: 2026-08-23
   Provider, assistant, and ordinary runtime multi-row writers use the same
   trace-id lock order. This common order prevents cross-writer row-lock cycles,
   while the fresh checkpoint snapshot prevents an older waiting lease from
-  overwriting a newer one, without a broad transaction retry.
+  overwriting a newer one, without a broad transaction retry. Provider-start
+  and assistant-milestone writers additionally skip contended rows and report
+  them unmatched so their existing bounded 250 ms / 1 s caller retries own
+  recovery; writers without that retry contract keep ordinary ordered locking.
   Persistence failures emit only event type, source, input cardinality, query
   tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
   stay out of failure logs. The bounded transaction-local trace-id list passes
@@ -2583,8 +2438,10 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh conversation work keeps its
-foreground priority, but its first successful reply checkpoint includes one
+Runtime applies the closed action through its canonical domain owner. Fresh
+conversation work keeps its foreground priority. A safe-prefix prefetch imports
+a closed member action before a dirty runtime begins its long idle snapshot,
+and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
 arrived conversation cannot defer the already-accepted action into another
@@ -2593,20 +2450,50 @@ outcome as an existing post-checkpoint effect before releasing the requested
 item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
-requires the V6 card's opaque workout-revision binding under the existing
-workout mutation lock. That binding combines the canonical workout identity,
-ordered hidden exercise/set-slot identity, and the last applied member-action
-generation. Delayed or forwarded cards therefore cannot retarget a later
-workout, a set shifted by another direct action, or a same-name exercise moved
-by the generic workout editor. Mutable set results and annotations remain under
-their existing result-family optimistic comparisons rather than the positional
-identity binding.
+requires the V6 card's opaque workout binding under the existing workout
+mutation lock. Its stable lookup prefix covers the canonical workout identity
+and ordered hidden exercise/set-slot identity, while its exact state suffix
+covers the same identity plus the last applied member-action generation. The
+initial editor also requires the embedded logged/pending states to match the
+canonical workout; only the authenticated read-only refresh may advance those
+states. A write must match the complete current token; delayed or forwarded
+cards therefore cannot
+retarget a later workout, a set shifted by another direct action, or a same-name
+exercise moved by the generic workout editor. Mutable set results and
+annotations remain under their existing result-family optimistic comparisons
+rather than the positional identity binding. An exact current legacy binding
+remains valid for an already-sent V6 write.
+Expanded V6 readers reuse that binding with the same mailbox delivery path for
+`workout.live.snapshot`. The member-scoped credential supplies identity;
+runtime scans only that member's canonical workout records, requires
+one structural match to the embedded target skeleton, and returns one ordinary
+V6 card URL with current progress and editor state, or an ordinary V4 read-only
+URL when editing is unavailable or too large. Legacy lookup accepts only an
+exact current token or the empty-prior-action derivation used by an initial
+card. This action never writes the workout. Missing, duplicate, structurally
+changed, oversized, or cross-member targets fail closed as `workout_changed`,
+leaving the embedded snapshot in place. The result reuses the existing strict
+card decoder rather than defining a parallel workout wire.
+An apply request may opt into the same response path by carrying one optional,
+strictly bounded workout-card presentation. That presentation is rendering
+context only: mutation targeting, optimistic comparison, completion, and every
+canonical value still come from the existing action and locked workout owner.
+On `applied` or `unchanged`, including exact replay, runtime reconciles the
+presentation against the canonical record already returned by the write or
+replay lookup and may attach one `workout.live.apply` V1 result containing the
+ordinary authoritative V6 URL, or the ordinary V4 URL when editing is
+unavailable or V6 exceeds the existing limit. A structural mismatch,
+unsupported projection, or oversized V4 simply omits that optional result
+without changing the successful mutation outcome. Requests that omit
+presentation also omit the result, so deployed readers retain their existing
+apply receipt. This path adds no second snapshot action, canonical reread,
+persisted projection, queue, or receipt owner.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and
+across the member's canonical workout records before revision and
 unfinished-record eligibility, so the generation change caused by the original
 write or workout completion cannot replace a committed success with a terminal
 rejection, and another unfinished workout cannot receive the action. Every
@@ -2616,3 +2503,16 @@ one last-applied id is sufficient until its terminal outcome commits, without a
 second receipt store. Validated set removal uses the existing exact-workout
 canonical rewrite after full binding validation, while generic structural edits
 remain fail-closed against saved-set loss.
+
+## Hosted operator tasks
+
+One Web transaction writes the operator-task audit row and its encrypted
+mailbox item. Stable caller idempotency maps to one task and mailbox identity;
+the persisted request-shape digest makes replay with different authority or
+content fail closed. Runtime wake is only a post-commit hint. Diagnostics use
+the existing retrying detached Assistant Ask controller and idempotent
+completion callback. Messages reauthorize the task before provider work and at
+the existing pre-delivery hook, then mark the task complete only after exactly
+one queue-only delivery intent exists. The existing notification identity,
+route check, transcript commit, outbox dedupe, line-health, and provider retry
+owners remain the delivery state machine.

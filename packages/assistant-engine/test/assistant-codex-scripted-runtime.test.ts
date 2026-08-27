@@ -161,14 +161,11 @@ const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
   'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
   '',
 ] as const
-// GitHub's restricted Linux runner cannot create the uid map required by
-// Codex's named-permission bubblewrap shell. Exact-profile startup still runs
-// there below; only the shell execution proof uses a capable host.
+// Workspace-installed Codex lives outside the named-permission bubblewrap
+// filesystem on Linux. The production runner image proves native Linux
+// confinement separately; exact-profile startup still runs here below.
 const scriptedPermissionShellIt =
-  process.env.GITHUB_ACTIONS === 'true'
-    && process.env.RUNNER_OS === 'Linux'
-    ? it.skip
-    : it
+  process.platform === 'linux' ? it.skip : it
 
 function buildTestAutomationLocalAtRecoveryKey(request: unknown): string {
   return createHash('sha256')
@@ -2924,7 +2921,7 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
+  cmd: "sed -n '1,/^## Bounded observation runs/p' skills/food-journal/SKILL.md",
 });
 text(result.output);
 `,

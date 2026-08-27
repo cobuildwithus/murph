@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -79,7 +79,10 @@ Updated: 2026-08-26
 9. [x] Prove foreground work that wins before exact admission permanently
    consumes that invocation's starter, including carried-input causal reruns,
    without pausing an idle controller or changing approved continuations.
-10. [ ] Commit, push, run final review with required CI, deploy, and prove live
+10. [x] Prove exact-owner mode cannot be reopened by a later generic Ask import
+    and foreground input cannot abort an approved detached continuation; scope
+    both callbacks to the already-selected invocation mode.
+11. [ ] Commit, push, run final review with required CI, deploy, and prove live
    mailbox and device-sync convergence.
 
 ## Decisions
@@ -124,6 +127,23 @@ Updated: 2026-08-26
   foreground wins before the exact promise exists, consume the invocation-local
   starter instead of pausing; include supplied initial input in the existing
   foreground-work derivation so later causal passes cannot reconsider the Ask.
+- Accepted final-review finding: the generic post-import Ask kick remained live
+  after ordinary exact-owner selection, so a later imported Ask could reopen the
+  retired exact path or race the exact starter. Suppress that generic ingress for
+  the entire invocation whenever ordinary exact ownership was selected; later
+  items remain durable for the next ordinary selection.
+- Accepted final-review finding: the foreground observer applied ordinary exact-
+  Ask abort/requeue semantics to approved detached continuations. Preserve those
+  independent continuations by returning before exact-mode preemption logic.
+- Seven-round cap retrospective: review-driven changes stayed within the same
+  existing invocation-local Ask controller, durable selector, and foreground
+  watcher. The latest correction added no persisted state, selector, queue,
+  lifecycle, or reconciliation owner; it removed the two remaining mode-crossing
+  entry points with focused production-shaped coverage. Splitting the provider
+  bound from exact mailbox ownership would delay the one live recovery outcome
+  without reducing either change's independent surface. On 2026-08-27 the user
+  explicitly chose continuation through another full ReviewGPT audit, required
+  CI, merge, and deployment rather than deletion, reversion, or abandonment.
 - Rejected: increasing hosted timeouts, changing resource admission, deleting
   queued work, or locally expiring the Ask without its Web-owned terminal result.
 

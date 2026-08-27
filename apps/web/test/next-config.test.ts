@@ -692,11 +692,14 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
   assert.match(csp, /child-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /frame-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /frame-src [^;]*https:\/\/\*\.kernel\.sh:8443/);
   assert.match(csp, /frame-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
   assert.doesNotMatch(csp, /https:\/\/kernel\.example\.test/);
   assert.match(csp, /frame-src [^;]*https:\/\/oauth\.telegram\.org/);
   assert.match(csp, /frame-src [^;]*https:\/\/verify\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/\*\.kernel\.sh:8443/);
+  assert.match(csp, /connect-src [^;]*wss:\/\/\*\.kernel\.sh:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*wss:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);

@@ -169,6 +169,7 @@ import {
   enqueueHostedSystemMailboxItem,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
+  findNextHostedSystemMailboxQueueItem,
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -1044,6 +1045,231 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test("active foreground mode checkpoints and releases when Environment work arrives", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedKinds: string[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPasses = 0;
+    let resolveEnvironmentImport = (): void => undefined;
+    const environmentImported = new Promise<void>((resolve) => {
+      resolveEnvironmentImport = resolve;
+    });
+    let resolveCheckpointStarted = (): void => undefined;
+    const checkpointStarted = new Promise<void>((resolve) => {
+      resolveCheckpointStarted = resolve;
+    });
+    let releaseCheckpoint = (): void => undefined;
+    const checkpointReleased = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let checkpointSignalAborted = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_environment_interview_foreground_handoff",
+              idleCheckpointDelayMs: 60_000,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(_snapshotInput, context) {
+              resolveCheckpointStarted();
+              context?.signal?.addEventListener("abort", () => {
+                checkpointSignalAborted = true;
+              }, { once: true });
+              await checkpointReleased;
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "d".repeat(64),
+                  key: "users/bundles/member-synthetic/environment-handoff.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              importedKinds.push(item.item.kind);
+              if (item.item.kind === "environment-interview.completed") {
+                resolveEnvironmentImport();
+              }
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                fetchRequests,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              assistantPasses += 1;
+              if (assistantPasses !== 1) {
+                throw new Error(
+                  "Foreground mode must not process Environment work after handoff.",
+                );
+              }
+              mailboxItems.push(createMailboxItem({
+                dedupeKey: "environment-interview:foreground-handoff",
+                id: "mailbox_item_environment_interview_foreground_handoff",
+                kind: "environment-interview.completed",
+                lane: "system",
+                laneSeq: "1",
+              }));
+              runtimeWakeSignal.notify();
+              await environmentImported;
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            },
+            runtimeWakeSignal,
+            vaultRoot,
+          },
+        ),
+        10_000,
+        () => events.join(","),
+      );
+      const checkpointOutcome = await Promise.race([
+        checkpointStarted.then(() => "started" as const),
+        resultPromise.then(() => "finished" as const),
+      ]);
+      expect(checkpointOutcome).toBe("started");
+      runtimeWakeSignal.notify();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      releaseCheckpoint();
+      const result = await resultPromise;
+
+      expect(result.immediateRecheckRequested).toBe(true);
+      expect(checkpointSignalAborted).toBe(false);
+      expect(assistantPasses).toBe(1);
+      expect(importedKinds).toContain("environment-interview.completed");
+      expect(checkpointRequests).toHaveLength(1);
+      expect(fetchRequests.some((request) =>
+        request.lanes.some((lane) => lane.lane === "system")
+      )).toBe(true);
+    } finally {
+      releaseCheckpoint();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("foreground mode releases already-staged Environment work after one foreground pass", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedKinds: string[] = [];
+    const interviewItem = createMailboxItem({
+      dedupeKey: "environment-interview:restored-foreground-handoff",
+      id: "mailbox_item_environment_interview_restored_foreground_handoff",
+      kind: "environment-interview.completed",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const conversationItem = createMailboxItem({
+      dedupeKey: "conversation:restored-foreground-handoff",
+      id: "mailbox_item_conversation_restored_foreground_handoff",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+    });
+    let assistantPasses = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueEnvironmentInterviewSystemMailboxItemForTest({
+        item: interviewItem,
+        vaultRoot,
+      });
+      expect(findNextHostedSystemMailboxQueueItem({
+        allowedRouteActions: ["run-environment-interview"],
+        now: new Date().toISOString(),
+        state: await readHostedSystemMailboxState(vaultRoot),
+      })).not.toBeNull();
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/restored-environment-handoff-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_environment_interview_restored_foreground_handoff",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/restored-environment-handoff-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedKinds.push(item.item.kind);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPasses += 1;
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(assistantPasses).toBe(1);
+      expect(importedKinds).toEqual(["conversation.message"]);
+      await expect(readHostedSystemMailboxState(vaultRoot)).resolves.toMatchObject({
+        pending: [expect.objectContaining({
+          wake: expect.objectContaining({
+            kind: "environment-interview.completed",
+          }),
+        })],
+      });
+      expect(result.immediateRecheckRequested).toBe(true);
+      expect(checkpointRequests).toHaveLength(1);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("environment interview mode applies only Habitat answers and refreshes the browser replica", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1111,6 +1337,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
+                nextWakeAt: "2026-04-26T23:59:59.000Z",
+                nextWakeReason: "assistant",
                 snapshotRef: restoredWorkspace.snapshotRef,
                 version: "0",
               }),
