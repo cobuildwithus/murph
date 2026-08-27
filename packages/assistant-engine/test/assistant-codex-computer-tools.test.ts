@@ -96,7 +96,7 @@ describe("murph computer dynamic tools", () => {
     const osControlDescription = osControlTool?.description ?? "";
     const pauseDescription = pauseTool?.description ?? "";
 
-    expect(actDescription.length).toBeLessThanOrEqual(380);
+    expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
     expect(actDescription).toContain(
@@ -108,10 +108,6 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription).toContain("bypass CAPTCHA");
     expect(actDescription).toContain("accept new consent");
     expect(actDescription).toContain("retry unknown effects");
-    expect(actDescription).toContain("Before call two");
-    expect(actDescription).toContain(
-      "call send_progress_update if available",
-    );
     expect(actDescription).toContain("After failure, call computer_open");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);

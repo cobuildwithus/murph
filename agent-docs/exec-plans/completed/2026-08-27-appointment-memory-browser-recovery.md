@@ -87,9 +87,9 @@ Updated: 2026-08-27
 - Final representative first-request measurement against the current base uses
   the prior complete pinned-App-Server capture plus the exact current serialized
   deltas under `gpt-tokenizer` 3.4.0 `o200k_harmony`. The private
-  browser-enabled route changes from 28,985 tokens / 132,847 bytes to 29,104 /
-  133,470 (+119, +0.4106%; +623 bytes, +0.4690%): +105 tokens / +553 bytes are
-  assembled instructions and +14 / +70 are the `computer_act` descriptor. The
+  browser-enabled route changes from 28,985 tokens / 132,847 bytes to 29,093 /
+  133,413 (+108, +0.3726%; +566 bytes, +0.4261%): +105 tokens / +553 bytes are
+  assembled instructions and +3 / +13 are the `computer_act` descriptor. The
   group route, where private computer tools are unavailable, changes from
   25,475 / 116,870 to 25,580 / 117,423 (+105, +0.4122%; +553 bytes, +0.4732%),
   all in assembled instructions. Conversation content, other tool/schema or
@@ -143,4 +143,9 @@ Updated: 2026-08-27
   task-file conflict. The resulting tree passed all six focused files (95 tests;
   124 opt-in provider cases skipped), Assistant Engine typecheck, and
   `git diff --check`.
+- Exact-head CI then found the `computer_act` description exceeded the existing
+  320-character budget. Removed its duplicate progress clause because
+  `computer_open` already owns that requirement; all authorization/retry
+  boundaries remain. The description is now 312 characters and the focused
+  tool/prompt/appointment suite passes 66/66.
 Completed: 2026-08-27
