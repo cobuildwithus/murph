@@ -1,6 +1,6 @@
 # Hosted cold-start non-workspace latency
 
-Status: active
+Status: completed
 Updated: 2026-08-27
 
 ## Goal
@@ -167,3 +167,4 @@ Success means:
 - If the remaining latency is entirely platform boot, provider wait, workspace
   restore, typing delivery, or already-owned receipt work, preserve the evidence
   and report that no maintainable in-scope fix met the threshold.
+Completed: 2026-08-27
