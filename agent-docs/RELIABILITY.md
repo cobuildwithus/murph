@@ -861,9 +861,12 @@ Last verified: 2026-08-23
 - Linq participant add/remove context is a bounded optional sidecar on the
   existing routed group, not another work owner. Provider-event deduplication
   and optional staging run in one transaction under chat, owner, then route
-  lock order, so the next ordinary group message cannot overtake a unique
-  change after ledger insertion and projection cleanup cannot deadlock against
-  a labeled append. A unique addition atomically retains the existing anonymous
+  lock order. Established group messages and active-group edits likewise take
+  chat ownership before participant/member or route ownership, so current Linq
+  group transactions have one order across that shared lock pair. The next
+  ordinary group message cannot overtake a unique change after ledger insertion,
+  and projection cleanup cannot deadlock against a labeled append. A unique
+  addition atomically retains the existing anonymous
   route bit; a removal has no send or wake fallback. Identity and
   owner-address-book reads happen only on the
   participant webhook path, never on ordinary message ingress. Optional lookup

@@ -97,6 +97,8 @@ import {
 } from "@/src/lib/hosted-routing/thread-route-store";
 import {
   parseHostedLinqWebhookEvent,
+  requireHostedLinqMessageEditedEvent,
+  requireHostedLinqMessageReceivedEvent,
   type HostedLinqParticipantChangedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
@@ -108,6 +110,7 @@ import {
 import {
   applyHostedLinqParticipantChangeToRouteTx,
   handleHostedOnboardingLinqWebhook,
+  runHostedLinqMessageEditPreparedTransaction,
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import {
   HOSTED_CRYPTO_DOMAINS,
@@ -136,6 +139,17 @@ type RouteFixture = {
   participantClient: PrismaClient;
   threadId: string;
   threadIdentityLookupKey: string;
+};
+
+type ActiveLinqGroupRoute = {
+  canonicalAccountLookupKey: string;
+  canonicalDeliveryRouteEncrypted: string;
+  canonicalPreparedDeliveryRoute: PreparedHostedThreadContainerDeliveryRoute;
+  canonicalRecipientPhone: string;
+  canonicalThreadLookupKey: string;
+  deliveringPreparedDeliveryRoute: PreparedHostedThreadContainerDeliveryRoute;
+  deliveringRecipientPhone: string;
+  participantPhone: string;
 };
 
 function createDeferred<T = void>(): Deferred<T> {
@@ -248,6 +262,128 @@ async function createRouteFixture(): Promise<RouteFixture> {
     participantClient,
     threadId,
     threadIdentityLookupKey,
+  };
+}
+
+async function activateLinqGroupRoute(
+  fixture: RouteFixture,
+): Promise<ActiveLinqGroupRoute> {
+  const numericSuffix = String(
+    Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 7), 16)
+      % 10_000_000,
+  ).padStart(7, "0");
+  const participantPhone = `+1555${numericSuffix}`;
+  const canonicalRecipientPhone = `+1556${numericSuffix}`;
+  const deliveringRecipientPhone = `+1557${numericSuffix}`;
+  const participantPhoneLookupKey = createHostedPhoneLookupKey(
+    participantPhone,
+  );
+  const canonicalAccountLookupKey = createHostedPhoneLookupKey(
+    canonicalRecipientPhone,
+  );
+  const deliveringAccountLookupKey = createHostedPhoneLookupKey(
+    deliveringRecipientPhone,
+  );
+  if (
+    !participantPhoneLookupKey
+    || !canonicalAccountLookupKey
+    || !deliveringAccountLookupKey
+  ) {
+    throw new Error("Expected valid Linq routing phone inputs.");
+  }
+
+  await fixture.observer.hostedMember.update({
+    data: { billingStatus: "active" },
+    where: { id: fixture.ownerMemberId },
+  });
+  for (const scope of ["launch.legal", "launch.health-data"] as const) {
+    await recordHostedLaunchRequiredConsent({
+      memberId: fixture.ownerMemberId,
+      prisma: fixture.observer,
+      scope,
+      source: "linq-route-lock-order-concurrency-test",
+    });
+  }
+  const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
+    memberId: fixture.ownerMemberId,
+    phoneNumber: participantPhone,
+    prisma: fixture.observer,
+    privyUserId: null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+  });
+  await fixture.observer.hostedMemberIdentity.create({
+    data: {
+      ...identityPrivate,
+      maskedPhoneNumberHint: "*** test",
+      memberId: fixture.ownerMemberId,
+      phoneLookupKey: participantPhoneLookupKey,
+      phoneNumberVerifiedAt: new Date("2026-08-09T11:00:00.000Z"),
+    },
+  });
+
+  const canonicalDeliveryRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: canonicalAccountLookupKey,
+    channel: "linq",
+    threadId: fixture.threadId,
+  });
+  const canonicalDeliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+    containerMemberId: fixture.containerMemberId,
+    prisma: fixture.observer,
+    route: canonicalDeliveryRoute,
+  });
+  const canonicalThreadLookupKey = createHostedExternalThreadLookupKey({
+    accountLookupKey: canonicalAccountLookupKey,
+    channel: "linq",
+    threadId: fixture.threadId,
+  });
+  if (!canonicalThreadLookupKey) {
+    throw new Error("Expected a canonical Linq thread lookup key.");
+  }
+  await fixture.observer.hostedThreadRoute.update({
+    data: {
+      accountLookupKey: canonicalAccountLookupKey,
+      deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+      threadLookupKey: canonicalThreadLookupKey,
+    },
+    where: {
+      channel_threadIdentityLookupKey: {
+        channel: "linq",
+        threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+      },
+    },
+  });
+
+  const deliveringRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: deliveringAccountLookupKey,
+    channel: "linq",
+    threadId: fixture.threadId,
+  });
+  return {
+    canonicalAccountLookupKey,
+    canonicalDeliveryRouteEncrypted,
+    canonicalPreparedDeliveryRoute: {
+      containerMemberId: fixture.containerMemberId,
+      deliveryRoute: canonicalDeliveryRoute,
+      deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+      observedDeliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+    },
+    canonicalRecipientPhone,
+    canonicalThreadLookupKey,
+    deliveringPreparedDeliveryRoute: {
+      containerMemberId: fixture.containerMemberId,
+      deliveryRoute: deliveringRoute,
+      deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+        containerMemberId: fixture.containerMemberId,
+        prisma: fixture.observer,
+        route: deliveringRoute,
+      }),
+      observedDeliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+    },
+    deliveringRecipientPhone,
+    participantPhone,
   };
 }
 
@@ -725,9 +861,336 @@ function pauseHostedMemberRoutingDemotionAfterWrite(input: {
   });
 }
 
+function buildRoutedGroupMessageEvent(input: {
+  createdAt: string;
+  eventId: string;
+  messageId: string;
+  ownerPhone: string;
+  participantPhone: string;
+  text: string;
+  threadId: string;
+}) {
+  return requireHostedLinqMessageReceivedEvent(parseHostedLinqWebhookEvent(
+    JSON.stringify({
+    api_version: "v3",
+    created_at: input.createdAt,
+    data: {
+      chat: {
+        id: input.threadId,
+        is_group: true,
+        owner_handle: {
+          handle: input.ownerPhone,
+          id: "owner-handle",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      direction: "inbound",
+      id: input.messageId,
+      parts: [{ type: "text", value: input.text }],
+      sender_handle: {
+        handle: input.participantPhone,
+        id: "sender-handle",
+        service: "iMessage",
+      },
+      sent_at: input.createdAt,
+      service: "iMessage",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    webhook_version: "2026-02-03",
+    }),
+  ));
+}
+
+function buildRoutedGroupMessageEditedEvent(input: {
+  createdAt: string;
+  eventId: string;
+  messageId: string;
+  participantPhone: string;
+  text: string;
+  threadId: string;
+}) {
+  return requireHostedLinqMessageEditedEvent(parseHostedLinqWebhookEvent(
+    JSON.stringify({
+    api_version: "v3",
+    created_at: input.createdAt,
+    data: {
+      chat: { id: input.threadId },
+      direction: "inbound",
+      edited_at: input.createdAt,
+      id: input.messageId,
+      part: { index: 0, text: input.text },
+      sender_handle: {
+        handle: input.participantPhone,
+        id: "sender-handle-edit",
+        is_me: false,
+        service: "iMessage",
+      },
+    },
+    event_id: input.eventId,
+    event_type: "message.edited",
+    webhook_version: "2026-02-03",
+    }),
+  ));
+}
+
+function pauseHostedWebhookTransactionAfterRawOperation(input: {
+  client: PrismaClient;
+  locked: Deferred<void>;
+  operation?: "execute" | "query";
+  operationCall?: number;
+  pid: Deferred<number>;
+  release: Deferred<void>;
+}): PrismaClient {
+  let paused = false;
+  let rawOperationCalls = 0;
+  return new Proxy(input.client, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return <TResult>(
+          callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
+          options?: {
+            isolationLevel?: Prisma.TransactionIsolationLevel;
+            maxWait?: number;
+            timeout?: number;
+          },
+        ) => target.$transaction(async (tx) => {
+          input.pid.resolve(await readBackendPid(tx));
+          const propertyToPause = input.operation === "execute"
+            ? "$executeRaw"
+            : input.operation === "query"
+              ? "$queryRaw"
+              : null;
+          const pausedTx = new Proxy<Prisma.TransactionClient>(tx, {
+            get(transaction, transactionProperty) {
+              const value = Reflect.get(
+                transaction,
+                transactionProperty,
+                transaction,
+              );
+              if (
+                propertyToPause !== null
+                && transactionProperty === propertyToPause
+                && typeof value === "function"
+              ) {
+                return async (...args: unknown[]) => {
+                  const result = await Reflect.apply(value, transaction, args);
+                  rawOperationCalls += 1;
+                  if (
+                    !paused
+                    && rawOperationCalls === (input.operationCall ?? 1)
+                  ) {
+                    paused = true;
+                    input.locked.resolve();
+                    await input.release.promise;
+                  }
+                  return result;
+                };
+              }
+              return typeof value === "function"
+                ? value.bind(transaction)
+                : value;
+            },
+          });
+          return callback(pausedTx);
+        }, options);
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "Linq participant-change PostgreSQL ordering",
+  "Linq group PostgreSQL ordering",
   () => {
+    it.each([
+      { startOrder: "message-first" },
+      { startOrder: "edit-first" },
+    ] as const)(
+      "serializes an active-group edit with a routed message when $startOrder",
+      async ({ startOrder }) => {
+        const firstLockHeld = createDeferred();
+        const releaseFirst = createDeferred();
+        const messagePid = createDeferred<number>();
+        const editPid = createDeferred<number>();
+        let fixture: RouteFixture | null = null;
+        let messageTransaction: ReturnType<
+          typeof planHostedOnboardingLinqWebhook
+        > | null = null;
+        let editTransaction: ReturnType<
+          typeof runHostedLinqMessageEditPreparedTransaction
+        > | null = null;
+
+        try {
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          const activeRoute = await activateLinqGroupRoute(activeFixture);
+          const originalMessageId = `message_original_${randomUUID()}`;
+          const originalEvent = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_original_${randomUUID()}`,
+            messageId: originalMessageId,
+            ownerPhone: activeRoute.canonicalRecipientPhone,
+            participantPhone: activeRoute.participantPhone,
+            text: "Original group message",
+            threadId: activeFixture.threadId,
+          });
+          await expect(activeFixture.observer.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: originalEvent,
+              preparedThreadDeliveryRoute:
+                activeRoute.canonicalPreparedDeliveryRoute,
+              prisma: tx,
+            })
+          )).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+
+          const newMessageEvent = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:02:00.000Z",
+            eventId: `event_new_${randomUUID()}`,
+            messageId: `message_new_${randomUUID()}`,
+            ownerPhone: activeRoute.canonicalRecipientPhone,
+            participantPhone: activeRoute.participantPhone,
+            text: "Concurrent group message",
+            threadId: activeFixture.threadId,
+          });
+          const editEvent = buildRoutedGroupMessageEditedEvent({
+            createdAt: "2026-08-09T12:01:00.000Z",
+            eventId: `event_edit_${randomUUID()}`,
+            messageId: originalMessageId,
+            participantPhone: activeRoute.participantPhone,
+            text: "Corrected group message",
+            threadId: activeFixture.threadId,
+          });
+
+          const runMessage = (pauseAfterChatLock: boolean) => {
+            const client = pauseHostedWebhookTransactionAfterRawOperation({
+              client: activeFixture.messageClient,
+              locked: firstLockHeld,
+              ...(pauseAfterChatLock ? { operation: "execute" } : {}),
+              pid: messagePid,
+              release: releaseFirst,
+            });
+            messageTransaction = client.$transaction((tx) =>
+              planHostedOnboardingLinqWebhook({
+                event: newMessageEvent,
+                preparedThreadDeliveryRoute:
+                  activeRoute.canonicalPreparedDeliveryRoute,
+                prisma: tx,
+              })
+            );
+          };
+          const runEdit = (pauseAfterMemberLock: boolean) => {
+            const client = pauseHostedWebhookTransactionAfterRawOperation({
+              client: activeFixture.participantClient,
+              locked: firstLockHeld,
+              ...(pauseAfterMemberLock ? { operation: "query" } : {}),
+              ...(pauseAfterMemberLock ? { operationCall: 2 } : {}),
+              pid: editPid,
+              release: releaseFirst,
+            });
+            editTransaction = runHostedLinqMessageEditPreparedTransaction({
+              event: editEvent,
+              prisma: client,
+            });
+          };
+
+          if (startOrder === "message-first") {
+            runMessage(true);
+            await firstLockHeld.promise;
+            runEdit(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await editPid.promise,
+            });
+          } else {
+            runEdit(true);
+            await firstLockHeld.promise;
+            runMessage(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await messagePid.promise,
+            });
+          }
+          releaseFirst.resolve();
+
+          if (!messageTransaction || !editTransaction) {
+            throw new Error("Expected both Linq message transactions.");
+          }
+          await expect(messageTransaction).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+          await expect(editTransaction).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-message-edit",
+            },
+          });
+
+          const [newMessageWake, editWake] = await Promise.all([
+            readHostedMailboxWakeByDedupeKey({
+              dedupeKey: newMessageEvent.event_id,
+              prisma: activeFixture.observer,
+              userId: activeFixture.containerMemberId,
+            }),
+            readHostedMailboxWakeByDedupeKey({
+              dedupeKey: editEvent.event_id,
+              prisma: activeFixture.observer,
+              userId: activeFixture.containerMemberId,
+            }),
+          ]);
+          expect(newMessageWake).toMatchObject({
+            eventId: newMessageEvent.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                messageId: newMessageEvent.data.message.id,
+              },
+            },
+          });
+          expect(editWake).toMatchObject({
+            eventId: editEvent.event_id,
+            kind: "conversation.message",
+            message: {
+              channel: "linq",
+              linqMessage: {
+                chatId: activeFixture.threadId,
+                editedTextPartIndex: 0,
+                messageId: originalMessageId,
+                parts: [{
+                  type: "text",
+                  value: "Corrected group message",
+                }],
+              },
+            },
+          });
+        } finally {
+          releaseFirst.resolve();
+          await Promise.allSettled([
+            ...(messageTransaction ? [messageTransaction] : []),
+            ...(editTransaction ? [editTransaction] : []),
+          ]);
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+        }
+      },
+    );
+
     it.each([
       {
         eventType: "participant.added",
@@ -770,147 +1233,24 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           clearHostedOnboardingEnvCache();
           fixture = await createRouteFixture();
           const activeFixture = fixture;
-          const numericSuffix = String(
-            Number.parseInt(
-              randomUUID().replaceAll("-", "").slice(0, 7),
-              16,
-            ) % 10_000_000,
-          ).padStart(7, "0");
-          const participantPhone = `+1555${numericSuffix}`;
-          const canonicalRecipientPhone = `+1556${numericSuffix}`;
-          const deliveringRecipientPhone = `+1557${numericSuffix}`;
-          const participantPhoneLookupKey = createHostedPhoneLookupKey(
-            participantPhone,
-          );
-          const canonicalAccountLookupKey = createHostedPhoneLookupKey(
-            canonicalRecipientPhone,
-          );
-          const deliveringAccountLookupKey = createHostedPhoneLookupKey(
+          const activeRoute = await activateLinqGroupRoute(activeFixture);
+          const {
+            canonicalAccountLookupKey,
+            canonicalDeliveryRouteEncrypted,
+            canonicalThreadLookupKey,
+            deliveringPreparedDeliveryRoute,
             deliveringRecipientPhone,
-          );
-          if (
-            !participantPhoneLookupKey
-            || !canonicalAccountLookupKey
-            || !deliveringAccountLookupKey
-          ) {
-            throw new Error("Expected valid Linq routing phone inputs.");
-          }
-
-          await activeFixture.observer.hostedMember.update({
-            data: { billingStatus: "active" },
-            where: { id: activeFixture.ownerMemberId },
-          });
-          for (const scope of ["launch.legal", "launch.health-data"] as const) {
-            await recordHostedLaunchRequiredConsent({
-              memberId: activeFixture.ownerMemberId,
-              prisma: activeFixture.observer,
-              scope,
-              source: "linq-route-lock-order-concurrency-test",
-            });
-          }
-          const identityPrivate =
-            await buildHostedMemberIdentityPrivateColumns({
-              memberId: activeFixture.ownerMemberId,
-              phoneNumber: participantPhone,
-              prisma: activeFixture.observer,
-              privyUserId: null,
-              signupPhoneCodeSendAttemptId: null,
-              signupPhoneCodeSendAttemptStartedAt: null,
-              signupPhoneCodeSentAt: null,
-              signupPhoneNumber: null,
-            });
-          await activeFixture.observer.hostedMemberIdentity.create({
-            data: {
-              ...identityPrivate,
-              maskedPhoneNumberHint: "*** test",
-              memberId: activeFixture.ownerMemberId,
-              phoneLookupKey: participantPhoneLookupKey,
-              phoneNumberVerifiedAt: new Date("2026-08-09T11:00:00.000Z"),
-            },
-          });
-
-          const canonicalDeliveryRoute = buildHostedThreadDeliveryRoute({
-            accountLookupKey: canonicalAccountLookupKey,
-            channel: "linq",
+            participantPhone,
+          } = activeRoute;
+          const event = buildRoutedGroupMessageEvent({
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `event_${randomUUID()}`,
+            messageId: `message_${randomUUID()}`,
+            ownerPhone: deliveringRecipientPhone,
+            participantPhone,
+            text: "Route this group message",
             threadId: activeFixture.threadId,
           });
-          const canonicalDeliveryRouteEncrypted =
-            await sealHostedThreadDeliveryRoute({
-              containerMemberId: activeFixture.containerMemberId,
-              prisma: activeFixture.observer,
-              route: canonicalDeliveryRoute,
-            });
-          const canonicalThreadLookupKey =
-            createHostedExternalThreadLookupKey({
-              accountLookupKey: canonicalAccountLookupKey,
-              channel: "linq",
-              threadId: activeFixture.threadId,
-            });
-          if (!canonicalThreadLookupKey) {
-            throw new Error("Expected a canonical Linq thread lookup key.");
-          }
-          await activeFixture.observer.hostedThreadRoute.update({
-            data: {
-              accountLookupKey: canonicalAccountLookupKey,
-              deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
-              threadLookupKey: canonicalThreadLookupKey,
-            },
-            where: {
-              channel_threadIdentityLookupKey: {
-                channel: "linq",
-                threadIdentityLookupKey:
-                  activeFixture.threadIdentityLookupKey,
-              },
-            },
-          });
-          const deliveringRoute = buildHostedThreadDeliveryRoute({
-            accountLookupKey: deliveringAccountLookupKey,
-            channel: "linq",
-            threadId: activeFixture.threadId,
-          });
-          const preparedDeliveryRoute:
-            PreparedHostedThreadContainerDeliveryRoute = {
-              containerMemberId: activeFixture.containerMemberId,
-              deliveryRoute: deliveringRoute,
-              deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
-                containerMemberId: activeFixture.containerMemberId,
-                prisma: activeFixture.observer,
-                route: deliveringRoute,
-              }),
-              observedDeliveryRouteEncrypted:
-                canonicalDeliveryRouteEncrypted,
-            };
-          const event = parseHostedLinqWebhookEvent(
-            JSON.stringify({
-              api_version: "v3",
-              created_at: "2026-08-09T12:00:00.000Z",
-              data: {
-                chat: {
-                  id: activeFixture.threadId,
-                  is_group: true,
-                  owner_handle: {
-                    handle: deliveringRecipientPhone,
-                    id: "owner-handle",
-                    is_me: true,
-                    service: "iMessage",
-                  },
-                },
-                direction: "inbound",
-                id: `message_${randomUUID()}`,
-                parts: [{ type: "text", value: "Route this group message" }],
-                sender_handle: {
-                  handle: participantPhone,
-                  id: "sender-handle",
-                  service: "iMessage",
-                },
-                sent_at: "2026-08-09T12:00:00.000Z",
-                service: "iMessage",
-              },
-              event_id: `event_${randomUUID()}`,
-              event_type: "message.received",
-              webhook_version: "2026-02-03",
-            }),
-          );
           const participantEvent = buildParticipantChangeEvent({
             eventType,
             handle: participantPhone,
@@ -932,7 +1272,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                 messagePid.resolve(await readBackendPid(tx));
                 return planHostedOnboardingLinqWebhook({
                   event,
-                  preparedThreadDeliveryRoute: preparedDeliveryRoute,
+                  preparedThreadDeliveryRoute:
+                    deliveringPreparedDeliveryRoute,
                   prisma: pauseAfterDemotion
                     ? pauseHostedMemberRoutingDemotionAfterWrite({
                         demoted: messageDemoted,

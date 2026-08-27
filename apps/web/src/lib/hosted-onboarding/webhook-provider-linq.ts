@@ -1090,6 +1090,10 @@ export async function planHostedLinqMessageEditedWebhook(input: {
       );
     }
   } else {
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: event.data.chat.id,
+      tx: input.prisma,
+    });
     const authorityNow = input.now ?? new Date();
     const senderMemberId = originalWake.message.senderMemberId
       ?? (
