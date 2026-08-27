@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
   hostedPhoneLookupKeyMatchesValue: vi.fn(),
+  prepareHostedPrivyPhoneTransferSourceRetirement: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
   prismaClient: {
     label: "test-prisma",
@@ -49,6 +50,8 @@ vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
     maxWait: 5_000,
     timeout: 30_000,
   },
+  prepareHostedPrivyPhoneTransferSourceRetirement:
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx:
     mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
   readHostedPrivyPhoneTransferProof: mocks.readHostedPrivyPhoneTransferProof,
@@ -124,6 +127,14 @@ describe("settings phone sync route", () => {
     });
     mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(null);
     mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockResolvedValue({
+      rawFingerprint: "prepared-fingerprint",
+      sourceBillingRef: null,
+      sourceIdentity: null,
+      sourceMemberId: "member_unused",
+      targetIdentity: null,
+      targetMemberId: "member_123",
+    });
     mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
       autoTrialBilling: null,
       sourceMemberId: "member_unused",
@@ -238,6 +249,13 @@ describe("settings phone sync route", () => {
     expect(response.status).toBe(200);
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     expect(
+      mocks.prepareHostedPrivyPhoneTransferSourceRetirement,
+    ).toHaveBeenCalledWith({
+      prisma: mocks.prismaClient,
+      sourceMemberId: "member_unused",
+      targetMemberId: "member_123",
+    });
+    expect(
       mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
     ).toHaveBeenCalledWith({
       identity: {
@@ -253,6 +271,14 @@ describe("settings phone sync route", () => {
         suspendedAt: null,
       },
       now: expect.any(Date),
+      prepared: {
+        rawFingerprint: "prepared-fingerprint",
+        sourceBillingRef: null,
+        sourceIdentity: null,
+        sourceMemberId: "member_unused",
+        targetIdentity: null,
+        targetMemberId: "member_123",
+      },
       prisma: mocks.prismaClient,
       targetPhoneNumberBeforeTransfer: null,
       transfer,
@@ -279,6 +305,53 @@ describe("settings phone sync route", () => {
       phoneNumber: "+14155552671",
       status: "synced",
     });
+  });
+
+  it("finishes provider-backed retirement preparation before transaction checkout", async () => {
+    const transfer = {
+      phoneNumber: "+14155552671",
+      sourceMemberId: "member_unused",
+      sourcePrivyUserId: "did:privy:user_unused",
+    };
+    let releasePreparation!: () => void;
+    const preparationBlocked = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const prepared = {
+      rawFingerprint: "delayed-fingerprint",
+      sourceBillingRef: null,
+      sourceIdentity: null,
+      sourceMemberId: "member_unused",
+      targetIdentity: null,
+      targetMemberId: "member_123",
+    };
+    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockImplementationOnce(
+      async () => {
+        await preparationBlocked;
+        return prepared;
+      },
+    );
+
+    const responsePromise = postSync({
+      kind: "exact",
+      phoneNumber: "+14155552671",
+    });
+    await vi.waitFor(() => {
+      expect(
+        mocks.prepareHostedPrivyPhoneTransferSourceRetirement,
+      ).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.prismaClient.$transaction).not.toHaveBeenCalled();
+
+    releasePreparation();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(mocks.prismaClient.$transaction).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({ prepared }));
   });
 
   it("delegates auto-trial authority to the canonical source-deletion boundary", async () => {

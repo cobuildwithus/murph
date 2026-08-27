@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
+import {
   HostedBillingStatus,
   type Prisma,
   type PrismaClient,
@@ -11,6 +15,7 @@ import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-cryp
 import {
   createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKey,
+  readHostedPhoneHint,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   commitPreparedHostedMemberIdentityWriteTx,
@@ -30,6 +35,8 @@ import {
 import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
+  prepareHostedPrivyPhoneTransferSourceRetirement,
+  prepareHostedPrivyPhoneTransferSourceRetirementTx,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import {
   commitPreparedHostedMemberChannelsUpdatedTx,
@@ -46,6 +53,28 @@ const domainRootMocks = vi.hoisted(() => ({
       return undefined;
     }),
 }));
+
+const privateProjectionMocks = vi.hoisted(() => ({
+  beforeIdentityKmsProjection: null as null | (() => Promise<void>),
+}));
+
+vi.mock(
+  "@/src/lib/hosted-onboarding/member-private-codecs",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/lib/hosted-onboarding/member-private-codecs")
+    >();
+    return {
+      ...actual,
+      readHostedMemberIdentityPrivateState: async (
+        ...args: Parameters<typeof actual.readHostedMemberIdentityPrivateState>
+      ) => {
+        await privateProjectionMocks.beforeIdentityKmsProjection?.();
+        return actual.readHostedMemberIdentityPrivateState(...args);
+      },
+    };
+  },
+);
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -96,6 +125,26 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function resolveBeforeTimeout<T>(
+  operation: Promise<T>,
+  milliseconds: number,
+  message: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
@@ -281,6 +330,210 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           observer,
         });
         await disconnectClients([observer, oldPhoneWriter, transferWriter]);
+      }
+    });
+
+    it.each([
+      ["source member sorts first", "source-first"],
+      ["target member sorts first", "target-first"],
+    ] as const)(
+      "finishes delayed KMS-backed identity projection before transaction checkout when the %s",
+      async (_, memberLockOrder) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const transferWriter = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const fixture = await createFixture(observer, {
+          memberLockOrder,
+          retirementScaffold: true,
+        });
+        expect(
+          fixture.sourceMemberId.localeCompare(fixture.targetMemberId) < 0,
+        ).toBe(memberLockOrder === "source-first");
+        const projectionStarted = createDeferred();
+        const releaseProjection = createDeferred();
+        let projectionPaused = false;
+        let privateProjectionCallsDuringTransaction = 0;
+        let retirement: Promise<unknown> | null = null;
+        let transactionActive = false;
+        let transactionStarted = false;
+
+        configureIdentityPrivateFieldCodec();
+        privateProjectionMocks.beforeIdentityKmsProjection = async () => {
+          if (transactionActive) {
+            privateProjectionCallsDuringTransaction += 1;
+            throw new Error(
+              "KMS-backed identity projection ran inside the retirement transaction",
+            );
+          }
+          if (projectionPaused) {
+            return;
+          }
+          projectionPaused = true;
+          projectionStarted.resolve();
+          await releaseProjection.promise;
+        };
+
+        try {
+          retirement = (async () => {
+            const prepared =
+              await prepareHostedPrivyPhoneTransferSourceRetirement({
+                prisma: transferWriter,
+                sourceMemberId: fixture.sourceMemberId,
+                targetMemberId: fixture.targetMemberId,
+              });
+            return transferWriter.$transaction(async (tx) => {
+              transactionStarted = true;
+              transactionActive = true;
+              try {
+                const targetMember = await readHostedMemberCoreState({
+                  memberId: fixture.targetMemberId,
+                  prisma: tx,
+                });
+                if (!targetMember) {
+                  throw new Error("Expected the phone-transfer target member.");
+                }
+                return await prepareHostedPrivyPhoneTransferSourceRetirementTx({
+                  identity: {
+                    phone: {
+                      number: transferPhoneNumber,
+                      verifiedAt: transferAt.getTime(),
+                    },
+                    telegram: null,
+                    userId: fixture.targetPrivyUserId,
+                  },
+                  member: targetMember,
+                  now: transferAt,
+                  prepared,
+                  prisma: tx,
+                  targetPhoneNumberBeforeTransfer,
+                  transfer: {
+                    phoneNumber: transferPhoneNumber,
+                    sourceMemberId: fixture.sourceMemberId,
+                    sourcePrivyUserId: fixture.sourcePrivyUserId,
+                  },
+                });
+              } finally {
+                transactionActive = false;
+              }
+            }, transactionOptions);
+          })();
+
+          await Promise.race([
+            projectionStarted.promise,
+            retirement.then(() => {
+              throw new Error(
+                "The retirement completed before provider preparation paused.",
+              );
+            }),
+          ]);
+          expect(transactionStarted).toBe(false);
+          await expect(resolveBeforeTimeout(
+            transferWriter.$queryRaw`SELECT 1`,
+            2_000,
+            "the preparation client stayed checked out",
+          )).resolves.toBeDefined();
+          await expect(resolveBeforeTimeout(
+            observer.$transaction(async (tx) => {
+              await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+                prisma: tx,
+                targetPhoneNumberBeforeTransfer,
+                transferPhoneNumber,
+              });
+              for (const memberId of [
+                fixture.sourceMemberId,
+                fixture.targetMemberId,
+              ].sort()) {
+                await lockHostedMemberRow(tx, memberId);
+              }
+              return "transfer-locks-available" as const;
+            }, transactionOptions),
+            2_000,
+            "phone or member work was blocked during provider preparation",
+          )).resolves.toBe("transfer-locks-available");
+
+          releaseProjection.resolve();
+          await expect(retirement).resolves.toEqual({
+            autoTrialBilling: null,
+            sourceMemberId: fixture.sourceMemberId,
+          });
+          expect(transactionStarted).toBe(true);
+          expect(privateProjectionCallsDuringTransaction).toBe(0);
+          await expect(observer.hostedMember.findUnique({
+            select: { suspendedAt: true },
+            where: { id: fixture.sourceMemberId },
+          })).resolves.toMatchObject({
+            suspendedAt: transferAt,
+          });
+        } finally {
+          transactionActive = false;
+          releaseProjection.resolve();
+          if (retirement) {
+            await Promise.allSettled([retirement]);
+          }
+          resetTestSeams();
+          await deleteFixtureMembers({ fixture, observer });
+          await disconnectClients([observer, transferWriter]);
+        }
+      },
+    );
+
+    it("rejects exact target identity-row drift under the canonical locks", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const transferWriter = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createFixture(observer, {
+        retirementScaffold: true,
+      });
+      configureIdentityPrivateFieldCodec();
+
+      try {
+        const prepared =
+          await prepareHostedPrivyPhoneTransferSourceRetirement({
+            prisma: transferWriter,
+            sourceMemberId: fixture.sourceMemberId,
+            targetMemberId: fixture.targetMemberId,
+          });
+        await observer.hostedMemberIdentity.update({
+          data: { maskedPhoneNumberHint: "drifted" },
+          where: { memberId: fixture.targetMemberId },
+        });
+        const targetMember = await readHostedMemberCoreState({
+          memberId: fixture.targetMemberId,
+          prisma: transferWriter,
+        });
+        if (!targetMember) {
+          throw new Error("Expected the phone-transfer target member.");
+        }
+
+        await expect(transferWriter.$transaction((tx) =>
+          prepareHostedPrivyPhoneTransferSourceRetirementTx({
+            identity: {
+              phone: {
+                number: transferPhoneNumber,
+                verifiedAt: transferAt.getTime(),
+              },
+              telegram: null,
+              userId: fixture.targetPrivyUserId,
+            },
+            member: targetMember,
+            now: transferAt,
+            prepared,
+            prisma: tx,
+            targetPhoneNumberBeforeTransfer,
+            transfer: {
+              phoneNumber: transferPhoneNumber,
+              sourceMemberId: fixture.sourceMemberId,
+              sourcePrivyUserId: fixture.sourcePrivyUserId,
+            },
+          }), transactionOptions)).rejects.toMatchObject({
+          code: "PRIVY_PHONE_NOT_READY",
+        });
+        await expect(observer.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.sourceMemberId },
+        })).resolves.toEqual({ suspendedAt: null });
+      } finally {
+        resetTestSeams();
+        await deleteFixtureMembers({ fixture, observer });
+        await disconnectClients([observer, transferWriter]);
       }
     });
 
@@ -572,12 +825,22 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
 async function createFixture(
   prisma: PrismaClient,
+  input: {
+    memberLockOrder?: "source-first" | "target-first";
+    retirementScaffold?: boolean;
+  } = {},
 ): Promise<PhoneTransferFixture> {
   const fixtureId = randomUUID();
+  const sourceSortPrefix = input.memberLockOrder === "target-first" ? "z" : "a";
+  const targetSortPrefix = input.memberLockOrder === "target-first" ? "a" : "z";
   const fixture = {
-    sourceMemberId: `member_phone_transfer_source_${fixtureId}`,
+    sourceMemberId: input.memberLockOrder
+      ? `member_phone_transfer_${sourceSortPrefix}_source_${fixtureId}`
+      : `member_phone_transfer_source_${fixtureId}`,
     sourcePrivyUserId: `did:privy:phone-transfer-source-${fixtureId}`,
-    targetMemberId: `member_phone_transfer_target_${fixtureId}`,
+    targetMemberId: input.memberLockOrder
+      ? `member_phone_transfer_${targetSortPrefix}_target_${fixtureId}`
+      : `member_phone_transfer_target_${fixtureId}`,
     targetPrivyUserId: `did:privy:phone-transfer-target-${fixtureId}`,
   };
   const sourcePhoneLookupKey = createHostedPhoneLookupKey(transferPhoneNumber);
@@ -615,6 +878,12 @@ async function createFixture(
   await prisma.hostedMemberIdentity.createMany({
     data: [
       {
+        ...(input.retirementScaffold
+          ? {
+              maskedPhoneNumberHint: readHostedPhoneHint(transferPhoneNumber),
+              phoneNumberVerifiedAt: transferAt,
+            }
+          : {}),
         memberId: fixture.sourceMemberId,
         phoneLookupKey: sourcePhoneLookupKey,
         phoneNumberEncrypted: transferPhoneNumber,
@@ -630,6 +899,54 @@ async function createFixture(
       },
     ],
   });
+  if (input.retirementScaffold) {
+    const sourceControlRootKeyId = `root_control_${fixtureId}`;
+    const sourceControlRootEnvelope = {
+      authoritySignature: {
+        alg: "GCP-KMS-EC-P256-SHA256",
+        keyVersionName: "test-authority-key",
+        signature: "test-signature",
+        signedAt: transferAt.toISOString(),
+      },
+      createdAt: transferAt.toISOString(),
+      domain: "control",
+      generation: 1,
+      rootKeyId: sourceControlRootKeyId,
+      schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+      updatedAt: transferAt.toISOString(),
+      userId: fixture.sourceMemberId,
+      wraps: [{
+        additionalAuthenticatedData: "test-aad",
+        ciphertextBlob: "test-ciphertext",
+        encryptionContext: {},
+        kind: "gcp-kms",
+        kmsKeyName: "test-kms-key",
+        recipient: "web-control-kms",
+      }],
+    } satisfies HostedDomainRootKeyEnvelopeV1;
+    await prisma.hostedUserCryptoEnvelope.create({
+      data: {
+        activatedAt: transferAt,
+        domain: "control",
+        id: `envelope_control_${fixtureId}`,
+        rootKeyId: sourceControlRootKeyId,
+        signedEnvelopeJson: sourceControlRootEnvelope,
+        status: "active",
+        userId: fixture.sourceMemberId,
+      },
+    });
+    await prisma.hostedUserCryptoAudit.create({
+      data: {
+        action: "domain-root.provisioned",
+        actor: "web",
+        domain: "control",
+        id: `audit_control_${fixtureId}`,
+        reason: "hosted-member.identity-private-fields",
+        rootKeyId: sourceControlRootKeyId,
+        userId: fixture.sourceMemberId,
+      },
+    });
+  }
 
   return fixture;
 }
@@ -718,6 +1035,7 @@ function configureIdentityPrivateFieldCodec(): void {
 }
 
 function resetTestSeams(): void {
+  privateProjectionMocks.beforeIdentityKmsProjection = null;
   domainRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly
     .mockReset()
     .mockResolvedValue(undefined);

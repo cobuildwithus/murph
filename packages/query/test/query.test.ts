@@ -166,7 +166,7 @@ tags:
 ---
 
 Body line
-`);
+`, { mode: "tolerant" });
 
   assert.deepEqual(parsed.attributes, {
     title: "Flexible Title",
@@ -182,11 +182,33 @@ title broken
 ---
 
 Body line
-`);
+`, { mode: "tolerant" });
 
   assert.deepEqual(parsed.attributes, {});
   assert.equal(parsed.rawFrontmatter, null);
   assert.equal(parsed.body, "---\ntitle broken\n---\n\nBody line");
+});
+
+test("parseMarkdownDocument keeps strict source diagnostics safe and field-specific", () => {
+  assert.throws(
+    () => parseMarkdownDocument(`---
+title: Example
+broken
+---
+`, {
+      mode: "strict",
+      relativePath: "journal/2026/2026-08-24.md",
+    }),
+    {
+      code: "QUERY_SOURCE_INVALID",
+      details: {
+        issue: "frontmatter_invalid",
+        lineNumber: 3,
+        querySource: true,
+        relativePath: "journal/2026/2026-08-24.md",
+      },
+    },
+  );
 });
 
 test("health frontmatter parsing keeps strict errors and trimmed bodies", () => {
@@ -1485,7 +1507,14 @@ test("readVault rejects vault metadata with removed layout fields", async () => 
 
     await assert.rejects(
       () => readVault(vaultRoot),
-      (error) => hasErrorCode(error, "VAULT_INVALID_METADATA"),
+      {
+        code: "QUERY_SOURCE_INVALID",
+        details: {
+          issue: "metadata_invalid",
+          querySource: true,
+          relativePath: "vault.json",
+        },
+      },
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -1503,7 +1532,14 @@ test("readVault rejects explicit older vault format versions", async () => {
 
     await assert.rejects(
       () => readVault(vaultRoot),
-      (error) => hasErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
+      {
+        code: "QUERY_SOURCE_INVALID",
+        details: {
+          issue: "unsupported_format",
+          querySource: true,
+          relativePath: "vault.json",
+        },
+      },
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -1521,7 +1557,14 @@ test("searchVaultRuntime rejects explicit newer vault format versions before reb
 
     await assert.rejects(
       () => searchVaultRuntime(vaultRoot, "lab report"),
-      (error) => hasErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
+      {
+        code: "QUERY_SOURCE_INVALID",
+        details: {
+          issue: "unsupported_format",
+          querySource: true,
+          relativePath: "vault.json",
+        },
+      },
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -1868,7 +1911,15 @@ test("readVault rejects alias-heavy fixtures once query reads go canonical-only"
   try {
     await assert.rejects(
       () => readVault(vaultRoot),
-      /Missing canonical "experimentId" in experiment frontmatter at bank\/experiments\/recovery-plan\.md\./u,
+      {
+        code: "QUERY_SOURCE_INVALID",
+        details: {
+          field: "experimentId",
+          issue: "missing_field",
+          querySource: true,
+          relativePath: "bank/experiments/recovery-plan.md",
+        },
+      },
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

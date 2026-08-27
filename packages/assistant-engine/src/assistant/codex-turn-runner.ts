@@ -92,6 +92,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
+import type {
+  AnalyzeVideoTurnState,
+} from '../assistant-codex/analyze-video-tool.js'
 import {
   resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputItemInput,
@@ -265,6 +268,7 @@ export async function executeCodexTurnWithRecovery(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   input: AssistantMessageInput
   onFinishWithoutReplyAccepted?: ((
@@ -307,6 +311,7 @@ export async function executeCodexTurnWithRecovery(input: {
   let attemptOutcome: AssistantCodexAttemptOutcome
   try {
     attemptOutcome = await executeAssistantCodexAttempt({
+      analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       attemptPlan,
       executionPlan,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
@@ -465,6 +470,7 @@ function emitCodexPlanTraceEvent(input: {
 }
 
 async function executeAssistantCodexAttempt(input: {
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
   onProviderRequestStarted?: ((event: {
@@ -620,6 +626,7 @@ async function executeAssistantCodexAttempt(input: {
         abortSignal: serviceTier
           ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
           : executionPlan.input.abortSignal,
+        analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
         activeTurnId: executionPlan.turnId,
         activeTurnSteering:
           hostedImageCompletionNativeCapabilitiesRestrictedTurn

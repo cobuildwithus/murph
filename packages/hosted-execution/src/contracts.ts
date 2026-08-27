@@ -246,6 +246,7 @@ export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
   "context-handoff",
   "creative-response",
   "creative-response-text",
+  "operator-message",
 ] as const;
 
 export type HostedExecutionAssistantNotificationPromptProfile =
@@ -290,6 +291,11 @@ export interface HostedExecutionGroupContextHandoffNotification {
   originAssistantInputId: string;
 }
 
+export interface HostedExecutionOperatorTaskNotification {
+  expiresAt: string;
+  taskId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
@@ -299,6 +305,7 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   groupContextHandoff?: HostedExecutionGroupContextHandoffNotification;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  operatorTask?: HostedExecutionOperatorTaskNotification;
   privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;
@@ -335,6 +342,11 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   kind: "consented_member";
   membershipId: string;
   permissionDigest: string;
+}
+
+export interface HostedExecutionAssistantAskOperatorTaskTarget {
+  kind: "operator_task";
+  taskId: string;
 }
 
 /**
@@ -381,6 +393,7 @@ export type HostedExecutionAssistantAskResultDestination =
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskOperatorTaskTarget
   | HostedExecutionAssistantAskCurrentSenderTarget;
 
 export function isHostedExecutionAssistantAskCurrentSenderTarget(
@@ -432,6 +445,12 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
+export interface HostedExecutionAssistantAskOperatorTaskRequestedPayload {
+  expiresAt: string;
+  question: string;
+  target: HostedExecutionAssistantAskOperatorTaskTarget;
+}
+
 export interface HostedExecutionAssistantAskCurrentSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
@@ -450,6 +469,7 @@ export interface HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload {
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
+  | HostedExecutionAssistantAskOperatorTaskRequestedPayload
   | HostedExecutionAssistantAskCurrentSenderRequestedPayload
   | HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload;
 

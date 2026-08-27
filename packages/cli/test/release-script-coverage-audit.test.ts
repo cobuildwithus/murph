@@ -1327,13 +1327,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.136')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.138')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.136'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.138'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1908,12 +1908,37 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toMatch(
       /A contract\s+mismatch or theoretical concern is evidence, not a finding, unless it\s+establishes that harm/u,
     )
+    expect(prDeepReviewPrompt).toContain(
+      '`FINDINGS` means the PR is not ready to merge as written',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'A category label never lowers this threshold',
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /If the PR can responsibly merge without correcting an observation, it is not a\s+finding/u,
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'as a non-blocking review note under',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'whose only gap is supplementary disclosure',
+    )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
     expect(prDeepReviewPrompt).toMatch(
       /rare one-window miss affecting one or\s+a\s+few members/u,
     )
     expect(prDeepReviewPrompt).toContain('Do not demand replay, backfill, migration, dual-write,')
+    expect(prDeepReviewPrompt).toContain('`Review notes:` section')
+    expect(prDeepReviewPrompt).toContain(
+      'Review notes do not require remediation before merge',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'do not become prior\nfindings in later rounds',
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /no\s+qualifying findings and one or more review notes must return `ROUND_OUTCOME:\s+PASS`/u,
+    )
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: PASS`')
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: FINDINGS`')
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: RETROSPECTIVE_REQUIRED`')
@@ -1935,7 +1960,7 @@ describe('monorepo release flow coverage audit', () => {
       'Every material behavior or ownership change is necessary',
     )
     expect(prDeepReviewPrompt).toMatch(
-      /Every non-obvious affected surface is(?: also)?\s+disclosed/u,
+      /Every material non-obvious affected surface whose omission would\s+make the merge contract meaningfully misleading is disclosed/u,
     )
     expect(prDeepReviewPrompt).toContain(
       'applicable frontend and Product UX lenses own rendered proof',
@@ -1943,14 +1968,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain(
       'routed local Product UX review',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'Disclosure does not make\nan unsafe or needless change acceptable',
+    expect(prDeepReviewPrompt).toMatch(
+      /Disclosure does not make an\s+unsafe or needless change acceptable/u,
     )
     expect(prDeepReviewPrompt).toContain(
-      'Delete or split unnecessary scope. When\nthe surface is necessary but undisclosed',
+      'under the\n**Purpose Drift** rule in the Finding bar below',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'require the intent contract to add the reason',
+    expect(prDeepReviewPrompt).not.toMatch(
+      /surface is necessary but undisclosed, require the PR intent contract/u,
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /for necessary but materially misleading undisclosed\s+scope, require the intent contract to add the reason and regression proof/u,
     )
     expect(reviewGptConfig).toContain(
       'review_gpt_register_dir_preset "completion-specialists"',
@@ -3009,7 +3037,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     }
   })
 
-  it('enforces the assembled completion-specialists prompt budget for canonical and Frog callers', () => {
+  it('enforces the assembled completion-specialists prompt budget', () => {
     const preflightHarness = `
 source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"
 review_gpt_require_completion_specialists_prompt_budget "$@"
@@ -3021,28 +3049,11 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     const canonicalPrompt = workflow.match(
       /pnpm --silent review:gpt completion-specialists[\s\S]*?--prompt "([^"]+)"/u,
     )?.[1]
-    const frogAutofix = readFileSync(
-      path.join(repoRoot, 'scripts', 'frog-autofix.ts'),
-      'utf8',
-    )
-    const frogPromptTemplate = frogAutofix.match(
-      /prompt: `([^`]*SPECIALIST_REVIEW_COMPLETE[^`]*)`/u,
-    )?.[1]
     expect(canonicalPrompt).toBeTruthy()
-    expect(frogPromptTemplate).toBeTruthy()
 
     const renderedCanonicalPrompt = canonicalPrompt!.replace(
       /\$\([^)]*\)/gu,
       'a'.repeat(40),
-    )
-    const renderedFrogPrompt = frogPromptTemplate!
-      .replace(/\$\{pullRequest\}/gu, '9'.repeat(10))
-      .replace(/\$\{options\.issueNumber\}/gu, '9'.repeat(10))
-      .replace(/\$\{head\.slice\(0, 7\)\}/gu, 'a'.repeat(7))
-      .replace(/\$\{head\.slice\(0, 12\)\}/gu, 'a'.repeat(12))
-      .replace(/\$\{head\}/gu, 'a'.repeat(40))
-    expect(renderedFrogPrompt).toContain(
-      'place one SPECIALIST_OUTCOME line immediately before final SPECIALIST_REVIEW_COMPLETE',
     )
 
     const runBudget = (prompt: string) =>
@@ -3066,10 +3077,8 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
         },
       )
 
-    for (const prompt of [renderedCanonicalPrompt, renderedFrogPrompt]) {
-      const result = runBudget(prompt)
-      expect(result.status, result.stderr).toBe(0)
-    }
+    const canonicalResult = runBudget(renderedCanonicalPrompt)
+    expect(canonicalResult.status, canonicalResult.stderr).toBe(0)
 
     const oversizedResult = runBudget('x'.repeat(1_000))
     expect(oversizedResult.status).not.toBe(0)
@@ -3077,7 +3086,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'assembled completion-specialists prompt is',
     )
     expect(oversizedResult.stderr).toContain(
-      'canonical/Frog budget is 6500',
+      'canonical budget is 6500',
     )
     const mixedPresetResult = spawnSync(
       'bash',
@@ -4455,8 +4464,6 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS')
-    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_PATH')
-    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_SHA256')
     expect(fullPackageScript).toContain('review-phase.json')
     expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
@@ -4649,6 +4656,11 @@ printf 'ZIP: %s (%s bytes)\n' \
         'agent-docs/operations/product-ux.md',
         'product UX workflow\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+        'assistant verification workflow\n',
+      )
       writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
       writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
@@ -4673,21 +4685,6 @@ printf 'ZIP: %s (%s bytes)\n' \
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
-      const expectedParentBody = [
-        `ReviewGPT first-reviewed head: ${firstHead}`,
-        'ReviewGPT context sensitivity: routine',
-        'Frog autofix issue: #123',
-        '',
-      ].join('\n')
-      writeHarnessFile(
-        harnessRoot,
-        'audit-packages/frog-autofix-pr-body.md',
-        expectedParentBody,
-      )
-      const expectedParentBodySha256 = createHash('sha256')
-        .update(expectedParentBody)
-        .digest('hex')
-
       writeHarnessFile(
         harnessRoot,
         'packages/health-commons/content/sources/demo/source.md',
@@ -4858,6 +4855,7 @@ printf 'ZIP: %s (%s bytes)\n' \
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
+          '.agents/skills/verify-murph-assistant/SKILL.md',
           packagedEvidencePath,
           supplementalSkillPath,
           supplementalProofPath,
@@ -5125,46 +5123,6 @@ printf 'ZIP: %s (%s bytes)\n' \
           { encoding: 'utf8' },
         ),
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
-      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
-
-      writeHarnessFile(
-        harnessRoot,
-        'audit-packages/frog-autofix-pr-body.md',
-        expectedParentBody,
-      )
-      const roundOneParentBody = invokePackager('round-one-parent-body', firstHead, {
-        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
-          'audit-packages/frog-autofix-pr-body.md',
-        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: expectedParentBodySha256,
-        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
-        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
-        REVIEW_GPT_ROUND_NUMBER: '1',
-      })
-      expect(
-        roundOneParentBody.result.status,
-        roundOneParentBody.result.stderr,
-      ).toBe(0)
-      expect(execFileSync(
-        'unzip',
-        ['-p', roundOneParentBody.zipPath, 'review-gpt-pr-context/pr-body.md'],
-        { encoding: 'utf8' },
-      )).toBe(expectedParentBody)
-      expect(listZipEntries(roundOneParentBody.zipPath)).not.toContain(
-        'audit-packages/frog-autofix-pr-body.md',
-      )
-
-      const changedParentBody = invokePackager('changed-parent-body', firstHead, {
-        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
-          'audit-packages/frog-autofix-pr-body.md',
-        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: 'f'.repeat(64),
-        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
-        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
-        REVIEW_GPT_ROUND_NUMBER: '1',
-      })
-      expect(changedParentBody.result.status).not.toBe(0)
-      expect(changedParentBody.result.stderr).toContain(
-        'expected ReviewGPT PR body evidence changed before packaging',
-      )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {

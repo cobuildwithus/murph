@@ -4323,6 +4323,7 @@ test("Junction sparse corrections reject excessive calendar-refresh fanout", asy
 
 test("Junction dense resource jobs yield between closed calendar days", async () => {
   const requests: string[] = [];
+  const requestTimingCategories: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
@@ -4364,6 +4365,10 @@ test("Junction dense resource jobs yield between closed calendar days", async ()
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
+      recordProviderRequestTiming: (category, elapsedMs) => {
+        assert.ok(Number.isFinite(elapsedMs) && elapsedMs >= 0);
+        requestTimingCategories.push(category);
+      },
       shouldYield: () => requests.some((url) => url.includes("/v2/timeseries/")),
     }),
     job,
@@ -4379,6 +4384,7 @@ test("Junction dense resource jobs yield between closed calendar days", async ()
   );
   const timeseriesRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
   assert.equal(timeseriesRequests.length, 1);
+  assert.deepEqual(requestTimingCategories, ["inventory", "resource"]);
   assertJunctionWindowQuery(
     requireValue(timeseriesRequests[0], "Junction resource job should fetch its first closed day."),
     "2026-04-01",

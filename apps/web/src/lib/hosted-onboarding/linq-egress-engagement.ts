@@ -53,6 +53,7 @@ type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 export type HostedLinqRuntimeEgressAssertionResult = {
   linePhoneNumberLookupKey?: string;
   resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  sourceEventId?: string;
 };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
@@ -257,6 +258,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         targetKind: "thread",
         threadIsDirect: true,
       },
+      sourceEventId: persistedDirectInbound.sourceEventId,
     };
   }
 
@@ -277,6 +279,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
 interface MatchingPersistedHostedLinqDirectInbound {
   accountLookupKey: string | null;
   directRecipient: string;
+  sourceEventId: string;
   target: string;
 }
 
@@ -379,6 +382,7 @@ async function readMatchingPersistedHostedLinqDirectInboundMailboxItem(input: {
   return {
     accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
     directRecipient: wake.message.linqMessage.from,
+    sourceEventId: item.dedupeKey,
     target: wake.message.linqMessage.chatId,
   };
 }

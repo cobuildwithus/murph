@@ -2,6 +2,7 @@ import {
   bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitions,
+  immunizationImportPayloadSchema,
   type JsonObject,
   type HealthEntityDefinition,
   type HealthEntityKind,
@@ -302,6 +303,7 @@ const checkedHealthEntityDescriptorExtensions = {
       },
     },
     core: {
+      payloadSchema: immunizationImportPayloadSchema,
       resultIdField: "eventId",
       resultCapabilities: ["ledger-file"],
       runtimeMethod: "appendImmunization",

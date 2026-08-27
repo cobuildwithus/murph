@@ -79,9 +79,9 @@ function createHostedRuntimeDeviceSyncImporter(
   importer: DeviceSyncImporterPort,
 ): DeviceSyncImporterPort {
   return {
-    async importDeviceProviderSnapshot(input) {
+    async importDeviceProviderSnapshot(input, options) {
       try {
-        return await importer.importDeviceProviderSnapshot(input);
+        return await importer.importDeviceProviderSnapshot(input, options);
       } catch (error) {
         throw translateHostedRuntimeDeviceSyncImporterError(error);
       }

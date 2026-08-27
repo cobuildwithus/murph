@@ -19,6 +19,7 @@ import {
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
   buildHostedThreadDeliveryRoute,
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
   openHostedThreadDeliveryRoute,
   sealHostedThreadDeliveryRoute,
 } from "../src/lib/hosted-routing/thread-delivery-route";
@@ -90,6 +91,12 @@ const usageReferralMocks = vi.hoisted(() => ({
 const preparedThreadMocks = vi.hoisted(() => ({
   ensureHostedPreparedLinqThreadContainerRouteTx: vi.fn(),
 }));
+const groupStoreMocks = vi.hoisted(() => ({
+  ensureHostedGroupStructureForThreadContainerTx: vi.fn(async () => ({
+    created: true,
+    groupId: "group_materialized_123",
+  })),
+}));
 const pendingGroupSetupMocks = vi.hoisted(() => ({
   prepareHostedPendingGroupSetupForParticipants: vi.fn(),
   readHostedPendingGroupSetup: vi.fn(),
@@ -115,6 +122,17 @@ vi.mock("../src/lib/hosted-growth/usage-referral", () => ({
   reconcileHostedUsageReferralRewardAfterCommit:
     usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
 }));
+
+vi.mock("../src/lib/hosted-groups/group-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-groups/group-store")
+  >();
+  return {
+    ...actual,
+    ensureHostedGroupStructureForThreadContainerTx:
+      groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx,
+  };
+});
 
 vi.mock("../src/lib/hosted-groups/prepared-thread-container", async (importOriginal) => {
   const actual = await importOriginal<
@@ -344,6 +362,10 @@ const TEST_KEYRING_ENTRIES = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx.mockResolvedValue({
+    created: true,
+    groupId: "group_materialized_123",
+  });
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockReset();
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockResolvedValue(null);
   pendingGroupSetupMocks.prepareHostedPendingGroupSetupForParticipants
@@ -3413,6 +3435,14 @@ describe("Linq explicit external-thread routing", () => {
         deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
     });
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledTimes(1);
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledWith({
+        containerMemberId: "member_thread_container_123",
+        now: new Date("2026-06-24T00:00:00.000Z"),
+        tx: prisma,
+      });
     expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
     expect(prisma.readDeliveryRouteEncrypted("member_thread_container_123"))
       .toMatch(/^hsb-test:/u);
@@ -3467,6 +3497,62 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("materializes the same hosted-group structure for a new Telegram group route", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const owner = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_telegram",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(owner);
+    vi.mocked(hostedMemberStore.createHostedMember).mockResolvedValue({
+      ...owner,
+      id: "member_thread_container_telegram",
+    });
+    vi.mocked(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx)
+      .mockResolvedValue(undefined);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_activation_telegram",
+        userId: "member_thread_container_telegram",
+      }),
+    });
+    const preparedCreation = await prepareThreadContainerCreationForTest({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      containerMemberId: "member_thread_container_telegram",
+      prisma: prisma as unknown as Prisma.TransactionClient,
+      threadId: "telegram_group_123",
+    });
+
+    await expect(ensureHostedThreadContainerRouteTx({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+      ownerMemberId: "member_owner_telegram",
+      preparedCreation,
+      prisma: prisma as unknown as Prisma.TransactionClient,
+      threadId: "telegram_group_123",
+    })).resolves.toMatchObject({
+      containerMemberId: "member_thread_container_telegram",
+      created: true,
+    });
+
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledOnce();
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledWith({
+        containerMemberId: "member_thread_container_telegram",
+        now: new Date("2026-06-24T00:00:00.000Z"),
+        tx: prisma,
+      });
   });
 
   it("routes a bound Linq group thread into the container runtime", async () => {
@@ -8329,7 +8415,7 @@ describe("Linq group chat auto-provision", () => {
         ? query.join("?")
         : (query as Prisma.Sql).sql;
       if (sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       )) {
         expect(transactionOpen).toBe(false);
       }
@@ -8466,7 +8552,7 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.$executeRaw.mock.calls.map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ))).toHaveLength(0);
 
     currentParticipantMemberId = boundaryParticipantMemberId;
@@ -8498,7 +8584,7 @@ describe("Linq group chat auto-provision", () => {
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
     expect(participantReconciles[0]?.sql).toContain(
@@ -8620,7 +8706,7 @@ describe("Linq group chat auto-provision", () => {
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
     expect(participantReconciles[0]?.values).toContain(false);

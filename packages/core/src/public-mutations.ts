@@ -12,6 +12,7 @@ import {
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
+  validateSampleImport as validateSampleImportInternal,
   resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
 } from "./mutations.ts";
 import {
@@ -570,6 +571,12 @@ export async function importSamples(
   return withCanonicalInputWriteLock(input, importSamplesInternal);
 }
 
+export async function validateSampleImport(
+  input: Parameters<typeof validateSampleImportInternal>[0],
+): ReturnType<typeof validateSampleImportInternal> {
+  return validateSampleImportInternal(input);
+}
+
 export async function upsertProvider(
   input: Parameters<typeof upsertProviderInternal>[0],
 ): ReturnType<typeof upsertProviderInternal> {
@@ -626,8 +633,11 @@ export async function promoteInboxExperimentNote(
 
 export async function importDeviceBatch(
   input: Parameters<typeof importDeviceBatchInternal>[0],
+  options: Parameters<typeof importDeviceBatchInternal>[1] = {},
 ): ReturnType<typeof importDeviceBatchInternal> {
-  return withCanonicalInputWriteLock(input, importDeviceBatchInternal);
+  return withCanonicalWriteLock(input.vaultRoot, () =>
+    importDeviceBatchInternal(input, options),
+  );
 }
 
 export async function dedupeDeviceEventsByExternalRef(

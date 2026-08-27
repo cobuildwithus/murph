@@ -325,6 +325,7 @@ export function createWorkspaceSnapshotSessionService(input: {
           newWorkspaceCandidateCount,
           outcome,
           recordedCandidateCount,
+          workspaceAttemptId: sessionInput.attemptId,
         });
         return session;
       };
@@ -457,6 +458,7 @@ export function createWorkspaceSnapshotSessionService(input: {
           newWorkspaceCandidateCount,
           outcome: "failed",
           recordedCandidateCount,
+          workspaceAttemptId: sessionInput.attemptId,
         });
         throw error;
       }
@@ -846,6 +848,7 @@ function emitHostedWorkspaceSnapshotSessionStartDiagnostics(input: {
   newWorkspaceCandidateCount: number;
   outcome: HostedWorkspaceSnapshotSessionStartOutcome;
   recordedCandidateCount: number;
+  workspaceAttemptId: string;
 }): void {
   const totalDurationMs = input.diagnostics.alarmCandidateWorkDurationMs
     + input.diagnostics.ownerValidationDurationMs
@@ -883,6 +886,7 @@ function emitHostedWorkspaceSnapshotSessionStartDiagnostics(input: {
         : input.diagnostics.currentSubstage,
       snapshotStartWriteFenceOwnerValidationDurationMs:
         input.diagnostics.ownerValidationDurationMs,
+      workspaceAttemptId: input.workspaceAttemptId,
     },
     level: input.outcome === "failed" ? "warn" : "info",
     message: "Hosted runner workspace snapshot session start diagnostic.",

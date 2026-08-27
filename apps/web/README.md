@@ -292,6 +292,18 @@ The Overview Personal Patterns section also uses the encrypted browser-vault rep
   usage-credit reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
+Hosted Stripe receipt reconciliation emits one failure-only structured log per
+failed attempt. Its closed `stage` vocabulary is `event_retrieval`,
+`event_application`, `post_commit`, and `receipt_finalization`. The payload keeps
+the existing bounded event suffix and may add only a bounded sanitized error
+name, stable error code, sanitized top-level error message, and the existing
+Stripe-safe type, raw type, code, decline code, parameter, status, and validated
+opaque request-id projection. A top-level retry wrapper may inspect only its
+direct cause for those same Stripe-safe fields. The log never includes a raw
+error, stack, provider object or payload, member/customer/subscription/payment
+identifiers, submitted values, credentials, URLs, paths, or message content;
+Stripe request ids are correlation-only.
+
 ## Non-goals
 
 - canonical health-data storage
@@ -708,10 +720,14 @@ The Kernel API key stays in `apps/web` only. Cloudflare-hosted execution reaches
 computer-use through signed `web-control.worker` callbacks; neither Cloudflare
 nor Codex dynamic tool payloads receive raw Kernel credentials or live-view
 URLs.
-Kernel live-view iframe and WebSocket origins are code-owned from Kernel's
-documented CSP sources (`https://*.onkernel.com:8443` and
-`wss://*.onkernel.com:8443`) rather than operator-managed environment
-configuration.
+Kernel live-view origins are code-owned from Kernel's documented
+`*.kernel.sh:8443` and `*.onkernel.com:8443` host families rather than
+operator-managed environment configuration. One canonical host-suffix list
+derives the HTTPS iframe, HTTPS/WebSocket CSP, and URL-validation policies. A
+Kernel browser session remains available to Web-owned automation when its
+optional live-view URL does not match those sources; direct handoff validates
+the stored URL before publishing a link, and Managed Auth validates before
+converting to its Live View fallback.
 
 ## Product label databases
 
@@ -751,19 +767,24 @@ The current search path uses built-in Postgres full-text search plus the
 their existing 250-candidate SQL bound, and supplement searches retain their
 existing ranking path. Private food-name search uses a separate bounded
 retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 5,000 nearest-name matches, and 5,000
-deterministic canonical representatives from either its full-text arm or its
-trigram fallback before similarity scoring, canonical-key deduplication, and
-window sorting. Ranking is deterministic within that admitted set; it is
-intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
-continue to use direct lookup paths.
+most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
+nearest-name candidates before similarity scoring, canonical-key deduplication,
+and window sorting. Exactly one GiST branch is realized: full-text searches use
+strict-word-nearest names, while no-FTS typo searches use whole-name distance
+and its matching whole-name threshold. That shared metric keeps eligible typo
+matches ahead of ineligible names before the cap. The bounded admissions
+preserve representative choice and canonical diversity across the established
+5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
+within the admitted set; it is intentionally not an exhaustive whole-catalog
+ranking. Exact IDs and UPCs continue to use direct lookup
+paths.
 
 For an existing labels database, run
 `psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
-create the foods exact-name-rank, GiST name-rank, and canonical-rank indexes
-concurrently before deploying web code that uses this query shape. The
-production build preflight validates all three exact definitions plus their
-live/ready/valid state and fails closed if the rollout is missing or incomplete.
+create the foods exact-name-rank and GiST name-rank indexes concurrently before
+deploying web code that uses this query shape. The production build preflight
+validates both exact definitions plus their live/ready/valid state and fails
+closed if the rollout is missing or incomplete.
 `IF NOT EXISTS` cannot repair a same-named interrupted or wrong-definition
 index. When the preflight reports `not_live` or `wrong_definition`, inspect the
 reported fixed name, drop only that index without blocking table writes, and
@@ -772,7 +793,6 @@ rerun the rollout:
 ```sql
 DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_rank_idx;
 DROP INDEX CONCURRENTLY IF EXISTS public.foods_name_exact_rank_idx;
-DROP INDEX CONCURRENTLY IF EXISTS public.foods_canonical_rank_idx;
 ```
 
 Run only the statement for each reported nonconforming index. Do not drop an
@@ -1482,35 +1502,50 @@ roll back independently because final provider authorization remains Web-owned.
 exact SQL transition, while `production-migration-guard.test.ts` pins the
 production-alias proof, drain, second alias proof, and migration-owner order.
 
-The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
-`HostedThreadRoute.accountLookupKey` and its index; old application code remains
-compatible if the build fails after migration. Once the replacement build is
-live, a count-and-decrypt dry run may begin. Before applying, prove the
-production alias points at the replacement build, wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
-the alias again. Then repeat bounded projection batches until readiness:
+### Production-secret boundary for maintenance
 
-```bash
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
+Murph's production `DATABASE_URL` and `DIRECT_DATABASE_URL` are Vercel
+Sensitive values. Their values are non-readable after creation, so
+`vercel env run` is not a production database credential source even when the
+variable names appear in `vercel env ls`.
 
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
+Local agents and local commands must treat every production secret value and
+protected production identity as unavailable. Maintenance-script `--help`
+examples are local/test commands only; their caller must provide an approved
+non-production `DATABASE_URL` directly.
 
-NODE_OPTIONS=--conditions=react-server \
-  vercel env run --environment=production -- \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
-```
+If a maintenance task requires a production credential or protected identity,
+stop before implementation or execution. Explain the exact operation, the
+required secret class, and the safety gates that must remain intact, then
+discuss the decision with the user. Do not invent a workflow or endpoint,
+duplicate a secret, download a Vercel environment file, or begin the rollout
+while waiting. Any user-authorized hosted or protected execution path is a
+separate reviewed change.
 
-The command decrypts only through the existing thread-delivery-route owner,
+The Linq weighted-capacity rollout requires both production database access and
+hosted crypto authority, so it has no approved local execution path. Do not
+start its backfill or rollout freeze from a local agent session. The eventual
+user-authorized path must preserve the exact deployed-build proof, configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function drain, second alias
+proof, bounded dry-run/apply batches, and terminal readiness check.
+
+The backfill decrypts only through the existing thread-delivery-route owner,
 emits aggregate counts only, and updates rows with an optimistic authority
 check. Do not run `--apply` before the final alias proof and prior-function
 drain, do not treat a dry-run as readiness, and do not drop the legacy
 `HostedLinqLine.activeMemberLimit` column in the same rollout. The complete
 assignment and deployment contract is in
 `docs/hosted-linq-db-home-lines-migration.md`.
+
+New routed Linq and Telegram groups materialize their ordinary unnamed hosted
+group and route-owner membership inside the canonical route transaction. The
+structural write creates only the unnamed group and owner membership. It does
+not add roster participants, create a join code, import a provider title, or
+grant profile, health, or email sharing. Existing owner-authorized setup and
+explicit join flows retain their sharing behavior. The ordinary owner
+membership also satisfies existing current-participant gates for group actions
+such as outbound calls and physical notes; those effects retain exact-message,
+activation, usage, explicit-request, and final pre-provider checks.
 
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
@@ -1702,37 +1737,41 @@ the skew window.
 ### Hosted phone-call private-content migration
 
 The phone-call private-content rollout is an expand-and-scrub hard cut with no
-plaintext dual-write. Deploy the additive migration first: it adds nullable
-`brief_encrypted` and `result_encrypted` columns and makes the legacy brief JSON
-nullable, so the previously deployed web remains compatible. The replacement
-web encrypts every new brief/result before the guarded database write, reads
-ciphertext first, and falls back to legacy JSON only when ciphertext is null;
-this keeps both old calls and new calls usable while the scrub runs.
+plaintext dual-write. It requires both production database access and hosted
+crypto authority, so it has no approved local execution path. Stop before any
+production migration, deployment, deploy freeze, dry run, or protected alias
+proof, and discuss the required operation and execution owner with the user. Do
+not run the script locally against production or invent a workflow, endpoint,
+or credential path.
 
-Freeze production deploys and rollbacks before promoting the replacement web,
-then record its exact commit. Preliminary count-only dry runs may start once
-that deployment is live, but no applying backfill is safe yet: an invocation
-of the previous web can still finish later and require or write plaintext.
-Prove the production alias points at the replacement commit with
+Any later user-authorized path must deploy the additive migration first. It
+adds nullable `brief_encrypted` and `result_encrypted` columns and makes the
+legacy brief JSON nullable, so the previously deployed web remains compatible.
+The path must then freeze production deploys and rollbacks before promoting the
+replacement web and record its exact commit. The replacement web encrypts every
+new brief/result before the guarded database write, reads ciphertext first, and
+falls back to legacy JSON only when ciphertext is null; this keeps both old
+calls and new calls usable while the scrub runs.
+
+After that deployment is live, the authorized path may begin preliminary
+count-only dry runs, but no applying backfill is safe yet: an invocation of the
+previous web can still finish later and require or write plaintext. It must
+prove the production alias points at the replacement commit with
 `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
-`HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval.
-Resolve the alias again after the drain. If it changed, select the replacement
-or a newer compatible commit and restart the full drain.
+`HOSTED_WEB_VERCEL_*` operator environment, wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and
+resolve the alias again. If the alias changed, it must select the replacement or
+a newer compatible commit and restart the full drain.
 
-Before the final alias proof and prior-function drain, only count-only dry runs
-are safe; do not use `--apply` because it scrubs plaintext that a warm previous
-function may still need. Only after that final alias proof, run
-`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
-the production environment wrapper shown by the script's `--help`. Review the
-count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
-true or `selectedRows` is nonzero. Rerun the dry run and record the zero-row
-result as the authoritative scrub proof. Apply encrypts and round-trips missing
-ciphertext, proves any existing ciphertext equals the legacy value, and scrubs
-plaintext in one compare-and-set write; conflicts are safe to rerun. Output
-never contains row ids, member ids, plaintext, or ciphertext. Record the
-replacement commit, both alias proofs, elapsed drain, batch summaries, and
-final zero-row dry run before ending the deploy freeze.
+The authorized path must preserve count-only dry-run before apply, the final
+alias proof and prior-function drain, bounded apply batches until `hasMore` is
+false and `selectedRows` is zero, and a final zero-row dry run.
+Apply encrypts and round-trips missing ciphertext, proves any existing
+ciphertext equals the legacy value, and scrubs plaintext in one compare-and-set
+write; conflicts are safe to rerun. Output never contains row ids, member ids,
+plaintext, or ciphertext. Record the replacement commit, both alias proofs,
+elapsed drain, batch summaries, and final zero-row dry run before ending any
+later authorized deploy freeze.
 
 Live Retell consultation decrypts under one 10-second deadline spanning token
 exchange and KMS, while honoring an earlier caller abort. This path does not

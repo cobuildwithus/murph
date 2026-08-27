@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertionImportPayloadSchema,
   assertionSavePayloadSchema,
+  importAssertionRecord,
+  importVitalsRecord,
   importSocialHistoryRecord,
   saveAssertionPayload,
   scaffoldAssertionImportPayload,
@@ -105,6 +107,125 @@ describe("clinical import usecases", () => {
         },
       ],
     }).success).toBe(false);
+  });
+
+  it("rejects private vitals qualifier keys before loading a write runtime", async () => {
+    const privateQualifierKey = "private-qualifier-key-sentinel";
+    const privateQualifierValue = "private-qualifier-value-sentinel";
+    const { inputFile, vaultRoot } = await writePayload({
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      source: "import",
+      title: "Synthetic vitals",
+      measurements: [{
+        metric: "heart-rate",
+        value: 72,
+        unit: "bpm",
+        qualifiers: {
+          [privateQualifierKey]: [privateQualifierValue],
+        },
+      }],
+      externalRef: {
+        system: "synthetic-source",
+        resourceType: "vitals",
+        resourceId: "synthetic-vitals",
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      await importVitalsRecord({
+        vault: vaultRoot,
+        inputFile: `@${inputFile}`,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "invalid_payload",
+      context: {
+        issues: [{
+          code: "invalid_union",
+          publicPath: ["measurements", 0, "qualifiers"],
+        }],
+      },
+      name: "VaultCliError",
+    });
+    expect(JSON.stringify(thrown)).not.toContain(privateQualifierKey);
+    expect(JSON.stringify(thrown)).not.toContain(privateQualifierValue);
+    expect(mocks.appendHistoryEvent).not.toHaveBeenCalled();
+    expect(mocks.upsertEvent).not.toHaveBeenCalled();
+    expect(mocks.importEventBatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps producer-owned nested paths while collapsing strict-object keys", async () => {
+    const invalidDocumentId = "private-invalid-document-id-sentinel";
+    const rootUnknownKey = "privateRootUnknownKeySentinel";
+    const rootUnknownValue = "private-root-unknown-value-sentinel";
+    const nestedUnknownKey = "privateNestedUnknownKeySentinel";
+    const nestedUnknownValue = "private-nested-unknown-value-sentinel";
+    const assertionScaffold = scaffoldAssertionImportPayload();
+    const socialHistoryScaffold = scaffoldSocialHistoryImportPayload();
+
+    const cases = [
+      {
+        payload: {
+          ...assertionScaffold,
+          evidence: [{ sourceDocumentId: invalidDocumentId }],
+        },
+        publicPath: ["evidence", 0, "sourceDocumentId"],
+        run: importAssertionRecord,
+        privateTokens: [invalidDocumentId],
+      },
+      {
+        payload: {
+          ...assertionScaffold,
+          [rootUnknownKey]: rootUnknownValue,
+        },
+        publicPath: [],
+        run: importAssertionRecord,
+        privateTokens: [rootUnknownKey, rootUnknownValue],
+      },
+      {
+        payload: {
+          ...socialHistoryScaffold,
+          entries: [{
+            ...socialHistoryScaffold.entries[0],
+            [nestedUnknownKey]: nestedUnknownValue,
+          }],
+        },
+        publicPath: ["entries", 0],
+        run: importSocialHistoryRecord,
+        privateTokens: [nestedUnknownKey, nestedUnknownValue],
+      },
+    ];
+
+    for (const entry of cases) {
+      const { inputFile, vaultRoot } = await writePayload(entry.payload);
+      const error = await entry.run({
+        vault: vaultRoot,
+        inputFile: `@${inputFile}`,
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toMatchObject({
+        code: "invalid_payload",
+        context: {
+          issues: expect.arrayContaining([
+            expect.objectContaining({ publicPath: entry.publicPath }),
+          ]),
+          stage: "validation",
+        },
+        name: "VaultCliError",
+      });
+      const serialized = JSON.stringify(error);
+      for (const privateToken of entry.privateTokens) {
+        expect(serialized).not.toContain(privateToken);
+      }
+    }
+
+    expect(mocks.appendHistoryEvent).not.toHaveBeenCalled();
+    expect(mocks.upsertEvent).not.toHaveBeenCalled();
+    expect(mocks.importEventBatch).not.toHaveBeenCalled();
   });
 
   it("saves expanded clinical assertions with bounded evidence refs", async () => {
@@ -306,7 +427,19 @@ describe("clinical import usecases", () => {
     await expect(importSocialHistoryRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
-    })).rejects.toThrow("social-history payload is invalid.");
+    })).rejects.toMatchObject({
+      name: "VaultCliError",
+      code: "invalid_payload",
+      message: "social-history payload is invalid.",
+      context: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            publicPath: ["entries", 1, "externalRef"],
+            code: "custom",
+          }),
+        ]),
+      },
+    });
     expect(mocks.importEventBatch).not.toHaveBeenCalled();
   });
 

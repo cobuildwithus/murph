@@ -15,8 +15,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  markdown-docs-scope:
+    name: Classify billing documentation scope
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    outputs:
+      markdown_only: ${{ steps.scope-result.outputs.markdown_only }}
+    steps:
+      - name: Check out trusted base classifier
+        id: checkout-base
+        continue-on-error: true
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci-markdown-docs-scope.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Run trusted exact-PR classifier
+        id: classify
+        if: ${{ steps.checkout-base.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
+          if [[ ! -f scripts/ci-markdown-docs-scope.mjs ]]; then
+            echo "markdown_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/ci-markdown-docs-scope.mjs
+
+      - name: Publish fail-closed scope result
+        id: scope-result
+        if: ${{ always() }}
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout-base.outcome }}
+          CLASSIFIER_OUTCOME: ${{ steps.classify.outcome }}
+          CLASSIFIER_MARKDOWN_ONLY: ${{ steps.classify.outputs.markdown_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          markdown_only=false
+          if [[ "$CHECKOUT_OUTCOME" == "success" && "$CLASSIFIER_OUTCOME" == "success" && "$CLASSIFIER_MARKDOWN_ONLY" == "true" ]]; then
+            markdown_only=true
+          fi
+          echo "markdown_only=$markdown_only" >> "$GITHUB_OUTPUT"
+          echo "Billing scope classified with trusted base policy: markdown_only=$markdown_only"
+
   billing-hermetic:
     name: Hermetic hosted billing proof
+    needs: markdown-docs-scope
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -71,7 +126,7 @@ jobs:
     name: Live hosted-local Stripe browser matrix
     needs:
       - billing-hermetic
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}
     environment: hosted-stripe-billing-sandbox
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -180,6 +235,7 @@ jobs:
   billing-required:
     name: Required hosted Stripe billing boundary
     needs:
+      - markdown-docs-scope
       - billing-hermetic
       - live-stripe-browser
     if: ${{ always() }}
@@ -195,26 +251,34 @@ jobs:
       - name: Enforce hermetic proof and event-scoped live result
         env:
           EVENT_NAME: ${{ github.event_name }}
+          SCOPE_RESULT: ${{ needs.markdown-docs-scope.result }}
+          MARKDOWN_ONLY: ${{ needs.markdown-docs-scope.outputs.markdown_only }}
           HERMETIC_RESULT: ${{ needs.billing-hermetic.result }}
           LIVE_RESULT: ${{ needs.live-stripe-browser.result }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$HERMETIC_RESULT" != "success" ]]; then
-            echo "Hosted Stripe hermetic proof failed." >&2
-            exit 1
-          fi
           case "$EVENT_NAME" in
             push)
-              if [[ "$LIVE_RESULT" != "success" ]]; then
+              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]; then
                 echo "Main merges require the live hosted-local Stripe matrix; missing or malformed sandbox configuration fails closed." >&2
                 exit 1
               fi
+              echo "Hosted Stripe billing boundary satisfied by full main-push proof."
               ;;
             pull_request)
-              if [[ "$LIVE_RESULT" != "skipped" ]]; then
-                echo "Pull requests must not start the secret-bearing live job." >&2
-                exit 1
+              if [[ "$SCOPE_RESULT" == "success" && "$MARKDOWN_ONLY" == "true" ]]; then
+                if [[ "$HERMETIC_RESULT" != "skipped" || "$LIVE_RESULT" != "skipped" ]]; then
+                  echo "Markdown documentation proof requires both Stripe runtime jobs to remain skipped." >&2
+                  exit 1
+                fi
+                echo "Hosted Stripe billing boundary satisfied by exact-inventory Markdown documentation proof."
+              else
+                if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then
+                  echo "Full pull-request proof requires hermetic success and must not start the secret-bearing live job." >&2
+                  exit 1
+                fi
+                echo "Hosted Stripe billing boundary satisfied by full pull-request proof."
               fi
               ;;
             *)
@@ -222,4 +286,3 @@ jobs:
               exit 1
               ;;
           esac
-          echo "Hosted Stripe billing boundary satisfied."
