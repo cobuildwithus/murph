@@ -689,7 +689,7 @@ function buildAssistantHostedGroupGuidanceText(
         ]
       : []),
     toolSurface === "families"
-      ? "- Disclosure grants are paged independently from memberships. When the grant needed for `ask_member` or `revoke_disclosure_grant` is not on the current `read_current` or `list_memberships` page and `nextDisclosureGrantCursor` is nonnull, repeat that same action with the exact cursor until found or exhausted. Never treat `disclosureGrantsTruncated` as denial, revocation, or unavailability, and never guess a grant id."
+      ? "- Disclosure grants are paged independently from memberships. Track each cursor chain separately. When one chain returns its null next cursor, that chain is exhausted for this turn; advancing the other chain may re-list the exhausted chain's first page, so ignore any renewed cursor or truncation for the exhausted chain and never restart it. When the grant needed for `ask_member` or `revoke_disclosure_grant` is not on the current `read_current` or `list_memberships` page and `nextDisclosureGrantCursor` is nonnull, repeat that same action with the exact cursor until found or exhausted. Never treat `disclosureGrantsTruncated` as denial, revocation, or unavailability, and never guess a grant id."
       : null,
     toolSurface === "none"
       ? null

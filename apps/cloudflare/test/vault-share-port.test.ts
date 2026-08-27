@@ -4,11 +4,20 @@ const mocks = vi.hoisted(() => ({
   fetchHostedWebControlPlaneJson: vi.fn(),
 }));
 
-vi.mock("../src/runtime-platform/web-control-transport.ts", () => ({
-  fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
-}));
+vi.mock("../src/runtime-platform/web-control-transport.ts", async () => {
+  const actual = await vi.importActual<
+    typeof import("../src/runtime-platform/web-control-transport.ts")
+  >("../src/runtime-platform/web-control-transport.ts");
+  return {
+    ...actual,
+    fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
+  };
+});
 
 import { createHostedWebVaultSharePort } from "../src/runtime-platform/vault-share-port.ts";
+import {
+  HostedWebControlPlaneResponseError,
+} from "../src/runtime-platform/web-control-transport.ts";
 
 const DELIVER_REQUEST = {
   expectedGenerationToken: "a".repeat(43),
@@ -100,6 +109,36 @@ describe("createHostedWebVaultSharePort delivery", () => {
       .toBe(firstHeaders.get("x-murph-vault-share-effect-deadline"));
     expect(thirdHeaders.get("x-murph-vault-share-effect-deadline"))
       .toBe(firstHeaders.get("x-murph-vault-share-effect-deadline"));
+  });
+
+  it("does not report a partially delivered cohort when a continuation is deferred", async () => {
+    const deferred = new HostedWebControlPlaneResponseError({
+      code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+      description: "Hosted vault share delivery",
+      forwardedFromWeb: true,
+      message: "Hosted vault-share delivery has deferred approved work. Retry the request.",
+      retryable: true,
+      status: 503,
+    });
+    mocks.fetchHostedWebControlPlaneJson
+      .mockResolvedValueOnce({
+        continuation: "member_destination_025",
+        status: "delivered",
+      })
+      .mockRejectedValueOnce(deferred);
+
+    await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toBe(deferred);
+
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        body: {
+          ...DELIVER_REQUEST,
+          continuation: "member_destination_025",
+        },
+      }),
+    );
   });
 
   it("rejects malformed and repeated delivery continuations", async () => {

@@ -3907,6 +3907,240 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'paginates memberships and disclosure grants independently before leaving one exact group',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-dual-cursor-e2e-'),
+      )
+      const membershipCursor =
+        'eyJjcmVhdGVkQXQiOiIyMDI2LTA4LTI2VDEwOjAwOjAwLjAwMFoiLCJpZCI6Im1lbWJlcnNoaXBfcGFnZV8yIn0'
+      const firstDisclosureCursor =
+        'eyJncmFudGVkQXQiOiIyMDI2LTA4LTI2VDEwOjAwOjAwLjAwMFoiLCJpZCI6ImRpc2Nsb3N1cmVfcGFnZV8yIn0'
+      const secondDisclosureCursor =
+        'eyJncmFudGVkQXQiOiIyMDI2LTA4LTI1VDEwOjAwOjAwLjAwMFoiLCJpZCI6ImRpc2Nsb3N1cmVfcGFnZV8zIn0'
+      const targetMembershipId = 'membership_summit_circle'
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_dual_cursor',
+              recipientKey: 'recipient_private_group_dual_cursor',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_dual_cursor'],
+              conversationId: 'conversation_private_group_dual_cursor',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_dual_cursor'],
+              originSessionId: 'session_private_group_dual_cursor',
+              recipientKey: 'recipient_private_group_dual_cursor',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'leave_membership') {
+                  if (request.membershipId !== targetMembershipId) {
+                    throw new Error('Expected the exact paginated membership id.')
+                  }
+                  return {
+                    action: 'leave_membership',
+                    result: { status: 'left' },
+                  }
+                }
+                if (request.action !== 'list_memberships') {
+                  throw new Error(`Unexpected synthetic group action: ${request.action}`)
+                }
+                if (
+                  request.cursor === undefined
+                  && request.disclosureGrantCursor === undefined
+                ) {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [{
+                        grantId: 'grant_harbor_training_photo',
+                        groupLabel: 'Harbor Walkers',
+                        permissionText: 'Ask for a training photo after weekend walks.',
+                      }],
+                      disclosureGrantsTruncated: true,
+                      memberships: [{
+                        displayName: 'Harbor Walkers',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 6,
+                        membershipId: 'membership_harbor_walkers',
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      nextCursor: membershipCursor,
+                      nextDisclosureGrantCursor: firstDisclosureCursor,
+                      status: 'ok',
+                      truncated: true,
+                    },
+                  }
+                }
+                if (
+                  request.cursor === membershipCursor
+                  && request.disclosureGrantCursor === firstDisclosureCursor
+                ) {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [{
+                        grantId: 'grant_garden_sleep_check',
+                        groupLabel: 'Garden Circle',
+                        permissionText: 'Ask whether last night felt restful.',
+                      }],
+                      disclosureGrantsTruncated: true,
+                      memberships: [{
+                        displayName: 'Summit Circle',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'team',
+                        memberCount: 9,
+                        membershipId: targetMembershipId,
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      nextCursor: null,
+                      nextDisclosureGrantCursor: secondDisclosureCursor,
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
+                if (
+                  request.cursor === undefined
+                  && request.disclosureGrantCursor === secondDisclosureCursor
+                ) {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [{
+                        grantId: 'grant_summit_recovery_reflection',
+                        groupLabel: 'Summit Circle',
+                        permissionText: 'Ask for a weekly recovery reflection.',
+                      }],
+                      disclosureGrantsTruncated: false,
+                      memberships: [{
+                        displayName: 'Harbor Walkers',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 6,
+                        membershipId: 'membership_harbor_walkers',
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      nextCursor: membershipCursor,
+                      nextDisclosureGrantCursor: null,
+                      status: 'ok',
+                      truncated: true,
+                    },
+                  }
+                }
+                throw new Error(
+                  'Membership and disclosure cursors must be forwarded unchanged in their own fields.',
+                )
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Please leave whichever of my groups can currently ask me for a weekly recovery reflection. I do not remember which group that is.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[group-dual-cursor-e2e] ${JSON.stringify({
+            reply: result.finalMessage.trim(),
+            toolActions: groupRequests.flatMap((request) =>
+              request
+              && typeof request === 'object'
+              && 'action' in request
+              && typeof request.action === 'string'
+                ? [request.action]
+                : []
+            ),
+            toolCallCount: groupRequests.length,
+          })}\n`,
+        )
+
+        expect(groupRequests).toEqual([
+          { action: 'list_memberships' },
+          {
+            action: 'list_memberships',
+            cursor: membershipCursor,
+            disclosureGrantCursor: firstDisclosureCursor,
+          },
+          {
+            action: 'list_memberships',
+            disclosureGrantCursor: secondDisclosureCursor,
+          },
+          {
+            action: 'leave_membership',
+            membershipId: targetMembershipId,
+          },
+        ])
+        expect(
+          groupRequests.filter((request) =>
+            request !== null
+            && typeof request === 'object'
+            && 'action' in request
+            && request.action === 'leave_membership'
+          ),
+        ).toHaveLength(1)
+        expect(result.finalMessage).toMatch(/left|removed|no longer/iu)
+        expect(result.finalMessage).toMatch(/Summit Circle/iu)
+        expect(result.finalMessage).not.toMatch(
+          /could(?: not|'t) find|not (?:available|found)|no (?:matching )?group/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'places one bounded group call from the current request without a group-only preview turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()

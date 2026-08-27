@@ -102,6 +102,12 @@ export const POST = withJsonError(async (request: Request) => {
     sourceWorkspaceVersion: body.sourceWorkspaceVersion,
   });
   if (body.expectedGenerationToken !== page.generationToken) {
+    // A continuation proves that an earlier page only partially drained the
+    // expected cohort. If that cohort changes between pages, never acknowledge
+    // completion: the durable caller must restart against the new generation.
+    if (continuation !== undefined) {
+      throw createHostedVaultShareDeliveryDeferredError();
+    }
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,

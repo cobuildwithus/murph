@@ -246,6 +246,13 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain('select by role or newness')
     expect(directSection).toContain('expose identifiers, or fan out')
     expect(directSection).toContain('ordinary ambiguity without a group cue')
+    expect(directSection).toContain('Track each cursor chain separately')
+    expect(directSection).toContain(
+      'When one chain returns its null next cursor, that chain is exhausted for this turn',
+    )
+    expect(directSection).toContain(
+      'ignore any renewed cursor or truncation for the exhausted chain and never restart it',
+    )
     expect(groupPrompt).not.toContain('last-resort disambiguation check')
     expect(unverifiedPrompt).not.toContain('last-resort disambiguation check')
     expect(groupPrompt).not.toContain('already names a visible group')

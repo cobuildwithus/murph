@@ -48,8 +48,12 @@ Updated: 2026-08-26
   capacity. Do not blindly raise heavy payload or delivery constants to 64.
 - Preserve independent membership and disclosure cursors because advancing one
   collection must not skip the other.
+- Treat a cursor chain as exhausted for the current turn after its null next
+  cursor; paging the other collection must not restart the exhausted chain.
 - Preserve vault generation tokens, source-workspace fences, deadlines, and
-  exact-generation checks while restoring destination pagination.
+  exact-generation checks while restoring destination pagination. A generation
+  change after a partial page must defer the whole obligation, never acknowledge
+  the already-delivered prefix as complete.
 
 ## Verification
 
@@ -59,5 +63,6 @@ Updated: 2026-08-26
 - Vault-share store/route/Cloudflare continuation and PostgreSQL index proof.
 - Hosted Execution Assistant Ask parser Vitest.
 - Assistant prompt/cache-stability Vitest and Assistant Engine typecheck.
-- Focused real-Codex named handoff journey with exact tool-call assertions.
+- Focused real-Codex named handoff and independent dual-cursor journeys with
+  exact tool-call assertions and reply review.
 - Diff/privacy checks, ReviewGPT correction round, and required PR CI.

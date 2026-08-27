@@ -698,6 +698,38 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
+  it("defers when the active generation changes between delivery pages", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue({
+      continuation: null,
+      generationToken: CURRENT_GENERATION_TOKEN,
+      hasActiveShares: true,
+      shares: [],
+    });
+
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      continuation: "member_destination_025",
+      expectedGenerationToken: STALE_GENERATION_TOKEN,
+    }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+        retryable: true,
+      }),
+    });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      continuation: "member_destination_025",
+      grantorMemberId: "member_grantor",
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+    expect(mocks.hasUnmaterializedHostedVaultShareProjectionGeneration)
+      .not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
   it("retries a stale generation while its replacement still needs a snapshot", async () => {
     mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(true);
 
