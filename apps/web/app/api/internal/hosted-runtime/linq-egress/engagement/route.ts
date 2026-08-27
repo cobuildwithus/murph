@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
+  resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   hostedOnboardingError,
@@ -153,6 +154,31 @@ export const POST = withJsonError(async (request: Request) => {
         message: "The queued wearable recovery check is no longer current.",
         retryable: false,
       });
+    }
+
+    if (
+      finalAuthority.sourceEventId
+      && finalAuthority.resolvedRoute.targetKind === "thread"
+      && finalAuthority.resolvedRoute.threadIsDirect
+    ) {
+      const instantFirstTurn =
+        await resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+          eventId: finalAuthority.sourceEventId,
+          linqChatId: finalAuthority.resolvedRoute.target,
+          prisma: tx,
+        });
+      if (instantFirstTurn !== "available") {
+        throw hostedOnboardingError({
+          code: instantFirstTurn === "already_answered"
+            ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
+            : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
+          httpStatus: instantFirstTurn === "already_answered" ? 409 : 503,
+          message: instantFirstTurn === "already_answered"
+            ? "The exact inbound already has a Web-owned reply."
+            : "The exact inbound remains owned by its Web reply.",
+          retryable: instantFirstTurn !== "already_answered",
+        });
+      }
     }
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({

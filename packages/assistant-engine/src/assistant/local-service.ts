@@ -1806,6 +1806,15 @@ export async function sendAssistantMessageLocal(
               providerResult: failedProviderResult,
               turnId: currentUserTurn.turnId,
             })
+            if (
+              requestInput.allowFailedNoReplyRecovery &&
+              recoverableNoReplyDeliveryContextOrdinal !== null
+            ) {
+              await executionContext?.hosted?.assertTurnCommitAuthority?.({
+                acceptedInputs: providerRequestAcceptedInputItems,
+                turnId: currentUserTurn.turnId,
+              })
+            }
             const failedProviderResumeStateAction =
               providerRequestOrdinal === 1
                 ? 'preserve-existing'
@@ -2150,6 +2159,10 @@ export async function sendAssistantMessageLocal(
           rawResponse: providerResult.response,
           session: currentSession,
           sharedPlan,
+        })
+        await executionContext?.hosted?.assertTurnCommitAuthority?.({
+          acceptedInputs: providerRequestAcceptedInputItems,
+          turnId: currentUserTurn.turnId,
         })
 
         const resolvedFinalReplyDeliveryContext =

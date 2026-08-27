@@ -41,6 +41,7 @@ const BASE_REQUEST: HostedLinqFirstContactAdmissionRequest = {
   partTypes: ["text"],
   service: "imessage",
   text: "hi",
+  textWasTruncated: false,
 };
 
 const BASE_PARTICIPANT_CONTACT = {
