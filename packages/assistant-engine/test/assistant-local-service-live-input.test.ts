@@ -4367,9 +4367,15 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     const reconsiderationAdmissionClosed = createDeferred<void>()
     const reconsiderationFinish = createDeferred<void>()
     const liveSteeredPrompts: string[] = []
+    let requestZeroAnalyzeVideoTurnState: { providerCallCount: number } | null =
+      null
 
     mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
       async (providerInput) => {
+        requestZeroAnalyzeVideoTurnState = providerInput.analyzeVideoTurnState ?? null
+        assert.ok(requestZeroAnalyzeVideoTurnState)
+        expect(requestZeroAnalyzeVideoTurnState.providerCallCount).toBe(0)
+        requestZeroAnalyzeVideoTurnState.providerCallCount += 1
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-0',
           codexContinuation: { kind: 'explicit-structured-history' },
@@ -4406,6 +4412,10 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     )
     mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
       async (providerInput) => {
+        expect(providerInput.analyzeVideoTurnState).toBe(
+          requestZeroAnalyzeVideoTurnState,
+        )
+        expect(providerInput.analyzeVideoTurnState?.providerCallCount).toBe(1)
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-1',
           codexContinuation: { kind: 'explicit-structured-history' },
@@ -4738,6 +4748,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
             return release
           },
         },
+        analyzeVideoTurnState: providerInput.analyzeVideoTurnState,
         dynamicTools: [],
         groupConversation: true,
         processLifetime: 'one-shot',
@@ -4842,6 +4853,13 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
       ([providerInput]) => providerInput.providerRequestOrdinal,
     ),
   ).toEqual([0, 1])
+  const analyzeVideoTurnStates =
+    mocks.executeCodexTurnWithRecovery.mock.calls.map(
+      ([providerInput]) => providerInput.analyzeVideoTurnState,
+    )
+  expect(analyzeVideoTurnStates[0]).toBeDefined()
+  expect(analyzeVideoTurnStates[1]).toBe(analyzeVideoTurnStates[0])
+  expect(analyzeVideoTurnStates[0]?.providerCallCount).toBe(0)
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
     'One final response covering all three requests.',

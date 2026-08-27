@@ -31,9 +31,13 @@ import {
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
+  conversationRefFromAssistantInputConversation,
   createAssistantActiveTurnInputController,
+  listAssistantTranscriptEntries,
   listAssistantInputEvents,
+  readAssistantInputEvent,
   resolveAssistantConversationLookupKey,
+  resolveAssistantSession,
   updateAssistantInputAttachmentEvidence,
 } from "@murphai/assistant-engine";
 import {
@@ -44,6 +48,7 @@ import {
 import {
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
+import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 
 import {
   createHostedConversationMailboxImportItem,
@@ -60,6 +65,7 @@ import {
   compactHostedPendingAssistantInputIds,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
+  suppressHostedPendingLinqInputAnsweredByExternalReply,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   HostedRawEmailMessageMissingError,
@@ -87,6 +93,15 @@ const HOSTED_ASSISTANT_SEED_ENV = {
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
 } as const;
+const TEST_ASSISTANT_TARGET = createAssistantModelTarget({
+  model: HOSTED_ASSISTANT_SEED_ENV.HOSTED_ASSISTANT_MODEL,
+  modelProvider: "openai",
+  provider: "codex-cli",
+  reasoningEffort: HOSTED_ASSISTANT_SEED_ENV.HOSTED_ASSISTANT_REASONING_EFFORT,
+});
+if (!TEST_ASSISTANT_TARGET) {
+  throw new Error("Expected the hosted assistant test target to be valid.");
+}
 const tempRoots: string[] = [];
 
 afterEach(async () => {
@@ -463,13 +478,14 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test("waits for attachment evidence before notifying active turn input", async () => {
+  test("waits for attachment evidence before notifying an authenticated group video turn", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-notify-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake({
       message: {
+        accountLookupKey: "synthetic-account-lookup",
         channel: "linq",
         linqMessage: {
           chatId: "chat_evidence_notify",
@@ -490,9 +506,15 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
-          threadIsDirect: true,
+          threadIsDirect: false,
         },
         phoneLookupKey: "redacted-contact-sentinel",
+        routeAuthority: {
+          accountLookupKey: "synthetic-account-lookup",
+          channel: "linq",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_evidence_notify",
+        },
       },
     });
     const rawPath =
@@ -627,7 +649,7 @@ describe("hosted mailbox conversation import adapter", () => {
         type: "media",
         url: "redacted-attachment-url-sentinel",
       } as const,
-      name: "group MP4",
+      name: "group MP4 without route authority",
       runtime: createRuntime({
         forwardedEnv: {
           [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",
@@ -990,6 +1012,150 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(outcome.status, "imported");
     assert.equal(activityCallbackCount, 1);
     assert.equal(preparationCallbackCount, 0);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+  });
+
+  test("treats an imported self-authored Linq reply as terminal proof for the exact pending input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-self-reply-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inboundWake = createConversationWake({
+      eventId: "evt_self_reply_inbound",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_self_reply",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_self_reply_inbound",
+          parts: [{ type: "text", value: "Hey Murph" }],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const inbound = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(inboundWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: inboundWake.eventId,
+        id: "mailbox_item_self_reply_inbound",
+        laneSeq: "1",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    if (inbound.status !== "imported" || !inbound.assistantInputId) {
+      throw new Error("Expected the inbound Linq message to stage replyable input.");
+    }
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      inbound.assistantInputId,
+    ]);
+
+    const outboundWake = createConversationWake({
+      eventId: "evt_self_reply_outbound",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_self_reply",
+          from: "redacted-self-sentinel",
+          isFromMe: true,
+          messageId: "msg_self_reply_outbound",
+          parts: [{ type: "text", value: "Canonical Murph welcome" }],
+          replyToMessageId: "msg_self_reply_inbound",
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const outboundItem = createResolvedConversationMailboxItem({
+      dedupeKey: outboundWake.eventId,
+      id: "mailbox_item_self_reply_outbound",
+      laneSeq: "2",
+    });
+    const importOutbound = async () => await importHostedConversationMailboxItem({
+      assistantTarget: TEST_ASSISTANT_TARGET,
+      decodePayload: createDecodedPayloadDecoder(outboundWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item: outboundItem,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    const outbound = await importOutbound();
+
+    assert.equal(outbound.status, "imported");
+    assert.equal(outbound.status === "imported" && "assistantInputId" in outbound, false);
+    assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      inbound.assistantInputId,
+    ]);
+    assert.equal((await listAssistantInputEvents({ vault: vaultRoot })).events.length, 2);
+
+    const inboundEvent = await readAssistantInputEvent({
+      inputId: inbound.assistantInputId,
+      vault: vaultRoot,
+    });
+    if (!inboundEvent?.conversation) {
+      throw new Error("Expected the answered inbound to retain conversation identity.");
+    }
+    const session = await resolveAssistantSession({
+      conversation: conversationRefFromAssistantInputConversation(
+        inboundEvent.conversation,
+      ),
+      createIfMissing: false,
+      vault: vaultRoot,
+    });
+    assert.deepEqual(
+      (await listAssistantTranscriptEntries(vaultRoot, session.session.sessionId))
+        .map((entry) => ({
+          kind: entry.kind,
+          standaloneAssistantContext: entry.standaloneAssistantContext ?? false,
+          text: entry.text,
+        })),
+      [
+        {
+          kind: "user",
+          standaloneAssistantContext: false,
+          text: "Hey Murph",
+        },
+        {
+          kind: "assistant",
+          standaloneAssistantContext: true,
+          text: "Canonical Murph welcome",
+        },
+      ],
+    );
+
+    const assistantReplyEvent = (await listAssistantInputEvents({ vault: vaultRoot }))
+      .events.find((event) => event.conversation?.actorIsSelf === true);
+    if (!assistantReplyEvent) {
+      throw new Error("Expected the imported self-authored reply event.");
+    }
+    await suppressHostedPendingLinqInputAnsweredByExternalReply({
+      accountId: inboundEvent.conversation.accountId,
+      assistantReplyEvent,
+      replyToMessageId: "msg_self_reply_inbound",
+      target: TEST_ASSISTANT_TARGET,
+      threadId: inboundEvent.conversation.threadId ?? "",
+      vaultRoot,
+    });
+    assert.equal(
+      (await listAssistantTranscriptEntries(vaultRoot, session.session.sessionId)).length,
+      2,
+    );
+
   });
 
   test("does not notify active turn input early for durably consumed replay imports", async () => {

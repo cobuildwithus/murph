@@ -6,10 +6,11 @@ import {
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
 import {
+  createVaultReadModel,
   listEntities,
-  readVault,
   type VaultReadModel,
-} from "./model.ts";
+} from "./read-model.ts";
+import { readCanonicalEntityFamilySource } from "./vault-source.ts";
 
 export interface MealNutritionMetricTotal {
   total: number | null;
@@ -472,7 +473,7 @@ export async function readMealNutritionTotals(
   vaultRoot: string,
   options: MealNutritionTotalsOptions = {},
 ): Promise<MealNutritionTotalsResult> {
-  const readModel = await readVault(vaultRoot);
+  const readModel = await readMealNutritionModel(vaultRoot);
   return summarizeMealNutritionTotals(readModel, options);
 }
 
@@ -480,6 +481,13 @@ export async function readMealNutrientTotals(
   vaultRoot: string,
   options: MealNutritionTotalsOptions = {},
 ): Promise<MealNutrientTotalsResult> {
-  const readModel = await readVault(vaultRoot);
+  const readModel = await readMealNutritionModel(vaultRoot);
   return summarizeMealNutrientTotals(readModel, options);
+}
+
+async function readMealNutritionModel(vaultRoot: string): Promise<VaultReadModel> {
+  return createVaultReadModel({
+    vaultRoot,
+    entities: await readCanonicalEntityFamilySource(vaultRoot, "event"),
+  });
 }

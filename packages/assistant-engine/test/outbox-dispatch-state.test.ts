@@ -369,6 +369,39 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('abandons a stale Linq reply when Web already answered the exact first turn', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        channel: 'linq',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const abandoned = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('Web already answered the exact inbound'), {
+          code: 'HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED',
+          deliveryMayHaveSucceeded: false,
+          retryable: false,
+        }),
+        failedAt: new Date('2030-04-13T00:02:00.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(abandoned.status).toBe('abandoned')
+      expect(abandoned.deliveryConfirmationPending).toBe(false)
+      expect(abandoned.deliveryTransportIdempotent).toBe(false)
+      expect(abandoned.nextAttemptAt).toBeNull()
+      expect(abandoned.lastError?.code).toBe(
+        'HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED',
+      )
+    })
+  })
+
   it('reschedules confirmation retries from the reconciliation time', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2030-04-13T00:05:00.000Z'))

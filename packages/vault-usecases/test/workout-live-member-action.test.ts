@@ -141,6 +141,22 @@ function appendAction(setCount = 1) {
   };
 }
 
+function renameAction(name = "Machine leg press") {
+  return {
+    expectedWorkout: {
+      actionBinding: ACTION_BINDING,
+      exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+    },
+    kind: "workout.live.apply" as const,
+    mutations: [{
+      exercisePosition: 1,
+      kind: "exercise.rename" as const,
+      name,
+    }],
+    version: 1 as const,
+  };
+}
+
 function workoutPresentation(input: {
   exercises?: WorkoutSessionPresentationV1["workout"]["exercises"];
   state?: WorkoutSessionPresentationV1["workout"]["state"];
@@ -320,6 +336,90 @@ describe("live workout member action", () => {
       lastMemberActionId: ACTION_ID,
       observedAt: ACCEPTED_AT,
     });
+  });
+
+  it("renames an exercise in one canonical write", async () => {
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: renameAction(),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+
+    expect(mocks.updateLiveWorkoutExercises).toHaveBeenCalledTimes(1);
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      name: "Machine leg press",
+    }]);
+  });
+
+  it("applies set edits against the old name before renaming", async () => {
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        ...renameAction(),
+        mutations: [
+          ...renameAction().mutations,
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedResult: null,
+            kind: "set.put" as const,
+            result: { kind: "reps" as const, reps: 8 },
+            setPosition: 1,
+          },
+        ],
+      },
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      name: "Machine leg press",
+      sets: [{ order: 1, reps: 8 }],
+    }]);
+  });
+
+  it("rejects a rename that would make workout coordinates ambiguous", async () => {
+    const workout: WorkoutSession = {
+      ...BASE_WORKOUT,
+      exercises: [
+        BASE_WORKOUT.exercises[0]!,
+        {
+          ...BASE_WORKOUT.exercises[0]!,
+          name: "Hack squat",
+          order: 2,
+        },
+      ],
+    };
+    mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout(workout)]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        expectedWorkout: {
+          actionBinding: deriveWorkoutActionBinding(
+            "evt_test_workout",
+            workout,
+          ),
+          exercises: [
+            { name: "Leg press", sets: [{ logged: false }] },
+            { name: "Hack squat", sets: [{ logged: false }] },
+          ],
+        },
+        kind: "workout.live.apply",
+        mutations: [{
+          exercisePosition: 2,
+          kind: "exercise.rename",
+          name: "Leg press",
+        }],
+        version: 1,
+      },
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
   it("returns one authoritative V6 card for an apply and its exact replay", async () => {
