@@ -19,7 +19,6 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  classifyHostedSystemMailboxExecutionClass,
   HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -225,11 +224,9 @@ import type {
   HostedImageGenerationController,
 } from "./hosted-runtime/image-generation.ts";
 import {
-  findHostedSystemMailboxDurableFrontierItem,
   findNextHostedSystemMailboxQueueItem,
   isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
-  isHostedSystemMailboxModelFreeFrontierItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -652,16 +649,6 @@ async function hasHostedPreCheckpointLocalExternalCompletion(input: {
   }) !== null;
 }
 
-async function hasHostedModelFreeSystemMailboxFrontier(input: {
-  vaultRoot: string;
-}): Promise<boolean> {
-  const frontier = findHostedSystemMailboxDurableFrontierItem(
-    (await readHostedSystemMailboxState(input.vaultRoot)).pending,
-  );
-  return frontier !== null
-    && isHostedSystemMailboxModelFreeFrontierItem(frontier);
-}
-
 async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<{
@@ -669,7 +656,6 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
-  hasModelFreeSystemMailboxFrontier: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -710,19 +696,6 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
     prefetch.importedSeqByLane.system,
   );
   const systemItems = response.items.filter((item) => item.lane === "system");
-  let firstSystemItem: (typeof systemItems)[number] | null = null;
-  let firstSystemItemSeq: bigint | null = null;
-  for (const item of systemItems) {
-    const itemSeq = parseHostedMailboxSeqOrNull(item.laneSeq);
-    if (itemSeq === null) {
-      firstSystemItem = null;
-      break;
-    }
-    if (firstSystemItemSeq === null || itemSeq < firstSystemItemSeq) {
-      firstSystemItem = item;
-      firstSystemItemSeq = itemSeq;
-    }
-  }
   // Enrollment can start the first owner from conversation before the
   // activation continuation signals it. The shared prefetch can still hold
   // that conversation prefix after it has been imported, so classify only
@@ -764,11 +737,6 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
-    hasModelFreeSystemMailboxFrontier: firstSystemItem !== null
-      && classifyHostedSystemMailboxExecutionClass({
-        dedupeKey: firstSystemItem.dedupeKey,
-        kind: firstSystemItem.kind,
-      }) === "model_free",
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -1642,9 +1610,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     };
     let assistantProviderHandoffRequested = false;
-    let modelFreeSystemMailboxHandoffRequested = false;
-    const runtimeOwnerHandoffRequested = (): boolean =>
-      assistantProviderHandoffRequested || modelFreeSystemMailboxHandoffRequested;
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
@@ -1652,15 +1617,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           assertRuntimeNotAborted();
           const outcome = await options.importItem(importItem, context);
           assertRuntimeNotAborted();
-          if (
-            (input.request.processingMode ?? "default") === "default"
-            && importItem.item.lane === "system"
-            && await hasHostedModelFreeSystemMailboxFrontier({
-              vaultRoot: options.vaultRoot,
-            })
-          ) {
-            modelFreeSystemMailboxHandoffRequested = true;
-          }
           kickDetachedAssistantAskAfterImport(importItem, outcome);
           return outcome;
         },
@@ -2010,13 +1966,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";
-    const defaultProcessingMode =
-      (input.request.processingMode ?? "default") === "default";
-    let restoredModelFreeSystemMailboxHandoffPending =
-      defaultProcessingMode
-      && await hasHostedModelFreeSystemMailboxFrontier({
-        vaultRoot: restored.vaultRoot,
-      });
     // This marker can only suppress assistant execution. The Cloudflare
     // boundary sets it when platform policy has already made the normal
     // assistant handoff impossible. Assistant sources remain durable in the
@@ -3761,12 +3710,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             workspace: passInput.workspace,
         });
         recordBrowserVaultReplicaRefreshIntent(passResult);
-        if (passForeground && restoredModelFreeSystemMailboxHandoffPending) {
-          // Finish this user-visible pass, then hand the exact model-free
-          // durable frontier back to the generic system owner.
-          restoredModelFreeSystemMailboxHandoffPending = false;
-          modelFreeSystemMailboxHandoffRequested = true;
-        }
         if (
           passResult.runtimeStateDirty
           && (
@@ -3897,7 +3840,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       setIdleCheckpointStartBy(
-        Date.now() + (runtimeOwnerHandoffRequested() ? 0 : idleCheckpointDelayMs),
+        Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
       );
     };
     if (runtimeStateDirty) {
@@ -5110,13 +5053,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         await flushImageGenerationWork();
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch =
-          runtimeOwnerHandoffRequested()
+          assistantProviderHandoffRequested
             ? null
             : prependReadyImageCompletionInputs(
                 resolveForegroundRerunAssistantInputBatch(passResult),
               );
         let continueForegroundCausalPass =
-          !runtimeOwnerHandoffRequested()
+          !assistantProviderHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
         while (
           options.shutdownSignal?.aborted !== true
@@ -5154,13 +5097,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
           await flushImageGenerationWork();
           rerunAssistantInputBatch =
-            runtimeOwnerHandoffRequested()
+            assistantProviderHandoffRequested
               ? null
               : prependReadyImageCompletionInputs(
                   resolveForegroundRerunAssistantInputBatch(passResult),
                 );
           continueForegroundCausalPass =
-            !runtimeOwnerHandoffRequested()
+            !assistantProviderHandoffRequested
             && shouldContinueForegroundCausalPass(passResult);
         }
         return passResult;
@@ -5176,14 +5119,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
-        if (runtimeOwnerHandoffRequested()) {
+        if (assistantProviderHandoffRequested) {
           return false;
         }
-        const requestRestoredModelFreeSystemMailboxHandoff = (): void => {
-          restoredModelFreeSystemMailboxHandoffPending = false;
-          modelFreeSystemMailboxHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
-        };
         // Graceful shutdown hands staged work to the durable checkpoint before
         // this invocation starts another assistant or provider turn.
         const shouldContinue = () =>
@@ -5394,14 +5332,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 initialMailboxPrefetch,
               )
             : null;
-        if (
-          preCheckpointSystemPrefetch?.hasModelFreeSystemMailboxFrontier === true
-        ) {
-          // The exact durable frontier, not the payloadless wake, authorizes
-          // this handoff.
-          modelFreeSystemMailboxHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
-        }
         const hasForegroundConversationWork =
           hostedAssistantInputBatchHasWork(
             invocationLocalAssistantInputBatch,
@@ -5416,15 +5346,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             now: baseRunnerInput.now?.() ?? new Date().toISOString(),
             vaultRoot: restored.vaultRoot,
           });
-        if (
-          !hasForegroundConversationWork
-          && !shouldRunLocalPreCheckpointSystemWork
-          && restoredModelFreeSystemMailboxHandoffPending
-        ) {
-          requestRestoredModelFreeSystemMailboxHandoff();
-          await finishMailboxImportWithoutAssistant(conversationImport);
-          return false;
-        }
         const shouldRunConversationAssistant = shouldContinue() && (
           input.runAssistantWithoutMailboxWork === true
           || hasForegroundConversationWork
@@ -5520,7 +5441,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         await flushImageGenerationWork();
         if (
           latencySeed !== null
-          && !runtimeOwnerHandoffRequested()
+          && !assistantProviderHandoffRequested
           && !runtimeAbortController.signal.aborted
           && options.shutdownSignal?.aborted !== true
         ) {
@@ -5536,7 +5457,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         }
         if (
-          !runtimeOwnerHandoffRequested()
+          !assistantProviderHandoffRequested
           && options.shutdownSignal?.aborted !== true
           && !runtimeAbortController.signal.aborted
           && (wakeOptions.shouldContinue?.() ?? true)
@@ -5848,7 +5769,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
         const idleMaintenancePendingWork =
-          runtimeOwnerHandoffRequested()
+          assistantProviderHandoffRequested
           || pendingDurableCheckpointEffects.length > 0
           || durableCheckpointFollowUpPending
           || invocationStatus === "budget_exhausted"
@@ -6015,7 +5936,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           createHostedRuntimeCheckpointWakeInterruption({
             enabled:
               idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
-              && !runtimeOwnerHandoffRequested(),
+              && !assistantProviderHandoffRequested,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           });
         try {
@@ -6157,7 +6078,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true
-          && !runtimeOwnerHandoffRequested();
+          && !assistantProviderHandoffRequested;
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
@@ -6508,7 +6429,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           idleMaintenance.nextWakeReason === "inbox_media_retention"
           && idleMaintenance.nextWakeAt !== null;
         const immediateRecheckCandidate =
-          runtimeOwnerHandoffRequested()
+          assistantProviderHandoffRequested
           || immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
@@ -6524,7 +6445,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
         ]);
         const immediateRecheckRequested =
-          runtimeOwnerHandoffRequested()
+          assistantProviderHandoffRequested
           || (
             immediateRecheckCandidate
             && !isHostedRuntimeFutureMailboxContinuation({

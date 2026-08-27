@@ -774,17 +774,19 @@ row remains a hard ordering barrier. Already committed Web updates remain
 authoritative, while an interrupted or not-yet-checkpointed unit stays
 recoverable from the durable mailbox and its existing continuation contract.
 
-Default and `system_mailbox` owners hand off cooperatively in either direction.
-When either mode is requested behind the other, UserRunner wakes the exact
-active child, preserves its fence, and returns `retry_later`; it does not abort
-canonical publication. A default runtime revalidates the exact local durable
-frontier after import, finishes at most the current foreground causal pass,
-shortens its existing checkpoint window to zero, skips optional work, and
-returns `immediateRecheckRequested`. A system-mailbox runtime finishes or
-checkpoints its current model-free unit, observes the wake, and releases.
-Ordinary reconciliation then admits the waiting owner. This is the only
-cross-owner rule and adds no queue, scheduler, feature-specific mode, or
-persisted handoff state.
+The default owner already has the safe checkpoint and ordered system-mailbox
+pass needed to absorb model-free work. When `system_mailbox` is requested behind
+an active default runtime, UserRunner wakes that exact child and accepts the
+request without changing its fence. The default runtime finishes its current
+foreground work, checkpoints normally, and processes the exact first model-free
+row in place. There is no second owner transition or retry timer.
+
+The reverse direction remains cooperative: when fresh default work arrives
+behind a `system_mailbox` owner, UserRunner wakes that exact child, preserves its
+fence, and returns `retry_later`. The bounded system owner finishes or
+checkpoints its current model-free unit and releases so ordinary reconciliation
+can admit the foreground owner. Neither direction aborts canonical publication
+or adds a queue, scheduler, feature-specific mode, or persisted handoff state.
 
 Web derives the generic `systemMailboxFrontier` from the exact first live row
 after `hostedMailboxSystemHandledThroughSeq` by using the same shared

@@ -2082,15 +2082,16 @@ zero lag is not sufficient. Removing the web floor also requires a
 separate migration or forward runtime that removes the read-route dependency.
 
 Environment completion uses the existing generic model-free system-mailbox
-frontier. For the first release, deploy the Cloudflare Worker and runner bundle
-with `container_rollout=immediate`, prove the expected runner-bundle fingerprint,
-then deploy Web so it can classify `environment-interview.completed` as
-`model_free`. If Web is rolled back, it returns that row to the ordinary default
-owner; roll Web back before Cloudflare. No mailbox schema, persisted runtime
-mode, Temporal patch, or data migration creates a rollback floor. After both
-sides converge, complete one Environment interview while a foreground reply is
-active and verify the answer reaches Browser Vault without mailbox parse errors
-or duplicate model execution.
+frontier and introduces no special deployment order or container rollout mode.
+Old Web continues using the default owner; if new Web reaches an older runner
+first, the unrecognized Environment row stays durable until a compatible runner
+arrives. No mailbox schema, persisted runtime mode, Temporal patch, or data
+migration creates a rollback floor. Production may still require
+`container_rollout=immediate` for an independent active platform migration; that
+is not a requirement of Environment scheduling. After both sides converge,
+complete one Environment interview while a foreground reply is active and
+verify the answer reaches Browser Vault without mailbox parse errors or a model
+request.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
 

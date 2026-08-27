@@ -10,7 +10,7 @@ Updated: 2026-08-27
   when a foreground Murph reply is already running, without adding an
   Environment-specific scheduler or changing Temporal workflow behavior.
 - Express the behavior through the existing ordered mailbox, one generic
-  execution classifier, and cooperative runtime ownership at safe checkpoints.
+  execution classifier, and the default runtime's existing safe checkpoint.
 
 ## Success criteria
 
@@ -20,9 +20,9 @@ Updated: 2026-08-27
 - `environment-interview.completed` is handled by the existing model-free
   system-mailbox lane and reaches Browser Vault publication without a model
   request.
-- A resident default runtime yields to first-frontier model-free work only at a
-  runtime-owned safe checkpoint; fresh foreground/default work receives the
-  same cooperative handoff when model-free work owns the fence.
+- A resident default runtime absorbs first-frontier model-free work after its
+  existing safe checkpoint; only the bounded system-mailbox owner yields when
+  fresh foreground/default work arrives.
 - Environment status remains a UI projection only and is not a scheduling
   fact supplied to Temporal.
 - Temporal and the private worker repository require no functional change.
@@ -34,10 +34,9 @@ Updated: 2026-08-27
 - In scope:
   - Generic first-frontier mailbox classification in the hosted-execution
     owner package.
-  - Assistant-runtime model-free route/action admission and safe cooperative
-    yield logic.
-  - Cloudflare runner ownership handoff between default and system-mailbox
-    work.
+  - Assistant-runtime model-free route/action admission through the existing
+    default-owner checkpoint path.
+  - Cloudflare runner wake semantics between default and system-mailbox work.
   - Removal of Environment-specific reconciliation scheduling facts and
     documentation that describes them as orchestration inputs.
   - Focused regression coverage and a public changelog entry.
@@ -78,10 +77,11 @@ Updated: 2026-08-27
    negotiation state. Production provenance proves the removed private
    Environment mode never deployed and has no rollback-eligible caller or
    persisted fence.
-3. Risk: Cooperative handoff could interrupt a reply or canonical Browser
+3. Risk: Cross-mode wakes could interrupt a reply or canonical Browser
    Vault publication.
-   Mitigation: only the active runtime yields after its existing safe
-   checkpoint/recheck; the controller requests a wake and returns retry-later.
+   Mitigation: the default owner absorbs model-free work only after its existing
+   safe checkpoint; the bounded system owner alone yields through the existing
+   wake-and-retry path.
 4. Risk: Removing the Environment reconciliation fact could regress the UI.
    Mitigation: keep the existing Environment status query at its UI owner and
    remove only its orchestration projection.
@@ -92,7 +92,8 @@ Updated: 2026-08-27
    fact, runtime handoff, and Cloudflare ownership tests.
 2. Add one shared generic classifier and route Environment completion through
    the existing model-free system-mailbox action set.
-3. Generalize safe checkpoint/yield and controller handoff logic.
+3. Reuse the default owner's checkpoint path and narrow the controller to one
+   system-to-default yield direction.
 4. Delete Environment-specific orchestration facts, flags, and documentation
    made obsolete by the classifier.
 5. Add focused deterministic and composed hosted-local proof for all three
@@ -111,9 +112,9 @@ Updated: 2026-08-27
   and closure of the superseded private PR.
 - Keep one durable mailbox and one existing system-mailbox execution lane. An
   Environment completion is model-free work, not a new Temporal workflow mode.
-- Use an explicit Cloudflare-before-Web deploy order. Do not retain an
-  undeployed feature-specific mode or add a rollout state machine for a bounded
-  skew window.
+- Require no special deploy order or rollout mode. Mixed versions leave the row
+  on the old default path or durably pending until a compatible runner arrives;
+  do not add capability negotiation or rollout state.
 - A real-Codex semantic journey is required only if the final diff changes
   model-visible prompts, tool choice, or reply behavior. Deterministic hosted
   runtime proof is the stronger evidence for scheduling-only changes.
@@ -122,8 +123,8 @@ Updated: 2026-08-27
 
 - Completed local proof:
   - Hosted-execution classifier: 8 tests passed.
-  - Assistant-runtime system-mailbox and Environment integration: 38 tests
-    passed after the final hot-path narrowing.
+  - Assistant-runtime checkpoint, system-mailbox, and Environment integration:
+    91 focused tests passed after deleting the default-to-system handoff.
   - Cloudflare runner coordination: 157 tests passed.
   - Web reconciliation and classifier: 51 tests passed.
   - Changelog rendering: 9 tests passed.
@@ -136,9 +137,11 @@ Updated: 2026-08-27
     scenario started. The current Linux CI owner compares the exact base and
     candidate; repository friction is recorded separately.
 - Remaining gates:
-  - Exact-head preliminary completion-specialists ReviewGPT, final ReviewGPT,
-    the required GitHub checks, and post-deploy smoke.
+  - Corrected exact-head final ReviewGPT, public CI, private Linux composed E2E,
+    and post-deploy smoke. The preliminary specialists requested the composed
+    journey and a same-member ordered-predecessor case; both are accepted.
 - Required outcomes:
   - Exact first-frontier classification, no leapfrogging, no model call for
-    Environment completion, safe bidirectional handoff, durable retry after
-    failure, and unchanged foreground reply authority.
+    Environment completion, default-owner in-place draining, safe
+    system-to-default yield, durable retry after failure, and unchanged
+    foreground reply authority.

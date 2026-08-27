@@ -563,6 +563,10 @@ gate unset and makes no paid request.
   accepted outbound Linq request within 30 seconds while any staged background
   checkpoint remains held. The same scenario command then starts a clean Vitest
   process with a 10-second idle floor and typed, bounded ordering observation.
+  It also queues one same-member default-owned system row immediately before an
+  Environment completion, holds the default owner's canonical checkpoint, and
+  proves the report does not publish early before the ordered Environment row
+  advances without another provider request.
   That process proves a later durable conversation reaches mailbox import and
   provider start before an interrupted idle snapshot can retry, and proves the
   same foreground continuation after a committed canonical publication. The
