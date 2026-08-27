@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "tool-actions-finish-once",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Tool actions finish once",
+    "summary": "Murph now waits for long-running actions to finish and does not repeat an action after it already succeeded.",
+    "details": "If a reply cannot be prepared after an action succeeds, Murph keeps the completed action and reports the reply problem instead of trying the action again.",
+    "relevanceTags": ["assistant", "actions", "reliability"],
+    "sourcePullRequests": [2419]
+  }
+}
