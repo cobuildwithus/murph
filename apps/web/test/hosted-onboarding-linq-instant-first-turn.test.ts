@@ -508,7 +508,7 @@ describe("hosted Linq instant first turn", () => {
     const fetchMock = vi.fn().mockResolvedValue(buildOpenAiResponse({
       kind: "answer",
       message: reply,
-      serviceTier: "fast",
+      serviceTier: "priority",
     }));
     vi.stubGlobal("fetch", fetchMock);
 
