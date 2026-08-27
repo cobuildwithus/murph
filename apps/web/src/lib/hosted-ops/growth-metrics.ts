@@ -89,6 +89,7 @@ const SNAPSHOT_COMPARE_TARGET_DAYS = 7;
 const SNAPSHOT_COMPARE_MIN_DAYS = 6;
 const SNAPSHOT_COMPARE_MAX_DAYS = 8;
 export const HOSTED_GROWTH_CONVERSION_MATURITY_DAYS = 14;
+export const HOSTED_RECENT_MEMBER_RETENTION_LIMIT = 20;
 const TRIAL_ENDING_SOON_DAYS = 3;
 const HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX =
   `${HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX}:`;
@@ -293,6 +294,22 @@ export interface HostedGrowthTrialCohortRow {
   stillTrialing: number;
 }
 
+export interface HostedRecentMemberRetentionRow {
+  createdAt: string;
+  lastMessageAt: string | null;
+  maskedPhoneNumberHint: string | null;
+  memberId: string;
+  messagesLast7Days: number;
+  messagesToday: number;
+  onboardingCompleted: boolean;
+  suspended: boolean;
+}
+
+export interface HostedRecentMemberRetention {
+  capturedAt: string;
+  members: HostedRecentMemberRetentionRow[];
+}
+
 export interface HostedGrowthDashboard {
   activeUsers: {
     today: number;
@@ -325,6 +342,7 @@ export interface HostedGrowthDashboard {
     wowPercent: number | null;
   };
   payingCustomersWowPercent: number | null;
+  recentMemberRetention: HostedRecentMemberRetention;
   referralLinkUsage: HostedGrowthReferralLinkUsage;
   snapshotSeries: HostedGrowthSnapshotPoint[];
   trialCohorts: HostedGrowthTrialCohortRow[];
@@ -1278,6 +1296,7 @@ export async function readHostedGrowthDashboard(
   const [
     current,
     memberRows,
+    recentMemberRows,
     rawTrialStartRows,
     snapshots,
     messagesBeforeSeries,
@@ -1303,6 +1322,30 @@ export async function readHostedGrowthDashboard(
         ...realHostedMemberWhere,
         createdAt: {
           gte: recentStart,
+          lte: now,
+        },
+      },
+    }),
+    prisma.hostedMember.findMany({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        createdAt: true,
+        id: true,
+        identity: {
+          select: {
+            maskedPhoneNumberHint: true,
+          },
+        },
+        initialOnboardingCompletedAt: true,
+        suspendedAt: true,
+      },
+      take: HOSTED_RECENT_MEMBER_RETENTION_LIMIT,
+      where: {
+        ...realHostedMemberWhere,
+        createdAt: {
           lte: now,
         },
       },
@@ -1427,6 +1470,8 @@ export async function readHostedGrowthDashboard(
       },
     }),
     prisma.hostedMailboxItem.groupBy({
+      _count: { _all: true },
+      _max: { createdAt: true },
       by: ["userId"],
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
@@ -1478,6 +1523,7 @@ export async function readHostedGrowthDashboard(
       },
     }),
     prisma.hostedMailboxItem.groupBy({
+      _count: { _all: true },
       by: ["userId"],
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
@@ -1602,6 +1648,15 @@ export async function readHostedGrowthDashboard(
     })),
     startInclusive: dailyStart,
   });
+  const recentMessagesByMemberId = new Map(
+    activeUsersTrailing7DayDirectRows.map((row) => [row.userId, row] as const),
+  );
+  const todayMessagesByMemberId = new Map(
+    activeUsersTodayDirectRows.map((row) => [
+      row.userId,
+      row._count._all,
+    ] as const),
+  );
 
   const dailySeries = buildDailyGrowthSeries({
     dayCount: DAILY_SERIES_DAYS,
@@ -1713,6 +1768,25 @@ export async function readHostedGrowthDashboard(
           current.payingCustomers,
           comparableSnapshot.payingCustomers,
         ),
+    recentMemberRetention: {
+      capturedAt: now.toISOString(),
+      members: recentMemberRows.map((member) => {
+        const recentMessages = recentMessagesByMemberId.get(member.id);
+
+        return {
+          createdAt: member.createdAt.toISOString(),
+          lastMessageAt:
+            recentMessages?._max.createdAt?.toISOString() ?? null,
+          maskedPhoneNumberHint:
+            member.identity?.maskedPhoneNumberHint ?? null,
+          memberId: member.id,
+          messagesLast7Days: recentMessages?._count._all ?? 0,
+          messagesToday: todayMessagesByMemberId.get(member.id) ?? 0,
+          onboardingCompleted: member.initialOnboardingCompletedAt !== null,
+          suspended: member.suspendedAt !== null,
+        };
+      }),
+    },
     referralLinkUsage: buildHostedGrowthReferralLinkUsage({
       claimRows: referralLinkClaimRows,
       dayCount: DAILY_SERIES_DAYS,

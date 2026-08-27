@@ -18,9 +18,6 @@ import {
 import {
   readHostedGrowthSponsorshipMetrics,
 } from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
-import {
-  readHostedRecentMemberRetention,
-} from "@/src/lib/hosted-ops/recent-member-retention";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   Table,
@@ -49,10 +46,9 @@ export default async function HostedOpsGrowthPage() {
 
   const now = new Date();
   await captureHostedGrowthDailySnapshot(now);
-  const [dashboard, sponsorships, recentMemberRetention] = await Promise.all([
+  const [dashboard, sponsorships] = await Promise.all([
     readHostedGrowthDashboard(now),
     readHostedGrowthSponsorshipMetrics(now),
-    readHostedRecentMemberRetention(now),
   ]);
 
   return (
@@ -89,7 +85,7 @@ export default async function HostedOpsGrowthPage() {
         usageTopUps={dashboard.usageTopUps}
       />
 
-      <RecentMemberRetention retention={recentMemberRetention} />
+      <RecentMemberRetention retention={dashboard.recentMemberRetention} />
 
       <GrowthCharts
         dailySeries={dashboard.dailySeries}

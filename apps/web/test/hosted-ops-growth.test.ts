@@ -562,7 +562,9 @@ describe("hosted ops growth metrics", () => {
   it("reads referral claims by durable attribution rather than invite channel", async () => {
     const now = new Date("2026-07-31T12:00:00.000Z");
     queueCurrentMetricMocks();
-    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.count
@@ -632,7 +634,9 @@ describe("hosted ops growth metrics", () => {
   it("reads the durable group-to-private total and daily conversion series", async () => {
     const now = new Date("2026-07-31T12:00:00.000Z");
     queueCurrentMetricMocks();
-    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.count
@@ -1254,8 +1258,16 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
       .mockResolvedValueOnce([
-        { userId: "member_direct" },
-        { userId: "member_direct_only" },
+        {
+          _count: { _all: 7 },
+          _max: { createdAt: new Date("2026-07-06T11:30:00.000Z") },
+          userId: "member_direct",
+        },
+        {
+          _count: { _all: 2 },
+          _max: { createdAt: new Date("2026-07-05T12:00:00.000Z") },
+          userId: "member_direct_only",
+        },
       ])
       .mockResolvedValueOnce([{ userId: "member_previous" }])
       .mockResolvedValueOnce([
@@ -1265,8 +1277,8 @@ describe("hosted ops growth metrics", () => {
         { userId: "member_monthly" },
       ])
       .mockResolvedValueOnce([
-        { userId: "member_direct" },
-        { userId: "member_today" },
+        { _count: { _all: 4 }, userId: "member_direct" },
+        { _count: { _all: 3 }, userId: "member_today" },
       ]);
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
       buildLinqGroupMailboxRow({
@@ -1330,7 +1342,31 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
-    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          createdAt: new Date("2026-07-06T11:30:00.000Z"),
+          id: "member_no_recent_activity",
+          identity: { maskedPhoneNumberHint: "*** 0630" },
+          initialOnboardingCompletedAt: null,
+          suspendedAt: null,
+        },
+        {
+          createdAt: new Date("2026-07-05T12:00:00.000Z"),
+          id: "member_direct",
+          identity: null,
+          initialOnboardingCompletedAt: new Date("2026-07-05T12:05:00.000Z"),
+          suspendedAt: null,
+        },
+        {
+          createdAt: new Date("2026-07-04T12:00:00.000Z"),
+          id: "member_direct_only",
+          identity: { maskedPhoneNumberHint: "*** 0704" },
+          initialOnboardingCompletedAt: new Date("2026-07-04T12:05:00.000Z"),
+          suspendedAt: new Date("2026-07-06T10:00:00.000Z"),
+        },
+      ]);
     mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.count
@@ -1349,6 +1385,41 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: true,
       wowPercent: 300,
     });
+    expect(dashboard.recentMemberRetention).toEqual({
+      capturedAt: "2026-07-06T12:00:00.000Z",
+      members: [
+        {
+          createdAt: "2026-07-06T11:30:00.000Z",
+          lastMessageAt: null,
+          maskedPhoneNumberHint: "*** 0630",
+          memberId: "member_no_recent_activity",
+          messagesLast7Days: 0,
+          messagesToday: 0,
+          onboardingCompleted: false,
+          suspended: false,
+        },
+        {
+          createdAt: "2026-07-05T12:00:00.000Z",
+          lastMessageAt: "2026-07-06T11:30:00.000Z",
+          maskedPhoneNumberHint: null,
+          memberId: "member_direct",
+          messagesLast7Days: 7,
+          messagesToday: 4,
+          onboardingCompleted: true,
+          suspended: false,
+        },
+        {
+          createdAt: "2026-07-04T12:00:00.000Z",
+          lastMessageAt: "2026-07-05T12:00:00.000Z",
+          maskedPhoneNumberHint: "*** 0704",
+          memberId: "member_direct_only",
+          messagesLast7Days: 2,
+          messagesToday: 0,
+          onboardingCompleted: true,
+          suspended: true,
+        },
+      ],
+    });
     expect(dashboard.usageTopUps).toEqual({
       trackedFulfilled: 12,
     });
@@ -1361,6 +1432,8 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toEqual({
+      _count: { _all: true },
+      _max: { createdAt: true },
       by: ["userId"],
       where: {
         kind: "conversation.message",
@@ -1417,11 +1490,35 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
+      _count: { _all: true },
       where: {
         createdAt: {
           gte: new Date("2026-07-06T00:00:00.000Z"),
           lt: now,
         },
+      },
+    });
+    expect(mocks.hostedMember.findMany.mock.calls[3]?.[0]).toEqual({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        createdAt: true,
+        id: true,
+        identity: {
+          select: {
+            maskedPhoneNumberHint: true,
+          },
+        },
+        initialOnboardingCompletedAt: true,
+        suspendedAt: true,
+      },
+      take: 20,
+      where: {
+        createdAt: { lte: now },
+        hostedGroupRuntime: null,
+        threadContainer: null,
       },
     });
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(7);
@@ -1437,7 +1534,9 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce([{ userId: "member_direct_late" }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ userId: "member_direct_late" }])
-      .mockResolvedValueOnce([{ userId: "member_direct_late" }]);
+      .mockResolvedValueOnce([
+        { _count: { _all: 1 }, userId: "member_direct_late" },
+      ]);
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
       buildLinqGroupMailboxRow({
         contact: groupPhone,
@@ -3197,6 +3296,8 @@ function queueCurrentMetricMocks(input: { includeMax?: boolean } = {}) {
 
 function activeUserRows(count: number) {
   return Array.from({ length: count }, (_, index) => ({
+    _count: { _all: 1 },
+    _max: { createdAt: null },
     userId: `member_${index + 1}`,
   }));
 }

@@ -17,7 +17,7 @@ import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table
 import { RecentMemberRetention } from "../(dashboard)/ops/growth/recent-member-retention";
 import { ReferralLinkUsage } from "../(dashboard)/ops/growth/referral-link-usage";
 import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
-import type { HostedRecentMemberRetention } from "@/src/lib/hosted-ops/recent-member-retention";
+import type { HostedRecentMemberRetention } from "@/src/lib/hosted-ops/growth-metrics";
 
 const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
   const date = new Date(Date.UTC(2026, 6, index + 1));

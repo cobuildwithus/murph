@@ -10,7 +10,7 @@ import {
 import type {
   HostedRecentMemberRetention,
   HostedRecentMemberRetentionRow,
-} from "@/src/lib/hosted-ops/recent-member-retention";
+} from "@/src/lib/hosted-ops/growth-metrics";
 
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 const UTC_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {

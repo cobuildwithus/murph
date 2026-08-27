@@ -69,24 +69,25 @@ and ReviewGPT loop.
 
 ## Architecture
 
-- Add one focused server-only read model beside the existing Growth aggregate
-  owner rather than expanding the already broad aggregate dashboard type.
-- Read at most 20 real members in one ordered query. For those IDs only, issue
-  two independent set-based mailbox aggregates in parallel: rolling seven-day
-  count/latest receipt and current-UTC-day count.
+- Extend the existing Growth read owner with one ordered query for at most 20
+  real members rather than adding a second analytics owner.
+- Reuse the owner's existing rolling-seven-day and current-UTC-day personal
+  mailbox groupings by selecting count and latest-receipt fields from those
+  same operations; add no mailbox query for the section.
 - Use `HostedMailboxItem.createdAt` for receipt-time semantics and
   `conversation.message` for inbound messaging, matching the Growth contract;
   keep every displayed activity fact inside the live seven-day window.
 - Return only small serializable fields to a pure production component. Reuse
   that component with synthetic props in the existing Growth design study.
-- Maximum database work is three round trips and 20 aggregate output groups per
-  mailbox query; there is no per-member query or transaction.
+- Maximum incremental database work is one bounded member query; there is no
+  per-member query or transaction.
 
 ## Tasks
 
-1. Implement the bounded recent-member read model and unit coverage.
+1. Implement the bounded recent-member projection in the Growth read owner and
+   add composed unit coverage.
 2. Build the production section and its rich, sparse, and empty render tests.
-3. Wire the read into `/ops/growth` in parallel with existing independent reads.
+3. Render the projection already returned by the Growth dashboard owner.
 4. Add the production component to the existing Growth design study.
 5. Run focused tests, Web typecheck/lint, design/browser proof, privacy review,
    exact-head CI, preliminary specialist ReviewGPT, and the final ReviewGPT
@@ -102,9 +103,14 @@ and ReviewGPT loop.
   deletion-first correction keeps only today and rolling-seven-day activity and
   removes plan presentation. Refreshed desktop and phone browser proofs show all
   three recent-activity states without clipping or horizontal scrolling.
+- Final ReviewGPT round 2 found that the standalone projection duplicated the
+  Growth owner's existing today and seven-day mailbox reads. The accepted
+  complexity-collapse correction folds the newest-20 projection into that owner
+  and deletes both redundant mailbox operations. The composed focused test
+  proves the new rows and unchanged active-user totals from the shared reads.
 - `pnpm --dir apps/web test:prepared
   test/hosted-ops-recent-member-retention.test.tsx
-  test/hosted-ops-growth.test.ts` — pass, 60 tests.
+  test/hosted-ops-growth.test.ts` — pass after owner collapse, 58 tests.
 - Changed-file Web ESLint — pass.
 - `pnpm --dir apps/web typecheck` — pass. This full command regenerated the
   ignored Health Commons and Prisma prerequisites before the checker.
@@ -114,9 +120,10 @@ and ReviewGPT loop.
   the repository-pinned Chromium; the test blocks non-loopback requests and uses
   only the synthetic Growth study.
 - `pnpm test:diff <task paths>` — pass after remediation. The composed Web lane
-  passed 800 test files / 11,185 tests, full lint with zero errors, isolated dev smoke, and the
-  optimized Next.js production build, plus the repository architecture,
+  passed 800 test files / 11,183 tests, full lint with zero errors, isolated dev
+  smoke, and the optimized Next.js production build, plus the repository architecture,
   privacy, dependency, and workspace-boundary guards.
 - Exact pushed-head CI passed for the first candidate except the separately
-  pending native mobile E2Es. Final ReviewGPT round 1 returned two accepted
-  findings; the corrected head, refreshed evidence, CI, and final round 2 remain.
+  pending native mobile E2Es. Final ReviewGPT rounds 1 and 2 returned accepted
+  findings; the newest-owner correction, refreshed evidence, CI, and final
+  round 3 remain.
