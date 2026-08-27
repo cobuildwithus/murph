@@ -1181,13 +1181,6 @@ set -euo pipefail
 
 ${runAllPackageCoverage}
 
-node() {
-  printf '%s\n' \
-    packages/assistant-engine \
-    packages/core \
-    packages/hosted-local-harness \
-    packages/setup-cli
-}
 register_background_pid() { return 0; }
 unregister_background_pid() { return 0; }
 mark_acceptance_cli_coverage_complete() { return 0; }
@@ -1197,61 +1190,60 @@ run_workspace_package_coverage() {
   local package_dir="$1"
   local package_name="\${package_dir#packages/}"
 
-  : >"$sandbox/\${package_name}-started"
+  : >"$case_dir/\${package_name}-started"
   if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-    while [[ ! -f "$sandbox/release-assistant" ]]; do
+    while [[ ! -f "$case_dir/release-assistant" ]]; do
       command sleep 0.01
     done
-    return
   fi
+}
 
-  while [[ ! -f "$sandbox/release-remaining" ]]; do
+exercise_profile() {
+  local concurrency="$1"
+  local package_dir
+  local package_name
+  case_dir="$sandbox/concurrency-$concurrency"
+  mkdir -p "$case_dir"
+
+  package_coverage_shard=all
+  package_coverage_concurrency_limit="$concurrency"
+  package_coverage_cli_active_concurrency_limit=2
+
+  run_all_package_coverage 1 &
+  local scheduler_pid="$!"
+
+  for _ in {1..1200}; do
+    if [[ -f "$case_dir/vault-usecases-started" ]]; then
+      break
+    fi
     command sleep 0.01
   done
+
+  while IFS= read -r package_dir; do
+    [[ "$package_dir" == "packages/hosted-local-harness" ]] && continue
+    package_name="\${package_dir#packages/}"
+    [[ -f "$case_dir/\${package_name}-started" ]]
+  done < <(node scripts/release-verification-plan.mjs --package-dirs all)
+  [[ ! -f "$case_dir/hosted-local-harness-started" ]]
+
+  : >"$case_dir/release-assistant"
+  for _ in {1..1200}; do
+    if [[ -f "$case_dir/hosted-local-harness-started" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+
+  [[ -f "$case_dir/hosted-local-harness-started" ]]
+  wait "$scheduler_pid"
 }
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf -- "$sandbox"' EXIT
-package_coverage_shard=all
-package_coverage_concurrency_limit=3
-package_coverage_cli_active_concurrency_limit=3
-
-run_all_package_coverage 1 &
-scheduler_pid="$!"
-
-for _ in {1..400}; do
-  if [[
-    -f "$sandbox/assistant-engine-started"
-    && -f "$sandbox/core-started"
-  ]]; then
-    break
-  fi
-  command sleep 0.01
-done
-
-[[ -f "$sandbox/assistant-engine-started" ]]
-[[ -f "$sandbox/core-started" ]]
-command sleep 0.05
-[[ ! -f "$sandbox/hosted-local-harness-started" ]]
-[[ ! -f "$sandbox/setup-cli-started" ]]
-
-: >"$sandbox/release-assistant"
-for _ in {1..400}; do
-  if [[
-    -f "$sandbox/hosted-local-harness-started"
-    && -f "$sandbox/setup-cli-started"
-  ]]; then
-    break
-  fi
-  command sleep 0.01
-done
-
-[[ -f "$sandbox/hosted-local-harness-started" ]]
-[[ -f "$sandbox/setup-cli-started" ]]
-: >"$sandbox/release-remaining"
-wait "$scheduler_pid"
+exercise_profile 3
+exercise_profile 5
 printf 'pairwise-interlock-covered\n'
-`, 30_000);
+`, 60_000);
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("pairwise-interlock-covered\n");
