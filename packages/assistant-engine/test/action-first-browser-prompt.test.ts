@@ -32,7 +32,13 @@ describe('action-first browser prompt contract', () => {
       'For irreversible browser actions, make reversible progress first and stop only at a real point of risk',
     )
     expect(prompt).toContain(
-      'login/private handoff, missing material choice, unavailable payment or sensitive input, final confirmation, or a site/tool blocker',
+      'login/private handoff, missing material choice, unavailable payment or sensitive input, final confirmation, or a site/tool blocker proven after bounded recovery',
+    )
+    expect(prompt).toContain(
+      'An ordinary failed or unresponsive control is not yet a blocker',
+    )
+    expect(prompt).toContain(
+      're-inspect current state, then follow `computer-use` through a safe alternate interaction, OS fallback when allowed, and refresh only when no side effect is unknown and entered state is safe',
     )
     expect(prompt).toContain(
       'do not imply you opened or can drive checkout unless an actual runtime action happened',
@@ -53,6 +59,20 @@ describe('action-first browser prompt contract', () => {
     )
     expect(prompt).toContain(
       'do not require the user to open it or instruct them to click the final site control',
+    )
+  })
+
+  it('includes a fresh handoff link when direct takeover is required', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'When direct browser takeover is actually required and the pause tool returns a fresh handoff URL',
+    )
+    expect(prompt).toContain(
+      'include that URL with the one precise action needed',
+    )
+    expect(prompt).toContain(
+      'Never refer to an "open page" or takeover without giving the usable link',
     )
   })
 })

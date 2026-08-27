@@ -1,6 +1,6 @@
 ---
 name: appointment-scheduling
-description: Use when helping a user book, reschedule, cancel, or join a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns appointment intake completeness, availability and fallback bounds, canonical-memory reuse, safe persistence of durable scheduling preferences, and the ready-to-act gate; execution stays with the relevant transport skill or tool.
+description: Use when helping a user check in, complete intake, book, reschedule, cancel, or join a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns appointment intake completeness, availability and fallback bounds, canonical-memory reuse, safe persistence of durable scheduling preferences, and the ready-to-act gate; execution stays with the relevant transport skill or tool.
 ---
 
 # Appointment scheduling
@@ -21,6 +21,8 @@ website execution, and `murph.create_phone_call` owns call execution.
 Distinguish these outcomes before gathering details:
 
 - book, reschedule, cancel, or join a waitlist
+- check in for a confirmed appointment or complete its intake or registration
+  forms
 - collect office hours, availability, prices, policies, or other information
   without changing an appointment
 - test the calling or browser flow without sharing appointment information
@@ -98,10 +100,10 @@ minimum generally applicable intake below; do not invent an office policy.
 
 ## Build the readiness brief
 
-For a real booking, rescheduling, cancellation, or waitlist action, resolve
-each applicable slot as answered, recovered from reliable current evidence,
-explicitly delegated within bounds, explicitly skipped where the task can still
-proceed, or not applicable:
+For a real check-in, intake, booking, rescheduling, cancellation, or waitlist
+action, resolve each applicable slot as answered, recovered from reliable
+current evidence, explicitly delegated within bounds, explicitly skipped where
+the task can still proceed, or not applicable:
 
 1. **Action and service:** the requested action plus the appointment type or
    minimum reason needed to book the correct service. Do not diagnose to fill
@@ -126,9 +128,9 @@ proceed, or not applicable:
    preferred caller name, callback method, any other fact the destination is
    likely to require, and current approval to disclose each fact needed for
    this action. Patient name and date of birth are required for every real
-   booking, rescheduling, cancellation, or waitlist action covered by this
-   skill, even when the destination's public instructions do not mention them.
-   A memory record is not disclosure consent.
+   check-in, intake, booking, rescheduling, cancellation, or waitlist action
+   covered by this skill, even when the destination's public instructions do
+   not mention them. A memory record is not disclosure consent.
 8. **Success and stop condition:** what counts as done and what must come back
    to the user, such as a confirmed booking, a short option list, fee details,
    or a transfer when an unanticipated decision falls outside the brief.
@@ -223,6 +225,12 @@ For every other fact, classify it before writing:
 - **Current-task fact:** keep it in the conversation and bounded execution
   brief; do not persist it as generic memory.
 
+When the user supplies a new reusable fact, proactively save it only when a
+current canonical owner exists and that owner's contract permits the category.
+If a sensitive fact has no canonical structured owner, use it only for the
+authorized current task and say it was not saved; never claim that an attachment
+or identifier was remembered merely because it appeared in the conversation.
+
 Safe reusable memories include a usual provider or location, a recurring
 day-of-week or time-of-day preference, a preferred modality, permission to use
 any clinician by default, or a standing rule such as always asking before
@@ -251,10 +259,10 @@ identifiers or health details.
 
 ## Ready-to-act gate
 
-Do not start a real booking, rescheduling, cancellation, or waitlist action
-until every outcome-critical slot is resolved and the current user request
-authorizes the action within explicit bounds. A successful test call, office
-hours lookup, or availability inquiry cannot satisfy this gate.
+Do not start a real check-in, intake, booking, rescheduling, cancellation, or
+waitlist action until every outcome-critical slot is resolved and the current
+user request authorizes the action within explicit bounds. A successful test
+call, office hours lookup, or availability inquiry cannot satisfy this gate.
 
 For every real action covered by this skill, the gate also requires exactly one
 verified `Date of birth: YYYY-MM-DD` Identity record and current approval to
@@ -274,6 +282,13 @@ When intake is complete:
    collect options or end without committing.
 4. For browser execution, follow `computer-use` for final-term authorization,
    private handoff, submission, and verification.
+
+For check-in or intake, continue across every authorized ordinary form and
+recoverable field until the site verifies completion. A request to complete the
+task end to end authorizes reversible form progress, not an unprovided consent,
+optional data-sharing choice, inaccurate attestation, CAPTCHA bypass, credential
+entry, or sensitive disclosure outside the completed brief. Ask only for the
+specific unresolved choice or private takeover that actually blocks progress.
 
 If a test or information-only subtask finishes while the real appointment
 brief is incomplete, preserve the unresolved slots and resume intake on the

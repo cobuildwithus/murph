@@ -17,6 +17,7 @@ describe('appointment scheduling skill', () => {
     expect(matches[0]?.triggerHint).toContain(
       'phone, browser, portal, or structured integration',
     )
+    expect(matches[0]?.triggerHint).toContain('check-in, intake')
     expect(matches[0]?.triggerHint).toContain('ready-to-act gate')
 
     const raw = await readAppointmentSkill()
@@ -25,6 +26,9 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain('`computer-use` owns')
     expect(raw).toContain('`murph.create_phone_call` owns call execution')
     expect(raw).toContain('An information-only or connectivity-test action')
+    expect(raw).toContain(
+      'check in for a confirmed appointment or complete its intake or registration',
+    )
     expect(raw).toContain('never counts as readiness or\ncompletion')
     expect(raw).toContain(
       'For practice-wide information such as office hours, do not ask for a service',
@@ -81,7 +85,7 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain('Access and cost constraints when material')
     expect(raw).toContain('Identity, contact, and disclosure')
     expect(raw).toMatch(
-      /Patient name and date of birth are required for every real\s+booking/iu,
+      /Patient name and date of birth are required for every real\s+check-in, intake, booking/iu,
     )
     expect(raw).toContain('Success and stop condition')
     expect(raw).toContain('For rescheduling or cancellation')
@@ -124,6 +128,12 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain('insurance or prescription identifiers')
     expect(raw).toMatch(/current action\/disclosure\s+authority/iu)
     expect(raw).toContain('A memory record is not disclosure consent')
+    expect(raw).toContain(
+      'proactively save it only when a\ncurrent canonical owner exists',
+    )
+    expect(raw).toContain(
+      'never claim that an attachment\nor identifier was remembered merely because it appeared in the conversation',
+    )
   })
 
   it('blocks real execution until the brief and current authority are complete', async () => {
@@ -131,13 +141,13 @@ describe('appointment scheduling skill', () => {
 
     expect(raw).toContain('## Ready-to-act gate')
     expect(raw).toMatch(
-      /Do not start a real booking, rescheduling, cancellation, or waitlist action\s+until every outcome-critical slot is resolved/iu,
+      /Do not start a real check-in, intake, booking, rescheduling, cancellation, or\s+waitlist action until every outcome-critical slot is resolved/iu,
     )
     expect(raw).toMatch(
       /what Murph will request, what choices it\s+may accept, and what personal facts it will share/iu,
     )
     expect(raw).toMatch(
-      /A successful test call, office\s+hours lookup, or availability inquiry cannot satisfy this gate/iu,
+      /A successful test\s+call, office hours lookup, or availability inquiry cannot satisfy this gate/iu,
     )
     expect(raw).toMatch(
       /gate also requires exactly one\s+verified `Date of birth: YYYY-MM-DD` Identity record/iu,
@@ -147,6 +157,12 @@ describe('appointment scheduling skill', () => {
     )
     expect(raw).toMatch(
       /resume intake on the\s+next ordinary conversational turn/iu,
+    )
+    expect(raw).toContain(
+      'continue across every authorized ordinary form and\nrecoverable field until the site verifies completion',
+    )
+    expect(raw).toMatch(
+      /not an unprovided consent,\s+optional data-sharing choice, inaccurate attestation, CAPTCHA bypass/iu,
     )
   })
 })
