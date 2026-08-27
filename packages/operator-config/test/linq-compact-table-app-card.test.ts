@@ -76,7 +76,7 @@ describe('Linq compact-table app cards', () => {
         idempotency_key: 'compact-table-1',
         parts: [
           {
-            fallback_text: 'Your workout. Ask Murph for this card in text',
+            fallback_text: 'Your workout.',
             interactive: true,
             layout: expectedLayout,
             type: 'imessage_app',
@@ -128,8 +128,7 @@ describe('Linq compact-table app cards', () => {
     expect(requests[0]).toMatchObject({
       message: {
         parts: [{
-          fallback_text:
-            'Your Murph summary. Ask Murph for this card in text',
+          fallback_text: 'Your Murph summary.',
         }],
       },
     })

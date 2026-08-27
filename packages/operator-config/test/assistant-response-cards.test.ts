@@ -873,7 +873,7 @@ describe('assistant response cards', () => {
       },
     })
     expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).toBe(
-      'Your daily nutrition. Ask Murph for this card in text',
+      'Your daily nutrition.',
     )
     const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
     const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
