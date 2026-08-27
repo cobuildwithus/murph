@@ -3888,6 +3888,60 @@ describe("createHostedUsageCreditCheckout", () => {
 
   it.each([
     [
+      "owner-created join code",
+      "group_join_code_1234",
+      "owner-group-container-lock",
+      [
+        "owner-group-container-lock",
+        "beneficiary-lock",
+        "owner-group-container-lock",
+        "beneficiary-lock",
+      ],
+    ],
+    [
+      "signed funding-only locator",
+      "gf1.member_group_runtime.signed_funding_locator",
+      "signed-container-lock",
+      [
+        "beneficiary-lock",
+        "signed-container-lock",
+        "beneficiary-lock",
+        "signed-container-lock",
+      ],
+    ],
+  ] as const)(
+    "keeps canonical funding lock order for the %s",
+    async (_label, joinCode, targetLockEvent, expectedLockOrder) => {
+      const usageCreditEvents: string[] = [];
+      const fake = createFakePrisma({ usageCreditEvents });
+      mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
+        displayName: "Sunday sleep crew",
+        fundingPath: `/groups/fund/${encodeURIComponent(joinCode)}`,
+        joinCode,
+        kind: "friends",
+        runtimeMemberId: "member_group_runtime",
+      });
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode,
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+
+      expect(usageCreditEvents.filter((event) =>
+        event === "beneficiary-lock" || event === targetLockEvent
+      )).toEqual(expectedLockOrder);
+    },
+  );
+
+  it.each([
+    [
       "owner code to signed funding locator",
       "group_join_code_1234",
       "gf1.member_group_runtime.signed_funding_locator",
@@ -7773,6 +7827,11 @@ function createFakePrisma(input: {
               : input.occupiedUsageCreditSlotCount ?? 0,
         }];
       }
+      input.usageCreditEvents?.push(
+        sql.includes('FROM "hosted_group" AS "group"')
+          ? "owner-group-container-lock"
+          : "signed-container-lock",
+      );
       groupFundingQueryCalls.push({ queryParts, values });
       return input.groupFundingTargetLocked === false
         ? []

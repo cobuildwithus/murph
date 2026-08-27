@@ -505,6 +505,21 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
+    const ownerJoinCodeFundingTargets =
+      input.target.kind === "group" &&
+        readHostedGroupUsageFundingLocatorRuntimeMemberId(
+          input.target.joinCode,
+        ) === null
+        ? await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "group"."id"
+            FROM "hosted_group" AS "group"
+            INNER JOIN "hosted_thread_container" AS "container"
+              ON "container"."member_id" = "group"."runtime_member_id"
+            WHERE "group"."join_code" = ${input.target.joinCode}
+              AND "group"."runtime_member_id" = ${input.target.beneficiaryMemberId}
+            FOR SHARE OF "group", "container"
+          `
+        : null;
     let lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
     try {
       lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
@@ -781,15 +796,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       const locatorRuntimeMemberId =
         readHostedGroupUsageFundingLocatorRuntimeMemberId(target.joinCode);
       const fundingTargets = locatorRuntimeMemberId === null
-        ? await tx.$queryRaw<Array<{ id: string }>>`
-            SELECT "group"."id"
-            FROM "hosted_group" AS "group"
-            INNER JOIN "hosted_thread_container" AS "container"
-              ON "container"."member_id" = "group"."runtime_member_id"
-            WHERE "group"."join_code" = ${target.joinCode}
-              AND "group"."runtime_member_id" = ${target.beneficiaryMemberId}
-            FOR SHARE OF "group", "container"
-          `
+        ? ownerJoinCodeFundingTargets ?? []
         : locatorRuntimeMemberId === target.beneficiaryMemberId
           ? await tx.$queryRaw<Array<{ id: string }>>`
               SELECT "container"."member_id" AS "id"
