@@ -1,6 +1,7 @@
 ---
 title: 'Codex worktree setup receives no CODEX_HOME'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2416'
 ---
 
 ## What happened

@@ -1,6 +1,7 @@
 ---
 title: 'Release acceptance runs Linux Codex shell proof without CI markers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2417'
 ---
 
 ## Expected Behavior

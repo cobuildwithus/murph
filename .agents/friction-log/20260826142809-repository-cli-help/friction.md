@@ -1,6 +1,7 @@
 ---
 title: 'Repository CLI help fails when workspace package builds are absent'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2404'
 ---
 
 ## Expected Behavior

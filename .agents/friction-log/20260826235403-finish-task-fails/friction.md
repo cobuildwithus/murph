@@ -1,6 +1,7 @@
 ---
 title: 'finish-task fails after archiving a staged active plan'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2412'
 ---
 
 ## Expected Behavior
