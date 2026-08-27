@@ -144,6 +144,10 @@ const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
   import.meta.url,
 ).href;
+const hostedComputerUseCryptoModuleSpecifier = new URL(
+  "../../src/lib/computer-use/crypto.ts",
+  import.meta.url,
+).href;
 const hostedComputerUseStoreModuleSpecifier = new URL(
   "../../src/lib/computer-use/store.ts",
   import.meta.url,
@@ -297,7 +301,10 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
     } | null>;
   };
   hostedThreadContainer: {
-    findUnique(args: unknown): Promise<{ memberId: string } | null>;
+    findUnique(args: unknown): Promise<{
+      memberId: string;
+      monthlyUsageLimitUsdMicros: bigint;
+    } | null>;
   };
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
@@ -523,6 +530,16 @@ interface HostedComputerUseServiceModule {
     env: NodeJS.ProcessEnv;
     store: HostedComputerUseStoreForTest;
   }) => HostedComputerUseServiceForTest;
+}
+
+interface HostedComputerUseCryptoModule {
+  encryptComputerRunSecret(input: {
+    field: "kernel-live-view-url";
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    runId: string;
+    value: string;
+  }): Promise<string | null>;
 }
 
 export interface HostedComputerRunForTest {
@@ -1796,15 +1813,20 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
   periodStart: Date;
   remainingUsdMicros?: bigint;
 }): Promise<HostedAiUsagePeriodForTest> {
-  const limitUsdMicros = 10_000_000n;
-  const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
-  if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
-    throw new RangeError("Hosted AI usage test balance must be within the period limit.");
-  }
-  const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
-  const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedAiUsagePeriod.upsert({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const threadContainer = await deps.prisma.hostedThreadContainer.findUnique({
+      select: { monthlyUsageLimitUsdMicros: true },
+      where: { memberId: input.memberId },
+    });
+    const limitUsdMicros =
+      threadContainer?.monthlyUsageLimitUsdMicros ?? 10_000_000n;
+    const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
+    if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
+      throw new RangeError("Hosted AI usage test balance must be within the period limit.");
+    }
+    const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
+    const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
+    return await deps.prisma.hostedAiUsagePeriod.upsert({
       create: {
         billingPlanCode: "launch_monthly",
         blockedAt,
@@ -1829,8 +1851,8 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
           periodStart: input.periodStart,
         },
       },
-    })
-  );
+    });
+  });
 }
 
 export async function readHostedAiUsageLimitPeriodForTest(input: {
@@ -1910,14 +1932,29 @@ export async function seedHostedComputerRunForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expiresAt?: Date;
   kernelSessionId?: string;
+  liveViewUrl: string;
   memberId: string;
   runId: string;
 }): Promise<HostedComputerRunForTest> {
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const cryptoModule = await import(
+      hostedComputerUseCryptoModuleSpecifier
+    ) as HostedComputerUseCryptoModule;
+    const kernelLiveViewUrlEncrypted = await cryptoModule.encryptComputerRunSecret({
+      field: "kernel-live-view-url",
+      memberId: input.memberId,
+      prisma: deps.prisma,
+      runId: input.runId,
+      value: input.liveViewUrl,
+    });
+    if (!kernelLiveViewUrlEncrypted) {
+      throw new Error("Hosted computer test run live-view encryption failed.");
+    }
     const run = await deps.prisma.hostedComputerRun.create({
       data: {
         expiresAt: input.expiresAt ?? new Date(Date.now() + 60 * 60 * 1_000),
         id: input.runId,
+        kernelLiveViewUrlEncrypted,
         kernelProfileName: `hosted-local-${input.runId}`,
         kernelSessionId: input.kernelSessionId ?? `hosted-local-${input.runId}`,
         memberId: input.memberId,
