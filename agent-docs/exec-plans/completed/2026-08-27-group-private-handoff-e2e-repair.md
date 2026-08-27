@@ -1,6 +1,6 @@
 # Repair group/private handoff continuity and causal delivery
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -140,3 +140,4 @@ Updated: 2026-08-27
 - Proof: one synthetic end-to-end journey crosses both conversations and the
   canonical hosted owners, while focused real-Codex journeys review the actual
   tool choice and member-visible replies.
+Completed: 2026-08-27
