@@ -161,7 +161,15 @@ sent. Missing additive rollout evidence is handled but never recency-eligible.
 An explicit native offer is suppressed only by a covering active offer, never
 by the scopes already granted by current members, because access may be
 intended for a provider-room participant who has not joined the hosted group
-yet.
+yet. A room's explicit request to repost the native offer is the narrow
+exception: the model supplies that current accepted Message ref, Assistant
+Engine verifies it against current group input, and Web incorporates the exact
+accepted-input identity into provider idempotency. Web resends the locked
+current join-policy snapshot; reposting never defaults or replaces its scopes.
+Replay of that request converges on one provider message; a later request can
+post one replacement.
+Older active offers are revoked only after the replacement message is durably
+bound, so a failed send does not destroy the existing recovery path.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only

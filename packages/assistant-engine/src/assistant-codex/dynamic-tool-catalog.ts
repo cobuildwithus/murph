@@ -878,7 +878,7 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =

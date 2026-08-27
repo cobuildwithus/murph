@@ -81,6 +81,7 @@ import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -3285,6 +3286,129 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'binds a requested native access repost to the current group message',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-access-repost-e2e-'),
+      )
+      const messageRef = `ain_${'a'.repeat(32)}`
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-group-repost',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox-group-repost'],
+              originSessionId: 'session-group-repost',
+              recipientKey: 'recipient-group-repost',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'post_join_offer',
+                  result: {
+                    group: {
+                      displayName: null,
+                      id: 'group_synthetic_repost',
+                      kind: 'friends',
+                      memberCount: 1,
+                      members: [],
+                      requestedVaultShareProjectionKinds: [],
+                      requestedVaultShareProjectionScopes: [],
+                      status: 'active',
+                    },
+                    joinUrl: 'https://example.test/groups/join/synthetic',
+                    offeredAt: '2026-08-26T18:00:00.000Z',
+                    offerState: 'posted',
+                    status: 'sent',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            'Sender: participant-a',
+            'Current member message:',
+            '"The group access prompt is buried now. Please post a fresh native one in this chat so another participant can join."',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const accessCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_DATA_TOOL.name
+        )
+
+        process.stdout.write(
+          `[group-access-repost-e2e] ${JSON.stringify({
+            accessCallCount: accessCalls.length,
+            finalMessage: result.finalMessage,
+            groupRequests,
+          })}\n`,
+        )
+        expect(accessCalls).toHaveLength(1)
+        expect(accessCalls[0]).toMatchObject({
+          argumentsValue: {
+            action: 'offer_access',
+            message_ref: messageRef,
+          },
+        })
+        expect(groupRequests).toHaveLength(1)
+        expect(groupRequests[0]).toMatchObject({
+          action: 'post_join_offer',
+          repostOriginAssistantInputId: messageRef,
+        })
+        expect(result.finalMessage.trim()).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
   )
 
   it(
@@ -9792,6 +9916,530 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 })
+
+describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
+  it('resolves an exact menu label before saving a restaurant meal', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-restaurant-meal-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeRestaurantMealVaultCli({
+          binDirectory,
+          commandLogPath,
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+      ])
+
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
+          'The standard plate is the complete item and portion description.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const searchIndex = commands.findIndex((command) =>
+        command.startsWith('food search-labels ')
+      )
+      const addIndex = commands.findIndex((command) =>
+        command.startsWith('meal add ')
+        && !command.includes(' --help')
+        && command.includes(' --note ')
+        && !command.includes(' --name ')
+      )
+      const addCommand = commands[addIndex] ?? ''
+
+      process.stdout.write(
+        `[restaurant-meal-nutrition-e2e] ${JSON.stringify({
+          commands,
+          finalMessage: result.finalMessage,
+        })}\n`,
+      )
+      expect(searchIndex).toBeGreaterThanOrEqual(0)
+      expect(commands[searchIndex]).toMatch(/Harbor\s+Bowl/iu)
+      expect(commands[searchIndex]).toMatch(/chicken\s+plate/iu)
+      expect(addIndex).toBeGreaterThan(searchIndex)
+      expect(addCommand).toMatch(/--nutrition-calories\s+620\b/u)
+      expect(addCommand).toMatch(/--nutrition-protein-grams\s+42\b/u)
+      expect(addCommand).toMatch(
+        /--nutrition-source(?:=|\s+)["']?(?:database|label)["']?(?:\s|$)/u,
+      )
+      expect(result.finalMessage).not.toMatch(
+        /what (?:did you|was)|which (?:item|meal)|\?\s*$/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+
+  it('uses the official restaurant source after an exact menu miss', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-restaurant-official-source-e2e-'),
+    )
+    const officialNutritionUrl =
+      'https://harbor-bowl.example.test/nutrition'
+    const computerRequests: Array<{
+      body: Record<string, unknown>
+      url: string
+    }> = []
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'computer-use' }),
+        materializeRestaurantMealVaultCli({
+          binDirectory,
+          commandLogPath,
+          scenario: 'official-source',
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+      ])
+
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        fetchImpl: async (
+          request: string | URL | Request,
+          init?: RequestInit,
+        ): Promise<Response> => {
+          const url = request instanceof Request ? request.url : String(request)
+          const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+          computerRequests.push({ body, url })
+          if (url === 'http://web-control.worker/api/internal/computer/runs') {
+            return new Response(JSON.stringify({
+              expiresAt: '2026-08-26T20:00:00.000Z',
+              reused: false,
+              runId: 'run_synthetic_restaurant_nutrition',
+              status: 'running',
+              title: 'Harbor Bowl official nutrition',
+              url: officialNutritionUrl,
+              visibleText: [
+                'Harbor Bowl official nutrition',
+                'Standard Chicken Plate — serving size: 1 plate',
+                'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
+              ].join('\n'),
+            }), {
+              headers: { 'content-type': 'application/json' },
+              status: 200,
+            })
+          }
+          if (
+            url
+            === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_restaurant_nutrition/finish'
+          ) {
+            return new Response(JSON.stringify({
+              ok: true,
+              runId: 'run_synthetic_restaurant_nutrition',
+              status: 'completed',
+            }), {
+              headers: { 'content-type': 'application/json' },
+              status: 200,
+            })
+          }
+          throw new Error(`Unexpected hosted computer request: ${url}`)
+        },
+        hostedToolContext: createRealCodexComputerHostedToolContext(),
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
+          `The restaurant lists its official nutrition at ${officialNutritionUrl}.`,
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const searchIndex = commands.findIndex((command) =>
+        command.startsWith('food search-labels ')
+      )
+      const addIndex = commands.findIndex((command) =>
+        command.startsWith('meal add ')
+        && !command.includes(' --help')
+        && command.includes(' --note ')
+      )
+      const addCommand = commands[addIndex] ?? ''
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const searchAction = actions.find((action) =>
+        action.kind === 'command'
+        && action.command.includes('food search-labels')
+      )
+      const openAction = actions.find((action) =>
+        action.kind === 'dynamic'
+        && action.tool === MURPH_COMPUTER_OPEN_TOOL.name
+      )
+      const addAction = actions.find((action) =>
+        action.kind === 'command'
+        && action.command.includes('meal add')
+        && !action.command.includes('--help')
+      )
+
+      process.stdout.write(
+        `[restaurant-meal-official-source-e2e] ${JSON.stringify({
+          commands,
+          computerRequests,
+          finalMessage: result.finalMessage,
+        })}\n`,
+      )
+      expect(searchIndex).toBeGreaterThanOrEqual(0)
+      expect(commands[searchIndex]).toMatch(/Harbor\s+Bowl/iu)
+      expect(commands[searchIndex]).toMatch(/chicken\s+plate/iu)
+      expect(addIndex).toBeGreaterThan(searchIndex)
+      expect(searchAction).toBeDefined()
+      expect(openAction).toMatchObject({
+        argumentsValue: { startUrl: officialNutritionUrl },
+      })
+      expect(addAction).toBeDefined()
+      expect(openAction?.eventIndex).toBeGreaterThan(
+        searchAction?.eventIndex ?? Number.POSITIVE_INFINITY,
+      )
+      expect(addAction?.eventIndex).toBeGreaterThan(
+        openAction?.eventIndex ?? Number.POSITIVE_INFINITY,
+      )
+      expect(addCommand).toMatch(/--nutrition-calories\s+640\b/u)
+      expect(addCommand).toMatch(/--nutrition-protein-grams\s+44\b/u)
+      expect(addCommand).toMatch(
+        /--nutrition-source(?:=|\s+)["']?label["']?(?:\s|$)/u,
+      )
+      expect(addCommand).toContain(officialNutritionUrl)
+      expect(addCommand).not.toMatch(
+        /--nutrition-source(?:=|\s+)["']?estimated["']?(?:\s|$)/u,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+
+  it('saves without nutrition in an already-known number-sensitive context', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-restaurant-nonnumeric-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeRestaurantMealVaultCli({
+          binDirectory,
+          commandLogPath,
+          scenario: 'nonnumeric',
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+      ])
+
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: [
+            'Known member context:',
+            '- The member uses intuitive eating and is number-sensitive.',
+            '- Do not estimate or surface calories or macros, and minimize food prompts.',
+          ].join('\n'),
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
+          'The standard plate is the complete item and portion description.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const searchCommands = commands.filter((command) =>
+        command.startsWith('food search-labels ')
+      )
+      const addCommands = commands.filter((command) =>
+        command.startsWith('meal add ')
+        && !command.includes(' --help')
+        && command.includes(' --note ')
+      )
+
+      process.stdout.write(
+        `[restaurant-meal-nonnumeric-e2e] ${JSON.stringify({
+          commands,
+          finalMessage: result.finalMessage,
+        })}\n`,
+      )
+      expect(searchCommands).toEqual([])
+      expect(addCommands).toHaveLength(1)
+      expect(addCommands[0]).not.toContain('--nutrition-')
+      expect(result.finalMessage).not.toMatch(/calor|protein|carb|macro|fat/iu)
+      expect(result.finalMessage).not.toMatch(/\?\s*$/u)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
+async function materializeRestaurantMealVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+  scenario?: 'database' | 'nonnumeric' | 'official-source'
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const scenario = input.scenario ?? 'database'
+  const exactMenuResult = {
+    items: scenario === 'database' ? [{
+      brand: 'Harbor Bowl',
+      contaminantSummary: { status: 'no_known_product_tests' },
+      dataOrigin: 'restaurant_menu',
+      id: 'menu:harbor-bowl:chicken-plate',
+      label: {
+        calories: 620,
+        carbohydrateGrams: 68,
+        fatGrams: 20,
+        fiberGrams: 8,
+        proteinGrams: 42,
+        servingSize: 1,
+        servingSizeUnit: 'plate',
+      },
+      name: 'Harbor Bowl Standard Chicken Plate',
+    }] : [],
+    source: 'murph-data-api',
+  }
+  const savedNutrition = scenario === 'official-source'
+    ? {
+        calories: 640,
+        carbohydrateGrams: 70,
+        fatGrams: 21,
+        fiberGrams: 9,
+        proteinGrams: 44,
+        source: 'label',
+        sourceDetail: 'https://harbor-bowl.example.test/nutrition',
+      }
+    : {
+        calories: 620,
+        carbohydrateGrams: 68,
+        fatGrams: 20,
+        fiberGrams: 8,
+        proteinGrams: 42,
+        source: 'database',
+        sourceDetail: 'menu:harbor-bowl:chicken-plate',
+      }
+  const savedMeal = {
+    entity: {
+      id: 'meal_01SYNTHETICRESTAURANT00001',
+      kind: 'meal',
+      mealId: 'meal_01SYNTHETICRESTAURANT00001',
+      note: 'One standard chicken plate from Harbor Bowl, no substitutions.',
+      ...(scenario === 'nonnumeric'
+        ? {}
+        : {
+            nutrition: {
+              provenance: {
+                confidence: 'high',
+                source: savedNutrition.source,
+                sourceDetail: savedNutrition.sourceDetail,
+              },
+              totals: {
+                calories: savedNutrition.calories,
+                carbsGrams: savedNutrition.carbohydrateGrams,
+                fatGrams: savedNutrition.fatGrams,
+                fiberGrams: savedNutrition.fiberGrams,
+                proteinGrams: savedNutrition.proteinGrams,
+              },
+            },
+          }),
+      occurredAt: '2026-08-26T19:00:00-04:00',
+      source: 'manual',
+    },
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      `  meal\\ --help|meal\\ add\\ --help) printf '%s\\n' ${quoteNutritionShellLiteral([
+        'Usage: vault-cli meal add [options]',
+        'Options:',
+        '  --note <text>',
+        '  --occurred-at <ISO-8601-or-date>',
+        '  --nutrition-calories <number>',
+        '  --nutrition-protein-grams <number>',
+        '  --nutrition-carbs-grams <number>',
+        '  --nutrition-fat-grams <number>',
+        '  --nutrition-fiber-grams <number>',
+        '  --nutrition-source <database|label|estimated>',
+        '  --nutrition-confidence <level>',
+        '  --nutrition-source-detail <text>',
+        '  --format json',
+      ].join('\\n'))} ;;`,
+      '  food\\ search-labels\\ *)',
+      ...(scenario === 'nonnumeric'
+        ? [
+            '    printf \'unexpected nutrition lookup in number-sensitive context\\n\' >&2',
+            '    exit 65 ;;',
+          ]
+        : [
+            '    case "$*" in *Harbor*Bowl*|*harbor*bowl*) ;; *) printf \'exact restaurant required\\n\' >&2; exit 64 ;; esac',
+            '    case "$*" in *chicken*plate*|*Chicken*Plate*) ;; *) printf \'exact menu item required\\n\' >&2; exit 64 ;; esac',
+            `    ${emit(exactMenuResult)} ;;`,
+          ]),
+      '  meal\\ add*--name*) printf \'unknown option: --name\\n\' >&2; exit 64 ;;',
+      `  meal\\ add\\ *) ${emit(savedMeal)} ;;`,
+      `  meal\\ show\\ *) ${emit(savedMeal)} ;;`,
+      `  goal\\ list\\ *) ${emit({ count: 0, items: [], nextCursor: null })} ;;`,
+      `  memory\\ show\\ *) ${emit({ document: { records: [] }, memory: null })} ;;`,
+      '  *) printf \'unsupported restaurant meal fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
 
 describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
   it('recovers one automatic meal edit and retains unresolved photos', {
