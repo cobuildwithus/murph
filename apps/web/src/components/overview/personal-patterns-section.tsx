@@ -1,8 +1,26 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Ellipsis, Minus } from "lucide-react";
+import {
+  Activity,
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  Ellipsis,
+  Minus,
+  Moon,
+  Sparkles,
+} from "lucide-react";
 import Image from "next/image";
-import { createContext, useContext, useId, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   PersonalPatternCell,
@@ -13,6 +31,7 @@ import type {
 } from "@murphai/query/browser-overview";
 
 import { DashboardPageStatus } from "@/src/components/dashboard/dashboard-page-status";
+import { Button } from "@/src/components/ui/button";
 import {
   Popover,
   PopoverContent,
@@ -103,17 +122,73 @@ export function PersonalPatternsSection({
           visibleReport.outcomes.length > 0 ? (
             <PatternMatrix report={visibleReport} />
           ) : (
-            <div className="px-6 py-8 sm:px-8">
-              <p className="max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
-                {report && report.factors.length > 0
-                  ? "Murph needs more comparable days before showing this table."
-                  : "No comparison is ready yet. Murph needs an action or context, health data, and a nearby comparison day."}
-              </p>
-            </div>
+            <PatternsEmptyState
+              hasFactors={Boolean(report?.factors.length)}
+              hasHealthData={Boolean(report?.outcomes.length)}
+            />
           )}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PatternsEmptyState({
+  hasFactors,
+  hasHealthData,
+}: {
+  hasFactors: boolean;
+  hasHealthData: boolean;
+}) {
+  const needsContext = hasHealthData && !hasFactors;
+  const isLearning = hasHealthData && hasFactors;
+
+  return (
+    <div className="sm:grid sm:grid-cols-[1.12fr_0.88fr]">
+      <div className="p-7 sm:p-10">
+        <Sparkles className="size-8 text-primary" aria-hidden="true" />
+        <h2 className="mt-5 max-w-md font-serif text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          {isLearning
+            ? "Your first patterns are taking shape"
+            : needsContext
+            ? "Give your health data some context"
+            : "See what helps you feel and recover better"}
+        </h2>
+        <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+          {isLearning
+            ? "Murph has useful data and is waiting for enough comparable days. Keep wearing your device and sharing what happened."
+            : needsContext
+            ? "Your device records the result. Tell Murph about training, travel, caffeine, meals, and other things that may explain it."
+            : "Connect a health device. Murph will compare sleep and recovery with the things that happen in your life."}
+        </p>
+        <Button
+          className="mt-6 rounded-full"
+          render={<Link href={hasHealthData ? "/journal" : "/connect"} />}
+        >
+          {hasHealthData ? "Open Journal" : "Connect health data"}
+          <ArrowRight aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="border-t border-border bg-muted/20 p-7 sm:border-l sm:border-t-0 sm:p-10">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Patterns can reveal
+        </p>
+        <ul className="mt-5 space-y-5 text-sm text-foreground">
+          <li className="flex items-center gap-3">
+            <Moon className="size-5 text-primary" aria-hidden="true" />
+            What supports better sleep
+          </li>
+          <li className="flex items-center gap-3">
+            <Activity className="size-5 text-primary" aria-hidden="true" />
+            Which activities change recovery
+          </li>
+          <li className="flex items-center gap-3">
+            <Sparkles className="size-5 text-primary" aria-hidden="true" />
+            Which personal habits are worth testing
+          </li>
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -250,70 +325,110 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
 function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
   const outcomeColumns = buildOutcomeColumns(report.outcomes);
   const columns = `13.5rem repeat(${outcomeColumns.length}, minmax(7.5rem, 1fr))`;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showRightFade, setShowRightFade] = useState(false);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const update = () => {
+      const remaining =
+        scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft;
+      setShowRightFade(remaining > 2);
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) {
+      observer?.observe(scroller.firstElementChild);
+    }
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [outcomeColumns.length]);
 
   return (
-    <div
-      className="hidden overflow-x-auto shadow-[inset_-18px_0_14px_-18px_rgba(45,52,54,0.32)] sm:block"
-      data-patterns-layout="desktop"
-    >
-      <div className="min-w-max">
+    <div className="relative hidden sm:block" data-patterns-layout="desktop">
+      <div
+        aria-label="Pattern results. Scroll horizontally to see more health measures."
+        className="overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable]"
+        ref={scrollRef}
+        tabIndex={0}
+      >
         <div
-          className="grid items-end bg-muted/20"
-          style={{ gridTemplateColumns: columns }}
+          className="w-full"
+          style={{ minWidth: `${13.5 + outcomeColumns.length * 8.5}rem` }}
         >
           <div
-            className="sticky left-0 z-20 border-r border-border bg-[#fffcf6] dark:bg-card"
-            aria-hidden="true"
-          />
-          {outcomeColumns.map((outcome) => (
+            className="grid items-end bg-muted/20"
+            style={{ gridTemplateColumns: columns }}
+          >
             <div
-              key={outcome.id}
-              className="px-3 py-4 text-center"
-              data-pattern-outcome-column={outcome.id}
+              className="sticky left-0 z-20 border-r border-border bg-[#fffcf6] dark:bg-card"
+              aria-hidden="true"
+            />
+            {outcomeColumns.map((outcome) => (
+              <div
+                key={outcome.id}
+                className="px-3 py-4 text-center"
+                data-pattern-outcome-column={outcome.id}
+              >
+                <PatternOutcomeHeader outcome={outcome} />
+              </div>
+            ))}
+          </div>
+
+          {report.factors.map((factor) => (
+            <div
+              key={factor.id}
+              className="grid min-h-[4.75rem] items-center border-t border-border"
+              style={{ gridTemplateColumns: columns }}
             >
-              <PatternOutcomeHeader outcome={outcome} />
+              <div className="sticky left-0 z-10 flex items-center gap-2.5 border-r border-border bg-[#fffcf6] px-4 py-3 dark:bg-card">
+                <Image
+                  src={resolvePatternFactorIcon(factor)}
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="size-9 shrink-0 object-contain"
+                />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {factor.label}
+                  </p>
+                  <ObservedDaysMeter days={factor.observedDays} />
+                </div>
+              </div>
+
+              {outcomeColumns.map((outcome) => {
+                return (
+                  <div
+                    key={outcome.id}
+                    className="flex justify-center px-3 py-3"
+                  >
+                    <PatternOutcomeColumnCell
+                      factorLabel={factor.label}
+                      factorObservedDays={factor.observedDays}
+                      outcomes={outcome.outcomes}
+                      report={report}
+                      factorId={factor.id}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
-
-        {report.factors.map((factor) => (
-          <div
-            key={factor.id}
-            className="grid min-h-[4.75rem] items-center border-t border-border"
-            style={{ gridTemplateColumns: columns }}
-          >
-            <div className="sticky left-0 z-10 flex items-center gap-2.5 border-r border-border bg-[#fffcf6] px-4 py-3 dark:bg-card">
-              <Image
-                src={resolvePatternFactorIcon(factor)}
-                alt=""
-                width={40}
-                height={40}
-                className="size-9 shrink-0 object-contain"
-              />
-              <div className="flex min-w-0 flex-col gap-1">
-                <p className="text-sm font-medium text-foreground">
-                  {factor.label}
-                </p>
-                <ObservedDaysMeter days={factor.observedDays} />
-              </div>
-            </div>
-
-            {outcomeColumns.map((outcome) => {
-              return (
-                <div key={outcome.id} className="flex justify-center px-3 py-3">
-                  <PatternOutcomeColumnCell
-                    factorLabel={factor.label}
-                    factorObservedDays={factor.observedDays}
-                    outcomes={outcome.outcomes}
-                    report={report}
-                    factorId={factor.id}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        ))}
       </div>
+      {showRightFade ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 z-30 w-32 bg-gradient-to-r from-transparent to-[#fffcf6] dark:to-card"
+        />
+      ) : null}
     </div>
   );
 }

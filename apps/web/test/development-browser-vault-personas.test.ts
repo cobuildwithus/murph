@@ -164,6 +164,31 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
   }
 });
 
+test("Whoop persona covers the Journal connections used across the product", async () => {
+  const replica = await buildDevelopmentPersonaReplica(
+    "whoop",
+    new Date("2026-08-26T20:00:00.000Z"),
+  );
+  const events = replica.journal?.days.flatMap((day) => day.events) ?? [];
+  const titles = new Set(events.map((event) => event.title));
+
+  for (const expected of [
+    "Tennis planned",
+    "Strength training",
+    "Work trip",
+    "Time zone change",
+    "Blood test results",
+    "Magnesium for Sleep",
+    "Bedroom temperature changed",
+    "Consistent Wake Time completed",
+    "Day trip",
+    "No Late Caffeine added",
+    "Joined Strength Crew",
+  ]) {
+    assert.ok(titles.has(expected), `${expected}: ${[...titles].join(", ")}`);
+  }
+});
+
 test("New member exercises the empty Journal and Patterns states", async () => {
   const replica = await buildDevelopmentPersonaReplica(
     "new",

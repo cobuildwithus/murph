@@ -95,6 +95,47 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
   assert.deepEqual(parsed.personalPatterns, report);
 });
 
+test("Personal Patterns keeps a repeated eight-minute deep-sleep change", async () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const vault = createVaultReadModel({
+    entities: runningDates.map((date, index) =>
+      event(`deep_sleep_run_${index}`, date, "activity_session", {
+        activityType: "running",
+        durationMinutes: 45,
+      }),
+    ),
+    vaultRoot: "test://personal-pattern-deep-sleep-threshold",
+  });
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    return metricPoint(
+      `deep_sleep_${index}`,
+      date,
+      "deep-sleep-minutes",
+      runningDates.includes(addDays(date, -1)) ? 68 : 60,
+      "min",
+    );
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints,
+    sourceBundleHash: "d".repeat(64),
+    vault,
+  });
+  const report = parseBrowserVaultReplica(replica).personalPatterns;
+
+  const deepSleep = report?.cells.find(
+    (cell) => cell.factorId === "running" && cell.outcomeId === "deep-sleep",
+  );
+  assert.ok(deepSleep);
+  assert.equal(deepSleep.delta, 8);
+  assert.equal(deepSleep.direction, "higher");
+  assert.equal(deepSleep.stage, "seen_again");
+});
+
 test("Browser Vault parsing preserves a missing legacy Personal Patterns projection", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-04-27T12:00:00.000Z",

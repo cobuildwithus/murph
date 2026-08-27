@@ -173,7 +173,7 @@ test("PatternsPage renders personal comparisons on their own route", () => {
 
   assert.match(markup, />Patterns</);
   assert.doesNotMatch(markup, /What tends to move together/);
-  assert.match(markup, /No comparison is ready yet/);
+  assert.match(markup, /See what helps you feel and recover better/);
   assert.doesNotMatch(markup, /Weekly changes/);
 });
 
@@ -366,7 +366,7 @@ test("JournalPage renders its empty state after Browser Vault finishes without d
 
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /Your timeline starts with one useful detail/u);
+  assert.match(markup, /See the story behind your health data/u);
   assert.doesNotMatch(markup, /Preparing your Journal/u);
 });
 
@@ -387,7 +387,7 @@ test("JournalPage renders a structural skeleton while its first timeline is prep
 
   assert.match(markup, /Preparing your Journal/u);
   assert.match(markup, /aria-busy="true"/u);
-  assert.doesNotMatch(markup, /Your timeline starts with one useful detail/u);
+  assert.doesNotMatch(markup, /See the story behind your health data/u);
 });
 
 test("JournalPage renders its empty state while an empty vault refreshes", () => {
@@ -405,7 +405,7 @@ test("JournalPage renders its empty state while an empty vault refreshes", () =>
 
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /Your timeline starts with one useful detail/u);
+  assert.match(markup, /See the story behind your health data/u);
   assert.doesNotMatch(markup, /Preparing your Journal/u);
 });
 
@@ -448,7 +448,7 @@ test("JournalPage offers recovery when an old replica has no Journal view", () =
 
   assert.match(markup, /Journal is not ready yet/u);
   assert.match(markup, /Refresh Journal/u);
-  assert.doesNotMatch(markup, /Your timeline starts with one useful detail/u);
+  assert.doesNotMatch(markup, /See the story behind your health data/u);
 });
 
 test("Personal Patterns comparison controls use plain result language", () => {

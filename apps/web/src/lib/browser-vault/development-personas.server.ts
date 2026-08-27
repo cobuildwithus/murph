@@ -90,7 +90,8 @@ function buildPersonaFixture(
       patternedActivityDates?.running.has(priorDate) ?? false;
     const followsStrength =
       patternedActivityDates?.strength.has(priorDate) ?? false;
-    const followsTennis = patternedActivityDates?.tennis.has(priorDate) ?? false;
+    const followsTennis =
+      patternedActivityDates?.tennis.has(priorDate) ?? false;
     const wave = offset % 5;
     const totalSleep =
       430 +
@@ -367,6 +368,7 @@ function addPersonaSpecificEvents(
         strain: 12.9 + (offset % 3),
       });
     }
+    addWhoopJournalExamples(asOfDate, entities);
     return;
   }
 
@@ -561,10 +563,7 @@ function addPersonaSpecificEvents(
   addContextRichEvents(asOfDate, entities);
 }
 
-function addContextRichEvents(
-  asOfDate: string,
-  entities: CanonicalEntity[],
-) {
+function addContextRichEvents(asOfDate: string, entities: CanonicalEntity[]) {
   const tripStart = addDays(asOfDate, -5);
   entities.push(
     habitatEntity({
@@ -619,6 +618,139 @@ function addContextRichEvents(
       kind: "meal",
       occurredAt: `${addDays(asOfDate, -1)}T19:10:00.000Z`,
       title: "Meal",
+    }),
+  );
+}
+
+function addWhoopJournalExamples(
+  asOfDate: string,
+  entities: CanonicalEntity[],
+): void {
+  const date = (offset: number) => addDays(asOfDate, -offset);
+
+  entities.push(
+    journalNote({
+      date: date(1),
+      id: "whoop_calendar_tennis",
+      note: "Tennis is planned for 18:30 today.",
+      noteType: "journal-plan",
+      source: "calendar",
+      tags: ["key-tennis", "planned"],
+      title: "Tennis planned",
+    }),
+    eventEntity({
+      attributes: {
+        activityType: "strength-training",
+        durationMinutes: 52,
+        source: "whoop",
+        summary: "Completed the Lower Body A session from Strength Base.",
+        workout: {
+          exercises: [
+            "Goblet squat",
+            "Romanian deadlift",
+            "Split squat",
+            "Calf raise",
+          ],
+          routineName: "Strength Base · Lower Body A",
+        },
+      },
+      date: date(2),
+      id: "whoop_training_plan_session",
+      kind: "activity_session",
+      occurredAt: `${date(2)}T17:30:00.000Z`,
+      tags: ["key-strength-training", "training-plan-strength-base"],
+      title: "Strength training",
+    }),
+    journalNote({
+      date: date(3),
+      id: "whoop_multi_day_trip",
+      note: "Three-day work trip. Staying away from home, day 2 of 3.",
+      occurredAt: null,
+      source: "calendar",
+      tags: ["key-travel", "episode-work-trip"],
+      title: "Work trip",
+    }),
+    journalNote({
+      date: date(4),
+      id: "whoop_timezone_change",
+      note: "Local time changed by two hours during travel.",
+      occurredAt: null,
+      source: "calendar",
+      tags: ["key-travel", "timezone-change"],
+      title: "Time zone change",
+    }),
+    eventEntity({
+      attributes: {
+        source: "laboratory",
+        summary: "A new blood panel is ready with 18 measured markers.",
+      },
+      date: date(5),
+      id: "whoop_lab_result",
+      kind: "test",
+      occurredAt: `${date(5)}T09:00:00.000Z`,
+      title: "Blood test results",
+    }),
+    eventEntity({
+      attributes: {
+        source: "murph",
+        status: "active",
+        summary: "Day 6 of a 14-day magnesium sleep experiment.",
+      },
+      date: date(6),
+      id: "whoop_experiment_active",
+      kind: "experiment_context",
+      occurredAt: `${date(6)}T08:00:00.000Z`,
+      title: "Magnesium for Sleep",
+    }),
+    journalNote({
+      date: date(7),
+      id: "whoop_environment_change",
+      note: "Bedroom temperature changed from 21 C to 18 C.",
+      occurredAt: null,
+      source: "environment",
+      tags: ["key-bedroom-temperature"],
+      title: "Bedroom temperature changed",
+    }),
+    eventEntity({
+      attributes: {
+        source: "murph",
+        status: "completed",
+        summary: "The 14-day consistent wake time experiment finished.",
+      },
+      date: date(8),
+      id: "whoop_experiment_completed",
+      kind: "experiment_context",
+      occurredAt: `${date(8)}T08:00:00.000Z`,
+      title: "Consistent Wake Time completed",
+    }),
+    journalNote({
+      date: date(9),
+      id: "whoop_day_trip",
+      note: "Day trip by train. Home again the same evening.",
+      occurredAt: null,
+      source: "calendar",
+      tags: ["key-travel", "day-trip"],
+      title: "Day trip",
+    }),
+    eventEntity({
+      attributes: {
+        source: "murph",
+        status: "planned",
+        summary: "A seven-day no-late-caffeine experiment was added.",
+      },
+      date: date(10),
+      id: "whoop_experiment_new",
+      kind: "experiment_context",
+      occurredAt: `${date(10)}T08:00:00.000Z`,
+      title: "No Late Caffeine added",
+    }),
+    journalNote({
+      date: date(11),
+      id: "whoop_group_joined",
+      note: "Joined a private strength training group.",
+      source: "group",
+      tags: ["group-membership"],
+      title: "Joined Strength Crew",
     }),
   );
 }

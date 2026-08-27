@@ -402,15 +402,40 @@ function WeeklyInsights({ insights }: { insights: JournalInsight[] }) {
 
 function JournalEmptyState() {
   return (
-    <section className="max-w-xl rounded-2xl border border-border bg-card p-6 sm:p-8">
-      <Moon className="size-8 text-primary" aria-hidden="true" />
-      <h2 className="mt-5 font-serif text-2xl font-semibold tracking-tight text-foreground">
-        Your timeline starts with one useful detail
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        Tell Murph what happened, how you felt, or what context mattered. Sleep
-        and activity from connected devices will appear automatically.
-      </p>
+    <section className="overflow-hidden rounded-2xl border border-border bg-card sm:grid sm:grid-cols-[1.15fr_0.85fr]">
+      <div className="p-7 sm:p-10">
+        <Moon className="size-8 text-primary" aria-hidden="true" />
+        <h2 className="mt-5 max-w-md font-serif text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          See the story behind your health data
+        </h2>
+        <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+          Journal brings together sleep, activity, and the details you share
+          with Murph.
+        </p>
+        <Button className="mt-6 rounded-full" render={<Link href="/connect" />}>
+          Connect a device
+          <ArrowRight aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="border-t border-border bg-muted/20 p-7 sm:border-l sm:border-t-0 sm:p-10">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Your Journal can include
+        </p>
+        <ul className="mt-5 space-y-5 text-sm text-foreground">
+          <li className="flex items-center gap-3">
+            <Moon className="size-5 text-primary" aria-hidden="true" />
+            Sleep and recovery
+          </li>
+          <li className="flex items-center gap-3">
+            <Activity className="size-5 text-primary" aria-hidden="true" />
+            Workouts and daily activity
+          </li>
+          <li className="flex items-center gap-3">
+            <NotebookPen className="size-5 text-primary" aria-hidden="true" />
+            Context from your conversations
+          </li>
+        </ul>
+      </div>
     </section>
   );
 }
@@ -719,7 +744,6 @@ type SleepMetricBaselines = Map<string, number[]>;
 type SleepMetricDirection = "higher" | "lower" | "neutral";
 
 interface SleepMetricContext {
-  label: string;
   tone: "favorable" | "neutral" | "unfavorable";
 }
 
@@ -748,26 +772,18 @@ function SleepPopoverPresentation({
       {primaryMetrics.length > 0 ? (
         <dl className="grid grid-cols-2 gap-6">
           {primaryMetrics.map((metric) => (
-            <div key={metric.label}>
-              <SleepMetricLabel
-                description={
-                  metric.label === "Total sleep"
-                    ? "How long you slept during the main sleep period."
-                    : "Your device's overall rating of that night's sleep."
-                }
-                label={metric.label}
-              />
-              <dd className="mt-1 font-serif text-[1.75rem] font-semibold leading-8 tracking-[-0.02em] text-foreground">
-                {metric.value}
-              </dd>
-              <SleepMetricContextLabel
-                context={getSleepMetricContext(
-                  metric.label,
-                  metric.value,
-                  sleepBaselines,
-                )}
-              />
-            </div>
+            <SleepMetricValue
+              description={
+                metric.label === "Total sleep"
+                  ? "How long you slept during the main sleep period."
+                  : "Your device's overall rating of that night's sleep."
+              }
+              key={metric.label}
+              label={metric.label}
+              sleepBaselines={sleepBaselines}
+              value={metric.value}
+              variant="primary"
+            />
           ))}
         </dl>
       ) : null}
@@ -776,22 +792,13 @@ function SleepPopoverPresentation({
           <Separator />
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
             {details.metrics.map((metric) => (
-              <div key={metric.label}>
-                <SleepMetricLabel
-                  description={metric.description}
-                  label={metric.label}
-                />
-                <dd className="mt-1 font-serif text-xl font-semibold leading-6 text-foreground">
-                  {metric.value}
-                </dd>
-                <SleepMetricContextLabel
-                  context={getSleepMetricContext(
-                    metric.label,
-                    metric.value,
-                    sleepBaselines,
-                  )}
-                />
-              </div>
+              <SleepMetricValue
+                description={metric.description}
+                key={metric.label}
+                label={metric.label}
+                sleepBaselines={sleepBaselines}
+                value={metric.value}
+              />
             ))}
           </dl>
         </>
@@ -812,24 +819,44 @@ function SleepPopoverPresentation({
   );
 }
 
-function SleepMetricContextLabel({
-  context,
+function SleepMetricValue({
+  description,
+  label,
+  sleepBaselines,
+  value,
+  variant = "detail",
 }: {
-  context: SleepMetricContext | null;
+  description: string;
+  label: string;
+  sleepBaselines: SleepMetricBaselines;
+  value: string;
+  variant?: "detail" | "primary";
 }) {
-  if (!context) return null;
+  const context = getSleepMetricContext(label, value, sleepBaselines);
+
   return (
-    <p
-      className={cn(
-        "mt-1 text-[11px] leading-4",
-        context.tone === "favorable" && "text-primary",
-        context.tone === "unfavorable" && "text-red-600 dark:text-red-400",
-        context.tone === "neutral" && "text-muted-foreground",
-      )}
-    >
-      {context.label}
-    </p>
+    <div>
+      <SleepMetricLabel description={description} label={label} />
+      <dd
+        className={cn(
+          "-ml-2 mt-1 inline-flex rounded-lg px-2 py-1 font-serif font-semibold tracking-[-0.02em] text-foreground",
+          variant === "primary"
+            ? "text-[1.75rem] leading-8"
+            : "text-xl leading-6",
+          sleepMetricToneClass(context),
+        )}
+      >
+        {value}
+      </dd>
+    </div>
   );
+}
+
+function sleepMetricToneClass(context: SleepMetricContext | null): string {
+  if (!context || context.tone === "neutral") return "bg-muted/40";
+  if (context.tone === "favorable")
+    return "bg-primary/10 text-primary dark:bg-primary/15";
+  return "bg-red-700/10 text-red-700 dark:bg-red-500/15 dark:text-red-300";
 }
 
 function SleepMetricLabel({
@@ -1066,7 +1093,8 @@ function JournalEntryActions({
       >
         <div className="flex flex-col gap-1">
           {contactOptions.map((option) => {
-            const Icon = option.kind === "telegram" ? MessageCircle : NotebookPen;
+            const Icon =
+              option.kind === "telegram" ? MessageCircle : NotebookPen;
             return (
               <a
                 className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1170,7 +1198,9 @@ function WeekMetricLineChart({
     x: (index / Math.max(points.length - 1, 1)) * width,
     y: height - ((point.value - minimum) / range) * (height - 12) - 6,
   }));
-  const polyline = coordinates.map((point) => `${point.x},${point.y}`).join(" ");
+  const polyline = coordinates
+    .map((point) => `${point.x},${point.y}`)
+    .join(" ");
 
   return (
     <div className="pt-2">
@@ -1515,25 +1545,20 @@ function getSleepMetricContext(
   if (values.length < 7) return null;
   const current = parseSleepMetricValue(label, formattedValue);
   if (current === null) return null;
-  const baseline = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const baseline =
+    values.reduce((sum, value) => sum + value, 0) / values.length;
   if (baseline === 0) return null;
   const difference = (current - baseline) / Math.abs(baseline);
   if (Math.abs(difference) < 0.05) {
-    return { label: "Near your usual", tone: "neutral" };
+    return { tone: "neutral" };
   }
 
   const direction = sleepMetricDirection(label);
   if (direction === "neutral") {
-    return {
-      label: difference > 0 ? "Above your usual" : "Below your usual",
-      tone: "neutral",
-    };
+    return { tone: "neutral" };
   }
   const favorable = direction === "higher" ? difference > 0 : difference < 0;
-  return {
-    label: favorable ? "Better than your usual" : "Worse than your usual",
-    tone: favorable ? "favorable" : "unfavorable",
-  };
+  return { tone: favorable ? "favorable" : "unfavorable" };
 }
 
 function parseSleepMetricValue(label: string, value: string): number | null {
