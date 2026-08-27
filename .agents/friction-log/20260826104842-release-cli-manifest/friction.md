@@ -1,6 +1,7 @@
 ---
 title: 'Release CLI manifest fixed timeout blocks packaging on slower shared hosts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2438'
 ---
 
 ## Expected Behavior
