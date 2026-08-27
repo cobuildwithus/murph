@@ -156,7 +156,6 @@ function completeTestCodexProtocolEvents(
       params: {
         ...completedParams,
         tokenUsage: {
-          modelContextWindow: null,
           ...tokenUsage,
           last,
           total,
@@ -191,7 +190,6 @@ function completeTestTokenUsageBreakdown(
     : 0
   return breakdown
     ? {
-        cacheWriteInputTokens: 0,
         cachedInputTokens: 0,
         inputTokens,
         outputTokens,
@@ -440,6 +438,81 @@ describe('Codex assistant registry helpers', () => {
       servedModel: 'codex-mini',
       tokenPricingBasis: 'standard',
       totalTokens: null,
+    })
+  })
+
+  it('retains raw current-shape token usage with optional fields omitted', () => {
+    const extracted = extractExactCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        modelProvider: 'openai',
+        oss: false,
+      }),
+      rawEvents: [
+        {
+          method: 'turn/started',
+          params: {
+            turn: { id: 'turn-current-token-usage-shape' },
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-current-token-usage-shape',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 7,
+                inputTokens: 41,
+                outputTokens: 11,
+                reasoningOutputTokens: 3,
+                totalTokens: 52,
+              },
+              total: {
+                cachedInputTokens: 7,
+                inputTokens: 41,
+                outputTokens: 11,
+                reasoningOutputTokens: 3,
+                totalTokens: 52,
+              },
+            },
+            turnId: 'turn-current-token-usage-shape',
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-current-token-usage-shape',
+              model: 'gpt-5.4',
+            },
+          },
+        },
+      ],
+    })
+
+    expect(extracted).toMatchObject({
+      cacheWriteTokens: 0,
+      cachedInputTokens: 7,
+      inputTokens: 41,
+      outputTokens: 11,
+      providerRequestId: 'turn-current-token-usage-shape',
+      rawUsageJson: {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 7,
+        inputTokens: 41,
+        outputTokens: 11,
+        reasoningOutputTokens: 3,
+        totalTokens: 52,
+      },
+      reasoningTokens: 3,
+      totalTokens: 52,
+      turnProfileJson: {
+        modelContextWindow: null,
+        requestCount: 1,
+        requests: [{ cachedInput: 7, input: 41, output: 11 }],
+      },
+      usageExtractionSourcePath: 'thread.tokenUsage.total.delta',
     })
   })
 
