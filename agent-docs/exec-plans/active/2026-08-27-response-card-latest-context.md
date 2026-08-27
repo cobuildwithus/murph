@@ -30,8 +30,8 @@ request belongs to an older context.
    card contract.
 3. [complete] Add one focused production-derived real-Codex journey and review
    its actual synthetic reply.
-4. Add the member-facing changelog item, run focused checks and typecheck, then
-   complete the required PR reviews and CI.
+4. [in progress] Add the member-facing changelog item, run focused checks and
+   typecheck, then complete the required PR reviews and CI.
 
 ## Verification
 
@@ -43,3 +43,4 @@ request belongs to an older context.
 - `pnpm test:assistant:live -- --test "attaches a fresh nutrition card for the
   latest live-steered request"` — passed with one card attached at delivery
   context ordinal 1 and the complete deterministic nutrition-card reply.
+- `pnpm --dir apps/web test -- changelog-page.test.tsx` — passed (9 tests).
