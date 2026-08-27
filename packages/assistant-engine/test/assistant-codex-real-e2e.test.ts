@@ -187,6 +187,12 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
+  'allow_login_shell=false',
+  'features.plugins=false',
+  'skills.include_instructions=false',
+  'skills.bundled.enabled=false',
+] as const
 const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
 const REPEATED_SET_ALPHA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7Q'
 const REPEATED_SET_BETA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7R'
@@ -2734,13 +2740,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          configOverrides: ['allow_login_shell=false'],
           developerInstructions: [
             buildRoutinePresentationDeveloperInstructions({
               channel: 'telegram' as const,
             }),
             exerciseGuidance,
-            'Test harness tool result contract: when calling a Murph tool inside functions.exec, pass its returned value directly to text(). Do not read a content property from the result.',
           ].join('\n\n'),
           env: {
             ...config.env,
@@ -10574,6 +10578,15 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 
+  it('pins live turns to the hosted shell and plugin boundaries', () => {
+    expect(REAL_CODEX_HOSTED_CONFIG_OVERRIDES).toEqual([
+      'allow_login_shell=false',
+      'features.plugins=false',
+      'skills.include_instructions=false',
+      'skills.bundled.enabled=false',
+    ])
+  })
+
   it('uses normal Codex home only in explicit subscription mode', async () => {
     const config = await resolveRealCodexE2eConfig({
       sourceEnv: {
@@ -14324,6 +14337,10 @@ async function executeRealCodexAppServerTurn(
   try {
     return await executeCodexAppServerTurn({
       ...input,
+      configOverrides: [
+        ...REAL_CODEX_HOSTED_CONFIG_OVERRIDES,
+        ...(input.configOverrides ?? []),
+      ],
       dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
         allowFinishWithoutReply: input.allowFinishWithoutReply,
         messageTargetingAvailable:
