@@ -79,6 +79,53 @@ describe("hosted member action runtime", () => {
     },
   );
 
+  it("retries preference persistence after the canonical action marker commits", async () => {
+    const action = {
+      expectedWorkout: {
+        actionBinding: "a".repeat(64),
+        exercises: [{ name: "Bench press", sets: [{ logged: false }] }],
+      },
+      kind: "workout.live.apply" as const,
+      mutations: [],
+      version: 1 as const,
+      weightUnitPreference: "kg" as const,
+    };
+    const wake = {
+      eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      kind: "member.action.requested" as const,
+      occurredAt: "2026-08-26T05:45:00.000Z",
+      request: {
+        action,
+        actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        requestedAt: "2026-08-26T05:45:00.000Z",
+        schemaVersion: 1 as const,
+      },
+      userId: "member-1",
+    };
+    mocks.applyLiveWorkoutMemberAction
+      .mockResolvedValueOnce({ status: "applied" })
+      .mockResolvedValueOnce({ status: "unchanged" });
+    mocks.setWorkoutUnitPreferences
+      .mockRejectedValueOnce(new Error("preference write failed"))
+      .mockResolvedValueOnce({ updated: true });
+
+    await expect(executeHostedMemberActionWake({
+      vaultRoot: "/vault",
+      wake,
+    })).rejects.toThrow("preference write failed");
+    await expect(executeHostedMemberActionWake({
+      vaultRoot: "/vault",
+      wake,
+    })).resolves.toMatchObject({
+      postCheckpointRecord: {
+        outcome: { status: "unchanged" },
+      },
+    });
+
+    expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledTimes(2);
+    expect(mocks.setWorkoutUnitPreferences).toHaveBeenCalledTimes(2);
+  });
+
   it("applies the typed action directly without an assistant turn", async () => {
     const action = {
       expectedWorkout: {
