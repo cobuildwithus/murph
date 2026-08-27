@@ -938,11 +938,17 @@ existing retention sweep, and terminal convergence deletes the receipt.
 Account deletion first locks and suspends the owner plus every owned thread
 container, and every relationship writer that can add a runtime, Stripe, Family,
 or Privy target shares that member lock and rejects suspended owners. The final
-deletion transaction locks the same owner first and rejects any target-set
-change before persisting the receipt or deleting local rows. A searchable,
-non-reversible Privy lookup key on an incomplete receipt blocks identity
-re-creation and lets retries prove that a newly bound identity cannot be
-deleted.
+deletion transaction locks its exact sorted hosted-group set before Family and
+deletion-member rows, then rejects any target-set change before persisting the
+receipt or deleting local rows. Group-offer acceptance uses that same
+group-before-member order; a Telegram tap revalidates its mutable actor binding
+after those canonical locks and before accepted side effects or commit, so a
+concurrent relink rolls the grant back atomically. Both the initial lookup and
+the locked revalidation use the existing blind-index core projection, so they
+do not decrypt private routing state or call KMS while the transaction holds
+group and member locks. A searchable, non-reversible
+Privy lookup key on an incomplete receipt blocks identity re-creation and lets
+retries prove that a newly bound identity cannot be deleted.
 
 Immediate provider attempts share one five-second abortable deadline. Retention
 attempts share one fifteen-second abortable deadline, use bounded four-receipt
@@ -1730,7 +1736,7 @@ Participant selection remains independent of durable `hasOwnMurph` activation.
 Roster matches are exposed to the model as current-turn participant
 `displayName` text. Automatic transcript matches keep explicit internal
 `unverified-owner-contact` provenance but render to the model as
-`Address-book name (display only):`; participant-change labels remain weak
+`Address-book name:`; participant-change labels remain weak
 one-shot context. The stable group prompt treats these values as familiar names
 for natural conversational reference without turning them into identity,
 membership, consent, routing, profile, invite, signup, delivery, or effect
@@ -1744,7 +1750,7 @@ cache, and rollout contract is recorded in
 
 ### Meal-photo capture
 
-The iOS companion is the only owner of photo-library observation and on-device meal classification. A member explicitly enables the feature, and the companion considers only photos created after that opt-in; the hosted system never receives or scans the rest of the library. Foreground enrollment uses the member's Privy identity token, while background uploads use a dedicated renewable bearer that grants only meal-photo upload and self-revocation. `apps/web` owns one enrollment row per member and hashed installation UUID. Schema-v2 identity mutations carry a positive signed-32-bit `authorityRevision`; the server accepts only a revision newer than that row's high-water mark, except that an exact replay of the current disabled revision is idempotently revoked. Identity revocation upserts a credential-free tombstone even when enrollment has not arrived, so a delayed lower-revision enable cannot restore upload authority. A higher revision is required for an explicit later re-enable. Existing schema-v1 installations remain on revision zero with their prior immediate enrollment, refresh, and revocation behavior, but schema-v1 identity mutations cannot cross a positive v2 fence.
+The iOS companion is the only owner of photo-library observation and on-device meal classification. A member explicitly enables the feature, and the companion considers only photos created after that opt-in; the hosted system never receives or scans the rest of the library. Foreground enrollment uses the member's Privy identity token, while background uploads use a dedicated renewable bearer that grants only meal-photo upload and self-revocation. `apps/web` owns one enrollment row per member and hashed installation UUID. Schema-v2 identity mutations carry a positive signed-32-bit `authorityRevision`; the server accepts only a revision newer than that row's high-water mark, except that an exact replay of the current disabled revision is idempotently revoked. Identity revocation upserts a credential-free tombstone even when enrollment has not arrived, so a delayed lower-revision enable cannot restore upload authority. A higher revision is required for an explicit later re-enable. Existing schema-v1 installations remain on revision zero with their prior immediate enrollment, refresh, and revocation behavior, but schema-v1 identity mutations cannot cross a positive v2 fence. Every completed revision-zero revocation advances the same row's ID as its generation, so crypto preparation from before that revocation fails closed while a later foreground enrollment can explicitly restore authority.
 
 Explicit foreground submission is a separate, narrower authority path. The
 iOS companion may accept at most ten member-selected images from Apple's system
@@ -2330,6 +2336,43 @@ receipts retain retry authority, and alert configuration or delivery failure
 cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
+Positive Stripe payment email is a separate receipt-owned operational
+projection. After canonical reconciliation accepts a positive `invoice.paid`
+amount or fulfills a usage-credit Checkout or saved-card PaymentIntent, the
+same receipt must send one plain-text email before completion. This covers
+subscription creation and renewal, paid plan-change invoices, recurring usage
+invoices, and one-time or automatic usage purchases. Zero-dollar invoices and
+plan changes that collect no money remain silent. A receipt-local sent marker
+and event-derived Resend idempotency key prevent replay after provider success;
+configuration or provider failure leaves that receipt retryable while the
+already-committed billing, entitlement, and usage-credit result remains intact.
+The notification and the receipt's existing post-canonical effects are separate
+attempts inside that one owner: failure of runtime recheck, sponsorship,
+cleanup, or member email work cannot suppress the payment email attempt, and
+payment-email failure cannot suppress those effects. Both attempts start before
+either is awaited, so Resend latency cannot delay paid usage recovery and a
+stalled post-canonical effect cannot delay the operator notification. Peak new
+concurrency is bounded to one payment-email request plus the existing single
+post-canonical effect chain. If both fail while the sent marker is absent,
+the existing runtime-recheck pending code takes precedence because replay
+consumes it to reconstruct a direct-paid wake; the absent sent marker still
+retries notification on that receipt. Other simultaneous failures retain
+notification priority so a poisonable cleanup cannot suppress unmarked email.
+After the marker exists, the other effect retains its existing retry and poison
+policy.
+
+If reconciliation also commits one or more activation mailbox items, it stores
+their exact pointers on the same receipt in the activation transaction. Every
+positive-payment attempt rehydrates any retained pointers and hands them to the
+existing activation-wake owner before notification work, including replay after
+the sent marker already exists. Activation commit, provider delivery,
+sent-marker persistence, and receipt-completion failures therefore cannot
+overlap in a way that loses the activation handoff.
+The projection includes only amount, currency, a bounded payment category,
+event type and time, live/test mode, and the opaque Stripe event id. It never
+reads or includes member/customer identity, contact details, checkout contents,
+or raw provider payloads.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve
@@ -2674,20 +2717,21 @@ envelope whose `action` is a closed discriminated union. The first action family
 typed exercise/set mutations; it is not an arbitrary path, patch, database, or
 tool-call surface. At the existing response-card attachment boundary, runtime
 re-reads the exact canonical workout and may add one trusted typed editor
-projection to an active card. The native V6 wire carries that projection plus
-one opaque SHA-256 workout-revision binding derived from the canonical workout
+projection to an active V6 card. V6 carries that projection inline with one
+opaque SHA-256 workout-revision binding derived from the canonical workout
 identity and its last applied member-action marker. It contains neither value
 and grants no authority, but preserves exact nullable prior fields while letting
 the workout owner prove under its existing lock that an old card still names
 the exact unfinished workout and predates no direct action. Note-shaped results
-enter V6 only when the exact canonical note
+enter the editor only when the exact canonical note
 fits the visible card result; longer hidden notes cannot enter persisted or
 provider payloads and leave the card V4/read-only. Every other completed set
 must fit exactly one complete note, reps, or weight/reps family; duration,
 distance, RPE, bodyweight, assistance, added-load, and mixed results preserve
 the original V4 actual. Unsupported exercise modes remain V4 before their first
-result as well. A failed read, presentation mismatch, completed workout,
-or oversized V6 likewise stays V4/read-only instead of guessing. Web authenticates and validates the request, locks and
+result as well. A failed read, presentation mismatch, completed workout, or V6
+envelope that exceeds the URL ceiling stays V4/read-only instead of guessing.
+Web authenticates and validates the request, locks and
 re-checks member access and consent, then appends one encrypted
 `member.action.requested:<actionId>` item to the existing system mailbox before
 signaling the existing Temporal runtime. Runtime dispatches the action directly
@@ -3562,6 +3606,7 @@ subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
 - Treat `murph` and `vault-cli` as different UX layers over the same command graph: `murph` is the single-active-vault product entrypoint, while `vault-cli` remains the raw explicit-vault contract for development, automation, and assistant/runtime integration.
 - Treat output/discovery transport such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp` as incur-owned global behavior. Murph command docs should focus on domain semantics unless the repo intentionally constrains that surface.
 - `VaultCliError.context` is the sole structured recovery metadata source. A finite owner-written `publicPath` overrides an ordinary structural schema issue path; otherwise a bounded path made only of static field segments and non-negative occurrences may become field guidance. One pure, lazily loadable operator-config projection serves both setup and main CLI bridges. Escaped raw Zod errors still receive a fixed fieldless validation failure, while native Incur parse/validation errors bypass this projection. Known errors may preserve only the fixed stages `validation`, `read`, `write`, `configuration`, `authorization`, `transport`, `response`, `filesystem`, `render`, `persistence`, `conflict`, and `integrity`; owner issues infer `validation` only when no explicit stage exists. Bounded messages and owner hints remain model-visible recovery evidence, and stable error codes survive when they match the closed identifier shape. The projector masks concrete home-directory and credential shapes instead of replacing ordinary diagnostic prose or every absolute path. Fixed filesystem failures retain stable categories and prerequisites; other exceptions use `UNKNOWN` only when no stable code exists and use the generic message only when no useful bounded message exists. Failures before `serve()` use that same lazy projection when the caller requested machine output.
+- The assistant daemon client treats only a bounded owner code from non-5xx error JSON as authoritative and maps known invalid-id, missing-resource, vault-mismatch, and conflict outcomes to their real recovery decision; response prose remains outside the client contract and unknown 5xx responses stay generic. Assistant run results, the legacy `lastError`, structured `lastFailure`, and emitted daemon-failure event derive from one bounded outward projection instead of publishing competing raw and projected outcomes.
 - `food schedule` preflights the canonical core-owned generated scheduled-log slug and title before its first food or audit write; the core writer still revalidates both at persistence. Core and query validate stored scheduled-log frontmatter through the same contract schema and retain bounded issue code, static path, and reason so the CLI can distinguish submitted repair from a non-retryable stored-registry failure without reducing every failure to generic prose.
 - Keep the root CLI default-exported from `packages/cli/src/index.ts` and keep `packages/cli/src/incur.generated.ts` aligned with command-topology changes so typed CTAs and generated skill metadata stay truthful.
 - Source-only CLI checks are useful for triage, but repo acceptance still depends on the built CLI path because package tests execute `packages/cli/dist/bin.js`.
@@ -3650,9 +3695,8 @@ Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
 versioned delivery contract. V1-V4 carry private-direct presentation values;
-V5 uses the identity-free public challenge projection, and native-only V6 adds
-the opaque workout-revision binding plus a bounded typed editable-set projection
-derived from values already visible in that private-direct workout card. None may
+V5 uses the identity-free public challenge projection, and V6 carries its
+inline opaque-binding and bounded typed editable-set projection. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
 Generic V3 tables use compact grid typography and choose their one shared-header

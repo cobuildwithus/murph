@@ -279,13 +279,24 @@ export const workoutLiveApplyMemberActionV1Schema = z
     kind: z.literal("workout.live.apply"),
     mutations: z
       .array(workoutMemberActionMutationV1Schema)
-      .min(1)
+      .min(0)
       .max(memberActionV1Bounds.mutations),
     presentation: workoutSessionPresentationV1Schema.optional(),
+    weightUnitPreference: z.enum(["lb", "kg"]).optional(),
     version: z.literal(1),
   })
   .strict()
   .superRefine((action, context) => {
+    if (
+      action.mutations.length === 0
+      && action.weightUnitPreference === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A workout action requires a mutation or unit preference.",
+        path: ["mutations"],
+      });
+    }
     const targets = new Map<string, WorkoutMemberActionMutationV1>();
     const removalSnapshots = new Map<
       number,

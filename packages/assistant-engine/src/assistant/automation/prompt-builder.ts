@@ -554,9 +554,9 @@ function renderAssistantAutoReplyInputSection(input: {
   }
   if (input.senderHandle && input.speakerLabel) {
     const label = input.speakerLabel.source === 'profile-name'
-      ? 'Profile name (display only)'
+      ? 'Profile name'
       : input.speakerLabel.source === 'unverified-owner-contact'
-        ? 'Address-book name (display only)'
+        ? 'Address-book name'
         : 'Speaker name'
     sections.push(`${label}: ${JSON.stringify(input.speakerLabel.displayName)}`)
   }

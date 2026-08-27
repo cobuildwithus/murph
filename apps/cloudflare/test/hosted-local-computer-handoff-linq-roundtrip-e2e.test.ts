@@ -108,6 +108,7 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
     });
     await seedHostedComputerRunForTest({
       environment: requireScenario().runtimeEnv,
+      liveViewUrl: `https://proxy.test-browser.onkernel.com:8443/live/${computerRunId}`,
       memberId,
       runId: computerRunId,
     });
@@ -140,14 +141,21 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
     expect(requireLinqStub().readObservedMessageText(pausedReply)).toBe(pausedReplyText);
     await requireScenario().waitForHostedCompletion(memberId);
 
-    const awaiting = await readHostedComputerRunHandoffForTest({
-      environment: requireScenario().runtimeEnv,
-      runId: computerRunId,
-    });
-    expect(awaiting.run).toMatchObject({
-      awaitingReason: "other",
-      pendingHandoffId: awaiting.handoff?.id,
-      status: "awaiting_user",
+    const awaiting = await vi.waitFor(async () => {
+      const state = await readHostedComputerRunHandoffForTest({
+        environment: requireScenario().runtimeEnv,
+        runId: computerRunId,
+      });
+      expect(state.run).toMatchObject({
+        awaitingReason: "other",
+        pendingHandoffId: state.handoff?.id,
+        status: "awaiting_user",
+      });
+      expect(state.handoff).toMatchObject({ status: "open" });
+      return state;
+    }, {
+      interval: 250,
+      timeout: 30_000,
     });
     expect(readLinqCheckpointConversationParts(
       awaiting.run?.checkpointContext?.conversationId ?? null,

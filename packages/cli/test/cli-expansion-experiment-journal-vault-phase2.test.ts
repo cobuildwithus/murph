@@ -3546,6 +3546,17 @@ test.sequential(
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
 
+      const regexShapedLegacyDate = await runSliceCli<{
+        created: boolean
+        date: string
+        journalPath: string
+      }>([
+        'journal',
+        'ensure',
+        '2026-02-30',
+        '--vault',
+        vaultRoot,
+      ])
       const appended = await runSliceCli<{
         created: boolean
         updated: boolean
@@ -3700,10 +3711,17 @@ test.sequential(
         vaultRoot,
       ])
 
+      assert.equal(regexShapedLegacyDate.ok, true)
+      assert.equal(requireData(regexShapedLegacyDate).created, true)
+      assert.equal(requireData(regexShapedLegacyDate).date, '2026-02-30')
+      assert.equal(
+        requireData(regexShapedLegacyDate).journalPath,
+        'journal/2026/2026-02-30.md',
+      )
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
-      assert.equal(linked.ok, true)
+      assert.equal(linked.ok, true, JSON.stringify(linked))
       assert.equal(requireData(linked).changed, 2)
       assert.deepEqual(requireData(linked).eventIds, [firstEventId, secondEventId])
       assert.equal(linkedStreams.ok, true)
@@ -3717,12 +3735,12 @@ test.sequential(
       assert.equal(commaDelimitedEventLink.ok, false)
       assert.match(
         commaDelimitedEventLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
+        /canonical event id|repeat the flag instead|comma-delimited values are not supported/iu,
       )
       assert.equal(commaDelimitedStreamLink.ok, false)
       assert.match(
         commaDelimitedStreamLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
+        /supported sample stream|repeat the flag instead|comma-delimited values are not supported/iu,
       )
       assert.equal(unlinked.ok, true)
       assert.equal(requireData(unlinked).changed, 1)
@@ -3758,6 +3776,7 @@ test.sequential(
       )
       assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
+      await access(path.join(vaultRoot, 'journal/2026/2026-02-30.md'))
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')
       assert.match(journalMarkdown, /Evening note from the CLI append helper\./u)

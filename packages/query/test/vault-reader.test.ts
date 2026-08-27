@@ -89,7 +89,7 @@ test("readVaultTolerant builds a read model from sparse canonical layouts", asyn
     );
     await assert.rejects(
       () => readVault(vaultRoot),
-      /Failed to parse JSONL at ledger\/assessments\/2026\/2026-04\.jsonl:1/u,
+      /Canonical vault source ledger\/assessments\/2026\/2026-04\.jsonl:1 is invalid/u,
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
@@ -116,7 +116,7 @@ test("readVault invalidates legacy v5 projections before strict reads", async ()
 
     await assert.rejects(
       () => readVault(vaultRoot),
-      /Failed to parse JSONL at ledger\/assessments\/2026\/2026-04\.jsonl:1/u,
+      /Canonical vault source ledger\/assessments\/2026\/2026-04\.jsonl:1 is invalid/u,
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });

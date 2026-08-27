@@ -47,6 +47,7 @@ export interface ExaResearchScoutClientDependencies {
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
   signal?: AbortSignal
+  timeoutMs?: number
 }
 
 export function readExaApiKey(
@@ -67,6 +68,7 @@ export async function fetchExaResearchScoutCandidates(
     throw new VaultCliError(
       'research_exa_token_missing',
       'Exa research scout is not configured. Set EXA_API_KEY in the runtime environment before using research scout.',
+      { retryable: false },
     )
   }
 
@@ -104,6 +106,7 @@ export async function fetchExaResearchScoutBatchCandidates(
     throw new VaultCliError(
       'research_exa_token_missing',
       'Exa research scout is not configured. Set EXA_API_KEY in the runtime environment before using research scout.',
+      { retryable: false },
     )
   }
 
@@ -228,6 +231,10 @@ function createExaResearchScoutClient(
     apiKey,
     fetchImpl: dependencies.fetchImpl ?? fetch,
     callerSignal: dependencies.signal,
+    timeoutMs:
+      Number.isSafeInteger(dependencies.timeoutMs) && (dependencies.timeoutMs ?? 0) > 0
+        ? dependencies.timeoutMs ?? DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS
+        : DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS,
   })
 }
 
@@ -235,16 +242,19 @@ class RunnerScopedExaClient extends Exa {
   private readonly apiKey: string
   private readonly callerSignal: AbortSignal | undefined
   private readonly fetchImpl: typeof fetch
+  private readonly timeoutMs: number
 
   constructor(input: {
     apiKey: string
     callerSignal: AbortSignal | undefined
     fetchImpl: typeof fetch
+    timeoutMs: number
   }) {
     super(input.apiKey, DEFAULT_EXA_API_BASE_URL)
     this.apiKey = input.apiKey
     this.callerSignal = input.callerSignal
     this.fetchImpl = input.fetchImpl
+    this.timeoutMs = input.timeoutMs
   }
 
   override async request<T = unknown>(
@@ -266,9 +276,7 @@ class RunnerScopedExaClient extends Exa {
       })
     }
 
-    const timeoutSignal = AbortSignal.timeout(
-      DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS,
-    )
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs)
     const requestSignal = this.callerSignal
       ? AbortSignal.any([this.callerSignal, timeoutSignal])
       : timeoutSignal
@@ -315,16 +323,23 @@ class RunnerScopedExaClient extends Exa {
     try {
       payload = await response.json()
     } catch (error) {
-      const timedOut = timeoutSignal.aborted
-        && error === timeoutSignal.reason
       const abortedByCaller = this.callerSignal?.aborted === true
-        && error === this.callerSignal.reason
+      const timedOut = timeoutSignal.aborted && !abortedByCaller
       throw createExaResearchScoutRequestError({
         abortedByCaller,
-        failureStage: 'response_body',
+        failureStage: error instanceof SyntaxError
+          ? 'response_json'
+          : 'response_body',
         status: response.status,
         timedOut,
         transportErrorName: readSafeErrorName(error),
+      })
+    }
+
+    if (!isExaResearchScoutSuccess(payload)) {
+      throw createExaResearchScoutRequestError({
+        failureStage: 'response_shape',
+        status: response.status,
       })
     }
 
@@ -346,23 +361,120 @@ function createExaResearchScoutRequestError(input: {
   timedOut?: boolean
   transportErrorName?: string
 }): VaultCliError {
-  const message = input.timedOut === true
-    ? 'Exa research scout request timed out.'
-    : input.abortedByCaller === true
-      ? 'Exa research scout request was aborted.'
-      : 'Exa research scout request failed.'
+  const classification = classifyExaResearchScoutFailure(input)
 
   return new VaultCliError(
-    'research_exa_request_failed',
-    message,
+    classification.code,
+    classification.message,
     {
       abortedByCaller: input.abortedByCaller === true,
       failureStage: input.failureStage,
+      retryable: classification.retryable,
       status: input.status,
       timedOut: input.timedOut === true,
       transportErrorName: input.transportErrorName,
     },
   )
+}
+
+function classifyExaResearchScoutFailure(input: {
+  abortedByCaller?: boolean
+  failureStage: string
+  status?: number
+  timedOut?: boolean
+}): {
+  code: string
+  message: string
+  retryable: boolean
+} {
+  if (input.abortedByCaller === true) {
+    return {
+      code: 'research_exa_aborted',
+      message: 'Exa research scout request was aborted.',
+      retryable: false,
+    }
+  }
+  if (input.timedOut === true) {
+    return {
+      code: 'research_exa_timeout',
+      message: 'Exa research scout request timed out.',
+      retryable: true,
+    }
+  }
+  if (input.status === 401 || input.status === 403) {
+    return {
+      code: 'research_exa_auth_failed',
+      message: 'Exa rejected the research scout credentials.',
+      retryable: false,
+    }
+  }
+  if (input.status === 429) {
+    return {
+      code: 'research_exa_rate_limited',
+      message: 'Exa rate-limited the research scout request.',
+      retryable: true,
+    }
+  }
+  if (input.status === 408 || (input.status !== undefined && input.status >= 500)) {
+    return {
+      code: 'research_exa_unavailable',
+      message: 'Exa research scout is temporarily unavailable.',
+      retryable: true,
+    }
+  }
+  if (input.failureStage === 'response_json' || input.failureStage === 'response_shape') {
+    return {
+      code: 'research_exa_invalid_response',
+      message: 'Exa returned an invalid research scout response.',
+      retryable: false,
+    }
+  }
+  if (input.failureStage === 'response_body') {
+    return {
+      code: 'research_exa_unavailable',
+      message: 'Exa research scout response could not be read.',
+      retryable: true,
+    }
+  }
+  if (input.status !== undefined && input.status >= 400) {
+    return {
+      code: 'research_exa_request_rejected',
+      message: 'Exa rejected the research scout request.',
+      retryable: false,
+    }
+  }
+  if (input.failureStage === 'request') {
+    return {
+      code: 'research_exa_unavailable',
+      message: 'Exa research scout is temporarily unavailable.',
+      retryable: true,
+    }
+  }
+  if (input.failureStage === 'request_shape') {
+    return {
+      code: 'research_exa_request_invalid',
+      message: 'Exa research scout request could not be constructed.',
+      retryable: false,
+    }
+  }
+  return {
+    code: 'research_exa_request_failed',
+    message: 'Exa research scout request failed.',
+    retryable: false,
+  }
+}
+
+function isExaResearchScoutSuccess(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  if (!('results' in value) || !Array.isArray(value.results)) {
+    return false
+  }
+  if (!('output' in value) || !value.output || typeof value.output !== 'object' || Array.isArray(value.output)) {
+    return false
+  }
+  return 'content' in value.output
 }
 
 function readSafeErrorName(error: unknown): string | undefined {

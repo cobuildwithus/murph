@@ -344,10 +344,17 @@ type HealthCommonsProtocolActivationRecord = {
     }
   }
 }
+type HealthCommonsProtocolArtifactFailure = {
+  artifact: 'protocol_family_graph' | 'protocol_index' | 'protocol_run_specs'
+  category: 'invalid' | 'unavailable'
+}
 type HealthCommonsProtocolActivationRuntime = {
   getGeneratedHealthCommonsProtocolRunSpecReader(): {
     findByLookup(lookup: string): HealthCommonsProtocolActivationRecord | null
   }
+  isHealthCommonsProtocolArtifactError(
+    error: unknown,
+  ): error is HealthCommonsProtocolArtifactFailure
 }
 
 const healthCommonsSafetyDispositionRank: Record<
