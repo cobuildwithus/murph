@@ -43,8 +43,8 @@ import { GrowthScorecard } from "../app/(dashboard)/ops/growth/growth-scorecard"
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  decodeHostedMailboxStoredPayloads: vi.fn(),
   executeRaw: vi.fn(),
-  decodeHostedMailboxStoredPayload: vi.fn(),
   getHostedDashboardPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
   hostedAccountGroup: {
@@ -97,6 +97,7 @@ const mocks = vi.hoisted(() => ({
   hostedUsageCreditPurchase: {
     findMany: vi.fn(),
   },
+  queryRaw: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -113,7 +114,7 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
+  decodeHostedMailboxStoredPayloads: mocks.decodeHostedMailboxStoredPayloads,
 }));
 
 vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
@@ -143,6 +144,7 @@ let growthCronRoute: GrowthCronRouteModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
   $executeRaw: mocks.executeRaw,
+  $queryRaw: mocks.queryRaw,
   hostedAccountGroup: mocks.hostedAccountGroup,
   hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
@@ -192,11 +194,13 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMemberIdentity.findMany.mockResolvedValue([]);
     mocks.hostedMemberRouting.findMany.mockResolvedValue([]);
     mocks.hostedMember.findMany.mockResolvedValue([]);
-    mocks.decodeHostedMailboxStoredPayload.mockImplementation(async (input: {
-      payloadInlineCiphertext: unknown;
+    mocks.decodeHostedMailboxStoredPayloads.mockImplementation(async (input: {
+      entries: Array<{ payloadInlineCiphertext: unknown }>;
     }) => {
-      const payload = input.payloadInlineCiphertext;
-      return typeof payload === "string" ? JSON.parse(payload) : null;
+      return input.entries.map((entry) => {
+        const payload = entry.payloadInlineCiphertext;
+        return typeof payload === "string" ? JSON.parse(payload) : null;
+      });
     });
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
       trackedFulfilledUsageTopUps: 0,
@@ -911,12 +915,9 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("counts own-paid or family-paid members in the mature converted count query", async () => {
-    queueCurrentMetricMocks();
+  it("renders current metrics without capturing a snapshot", async () => {
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(activeUserRows(6))
       .mockResolvedValueOnce(activeUserRows(3))
       .mockResolvedValueOnce(activeUserRows(9))
@@ -924,15 +925,28 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
-    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
-      snapshotRow("2026-07-06", 2_900),
-    );
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(1);
+    mocks.queryRaw.mockResolvedValueOnce([{
+      activeMonthlyCapUsdCents: 0n,
+      activeMonthlySponsorships: 0n,
+      monthlyPaidPurchasesThisMonth: 0n,
+      monthlyPaidThisMonthUsdCents: 0n,
+      oneTimePaidPurchasesThisMonth: 0n,
+      oneTimePaidThisMonthUsdCents: 0n,
+      paidPurchasesThisMonth: 0n,
+      paidThisMonthUsdCents: 0n,
+      remainingUsageUsdMicros: 0n,
+      usageConsumedThisMonthUsdMicros: 0n,
+    }]);
+    const guarded = createDatabaseConcurrencyGuard(
+      prisma as unknown as Record<string, unknown>,
+    );
+    mocks.getPrisma.mockReturnValue(guarded.client);
 
     const markup = renderToStaticMarkup(await growthPage.default());
 
@@ -954,6 +968,10 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toMatch(
       /Tracked fulfilled usage top-ups<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
     );
+    expect(guarded.peak()).toBe(8);
+    expect(mocks.queryRaw).toHaveBeenCalledOnce();
+    expect(mocks.hostedGrowthDailySnapshot.upsert).not.toHaveBeenCalled();
+    expect(mocks.hostedMember.updateMany).not.toHaveBeenCalled();
     expect(mocks.hostedUsageCreditEntry.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
         beneficiary: {
@@ -1248,6 +1266,39 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("bounds dashboard database fanout while preserving the computed metrics", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedUsageCreditEntry.count.mockResolvedValue(0);
+    const guarded = createDatabaseConcurrencyGuard(
+      prisma as unknown as Record<string, unknown>,
+    );
+
+    const dashboard = await readHostedGrowthDashboard(
+      now,
+      guarded.client as never,
+    );
+
+    expect(guarded.peak()).toBe(8);
+    expect(dashboard.current).toMatchObject({
+      coveredMembers: 2,
+      mrrUsdCents: 2_800,
+      payingCustomers: 2,
+      totalMembers: 4,
+      trialingMembers: 1,
+    });
+    expect(dashboard.conversion).toEqual({
+      converted: 0,
+      matureStarted: 0,
+      percent: null,
+    });
+    expect(dashboard.activeUsers).toMatchObject({
+      today: 0,
+      trailing30Days: 0,
+      trailing7Days: 0,
+    });
+  });
+
   it("counts distinct senders across personal chats and group containers", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
@@ -1521,7 +1572,59 @@ describe("hosted ops growth metrics", () => {
         threadContainer: null,
       },
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(7);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(7);
+  });
+
+  it("decodes more than fifteen retained group messages in one mailbox batch", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const contacts = Array.from({ length: 16 }, (_, index) =>
+      requireLinqContact(
+        "phone",
+        `+155500000${String(index + 1).padStart(2, "0")}`,
+      )
+    );
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce(
+      contacts.map((contact, index) => buildLinqGroupMailboxRow({
+        contact,
+        containerMemberId: `thread_container_${index + 1}`,
+        occurredAt: new Date(`2026-07-05T${String(index).padStart(2, "0")}:00:00.000Z`),
+      })),
+    );
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce(
+      contacts.map((contact, index) => ({
+        memberId: `member_group_${index + 1}`,
+        phoneLookupKey: contact.lookupKey,
+      })),
+    );
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toMatchObject({
+      today: 0,
+      trailing30Days: 16,
+      trailing7Days: 16,
+      wowPercent: null,
+    });
+    expect(dashboard.current.totalMembers).toBe(4);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(16);
   });
 
   it("assigns late provider events to the durable receipt window", async () => {
@@ -1594,9 +1697,13 @@ describe("hosted ops growth metrics", () => {
         },
       },
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledWith(
       expect.objectContaining({
-        occurredAt: providerOccurredAt.toISOString(),
+        entries: [
+          expect.objectContaining({
+            occurredAt: providerOccurredAt.toISOString(),
+          }),
+        ],
       }),
     );
   });
@@ -1648,7 +1755,7 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: true,
       wowPercent: 100,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(1);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
     expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
         contentRetiredAt: true,
@@ -1696,7 +1803,7 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: false,
       wowPercent: null,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
+    expect(mocks.decodeHostedMailboxStoredPayloads).not.toHaveBeenCalled();
   });
 
   it("marks current WAU incomplete when retired content affects the current week", async () => {
@@ -1739,7 +1846,7 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: false,
       wowPercent: null,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
+    expect(mocks.decodeHostedMailboxStoredPayloads).not.toHaveBeenCalled();
   });
 
   it("still rejects missing group content without a retirement marker", async () => {
@@ -1876,7 +1983,10 @@ describe("hosted ops growth metrics", () => {
       wowPercent: null,
     });
     expect(mocks.hostedMemberRouting.findMany).toHaveBeenCalledTimes(1);
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(3);
   });
 
   it("omits group reaction attestation rows from active senders", async () => {
@@ -1932,7 +2042,10 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: true,
       wowPercent: null,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(3);
   });
 
   it("still rejects the reaction sender attestation on a non-reaction event", async () => {
@@ -3031,7 +3144,7 @@ describe("hosted ops growth metrics", () => {
         occurredAt: new Date("2026-07-05T08:00:00.000Z"),
       }),
     ]);
-    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+    mocks.decodeHostedMailboxStoredPayloads.mockRejectedValueOnce(
       new Error("unavailable sidecar"),
     );
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
@@ -3200,7 +3313,7 @@ describe("hosted ops growth metrics", () => {
         occurredAt: new Date("2026-07-05T08:00:00.000Z"),
       }),
     ]);
-    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+    mocks.decodeHostedMailboxStoredPayloads.mockRejectedValueOnce(
       new Error("unavailable sidecar"),
     );
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
@@ -3300,6 +3413,48 @@ function activeUserRows(count: number) {
     _max: { createdAt: null },
     userId: `member_${index + 1}`,
   }));
+}
+
+function createDatabaseConcurrencyGuard(
+  client: Record<string, unknown>,
+): {
+  client: Record<string, unknown>;
+  peak: () => number;
+} {
+  let active = 0;
+  let peak = 0;
+  const guardOperation = (operation: unknown, receiver: object): unknown => {
+    if (typeof operation !== "function") {
+      return operation;
+    }
+    return async (...args: unknown[]) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        await Promise.resolve();
+        return await Reflect.apply(operation, receiver, args);
+      } finally {
+        active -= 1;
+      }
+    };
+  };
+  const guardedClient = Object.fromEntries(
+    Object.entries(client).map(([delegateName, delegate]) => [
+      delegateName,
+      delegate && typeof delegate === "object"
+        ? Object.fromEntries(
+            Object.entries(delegate).map(([methodName, method]) => [
+              methodName,
+              guardOperation(method, delegate),
+            ]),
+          )
+        : guardOperation(delegate, client),
+    ]),
+  );
+  return {
+    client: guardedClient,
+    peak: () => peak,
+  };
 }
 
 function requireLinqContact(

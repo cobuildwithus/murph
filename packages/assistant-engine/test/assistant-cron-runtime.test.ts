@@ -4317,6 +4317,71 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('prioritizes current occurrence completion over recurring delivery', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-current-completion-skip-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'balance routine reminder',
+    )
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'Direct-message completion takes precedence: return `skip` for only this occurrence',
+    )
+    expect(providerInput?.instructions).toContain(
+      'a user report or assistant acknowledgment that explicitly confirms this exact action was completed in its window',
+    )
+    expect(providerInput?.instructions).toContain(
+      'future recurrences remain active',
+    )
+    expect(providerInput?.instructions).toContain(
+      'this schedule has one configured local time per eligible day, so matching completion on the occurrence local date is in-window',
+    )
+  })
+
+  it('requires occurrence-specific completion evidence for multi-fire treatment reminders', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-multi-fire-completion-proof-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'treatment reminder',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the recurring reminder automation to exist.')
+    }
+    automation.instructions = 'Remind the member to take the prescribed treatment dose.'
+    automation.schedule = {
+      expression: '0 8,20 * * *',
+      kind: 'cron',
+    }
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'do not assume this schedule fires only once per local day',
+    )
+    expect(providerInput?.instructions).toContain(
+      'Local-date coincidence alone is insufficient; require the evidence to identify the current time, dose, or sequence.',
+    )
+  })
+
   it('sends one recurring reminder cadence question and then skips after continued room silence', async () => {
     vi.useFakeTimers()
     const { vaultRoot } = await createRuntimeContext(
@@ -4380,7 +4445,7 @@ describe('assistant cron runtime orchestration', () => {
         'In a group, address the room collectively.',
       )
       expect(notificationInput.instructions).toContain(
-        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
         ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
@@ -4451,6 +4516,13 @@ describe('assistant cron runtime orchestration', () => {
     }
 
     expect(occurrenceIndex).toBe(3)
+    const scheduledNextOccurrence = (await listAssistantCronJobs(vaultRoot))
+      .find((job) => job.jobId === canonicalJob.jobId)
+      ?.state.nextRunAt
+    expect(scheduledNextOccurrence).toBeTruthy()
+    expect(Date.parse(scheduledNextOccurrence ?? '')).toBeGreaterThan(
+      Date.parse(occurrenceTimes.at(-1) ?? ''),
+    )
     await expect(listAssistantCronRuns({
       job: canonicalJob.jobId,
       vault: vaultRoot,
@@ -4504,10 +4576,10 @@ describe('assistant cron runtime orchestration', () => {
         input as AssistantNotificationInput,
       )
       expect(notificationInput.instructions).toContain(
-        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
-        'For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+        'Send those cues normally unless the direct-conversation completion rule above applies, the member explicitly changes or pauses them, or another authoritative skip condition applies.',
       )
       if (occurrenceIndex > 0) {
         expect(notificationInput.instructions).toContain(

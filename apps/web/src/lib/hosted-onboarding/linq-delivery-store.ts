@@ -53,6 +53,8 @@ const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
 export const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE =
+  "instant_first_turn_v1";
 type HostedLinqDeliveryProviderDispatchData = {
   attemptedAt: Date;
   failedAt: null;
@@ -311,6 +313,7 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 }
 
 type HostedLinqDeliveryProviderDispatchClaimInput = {
+  advancePreProviderAttempt?: boolean;
   attemptedAt?: Date;
   groupJoinOutreachId?: string | null;
   groupJoinReplyOccurredAt?: Date | null;
@@ -331,7 +334,7 @@ export type HostedLinqDeliveryProviderDispatchClaim = {
   claimed: boolean;
   failureCode?: string | null;
   id: string | null;
-  outcome?: "completed" | "incompatible";
+  outcome?: "completed" | "incompatible" | "terminal";
   replayingRichLinkPartial?: true;
   retryAt?: Date;
 };
@@ -669,6 +672,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   });
   if (existing) {
     return claimExistingHostedLinqDeliveryProviderDispatchTx({
+      advancePreProviderAttempt: input.advancePreProviderAttempt,
       attemptedAt,
       data,
       delivery: existing,
@@ -698,6 +702,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     throw new Error("Hosted Linq delivery claim conflict did not preserve a row.");
   }
   return claimExistingHostedLinqDeliveryProviderDispatchTx({
+    advancePreProviderAttempt: input.advancePreProviderAttempt,
     attemptedAt,
     data,
     delivery: concurrent,
@@ -731,6 +736,100 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
+export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
+  | "already_answered"
+  | "available"
+  | "defer";
+
+export function isHostedLinqInstantFirstTurnFallbackTerminal(input: {
+  failedAt: Date | null;
+  payloadCiphertext: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  status: string;
+}): boolean {
+  return input.skippedAt !== null
+    || input.status === "skipped"
+    || (
+      (input.failedAt !== null || input.status === "failed")
+      && input.payloadCiphertext === null
+      && input.payloadSchema === null
+    );
+}
+
+type HostedLinqInstantFirstTurnDeliveryDisposition =
+  | "answered"
+  | "fallback"
+  | "unresolved";
+
+function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+  failureCode?: string | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  payloadCiphertext: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  status: string;
+}): HostedLinqInstantFirstTurnDeliveryDisposition {
+  if (isHostedLinqDeliveryProviderCorrelated(input)) {
+    return "answered";
+  }
+  if (isHostedLinqInstantFirstTurnFallbackTerminal(input)) {
+    return "fallback";
+  }
+  return "unresolved";
+}
+
+export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx(
+  input: {
+    eventId: string;
+    linqChatId: string;
+    prisma: HostedLinqDeliveryClient;
+  },
+): Promise<HostedLinqInstantFirstTurnRuntimeEgressDisposition> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  const sourceRef = createHostedLinqDeliverySourceRefLookupKey(input.eventId);
+  if (linqChatLookupKeys.length === 0 || !sourceRef) {
+    return "defer";
+  }
+
+  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      failedAt: true,
+      failureCode: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      payloadCiphertext: true,
+      payloadSchema: true,
+      skippedAt: true,
+      status: true,
+    },
+    where: {
+      linqChatLookupKey: { in: linqChatLookupKeys },
+      sourceRef,
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    },
+  });
+  if (!delivery) {
+    return "available";
+  }
+  const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(
+    delivery,
+  );
+  return disposition === "answered"
+    ? "already_answered"
+    : disposition === "fallback"
+      ? "available"
+      : "defer";
+}
+
 export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
   linqChatId: string;
   prisma: HostedLinqDeliveryClient;
@@ -753,8 +852,69 @@ export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
       },
       messageLookupKey: null,
       skippedAt: null,
-      failedAt: null,
-      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+      OR: [
+        {
+          failedAt: null,
+          status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+        },
+        {
+          template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+          OR: [
+            { failedAt: null, status: "attempted" },
+            {
+              payloadCiphertext: { not: null },
+              status: {
+                in: [
+                  HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+                  "failed",
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  return delivery !== null;
+}
+
+export async function hasConflictingHostedLinqInstantFirstTurnForChatTx(input: {
+  eventId: string;
+  linqChatId: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  const sourceRef = createHostedLinqDeliverySourceRefLookupKey(input.eventId);
+  if (linqChatLookupKeys.length === 0 || !sourceRef) {
+    return false;
+  }
+
+  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
+    select: { id: true },
+    where: {
+      acceptedAt: null,
+      deliveredAt: null,
+      lastReceiptAt: null,
+      linqChatLookupKey: { in: linqChatLookupKeys },
+      messageLookupKey: null,
+      skippedAt: null,
+      sourceRef: { not: sourceRef },
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      OR: [
+        { failedAt: null, status: "attempted" },
+        {
+          payloadCiphertext: { not: null },
+          status: {
+            in: [
+              HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+              "failed",
+            ],
+          },
+        },
+      ],
     },
   });
 
@@ -2670,6 +2830,8 @@ const hostedLinqDeliveryLifecycleSelect = {
   linqChatLookupKey: true,
   messageLookupKey: true,
   phoneNumberLookupKey: true,
+  payloadCiphertext: true,
+  payloadSchema: true,
   retryAfterAt: true,
   skippedAt: true,
   source: true,
@@ -2767,6 +2929,7 @@ function readHostedLinqTelegramUsageLimitRetryAt(input: {
 }
 
 async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
+  advancePreProviderAttempt?: boolean;
   attemptedAt: Date;
   data: HostedLinqDeliveryProviderDispatchData;
   delivery: {
@@ -2782,6 +2945,8 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     linqChatLookupKey: string | null;
     messageLookupKey: string | null;
     phoneNumberLookupKey: string | null;
+    payloadCiphertext: string | null;
+    payloadSchema: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
     source: string;
@@ -2901,6 +3066,55 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
         ? { replayingRichLinkPartial: true as const }
         : { retryAt: input.attemptedAt }),
     };
+  }
+
+  if (
+    input.advancePreProviderAttempt === true
+    && input.data.status
+      === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+    && input.delivery.status === "attempted"
+    && isHostedLinqDeliveryPreProvider(input.delivery)
+  ) {
+    const updated = await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        acceptedAt: null,
+        attemptedAt: input.delivery.attemptedAt,
+        deliveredAt: null,
+        failedAt: null,
+        id: input.delivery.id,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        skippedAt: null,
+        source: input.delivery.source,
+        sourceRef: input.delivery.sourceRef,
+        status: "attempted",
+        targetKind: input.delivery.targetKind,
+        template: input.delivery.template,
+        updatedAt: input.delivery.updatedAt,
+      },
+      data: input.data,
+    });
+    return {
+      claimed: updated.count === 1,
+      id: input.delivery.id,
+      ...(updated.count === 0 ? { retryAt: input.attemptedAt } : {}),
+    };
+  }
+
+  if (
+    input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+  ) {
+    const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(
+      input.delivery,
+    );
+    if (disposition !== "unresolved") {
+      return {
+        claimed: false,
+        id: input.delivery.id,
+        outcome: disposition === "answered" ? "completed" : "terminal",
+      };
+    }
   }
 
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
@@ -3027,6 +3241,15 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
               source: HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE,
               status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
               template: "ai_usage_quota",
+            }]
+          : []),
+        ...(input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+          ? [{
+              attemptedAt: {
+                lte: staleAttemptBefore,
+              },
+              status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+              template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
             }]
           : []),
       ]
@@ -3362,6 +3585,7 @@ function isHostedLinqPinnedTargetDeliveryTemplate(
   template: string | null | undefined,
 ): boolean {
   return isHostedLinqInviteSignupDeliveryTemplate(template)
+    || template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
     || template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
     || template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
 }

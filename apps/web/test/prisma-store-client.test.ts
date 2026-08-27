@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from "vitest";
+
+import type { PrismaInteractiveTransactionOperation } from "@/src/lib/prisma";
 
 const mocks = vi.hoisted(() => {
   interface AdapterOptions {
@@ -1379,6 +1389,191 @@ describe("prisma module", () => {
     expect(pressureLogs(warn)).toEqual([]);
   });
 
+  it("warns five seconds after a labeled callback enters, not during acquisition", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      const callbackEntered = deferred();
+      const releaseCallback = deferred();
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) => {
+          vi.advanceTimersByTime(5_000);
+          return callback({ transaction: true });
+        },
+      );
+
+      const pending = runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.database_delete",
+        async () => {
+          callbackEntered.resolve();
+          await releaseCallback.promise;
+          return "committed";
+        },
+        { timeout: 20_000 },
+      );
+      await callbackEntered.promise;
+
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(inFlightTransactionLogs(warn)).toEqual([{
+        durationMs: 5_000,
+        operation: "account_deletion.database_delete",
+        timeoutMs: 20_000,
+      }]);
+
+      releaseCallback.resolve();
+      await expect(pending).resolves.toBe("committed");
+      expect(slowTransactionLogs(warn, "callback")).toEqual([{
+        callbackOutcome: "completed",
+        durationMs: 5_000,
+        operation: "transaction.interactive",
+        timeoutMs: 20_000,
+      }]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the in-flight timer for a fast labeled callback", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) =>
+          callback({ transaction: true }),
+      );
+
+      await expect(runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.suspension_fence",
+        async () => "committed",
+      )).resolves.toBe("committed");
+
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("warns once while a labeled callback remains open", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      const callbackEntered = deferred();
+      const releaseCallback = deferred();
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) =>
+          callback({ transaction: true }),
+      );
+
+      const pending = runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.suspension_fence",
+        async () => {
+          callbackEntered.resolve();
+          await releaseCallback.promise;
+          return "committed";
+        },
+        { timeout: 60_000 },
+      );
+      await callbackEntered.promise;
+
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(inFlightTransactionLogs(warn)).toEqual([{
+        durationMs: 5_000,
+        operation: "account_deletion.suspension_fence",
+        timeoutMs: 60_000,
+      }]);
+
+      releaseCallback.resolve();
+      await expect(pending).resolves.toBe("committed");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    new Error("callback rejected"),
+    Object.assign(
+      new Error("Transaction API error: Transaction already closed."),
+      { code: "P2028" },
+    ),
+  ])("clears the in-flight timer after rejection", async (error) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) =>
+          callback({ transaction: true }),
+      );
+
+      await expect(runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.database_delete",
+        async () => {
+          throw error;
+        },
+      )).rejects.toBe(error);
+
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects arbitrary runtime labels and exposes a closed label type", async () => {
+    expectTypeOf<PrismaInteractiveTransactionOperation>().toEqualTypeOf<
+      | "account_deletion.database_delete"
+      | "account_deletion.suspension_fence"
+    >();
+    const { runPrismaInteractiveTransaction } = await import("@/src/lib/prisma");
+
+    expect(() => Reflect.apply(
+      runPrismaInteractiveTransaction,
+      undefined,
+      [null, "account_deletion.member_123", async () => undefined],
+    )).toThrowError(
+      new TypeError("Unsupported Prisma interactive transaction operation."),
+    );
+  });
+
   it("reports callback wall time separately from acquisition wait", async () => {
     process.env = {
       ...process.env,
@@ -1406,6 +1601,7 @@ describe("prisma module", () => {
         timeoutMs: 15_000,
       }]);
       expect(slowTransactionLogs(warn, "acquisition")).toEqual([]);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1621,6 +1817,18 @@ function failureDispositions(warn: { mock: { calls: unknown[][] } }): unknown[] 
     .map((call) => (call[1] as { disposition: unknown }).disposition);
 }
 
+function inFlightTransactionLogs(
+  warn: { mock: { calls: unknown[][] } },
+): unknown[] {
+  return warn.mock.calls
+    .filter(
+      (call) =>
+        call[0]
+        === "Hosted web database transaction callback still in flight.",
+    )
+    .map((call) => call[1]);
+}
+
 function slowTransactionLogs(
   warn: { mock: { calls: unknown[][] } },
   category: "acquisition" | "batch" | "callback",
@@ -1632,6 +1840,15 @@ function slowTransactionLogs(
         : `transaction ${category}`}.`,
     )
     .map((call) => call[1]);
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise();
+  });
+
+  return { promise, resolve };
 }
 
 

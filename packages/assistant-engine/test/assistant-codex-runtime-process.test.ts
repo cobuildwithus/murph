@@ -2350,14 +2350,16 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     },
   )
 
-  it('uses-the-lower-group-threshold and preserves pre-compaction usage attribution', async () => {
+  it('compacts current-shape group usage and preserves pre-compaction attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
     const turnId = 'turn-compact-provider-usage'
+    const spawnedChildren: MockChildProcess[] = []
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
+      spawnedChildren.push(child)
 
       queueMicrotask(() => {
         void (async () => {
@@ -2376,19 +2378,18 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
               threadId,
               turnId,
               tokenUsage: {
-                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
+                last: { reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 50_000,
                   outputTokens: 12,
                   totalTokens: 50_012,
                 },
-                total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
+                total: { reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 50_000,
                   outputTokens: 12,
                   totalTokens: 50_012,
                 },
-                modelContextWindow: 128_000,
               },
             },
           }))
@@ -2518,6 +2519,11 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
         totalTokens: 50_000,
       },
     })
+    expect(
+      readWrittenRpcMessages(
+        requireMockChildProcess(spawnedChildren[0] ?? null),
+      ).filter((message) => message.method === 'thread/compact/start'),
+    ).toHaveLength(1)
   })
 
   it('uses the pre-compaction estimate when the exact completion has no billing payload', async () => {

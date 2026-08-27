@@ -1102,6 +1102,29 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
   "Murph Blood Test Import Payload",
 );
 
+export const immunizationImportPayloadSchema = withContractMetadata(
+  z
+    .object({
+      ...writableEventCommonPayloadShape,
+      evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+      vaccineName: boundedString(1, 160),
+      manufacturer: optionalWritableTextSchema(160),
+      lotNumber: optionalWritableTextSchema(120),
+      route: optionalWritableTextSchema(80),
+      site: optionalWritableTextSchema(80),
+      series: optionalWritableTextSchema(120),
+      targetDiseases: z
+        .union([
+          z.array(boundedString(1, 120)).max(25),
+          z.null(),
+        ])
+        .optional(),
+    })
+    .strict(),
+  "@murphai/contracts/immunization-import-payload.schema.json",
+  "Murph Immunization Import Payload",
+);
+
 const workoutImportPayloadBaseShape = {
   kind: z.literal("activity_session").optional(),
   title: boundedString(1, 240).optional(),
@@ -3654,6 +3677,7 @@ export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
 export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
 export type BloodTestImportPayload = z.infer<typeof bloodTestImportPayloadSchema>;
+export type ImmunizationImportPayload = z.infer<typeof immunizationImportPayloadSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;

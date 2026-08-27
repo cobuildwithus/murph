@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { attachDatabasePool } from "@vercel/functions";
 import pg, { type Pool as PgPool } from "pg";
 
@@ -27,6 +27,15 @@ const DATABASE_RETRY_MIN_DELAY_MS = 50;
 const DATABASE_RETRY_MAX_DELAY_MS = 250;
 const POOL_PRESSURE_SAMPLE_INTERVAL_MS = 10_000;
 const SLOW_TRANSACTION_MS = 5_000;
+
+export type PrismaInteractiveTransactionOperation =
+  | "account_deletion.database_delete"
+  | "account_deletion.suspension_fence";
+
+interface PrismaInteractiveTransactionOptions {
+  maxWait?: number;
+  timeout?: number;
+}
 
 /**
  * Last pressure sample per pool. Keyed by pool rather than held in a module
@@ -124,6 +133,43 @@ installHostedWebWarningFilters();
 export interface CreatePrismaClientInput {
   databaseUrl: string;
   poolMax?: number;
+}
+
+/**
+ * Adds one closed, low-cardinality label to a proven long interactive
+ * transaction without widening Prisma's public transaction signature.
+ */
+export function runPrismaInteractiveTransaction<T>(
+  prisma: PrismaClient,
+  operation: PrismaInteractiveTransactionOperation,
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: PrismaInteractiveTransactionOptions,
+): Promise<T> {
+  const allowedOperation =
+    requirePrismaInteractiveTransactionOperation(operation);
+  const transactionTimeoutMs = resolveConfiguredTransactionTimeoutMs(
+    options?.timeout,
+  );
+  const labeledCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<T> => {
+    const inFlightWarningTimer =
+      scheduleDatabaseTransactionCallbackInFlightWarning(
+        allowedOperation,
+        transactionTimeoutMs,
+      );
+    try {
+      return await callback(tx);
+    } finally {
+      if (inFlightWarningTimer !== null) {
+        clearTimeout(inFlightWarningTimer);
+      }
+    }
+  };
+
+  return options
+    ? prisma.$transaction(labeledCallback, options)
+    : prisma.$transaction(labeledCallback);
 }
 
 function createPrismaPool(input: CreatePrismaClientInput): PgPool {
@@ -688,6 +734,36 @@ function reportSlowDatabaseTransactionCallback(
   );
 }
 
+function scheduleDatabaseTransactionCallbackInFlightWarning(
+  operation: PrismaInteractiveTransactionOperation,
+  timeoutMs: number,
+): ReturnType<typeof setTimeout> | null {
+  // Do not leave this diagnostic armed past an equal or earlier Prisma
+  // transaction timeout.
+  if (timeoutMs <= SLOW_TRANSACTION_MS) {
+    return null;
+  }
+
+  try {
+    return setTimeout(() => {
+      try {
+        console.warn(
+          "Hosted web database transaction callback still in flight.",
+          {
+            durationMs: SLOW_TRANSACTION_MS,
+            operation,
+            timeoutMs,
+          },
+        );
+      } catch {
+        // Diagnostic-only logging must never alter transaction ownership.
+      }
+    }, SLOW_TRANSACTION_MS);
+  } catch {
+    return null;
+  }
+}
+
 function reportSlowDatabaseBatchTransaction(
   durationMs: number,
   timeoutMs: number,
@@ -726,12 +802,34 @@ function readDatabasePoolSnapshot(pool: PgPool): DatabasePoolSnapshot {
 }
 
 function resolveTransactionTimeoutMs(args: readonly unknown[]): number {
-  const configuredTimeout = readUnknownProperty(args[1], "timeout");
+  return resolveConfiguredTransactionTimeoutMs(
+    readUnknownProperty(args[1], "timeout"),
+  );
+}
+
+function resolveConfiguredTransactionTimeoutMs(
+  configuredTimeout: unknown,
+): number {
   return typeof configuredTimeout === "number"
       && Number.isFinite(configuredTimeout)
       && configuredTimeout > 0
     ? Math.trunc(configuredTimeout)
     : PRISMA_TRANSACTION_TIMEOUT_MS;
+}
+
+function requirePrismaInteractiveTransactionOperation(
+  operation: PrismaInteractiveTransactionOperation,
+): PrismaInteractiveTransactionOperation {
+  switch (operation) {
+    case "account_deletion.database_delete":
+    case "account_deletion.suspension_fence":
+      return operation;
+    default: {
+      const unsupportedOperation: never = operation;
+      void unsupportedOperation;
+      throw new TypeError("Unsupported Prisma interactive transaction operation.");
+    }
+  }
 }
 
 function isExpiredTransactionError(error: unknown): boolean {
