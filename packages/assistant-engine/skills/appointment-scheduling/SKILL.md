@@ -128,9 +128,11 @@ the task can still proceed, or not applicable:
    preferred caller name, callback method, any other fact the destination is
    likely to require, and current approval to disclose each fact needed for
    this action. Patient name and date of birth are required for every real
-   check-in, intake, booking, rescheduling, cancellation, or waitlist action
-   covered by this skill, even when the destination's public instructions do
-   not mention them. A memory record is not disclosure consent.
+   booking, rescheduling, cancellation, or waitlist action covered by this
+   skill, even when the destination's public instructions do not mention them.
+   For check-in or intake, derive required identity fields from the official
+   destination and do not ask for or disclose date of birth when it is not
+   required. A memory record is not disclosure consent.
 8. **Success and stop condition:** what counts as done and what must come back
    to the user, such as a confirmed booking, a short option list, fee details,
    or a transfer when an unanticipated decision falls outside the brief.
@@ -179,15 +181,21 @@ For example, when a practice is chosen but service and availability are
 missing, ask: "What kind of appointment do you need, and what days or times
 usually work? Any clinician preference, or is anyone okay?"
 
-For the required date of birth, tell the user it will be saved in their private
-vault for future medical scheduling. If the user declines either the date or
-durable storage, do not start the real action.
+For a booking, rescheduling, cancellation, or waitlist action, tell the user the
+required date of birth will be saved in their private vault for future medical
+scheduling. If the user declines either the date or durable storage, do not
+start that real action. For check-in or intake, first inspect the official
+destination. If it requires date of birth and no reliable saved value exists,
+ask once. Current-task use with explicit disclosure authority is sufficient;
+honor a refusal to save without blocking the check-in or intake.
 
 ## Durable Memory boundary
 
-Date of birth is the one required durable identity exception for this workflow.
-For every real action covered by this skill, keep exactly one normalized
-canonical memory record in the `Identity` section:
+Date of birth is the one required durable identity exception for booking,
+rescheduling, cancellation, and waitlist actions in this workflow. It is not a
+durable prerequisite for check-in or intake. When durable storage is required
+or the user authorizes it, keep exactly one normalized canonical memory record
+in the `Identity` section:
 
 `Date of birth: YYYY-MM-DD`
 
@@ -213,7 +221,9 @@ In a direct/private conversation:
    `vault-cli memory forget <memoryId> --vault "$VAULT"`.
 6. Treat the saved value as reusable identity evidence, not current approval to
    disclose it. If the user declines to provide or durably save the value, stop
-   before the real scheduling action.
+   before a booking, rescheduling, cancellation, or waitlist action. For
+   check-in or intake, continue with an explicitly authorized current-task
+   value when the destination requires it; do not write that value.
 
 For every other fact, classify it before writing:
 
@@ -264,9 +274,13 @@ waitlist action until every outcome-critical slot is resolved and the current
 user request authorizes the action within explicit bounds. A successful test
 call, office hours lookup, or availability inquiry cannot satisfy this gate.
 
-For every real action covered by this skill, the gate also requires exactly one
-verified `Date of birth: YYYY-MM-DD` Identity record and current approval to
-disclose the patient's name and date of birth to the destination.
+For booking, rescheduling, cancellation, and waitlist actions, the gate also
+requires exactly one verified `Date of birth: YYYY-MM-DD` Identity record and
+current approval to disclose the patient's name and date of birth to the
+destination. For check-in or intake, require only identity fields proven
+necessary by the official destination. When it requires date of birth, either a
+reliable saved value or an explicitly authorized current-task value satisfies
+the gate; durable storage is not required.
 
 When intake is complete:
 
@@ -276,9 +290,9 @@ When intake is complete:
 2. Before acting, summarize in one line what Murph will request, what choices it
    may accept, and what personal facts it will share.
 3. Put only approved, call-relevant facts in `shareableFacts`. For an appointment
-   call, include the approved `patient_name` and normalized `date_of_birth`
-   (`YYYY-MM-DD`). If a live choice exceeds the brief, consult or transfer to the
-   user when available; otherwise
+   call, include approved identity fields only when the destination requires
+   them; normalize an approved `date_of_birth` as `YYYY-MM-DD`. If a live choice
+   exceeds the brief, consult or transfer to the user when available; otherwise
    collect options or end without committing.
 4. For browser execution, follow `computer-use` for final-term authorization,
    private handoff, submission, and verification.

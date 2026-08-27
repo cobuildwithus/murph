@@ -23,6 +23,9 @@ describe('action-first browser prompt contract', () => {
     expect(executionText).toContain(
       'use that tool instead of replying with only a search result, product link, appointment portal, or instructions',
     )
+    expect(executionText).toContain(
+      'For medical appointment check-in or intake, read `appointment-scheduling` before browser execution',
+    )
   })
 
   it('preserves point-of-risk pauses instead of premature search-only replies', () => {
@@ -38,7 +41,7 @@ describe('action-first browser prompt contract', () => {
       'An ordinary failed or unresponsive control is not yet a blocker',
     )
     expect(prompt).toContain(
-      're-inspect current state, then follow `computer-use` through a safe alternate interaction, OS fallback when allowed, and refresh only when no side effect is unknown and entered state is safe',
+      're-inspect current state, complete one safe alternate interaction, and only then use `computer-use` OS fallback when allowed; refresh only when no side effect is unknown and entered state is safe',
     )
     expect(prompt).toContain(
       'do not imply you opened or can drive checkout unless an actual runtime action happened',

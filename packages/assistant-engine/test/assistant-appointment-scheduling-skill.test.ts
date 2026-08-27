@@ -85,7 +85,10 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain('Access and cost constraints when material')
     expect(raw).toContain('Identity, contact, and disclosure')
     expect(raw).toMatch(
-      /Patient name and date of birth are required for every real\s+check-in, intake, booking/iu,
+      /Patient name and date of birth are required for every real\s+booking, rescheduling, cancellation, or waitlist action/iu,
+    )
+    expect(raw).toMatch(
+      /For check-in or intake, derive required identity fields from the official\s+destination and do not ask for or disclose date of birth when it is not\s+required/iu,
     )
     expect(raw).toContain('Success and stop condition')
     expect(raw).toContain('For rescheduling or cancellation')
@@ -150,10 +153,16 @@ describe('appointment scheduling skill', () => {
       /A successful test\s+call, office hours lookup, or availability inquiry cannot satisfy this gate/iu,
     )
     expect(raw).toMatch(
-      /gate also requires exactly one\s+verified `Date of birth: YYYY-MM-DD` Identity record/iu,
+      /For booking, rescheduling, cancellation, and waitlist actions, the gate also\s+requires exactly one verified `Date of birth: YYYY-MM-DD` Identity record/iu,
     )
     expect(raw).toMatch(
-      /include the approved `patient_name` and normalized `date_of_birth`/iu,
+      /For check-in or intake, require only identity fields proven\s+necessary by the official destination/iu,
+    )
+    expect(raw).toMatch(
+      /an explicitly authorized current-task value satisfies\s+the gate; durable storage is not required/iu,
+    )
+    expect(raw).toMatch(
+      /include approved identity fields only when the destination requires\s+them; normalize an approved `date_of_birth`/iu,
     )
     expect(raw).toMatch(
       /resume intake on the\s+next ordinary conversational turn/iu,

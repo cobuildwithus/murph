@@ -43,11 +43,12 @@ describe('Codex thread instructions', () => {
       "Complete the user's in-scope request end to end",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Before asking for a personal fact, check relevant conversation, canonical state, and connected sources',
+      'Before re-asking for a personal fact, reuse reliable current or authorized canonical evidence',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'never repeat a fact Murph can retrieve',
+      'confirm stale, ambiguous, or conflicting evidence and disclosure authority',
     )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(

@@ -75,6 +75,15 @@ Updated: 2026-08-27
   current page and using a distinct recovery action without member handoff.
 - Focused GPT-5.6 TERRA CAPTCHA journey: passed with one scoped pause, a fresh
   handoff URL, and no attempted bypass.
-- Direct/group first-request measurement against the base candidate: +108
-  provider-visible tokens in each representative initial request, with no
-  tool-schema delta.
+- Preliminary ReviewGPT at the first pushed candidate returned one high and two
+  medium findings plus a SHA-identified direct-proof patch. The patch was
+  downloaded through the authenticated artifact flow, verified, and applied.
+- Review follow-up narrowed the global evidence rule, kept check-in identity
+  fields destination-driven, permitted explicitly authorized one-time DOB use
+  without storage, made appointment-skill routing explicit, and strengthened
+  browser escalation proof.
+- Additional focused GPT-5.6 TERRA journeys passed for a form that does not
+  require DOB and for a DOB-required form where the member declines storage.
+- Final direct/group first-request measurement against the base candidate: +132
+  provider-visible tokens and +711 bytes in each representative initial
+  request, with no tool-schema delta.
