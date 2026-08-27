@@ -266,17 +266,18 @@ model DeviceSyncCompanionCaptureReceipt {
 }
 
 model DeviceAgentSession {
-  id                  String    @id
-  userId              String    @map("user_id")
-  label               String?
-  tokenHash           String    @unique @map("token_hash")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-  expiresAt           DateTime  @map("expires_at")
-  lastSeenAt          DateTime? @map("last_seen_at")
-  revokedAt           DateTime? @map("revoked_at")
-  revokeReason        String?   @map("revoke_reason")
-  replacedBySessionId String?   @map("replaced_by_session_id")
+  id                       String    @id
+  userId                   String    @map("user_id")
+  label                    String?
+  tokenHash                String    @unique @map("token_hash")
+  imessageRenewalTokenHash String?   @unique @map("imessage_renewal_token_hash")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  expiresAt                DateTime  @map("expires_at")
+  lastSeenAt               DateTime? @map("last_seen_at")
+  revokedAt                DateTime? @map("revoked_at")
+  revokeReason             String?   @map("revoke_reason")
+  replacedBySessionId      String?   @map("replaced_by_session_id")
 
   @@index([userId])
   @@index([expiresAt])
@@ -645,6 +646,8 @@ model HostedMember {
   hostedWorkspace                HostedWorkspace?
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   opsUsageResetReceipts          HostedOpsUsageResetReceipt[]
+  operatorTasks                  HostedOperatorTask[]             @relation("HostedOperatorTaskMember")
+  operatorTasksRequested         HostedOperatorTask[]             @relation("HostedOperatorTaskRequester")
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
   groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
@@ -1203,6 +1206,30 @@ model HostedMailboxPayload {
 
   @@index([userId, createdAt])
   @@map("hosted_mailbox_payload")
+}
+
+model HostedOperatorTask {
+  id                   String        @id
+  memberId             String        @map("member_id")
+  requestedByMemberId  String?       @map("requested_by_member_id")
+  idempotencyKey       String        @unique @map("idempotency_key")
+  requestShapeHash     String        @map("request_shape_hash")
+  requestMailboxItemId String        @unique @map("request_mailbox_item_id")
+  source               String
+  kind                 String
+  status               String
+  resultEncrypted      String?       @map("result_encrypted")
+  expiresAt            DateTime      @map("expires_at")
+  completedAt          DateTime?     @map("completed_at")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+  member               HostedMember  @relation("HostedOperatorTaskMember", fields: [memberId], references: [id], onDelete: Cascade)
+  requestedBy          HostedMember? @relation("HostedOperatorTaskRequester", fields: [requestedByMemberId], references: [id], onDelete: SetNull)
+
+  @@index([memberId, createdAt])
+  @@index([requestedByMemberId, createdAt])
+  @@index([status, expiresAt])
+  @@map("hosted_operator_task")
 }
 
 model HostedIngressLatencyTrace {
@@ -2032,6 +2059,15 @@ model HostedThreadContainerParticipant {
   @@id([containerMemberId, participantMemberId])
   @@index([containerMemberId])
   @@map("hosted_thread_container_participant")
+}
+
+model HostedGroupParticipantObservation {
+  contactLookupKey String   @id @map("contact_lookup_key")
+  firstObservedAt  DateTime @map("first_observed_at")
+  expiresAt        DateTime @map("expires_at")
+
+  @@index([expiresAt, contactLookupKey], map: "hosted_group_participant_observation_expiry_idx")
+  @@map("hosted_group_participant_observation")
 }
 
 model HostedThreadRoute {

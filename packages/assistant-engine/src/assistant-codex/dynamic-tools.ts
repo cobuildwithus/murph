@@ -168,6 +168,7 @@ import {
 import {
   resolveAssistantVaultImageResponseMedia,
 } from '../assistant/vault-file-send.js'
+
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -6740,7 +6741,7 @@ function invalidDynamicToolArgumentsResult(
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     false,
-    buildToolCallValidationFeedback(validationDigest, { error }),
+    buildToolCallValidationFeedback(validationDigest, error),
   )
 }
 

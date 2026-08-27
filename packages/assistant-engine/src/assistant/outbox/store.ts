@@ -290,7 +290,7 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
 }
 
 export async function findAssistantOutboxIntentByDedupeIdentity(input: {
-  dedupeKey: string
+  dedupeKey?: string | null
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
   legacyDedupeKey?: string | null
@@ -303,13 +303,16 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   const deliveryIdempotencyKey = normalizeNullableString(
     input.deliveryIdempotencyKey,
   )
+  const dedupeKey = normalizeNullableString(input.dedupeKey)
   const routes = [
-    {
-      kind: 'dedupe-key' as const,
-      key: input.dedupeKey,
-      matches: (intent: AssistantOutboxIntent) =>
-        intent.dedupeKey === input.dedupeKey,
-    },
+    ...(dedupeKey
+      ? [{
+          kind: 'dedupe-key' as const,
+          key: dedupeKey,
+          matches: (intent: AssistantOutboxIntent) =>
+            intent.dedupeKey === dedupeKey,
+        }]
+      : []),
     ...(deliveryIdempotencyKey
       ? [{
           kind: 'delivery-idempotency-key' as const,

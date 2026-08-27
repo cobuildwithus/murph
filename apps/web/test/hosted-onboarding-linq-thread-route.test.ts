@@ -8415,7 +8415,7 @@ describe("Linq group chat auto-provision", () => {
         ? query.join("?")
         : (query as Prisma.Sql).sql;
       if (sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       )) {
         expect(transactionOpen).toBe(false);
       }
@@ -8552,7 +8552,7 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.$executeRaw.mock.calls.map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ))).toHaveLength(0);
 
     currentParticipantMemberId = boundaryParticipantMemberId;
@@ -8584,7 +8584,7 @@ describe("Linq group chat auto-provision", () => {
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
     expect(participantReconciles[0]?.sql).toContain(
@@ -8706,7 +8706,7 @@ describe("Linq group chat auto-provision", () => {
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
     expect(participantReconciles[0]?.values).toContain(false);

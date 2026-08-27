@@ -557,6 +557,12 @@ const TYPO_CASES: readonly SearchCase[] = [
   { category: "typo", name: "acid missing i", query: "alpha lipoic acd", expectedTopId: "generic-alpha-lipoic-acid" },
 ] as const;
 
+const FOOD_EXACT_ADMISSION_LIMIT = 250;
+const FOOD_FTS_ADMISSION_LIMIT = 10_000;
+const FOOD_NEAREST_NAME_ADMISSION_LIMIT = 10_000;
+const FOOD_MAX_SORT_INPUT = FOOD_EXACT_ADMISSION_LIMIT +
+  FOOD_FTS_ADMISSION_LIMIT + FOOD_NEAREST_NAME_ADMISSION_LIMIT;
+
 const UNICODE_CASES: readonly SearchCase[] = [
   { category: "unicode", name: "curly possessive apostrophe", query: "Doctor’s Best Magnesium", expectedTopId: "doctors-best-magnesium" },
   { category: "unicode", name: "modifier-letter possessive apostrophe", query: "Doctorʼs Best Magnesium", expectedTopId: "doctors-best-magnesium" },
@@ -698,7 +704,6 @@ describe.runIf(Boolean(testDatabaseUrl))(
   () => {
     const client = new pg.Client({
       connectionString: testDatabaseUrl ?? undefined,
-      statement_timeout: 8_000,
     });
     let connected = false;
     let transactionStarted = false;
@@ -936,6 +941,34 @@ describe.runIf(Boolean(testDatabaseUrl))(
           '100% Whey protein',
           '{"fixture":true}'::jsonb
       `);
+      await client.query(`
+        INSERT INTO foods (
+          id,
+          canonical_key,
+          data_origin,
+          data_origin_id,
+          data_origin_priority,
+          name,
+          brand,
+          upc,
+          off_market,
+          search_text,
+          label
+        )
+        SELECT
+          'food-boundary-typo-ineligible-' || seed::text,
+          'food-boundary-typo-ineligible-' || seed::text,
+          'usda_branded',
+          'food-boundary-typo-ineligible-' || seed::text,
+          50,
+          'Boundryftss menu item with rice sauce vegetables brand ' || seed::text,
+          NULL,
+          NULL,
+          false,
+          'Boundryftss menu item with rice sauce vegetables brand ' || seed::text,
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 10050) AS distractors(seed)
+      `);
       await client.query(
         "CREATE INDEX foods_fixture_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
       );
@@ -948,10 +981,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
       await client.query(
         "CREATE INDEX foods_fixture_name_exact_rank_idx ON foods (lower(name), data_origin_priority, id)",
       );
-      await client.query(
-        "CREATE INDEX foods_fixture_canonical_rank_idx ON foods (canonical_key, data_origin_priority, id)",
-      );
       await client.query("ANALYZE foods");
+      await client.query("SET LOCAL statement_timeout = '8s'");
     });
 
     afterAll(async () => {
@@ -1013,6 +1044,65 @@ describe.runIf(Boolean(testDatabaseUrl))(
       );
     }, 20_000);
 
+    it("keeps typo recovery, canonical diversity, and stable results for a large alias group", async () => {
+      const q = "Boundryfts";
+      const predicates = await client.query<{
+        distractor_fts_match: boolean;
+        distractor_ranks_ahead_by_strict_word: boolean;
+        distractor_trigram_match: boolean;
+        valid_fts_match: boolean;
+        valid_trigram_match: boolean;
+        valid_whole_name_ranks_ahead: boolean;
+      }>(
+        `
+        SELECT
+          to_tsvector('simple', valid.search_text) @@
+            websearch_to_tsquery('simple', $1) AS valid_fts_match,
+          valid.name % $1::text AS valid_trigram_match,
+          to_tsvector('simple', distractor.search_text) @@
+            websearch_to_tsquery('simple', $1) AS distractor_fts_match,
+          distractor.name % $1::text AS distractor_trigram_match,
+          (distractor.name <->>> $1::text) <
+            (valid.name <->>> $1::text) AS distractor_ranks_ahead_by_strict_word,
+          (valid.name <-> $1::text) <
+            (distractor.name <-> $1::text) AS valid_whole_name_ranks_ahead
+        FROM foods valid
+        CROSS JOIN foods distractor
+        WHERE valid.id = 'zz-food-boundary-fts-winner'
+          AND distractor.id = 'food-boundary-typo-ineligible-1'
+        `,
+        [q],
+      );
+      expect(predicates.rows[0]).toEqual({
+        distractor_fts_match: false,
+        distractor_ranks_ahead_by_strict_word: true,
+        distractor_trigram_match: false,
+        valid_fts_match: false,
+        valid_trigram_match: true,
+        valid_whole_name_ranks_ahead: true,
+      });
+
+      const first = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q,
+      });
+      const repeated = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q,
+      });
+
+      expect(first).toHaveLength(50);
+      expect(first[0]?.id).toBe("zz-food-boundary-fts-winner");
+      expect(first.map((row) => row.id)).toContain(
+        "zz-food-boundary-fts-alias-priority",
+      );
+      expect(repeated.map((row) => row.id)).toEqual(
+        first.map((row) => row.id),
+      );
+    }, 20_000);
+
     it.each(["% boundaryfts", "_ boundaryfts"])(
       "treats SQL wildcard characters as ordinary food-search input for %s",
       async (q) => {
@@ -1041,6 +1131,275 @@ describe.runIf(Boolean(testDatabaseUrl))(
     it("intercepts every contaminant lookup instead of requiring product-test tables", () => {
       expect(contaminantQueryCount).toBeGreaterThan(0);
     });
+  },
+);
+
+type ExplainPlanNode = {
+  "Actual Loops"?: number;
+  "Actual Rows"?: number;
+  "Index Name"?: string;
+  "Node Type"?: string;
+  "Parent Relationship"?: string;
+  Plans?: ExplainPlanNode[];
+};
+
+function flattenExplainPlan(node: ExplainPlanNode): ExplainPlanNode[] {
+  return [
+    node,
+    ...(node.Plans ?? []).flatMap((child) => flattenExplainPlan(child)),
+  ];
+}
+
+function explainRowsProcessed(node: ExplainPlanNode): number {
+  return (node["Actual Rows"] ?? 0) * (node["Actual Loops"] ?? 1);
+}
+
+function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
+  const sortNodes = nodes.filter((node) =>
+    node["Node Type"] === "Sort" ||
+    node["Node Type"] === "Incremental Sort"
+  );
+  expect(sortNodes.length).toBeGreaterThan(0);
+  for (const sortNode of sortNodes) {
+    const sortInputs = (sortNode.Plans ?? []).filter((child) =>
+      child["Parent Relationship"] === "Outer"
+    );
+    expect(sortInputs).toHaveLength(1);
+    expect(explainRowsProcessed(sortInputs[0] ?? {})).toBeLessThanOrEqual(
+      FOOD_MAX_SORT_INPUT,
+    );
+  }
+}
+
+describe.runIf(Boolean(testDatabaseUrl))(
+  "large-catalog food PostgreSQL search bound",
+  () => {
+    it("finishes common-token search inside the production statement timeout", async () => {
+      const client = new pg.Client({
+        connectionString: testDatabaseUrl ?? undefined,
+      });
+      let transactionStarted = false;
+      const capturedSearch: {
+        current: { text: string; values: unknown[] } | null;
+      } = { current: null };
+      const queryClient = {
+        async query<T>(text: string, values: unknown[]) {
+          if (
+            text.includes("FROM product_tests") ||
+            text.includes("JOIN product_tests")
+          ) {
+            return { rows: [] as T[] };
+          }
+
+          if (text.includes("WITH query AS")) {
+            capturedSearch.current = { text, values };
+          }
+          const result = await client.query(text, values);
+          return { rows: result.rows };
+        },
+      };
+      const queries = createFoodsQueries(queryClient);
+
+      await client.connect();
+      try {
+        await client.query("BEGIN");
+        transactionStarted = true;
+        await client.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+        await client.query("SET LOCAL statement_timeout = 0");
+        await client.query(`
+          CREATE TEMP TABLE foods (
+            id TEXT PRIMARY KEY,
+            canonical_key TEXT NOT NULL,
+            data_origin TEXT NOT NULL,
+            data_origin_id TEXT NOT NULL,
+            data_origin_priority SMALLINT NOT NULL,
+            name TEXT NOT NULL,
+            brand TEXT,
+            upc TEXT,
+            off_market BOOLEAN NOT NULL,
+            search_text TEXT NOT NULL,
+            label JSONB NOT NULL,
+            serving_grams NUMERIC
+          ) ON COMMIT DROP
+        `);
+        await client.query(`
+          INSERT INTO foods (
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            data_origin_priority,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            label
+          )
+          SELECT
+            'food-perf-' || seed::text,
+            'food-perf-' || seed::text,
+            CASE WHEN seed = 3 THEN 'usda_foundation' ELSE 'usda_branded' END,
+            'food-perf-' || seed::text,
+            50,
+            CASE
+              WHEN seed = 1 THEN 'Exact Commonfood'
+              WHEN seed = 2 THEN 'Unrelated Product'
+              WHEN seed = 3 THEN 'Generic Marker Food'
+              ELSE 'Commonfood Item ' || seed::text
+            END,
+            CASE WHEN seed = 2 THEN 'Needlebrand' ELSE NULL END,
+            NULL,
+            false,
+            CASE
+              WHEN seed = 1 THEN 'Exact Commonfood'
+              WHEN seed = 2 THEN 'Unrelated Product Needlebrand'
+              WHEN seed = 3 THEN 'Generic Marker Food genericmarker'
+              ELSE 'Commonfood Item ' || seed::text
+            END,
+            '{"fixture":true}'::jsonb
+          FROM generate_series(1, 250000) AS rows(seed)
+        `);
+        await client.query(
+          "CREATE INDEX foods_perf_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
+        );
+        await client.query(
+          "CREATE INDEX foods_perf_search_english_idx ON foods USING GIN (to_tsvector('english', search_text))",
+        );
+        await client.query(
+          "CREATE INDEX foods_perf_name_rank_idx ON foods USING GIST (name gist_trgm_ops)",
+        );
+        await client.query(
+          "CREATE INDEX foods_perf_name_exact_rank_idx ON foods (lower(name), data_origin_priority, id)",
+        );
+        await client.query("ANALYZE foods");
+        await client.query("SET LOCAL lock_timeout = '500ms'");
+        await client.query("SET LOCAL statement_timeout = '8s'");
+
+        const broad = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 20,
+          q: "commonfood",
+        });
+        expect(broad).toHaveLength(20);
+        expect(capturedSearch.current).not.toBeNull();
+        const broadSearch = capturedSearch.current;
+        if (!broadSearch) {
+          throw new Error("broad food search SQL was not captured");
+        }
+        await client.query("SET LOCAL statement_timeout = '30s'");
+        const broadExplain = await client.query<{ "QUERY PLAN": Array<{
+          Plan: ExplainPlanNode;
+        }> }>(
+          `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${broadSearch.text}`,
+          broadSearch.values,
+        );
+        const broadPlan = broadExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
+        expect(broadPlan).toBeDefined();
+        const broadNodes = flattenExplainPlan(broadPlan ?? {});
+        expect(broadNodes.some((node) =>
+          node["Index Name"] === "foods_perf_name_rank_idx"
+        )).toBe(true);
+        expectBoundedFoodSortInputs(broadNodes);
+        await client.query("SET LOCAL statement_timeout = '8s'");
+
+        const brandOnly = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q: "needlebrand",
+        });
+        expect(brandOnly.map((row) => row.id)).toContain("food-perf-2");
+        const brandSearch = capturedSearch.current;
+        if (!brandSearch) {
+          throw new Error("brand-only food search SQL was not captured");
+        }
+        const brandExplain = await client.query<{ "QUERY PLAN": Array<{
+          Plan: ExplainPlanNode;
+        }> }>(
+          `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${brandSearch.text}`,
+          brandSearch.values,
+        );
+        const brandPlan = brandExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
+        expect(brandPlan).toBeDefined();
+        expect(flattenExplainPlan(brandPlan ?? {}).some((node) =>
+          node["Index Name"] === "foods_perf_search_idx" ||
+          node["Index Name"] === "foods_perf_search_english_idx"
+        )).toBe(true);
+
+        const exact = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 5,
+          q: "Exact Commonfood",
+        });
+        expect(exact[0]?.id).toBe("food-perf-1");
+
+        const generic = await queries.searchFoods({
+          genericOnly: true,
+          includeOffMarket: false,
+          limit: 5,
+          q: "genericmarker",
+        });
+        expect(generic.map((row) => row.id)).toEqual(["food-perf-3"]);
+
+        const typoQ = "Comonfood";
+        const { rows: typoPredicates } = await client.query<{
+          valid_fts_match: boolean;
+          valid_trigram_match: boolean;
+        }>(
+          `
+          SELECT
+            to_tsvector('simple', search_text) @@
+              websearch_to_tsquery('simple', $1) AS valid_fts_match,
+            name % $1::text AS valid_trigram_match
+          FROM foods
+          WHERE id = 'food-perf-4'
+          `,
+          [typoQ],
+        );
+        expect(typoPredicates[0]).toEqual({
+          valid_fts_match: false,
+          valid_trigram_match: true,
+        });
+
+        const firstTypo = await queries.searchFoods({
+          includeOffMarket: false,
+          limit: 50,
+          q: typoQ,
+        });
+        const typoSearch = capturedSearch.current;
+        if (!typoSearch) {
+          throw new Error("large-catalog typo food search SQL was not captured");
+        }
+        expect(firstTypo).toHaveLength(50);
+
+        await client.query("SET LOCAL statement_timeout = '30s'");
+        const typoExplain = await client.query<{ "QUERY PLAN": Array<{
+          Plan: ExplainPlanNode;
+        }> }>(
+          `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${typoSearch.text}`,
+          typoSearch.values,
+        );
+        const typoPlan = typoExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
+        expect(typoPlan).toBeDefined();
+        const typoNodes = flattenExplainPlan(typoPlan ?? {});
+        expect(typoNodes.filter((node) =>
+          node["Index Name"] === "foods_perf_name_rank_idx" &&
+          (node["Actual Loops"] ?? 0) > 0
+        )).toHaveLength(1);
+        expectBoundedFoodSortInputs(typoNodes);
+        await client.query("SET LOCAL statement_timeout = '8s'");
+
+        const { rows: obsoleteIndexes } = await client.query<{ name: string | null }>(
+          "SELECT to_regclass('foods_perf_canonical_rank_idx')::text AS name",
+        );
+        expect(obsoleteIndexes[0]?.name).toBeNull();
+      } finally {
+        if (transactionStarted) {
+          await client.query("ROLLBACK");
+        }
+        await client.end();
+      }
+    }, 120_000);
   },
 );
 

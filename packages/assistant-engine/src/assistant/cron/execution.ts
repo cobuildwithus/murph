@@ -1790,9 +1790,12 @@ function resolveAssistantCronOutboxSupportSeriesId(
   return supportSeriesIds.length === 1 ? supportSeriesIds[0]! : null
 }
 
-function buildAssistantCronExecutionInstructions(
+export function buildAssistantCronExecutionInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1843,7 +1846,10 @@ function buildAssistantCronExecutionInstructions(
 
 function buildAssistantCronAutomationContextInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string | null {
   const context =
     job.kind === 'canonical'
@@ -1893,10 +1899,13 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
 function buildAssistantCronSupportScopeInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
+  // Weekly-digest metadata still participates in plan consent checks, but the
+  // saved automation instructions own the provider-visible task.
   if (
     job.kind !== 'canonical' ||
     job.source.kind !== 'automation' ||
-    job.source.supportKind === null
+    job.source.supportKind === null ||
+    job.source.supportKind === 'weekly_digest'
   ) {
     return null
   }
@@ -1905,9 +1914,7 @@ function buildAssistantCronSupportScopeInstructions(
     ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
-      : job.source.supportKind === 'review'
-        ? "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
-        : 'Provide only the agreed weekly summary shape from current evidence. Do not append a surprise accountability, repair, or coaching question.'
+      : "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
 
   return [
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
