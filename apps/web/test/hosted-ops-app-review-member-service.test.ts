@@ -29,6 +29,7 @@ const dependencies = vi.hoisted(() => {
     HostedDomainRootPreparationMismatchError,
     PrivyApiError,
     activateHostedMemberForPositiveSourceTx: vi.fn(),
+    assertHostedPrivyAccountDeletionNotPending: vi.fn(),
     cacheScope: null as string | null,
     ensureHostedMemberForPrivyIdentityResolutionTx: vi.fn(),
     freshCacheSequence: 0,
@@ -115,6 +116,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  assertHostedPrivyAccountDeletionNotPending:
+    dependencies.assertHostedPrivyAccountDeletionNotPending,
   ensureHostedMemberForPrivyIdentityResolutionTx:
     dependencies.ensureHostedMemberForPrivyIdentityResolutionTx,
   lookupHostedMemberForPrivyAuthAttempt:
@@ -444,6 +447,9 @@ describe("prepareHostedOpsAppReviewMember", () => {
     dependencies.activateHostedMemberForPositiveSourceTx.mockResolvedValue({
       activated: true,
     });
+    dependencies.assertHostedPrivyAccountDeletionNotPending.mockResolvedValue(
+      undefined,
+    );
     dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(
       undefined,
     );
@@ -493,6 +499,10 @@ describe("prepareHostedOpsAppReviewMember", () => {
     expect(dependencies.privyCreate).not.toHaveBeenCalled();
     expect(dependencies.privySetCustomMetadata).not.toHaveBeenCalled();
     expect(dependencies.lookupHostedMemberForPrivyAuthAttempt).toHaveBeenCalledOnce();
+    expect(dependencies.assertHostedPrivyAccountDeletionNotPending).toHaveBeenCalledWith({
+      prisma,
+      privyUserId: PRIVY_USER_ID,
+    });
     expect(dependencies.generateHostedMemberId).toHaveBeenCalledOnce();
     expect(dependencies.prepareHostedDomainRootForWeb).toHaveBeenCalledWith({
       domain: "control",
@@ -510,6 +520,7 @@ describe("prepareHostedOpsAppReviewMember", () => {
       }),
       now: NOW,
       preparedControlRoot,
+      preparedExistingMemberId: null,
       preparedNewMemberId: NEW_MEMBER_ID,
     }));
     expect(resolutionInput).toEqual(expect.not.objectContaining({
@@ -570,6 +581,29 @@ describe("prepareHostedOpsAppReviewMember", () => {
     });
   });
 
+  it("stops new-member preparation while the existing deletion owner is pending", async () => {
+    const deletionPending = Object.assign(
+      new Error("Account deletion is still finishing."),
+      { code: "PRIVY_ACCOUNT_DELETION_IN_PROGRESS" },
+    );
+    dependencies.assertHostedPrivyAccountDeletionNotPending.mockRejectedValueOnce(
+      deletionPending,
+    );
+
+    await expect(applyReviewerMember()).rejects.toBe(deletionPending);
+
+    expect(dependencies.lookupHostedMemberForPrivyAuthAttempt).toHaveBeenCalledOnce();
+    expect(dependencies.assertHostedPrivyAccountDeletionNotPending).toHaveBeenCalledWith({
+      prisma,
+      privyUserId: PRIVY_USER_ID,
+    });
+    expect(dependencies.generateHostedMemberId).not.toHaveBeenCalled();
+    expect(dependencies.prepareHostedDomainRootForWeb).not.toHaveBeenCalled();
+    expect(dependencies.readHostedMemberIdentity).not.toHaveBeenCalled();
+    expect(dependencies.privyGetById).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("uses the existing member id and its matching prepared control root", async () => {
     mockPreparedMemberLookupSequence(
       buildExistingMemberLookup(EXISTING_MEMBER_ID, "verifiedEmail"),
@@ -596,8 +630,10 @@ describe("prepareHostedOpsAppReviewMember", () => {
     expect(dependencies.ensureHostedMemberForPrivyIdentityResolutionTx)
       .toHaveBeenCalledWith(expect.objectContaining({
         preparedControlRoot,
+        preparedExistingMemberId: EXISTING_MEMBER_ID,
         preparedNewMemberId: EXISTING_MEMBER_ID,
       }));
+    expect(dependencies.assertHostedPrivyAccountDeletionNotPending).not.toHaveBeenCalled();
     expect(dependencies.readHostedMemberIdentity).toHaveBeenCalledWith({
       memberId: EXISTING_MEMBER_ID,
       prisma,

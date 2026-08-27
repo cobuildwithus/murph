@@ -3,6 +3,7 @@ import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const privyProvider = vi.hoisted(() => ({
+  afterExactRead: null as null | ((userId: string) => Promise<void>),
   deleteAfterInitialRead: false,
   exactReads: vi.fn(),
   initialReads: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@privy-io/node", async (importOriginal) => {
             if (!user) {
               throw new Error("Privy test user is not configured.");
             }
+            await privyProvider.afterExactRead?.(userId);
             return user;
           },
           getByEmailAddress: async ({ address }: { address: string }) => {
@@ -150,6 +152,10 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { prepareHostedOpsAppReviewMember } from "@/src/lib/hosted-ops/app-review-member";
+import {
+  persistHostedAccountDeletionCleanupTx,
+  prepareHostedAccountDeletionCleanup,
+} from "@/src/lib/hosted-privacy/account-deletion-cleanup";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -177,6 +183,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_review_test";
   process.env.PRIVY_APP_SECRET = "synthetic-app-review-secret";
   Reflect.deleteProperty(globalThis, "__murphHostedPrivyManagementClient");
+  privyProvider.afterExactRead = null;
   privyProvider.deleteAfterInitialRead = false;
   privyProvider.exactReads.mockClear();
   privyProvider.initialReads.mockClear();
@@ -228,6 +235,95 @@ describe.skipIf(!runPostgresProof)(
             id: { in: unexpectedMembers.map(({ memberId }) => memberId) },
           },
         });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("does not recreate an existing member deleted after the exact Privy read", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 3 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_app_review_deleted_${fixtureId}`;
+      const email = `app-review-stale-${fixtureId}@example.test`;
+      const userId = `did:privy:app-review-stale-${fixtureId}`;
+      const privyUserLookupKey = createHostedPrivyUserLookupKey(userId);
+      privyProvider.usersByEmail.set(email, buildPrivyUser({ email, userId }));
+      const cleanup = await prepareHostedAccountDeletionCleanup({
+        now: new Date("2026-08-27T12:00:00.000Z"),
+        privyUserId: userId,
+        runtimeMemberIds: [memberId],
+        stripeCustomerIds: [],
+      });
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+          domain: "control",
+          prisma,
+          reason: "test.app-review-stale-authority",
+          userId: memberId,
+        });
+        await runWithHostedDomainRootUnwrapCache(() => prisma.$transaction((tx) =>
+          upsertHostedMemberIdentity({
+            maskedPhoneNumberHint: null,
+            memberId,
+            phoneLookupKey: null,
+            phoneNumber: null,
+            phoneNumberVerifiedAt: null,
+            prisma: tx,
+            privyUserId: userId,
+            signupPhoneCodeSendAttemptId: null,
+            signupPhoneCodeSendAttemptStartedAt: null,
+            signupPhoneCodeSentAt: null,
+            signupPhoneNumber: null,
+          })
+        ));
+        privyProvider.afterExactRead = async (readUserId) => {
+          expect(readUserId).toBe(userId);
+          privyProvider.afterExactRead = null;
+          await prisma.$transaction(async (tx) => {
+            await persistHostedAccountDeletionCleanupTx({
+              cleanup,
+              prisma: tx,
+            });
+            await tx.hostedMember.delete({ where: { id: memberId } });
+          });
+        };
+
+        await expect(prepareHostedOpsAppReviewMember({
+          mode: "apply",
+          principal: { kind: "email", value: email },
+          prisma,
+        })).rejects.toMatchObject({
+          code: "PRIVY_ACCOUNT_DELETION_IN_PROGRESS",
+        });
+
+        expect(privyProvider.initialReads).toHaveBeenCalledOnce();
+        expect(privyProvider.exactReads).toHaveBeenCalledOnce();
+        await expect(prisma.hostedMember.count({
+          where: { id: memberId },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedMemberIdentity.count({
+          where: { privyUserLookupKey },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedAccountDeletionCleanup.count({
+          where: { id: cleanup.id },
+        })).resolves.toBe(1);
+      } finally {
+        privyProvider.afterExactRead = null;
+        const cleanupCompletedAt = new Date("2026-08-27T12:01:00.000Z");
+        await prisma.hostedAccountDeletionCleanup.updateMany({
+          data: {
+            cloudflareCompletedAt: cleanupCompletedAt,
+            privyCompletedAt: cleanupCompletedAt,
+            runtimeLogsCompletedAt: cleanupCompletedAt,
+            stripeCompletedAt: cleanupCompletedAt,
+          },
+          where: { id: cleanup.id },
+        });
+        await prisma.hostedAccountDeletionCleanup.deleteMany({
+          where: { id: cleanup.id },
+        });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();
       }
     });

@@ -27,6 +27,7 @@ import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
 import {
+  assertHostedPrivyAccountDeletionNotPending,
   ensureHostedMemberForPrivyIdentityResolutionTx,
   lookupHostedMemberForPrivyAuthAttempt,
 } from "../hosted-onboarding/member-identity-service";
@@ -205,6 +206,12 @@ async function resolvePreparedHostedOpsAppReviewMember(input: {
         identity: input.identity,
         prisma: input.prisma,
       });
+      if (!existing) {
+        await assertHostedPrivyAccountDeletionNotPending({
+          prisma: input.prisma,
+          privyUserId: input.identity.userId,
+        });
+      }
       const preparedMemberId = existing?.core.id ?? generateHostedMemberId();
       const preparedControlRoot = await prepareHostedDomainRootForWeb({
         domain: "control",
@@ -233,6 +240,7 @@ async function resolvePreparedHostedOpsAppReviewMember(input: {
               identity: input.identity,
               now: input.now,
               preparedControlRoot,
+              preparedExistingMemberId: existing?.core.id ?? null,
               preparedLiveIdentity,
               preparedNewMemberId: preparedMemberId,
               prisma: tx,

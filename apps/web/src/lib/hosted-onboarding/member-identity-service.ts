@@ -418,6 +418,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
+  preparedExistingMemberId?: string | null;
   preparedLiveIdentity?: HostedPrivyIdentity;
   preparedNewMemberId?: string;
   now: Date;
@@ -451,6 +452,13 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     identity: input.identity,
     prisma: input.prisma,
   }))?.core ?? null;
+
+  if (
+    input.preparedExistingMemberId !== undefined
+    && (existingMember?.id ?? null) !== input.preparedExistingMemberId
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
 
   if (
     existingMember
