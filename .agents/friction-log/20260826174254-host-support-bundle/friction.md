@@ -1,6 +1,7 @@
 ---
 title: 'Host-support bundle proof races a moving pull-request base'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2387'
 ---
 
 ## Expected Behavior

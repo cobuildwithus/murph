@@ -1,6 +1,7 @@
 ---
 title: 'Live assistant fixture loses per-turn command environment'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2393'
 ---
 
 ## Expected Behavior

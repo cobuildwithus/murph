@@ -1,6 +1,7 @@
 ---
 title: 'Live workout fixture uses sandbox-incompatible tsx IPC'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2392'
 ---
 
 ## Expected Behavior
