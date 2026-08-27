@@ -1,8 +1,8 @@
 # PR 2212 specialist recovery
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -202,3 +202,12 @@ without changing automation ownership or adding a second error framework.
   historical absolute total-byte allowance with the exact first-parent relative
   comparison. The obsolete branch-local absolute cap is not resurrected. The
   reviewed Core/runtime production behavior is unchanged by this base merge.
+- Integrated merged knowledge-recovery foundation `d3d01885c2` at merge
+  candidate `739f34ead4`. The only conflict was generated CLI skill metadata;
+  it was regenerated canonically from the complete merged command tree.
+- Final merged-tree proof passes: 345 focused daemon, automation, batch,
+  operator-config, and Vault tests; 22 release-secret guard cases; all seven
+  affected package typechecks; prepared runtime; CLI package shape; generated
+  schema/hash currentness; and diff whitespace. No production behavior changed
+  after the reviewed candidate.
+Completed: 2026-08-27
