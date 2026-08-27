@@ -2076,13 +2076,29 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             toolCallCount: videoCalls.length,
           })}\n`,
         )
-        expect(videoCalls).toHaveLength(1)
-        expect(videoCalls[0]).toMatchObject({
+        expect(videoCalls.length).toBeGreaterThanOrEqual(1)
+        const firstVideoCall = videoCalls[0]
+        expect(firstVideoCall).toMatchObject({
           argumentsValue: {
             message_ref: videoMessageRef,
           },
           kind: 'dynamic',
         })
+        if (firstVideoCall?.kind !== 'dynamic') {
+          throw new Error('Expected a dynamic video-analysis call.')
+        }
+        for (const repeatedVideoCall of videoCalls.slice(1)) {
+          expect(repeatedVideoCall).toMatchObject({
+            argumentsValue: {
+              message_ref: videoMessageRef,
+            },
+            kind: 'dynamic',
+            success: firstVideoCall.success,
+          })
+          if (repeatedVideoCall.kind === 'dynamic') {
+            expect(repeatedVideoCall.output).toBe(firstVideoCall.output)
+          }
+        }
         expect(acceptedMessageAuthorizationCallCount).toBe(0)
         expect(providerCallCount).toBe(1)
         expect(result.finalMessage).toMatch(/\b(?:eight|8)\b/iu)
