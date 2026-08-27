@@ -633,14 +633,18 @@ function getObservedDaysLevel(days: number): number {
 function selectVisiblePatternReport(
   report: PersonalPatternReport,
 ): PersonalPatternReport {
-  const factors = report.factors.filter((factor) =>
-    report.outcomes.some((outcome) => {
+  const outcomes = report.outcomes.filter((outcome) =>
+    report.factors.some((factor) => {
       const cell = findPatternCell(report, factor.id, outcome.id);
-      return cell !== undefined && cell.stage !== "insufficient";
+      return (
+        cell !== undefined &&
+        cell.stage !== "insufficient" &&
+        cell.stage !== "no_clear_pattern"
+      );
     }),
   );
-  const outcomes = report.outcomes.filter((outcome) =>
-    factors.some((factor) => {
+  const factors = report.factors.filter((factor) =>
+    outcomes.some((outcome) => {
       const cell = findPatternCell(report, factor.id, outcome.id);
       return cell !== undefined && cell.stage !== "insufficient";
     }),

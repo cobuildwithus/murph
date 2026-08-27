@@ -51,6 +51,14 @@ interface PersonaFixture {
   timeZone: string;
 }
 
+interface OuraPersonaActivityDates {
+  cycling: Set<string>;
+  hiking: Set<string>;
+  running: Set<string>;
+  strength: Set<string>;
+  tennis: Set<string>;
+}
+
 function buildPersonaFixture(
   personaId: DevelopmentPersonaId,
   asOfDate: string,
@@ -65,20 +73,49 @@ function buildPersonaFixture(
       addDays(asOfDate, -(index * 14 + 8)),
     ),
   );
+  const ouraActivityDates =
+    personaId === "oura" ? buildOuraPersonaActivityDates(asOfDate) : null;
 
   for (let offset = 83; offset >= 0; offset -= 1) {
     if (personaId === "family" || personaId === "new") continue;
     const date = addDays(asOfDate, -offset);
-    const followsFactor = factorDates.has(addDays(date, -1));
+    const priorDate = addDays(date, -1);
+    const followsFactor = factorDates.has(priorDate);
+    const followsCycling = ouraActivityDates?.cycling.has(priorDate) ?? false;
+    const followsRunning = ouraActivityDates?.running.has(priorDate) ?? false;
+    const followsStrength = ouraActivityDates?.strength.has(priorDate) ?? false;
+    const followsTennis = ouraActivityDates?.tennis.has(priorDate) ?? false;
     const wave = offset % 5;
-    const totalSleep = 430 + wave * 9 - (followsFactor ? 42 : 0);
-    const sleepScore = 79 + (offset % 4) - (followsFactor ? 9 : 0);
-    const efficiency = 87 + (offset % 3) - (followsFactor ? 4 : 0);
-    const readiness = 78 + (offset % 6) - (followsFactor ? 8 : 0);
+    const totalSleep =
+      430 +
+      wave * 9 -
+      (followsFactor ? 42 : 0) +
+      (followsCycling ? 32 : 0) -
+      (followsTennis ? 24 : 0);
+    const sleepScore =
+      79 +
+      (offset % 4) -
+      (followsFactor ? 9 : 0) +
+      (followsCycling ? 6 : 0) -
+      (followsTennis ? 6 : 0);
+    const efficiency =
+      87 + (offset % 3) - (followsFactor ? 4 : 0) + (followsRunning ? 5 : 0);
+    const readiness =
+      78 +
+      (offset % 6) -
+      (followsFactor ? 8 : 0) +
+      (followsCycling ? 8 : 0) -
+      (followsTennis ? 8 : 0);
     const hrv =
       personaId === "whoop"
         ? 58 + (offset % 8) - (followsFactor ? 5 : 0)
-        : 48 + (offset % 9) - (followsFactor ? 4 : 0);
+        : 48 +
+          (offset % 9) -
+          (followsFactor ? 4 : 0) +
+          (followsCycling ? 8 : 0) -
+          (followsTennis ? 5 : 0);
+    const deepSleep = 72 + (offset % 6) + (followsStrength ? 14 : 0);
+    const remSleep = 96 + (offset % 8) + (followsRunning ? 16 : 0);
 
     entities.push(
       eventEntity({
@@ -109,7 +146,7 @@ function buildPersonaFixture(
         source,
         date,
         "deep-sleep-minutes",
-        72 + (offset % 6),
+        deepSleep,
         "min",
       ),
       metricPoint(
@@ -117,7 +154,7 @@ function buildPersonaFixture(
         source,
         date,
         "rem-sleep-minutes",
-        96 + (offset % 8),
+        remSleep,
         "min",
       ),
       metricPoint(personaId, source, date, "sleep-score", sleepScore, "score"),
@@ -157,14 +194,14 @@ function buildPersonaFixture(
           personaId,
           date,
           "deep-sleep-minutes",
-          72 + (offset % 6),
+          deepSleep,
           "min",
         ),
         observationEntity(
           personaId,
           date,
           "rem-sleep-minutes",
-          96 + (offset % 8),
+          remSleep,
           "min",
         ),
         observationEntity(
@@ -228,7 +265,13 @@ function buildPersonaFixture(
     );
   }
 
-  addPersonaSpecificEvents(personaId, asOfDate, entities, metricPoints);
+  addPersonaSpecificEvents(
+    personaId,
+    asOfDate,
+    entities,
+    metricPoints,
+    ouraActivityDates,
+  );
 
   return {
     entities,
@@ -245,61 +288,24 @@ function addPersonaSpecificEvents(
   asOfDate: string,
   entities: CanonicalEntity[],
   metricPoints: MetricPoint[],
+  ouraActivityDates: OuraPersonaActivityDates | null,
 ) {
-  if (personaId === "oura") {
-    for (let offset = 6; offset <= 76; offset += 14) {
-      entities.push(
-        activityEntity(
-          personaId,
-          addDays(asOfDate, -offset),
-          "tennis",
-          62,
-          "oura",
-        ),
-      );
+  if (personaId === "oura" && ouraActivityDates) {
+    for (const date of ouraActivityDates.tennis) {
+      entities.push(activityEntity(personaId, date, "tennis", 62, "oura"));
     }
-    for (let offset = 4; offset <= 80; offset += 12) {
-      entities.push(
-        activityEntity(
-          personaId,
-          addDays(asOfDate, -offset),
-          "cycling",
-          42 + (offset % 4) * 8,
-          "oura",
-        ),
-      );
+    for (const date of ouraActivityDates.cycling) {
+      entities.push(activityEntity(personaId, date, "cycling", 50, "oura"));
     }
-    for (let offset = 9; offset <= 79; offset += 14) {
-      entities.push(
-        activityEntity(
-          personaId,
-          addDays(asOfDate, -offset),
-          "running",
-          32 + (offset % 3) * 7,
-          "oura",
-        ),
-      );
+    for (const date of ouraActivityDates.running) {
+      entities.push(activityEntity(personaId, date, "running", 39, "oura"));
     }
-    for (let offset = 12; offset <= 75; offset += 21) {
-      entities.push(
-        activityEntity(
-          personaId,
-          addDays(asOfDate, -offset),
-          "hiking",
-          105 + (offset % 2) * 35,
-          "oura",
-        ),
-      );
+    for (const date of ouraActivityDates.hiking) {
+      entities.push(activityEntity(personaId, date, "hiking", 120, "oura"));
     }
-    for (let offset = 3; offset <= 80; offset += 10) {
+    for (const date of ouraActivityDates.strength) {
       entities.push(
-        activityEntity(
-          personaId,
-          addDays(asOfDate, -offset),
-          "strength-training",
-          46 + (offset % 3) * 5,
-          "oura",
-        ),
+        activityEntity(personaId, date, "strength-training", 50, "oura"),
       );
     }
     return;
@@ -503,6 +509,31 @@ function addPersonaSpecificEvents(
       title: "Meal",
     }),
   );
+}
+
+function buildOuraPersonaActivityDates(
+  asOfDate: string,
+): OuraPersonaActivityDates {
+  return {
+    cycling: scheduledDates(asOfDate, 4, 80, 12),
+    hiking: scheduledDates(asOfDate, 12, 75, 21),
+    running: scheduledDates(asOfDate, 9, 79, 14),
+    strength: scheduledDates(asOfDate, 3, 80, 10),
+    tennis: scheduledDates(asOfDate, 6, 76, 14),
+  };
+}
+
+function scheduledDates(
+  asOfDate: string,
+  firstOffset: number,
+  lastOffset: number,
+  step: number,
+): Set<string> {
+  const dates = new Set<string>();
+  for (let offset = firstOffset; offset <= lastOffset; offset += step) {
+    dates.add(addDays(asOfDate, -offset));
+  }
+  return dates;
 }
 
 function habitatEntity(input: {

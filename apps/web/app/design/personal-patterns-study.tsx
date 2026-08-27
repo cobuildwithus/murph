@@ -229,6 +229,11 @@ const POPULATED_REPORT: PersonalPatternReport = {
       88,
       5,
     ),
+    cell("running", "unsupported", "no_clear_pattern", "flat", 0, 0, 0, 9),
+    cell("sauna", "unsupported", "no_clear_pattern", "flat", 0, 0, 0, 8),
+    cell("strength", "unsupported", "no_clear_pattern", "flat", 0, 0, 0, 6),
+    cell("late-meal", "unsupported", "no_clear_pattern", "flat", 0, 0, 0, 6),
+    cell("custom-tag", "unsupported", "no_clear_pattern", "flat", 0, 0, 0, 5),
     cell("sparse-factor", "total-sleep", "insufficient", "flat", 0, 0, 0, 2),
     cell(
       "sparse-factor",

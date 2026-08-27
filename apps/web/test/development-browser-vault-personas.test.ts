@@ -72,6 +72,33 @@ test("Oura persona covers a varied activity history", async () => {
   ]) {
     assert.ok(factorIds.has(expected), expected);
   }
+
+  const detectedCells =
+    replica.personalPatterns?.cells.filter(
+      (cell) =>
+        cell.stage === "new_clue" ||
+        cell.stage === "seen_again" ||
+        cell.stage === "worth_testing",
+    ) ?? [];
+  const detectedFactors = new Set(detectedCells.map((cell) => cell.factorId));
+  const detectedOutcomes = new Set(detectedCells.map((cell) => cell.outcomeId));
+
+  for (const expected of ["cycling", "late-caffeine", "running", "strength"]) {
+    assert.ok(detectedFactors.has(expected), expected);
+  }
+  for (const expected of [
+    "deep-sleep",
+    "rem-sleep",
+    "sleep-efficiency",
+    "total-sleep",
+  ]) {
+    assert.ok(detectedOutcomes.has(expected), expected);
+  }
+  assert.ok(
+    replica.personalPatterns?.cells.some(
+      (cell) => cell.stage === "no_clear_pattern",
+    ),
+  );
 });
 
 test("Whoop persona exposes provider-specific sleep and recovery outcomes", async () => {
