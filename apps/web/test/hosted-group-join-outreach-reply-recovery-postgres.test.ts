@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
@@ -14,6 +15,9 @@ const providerMocks = vi.hoisted(() => ({
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
+const stripeRuntimeMocks = vi.hoisted(() => ({
+  apiMode: null as { stripe: Stripe; stripeLiveMode: boolean } | null,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", async () => {
   const actual = await vi.importActual<
@@ -23,6 +27,29 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", async () =>
     ...actual,
     ensureHostedMemberStripeCustomer:
       providerMocks.ensureHostedMemberStripeCustomer,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/runtime")
+  >("@/src/lib/hosted-onboarding/runtime");
+  return {
+    ...actual,
+    requireHostedStripeApiMode: () =>
+      stripeRuntimeMocks.apiMode ?? actual.requireHostedStripeApiMode(),
+    requireHostedStripeUsageCreditCheckoutConfig: (
+      input: Parameters<
+        typeof actual.requireHostedStripeUsageCreditCheckoutConfig
+      >[0],
+    ) =>
+      stripeRuntimeMocks.apiMode
+        ? {
+            ...stripeRuntimeMocks.apiMode,
+            offerCode: input.offerCode,
+            priceId: "price_group_funding_lock",
+          }
+        : actual.requireHostedStripeUsageCreditCheckoutConfig(input),
   };
 });
 
@@ -329,6 +356,7 @@ import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-s
 import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
+import { hasHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   createHostedGroupUsageCreditCheckout,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
@@ -3006,6 +3034,146 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it.each([
+      ["already-prepared customers", false],
+      ["first-time customer preparation", true],
+    ] as const)(
+      "serializes two owner-code funders with %s",
+      async (_customerState, preparesCustomers) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const fixture = await createDeletionReplyRaceFixture();
+        const payerMemberIds = [
+          `hbm_group_funder_a_${randomUUID()}`,
+          `hbm_group_funder_b_${randomUUID()}`,
+        ];
+        const fundingGroupLockBarrier = createSqlLockBarrier(2);
+        let fundingContainerLockCount = 0;
+        let fundingGroupLockCount = 0;
+        const checkoutPrisma = withPrismaTransactionSqlLockBarrier({
+          barrier: fundingGroupLockBarrier,
+          matches: isOwnerCreatedGroupFundingLockQuery,
+          observe: (sql) => {
+            if (isFundingContainerShareQuery(sql)) {
+              fundingContainerLockCount += 1;
+            }
+            if (isOwnerCreatedGroupFundingLockQuery(sql)) {
+              fundingGroupLockCount += 1;
+            }
+          },
+          prisma: fixture.replyPrisma,
+        });
+        const createdCustomerMemberIds: string[] = [];
+        let checkoutPromises: Array<
+          ReturnType<typeof createHostedGroupUsageCreditCheckout>
+        > = [];
+
+        configureGroupFundingCheckoutProviderMocks();
+        const stripeCheckoutCreate = configureGroupFundingStripeRuntimeMock();
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt: ({ value }) => value,
+          encrypt: ({ value }) => value,
+        });
+        providerMocks.ensureHostedMemberStripeCustomer.mockImplementation(
+          async (input: { memberId: string }) => {
+            if (preparesCustomers) {
+              createdCustomerMemberIds.push(input.memberId);
+            }
+            return input.memberId === payerMemberIds[0]
+              ? "cus_group_funding_a"
+              : "cus_group_funding_b";
+          },
+        );
+
+        try {
+          await fixture.replyPrisma.hostedMember.createMany({
+            data: payerMemberIds.map((id) => ({
+              billingStatus: HostedBillingStatus.active,
+              id,
+            })),
+          });
+          await expect(hasHostedRuntimeActiveAccess(fixture.runtimeMemberId, {
+            prisma: fixture.replyPrisma,
+          })).resolves.toBe(true);
+          checkoutPromises = payerMemberIds.map((payerMemberId, index) =>
+            createHostedGroupUsageCreditCheckout({
+              clientRequestKey: `group_funding_pair_${index}_${suffix}`,
+              joinCode: fixture.joinCode,
+              now: new Date("2026-08-27T12:00:00.000Z"),
+              offerCode: "usage_10_usd",
+              payerMemberId,
+              prisma: checkoutPrisma,
+            })
+          );
+          const checkoutOutcomes = Promise.allSettled(checkoutPromises);
+          const barrierOrOutcome = await withTimeout(Promise.race([
+            fundingGroupLockBarrier.locked.then(() => ({
+              kind: "barrier" as const,
+            })),
+            checkoutOutcomes.then((outcome) => ({
+              kind: "outcome" as const,
+              outcome,
+            })),
+          ]), 5_000);
+          if (barrierOrOutcome.kind === "outcome") {
+            throw new Error(
+              "A checkout completed before both group locks were acquired.",
+            );
+          }
+          expect(providerMocks.ensureHostedMemberStripeCustomer)
+            .not.toHaveBeenCalled();
+          expect(stripeCheckoutCreate).not.toHaveBeenCalled();
+
+          fundingGroupLockBarrier.release();
+          const settled = await withTimeout(checkoutOutcomes, 10_000);
+          expect({
+            customerPreparationCount:
+              providerMocks.ensureHostedMemberStripeCustomer.mock.calls.length,
+            fundingContainerLockCount,
+            fundingGroupLockCount,
+          }).toEqual({
+            customerPreparationCount: 2,
+            fundingContainerLockCount: 4,
+            fundingGroupLockCount: 4,
+          });
+          for (const result of settled) {
+            expect(result.status).toBe("fulfilled");
+            if (result.status === "rejected") {
+              expect(errorContainsText(result.reason, "40P01")).toBe(false);
+              throw result.reason;
+            }
+            expect(result.value).toMatchObject({ status: "checkout_open" });
+          }
+          expect(stripeCheckoutCreate).toHaveBeenCalledTimes(2);
+          expect(new Set(createdCustomerMemberIds)).toEqual(
+            preparesCustomers ? new Set(payerMemberIds) : new Set(),
+          );
+          await expect(fixture.replyPrisma.hostedUsageCreditPurchase.count({
+            where: { payerMemberId: { in: payerMemberIds } },
+          })).resolves.toBe(2);
+          await expect(
+            fixture.replyPrisma.hostedGroupSponsorshipAuthorization.count({
+              where: { payerMemberId: { in: payerMemberIds } },
+            }),
+          ).resolves.toBe(0);
+          await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
+            where: { creatorMemberId: { in: payerMemberIds } },
+          })).resolves.toBe(2);
+        } finally {
+          fundingGroupLockBarrier.release();
+          await Promise.allSettled(checkoutPromises);
+          await Promise.all(payerMemberIds.map((payerMemberId) =>
+            cleanupGroupFundingPayer({
+              payerMemberId,
+              prisma: fixture.replyPrisma,
+            })
+          ));
+          setHostedSecureBoxStringTestCodecForTests(null);
+          resetGroupFundingCheckoutProviderMocks();
+          await cleanupDeletionReplyRaceFixture(fixture);
+        }
+      },
+    );
+
     it("serializes a Telegram group-offer tap before account deletion without deadlock", async () => {
       const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
       const deletionApplicationName = `delete_after_tg_${suffix}`;
@@ -5115,10 +5283,93 @@ function configureGroupFundingCheckoutProviderMocks(): void {
     .mockResolvedValue("cus_group_funding_lock");
 }
 
+function configureGroupFundingStripeRuntimeMock() {
+  const stripe = new Stripe("sk_test_group_funding_lock");
+  vi.spyOn(stripe.prices, "retrieve").mockImplementation(async (priceId) =>
+    stripeTestResponse({
+      active: true,
+      billing_scheme: "per_unit",
+      created: 0,
+      currency: "usd",
+      custom_unit_amount: null,
+      id: priceId,
+      livemode: false,
+      lookup_key: null,
+      metadata: {},
+      nickname: null,
+      object: "price",
+      product: "prod_group_funding_lock",
+      recurring: null,
+      tax_behavior: null,
+      tiers_mode: null,
+      transform_quantity: null,
+      type: "one_time",
+      unit_amount: 1_000,
+      unit_amount_decimal: null,
+    } satisfies Stripe.Price)
+  );
+  vi.spyOn(stripe.customers, "retrieve").mockImplementation(
+    async (customerId) => stripeTestResponse({
+      default_source: null,
+      id: customerId,
+      invoice_settings: { default_payment_method: null },
+      livemode: false,
+      object: "customer",
+    } as Stripe.Customer),
+  );
+  vi.spyOn(stripe.paymentMethods, "list").mockResolvedValue(stripeTestResponse({
+    data: [],
+    has_more: false,
+    object: "list",
+    url: "/v1/payment_methods",
+  } satisfies Stripe.ApiList<Stripe.PaymentMethod>));
+  vi.spyOn(stripe.subscriptions, "list").mockResolvedValue(stripeTestResponse({
+    data: [],
+    has_more: false,
+    object: "list",
+    url: "/v1/subscriptions",
+  } satisfies Stripe.ApiList<Stripe.Subscription>));
+  let sessionIndex = 0;
+  const checkoutCreate = vi.spyOn(stripe.checkout.sessions, "create")
+    .mockImplementation(async (request) => {
+      if (!request) {
+        throw new Error("Expected Stripe checkout parameters.");
+      }
+      sessionIndex += 1;
+      return stripeTestResponse({
+        adaptive_pricing: request.adaptive_pricing,
+        client_reference_id: request.client_reference_id,
+        customer: request.customer,
+        expires_at: request.expires_at,
+        id: `cs_test_group_funding_${sessionIndex}`,
+        livemode: false,
+        metadata: request.metadata,
+        mode: "payment",
+        payment_method_types: request.payment_method_types,
+        payment_status: "unpaid",
+        status: "open",
+        url: `https://checkout.stripe.test/group-funding-${sessionIndex}`,
+      } as Stripe.Checkout.Session);
+    });
+  stripeRuntimeMocks.apiMode = { stripe, stripeLiveMode: false };
+  return checkoutCreate;
+}
+
+function stripeTestResponse<T extends object>(value: T): Stripe.Response<T> {
+  return Object.assign(value, {
+    lastResponse: {
+      headers: {},
+      requestId: "req_group_funding_lock",
+      statusCode: 200,
+    },
+  });
+}
+
 function resetGroupFundingCheckoutProviderMocks(): void {
   vi.unstubAllEnvs();
   clearHostedOnboardingEnvCache();
   providerMocks.ensureHostedMemberStripeCustomer.mockReset();
+  stripeRuntimeMocks.apiMode = null;
 }
 
 async function cleanupGroupFundingPayer(input: {
@@ -5773,11 +6024,17 @@ type SqlLockBarrier = {
   waitUntilReleased: Promise<void>;
 };
 
-function createSqlLockBarrier(): SqlLockBarrier {
+function createSqlLockBarrier(expectedLockCount = 1): SqlLockBarrier {
   let reportLocked = (): void => undefined;
   let release = (): void => undefined;
+  let reportedLockCount = 0;
   const locked = new Promise<void>((resolve) => {
-    reportLocked = resolve;
+    reportLocked = () => {
+      reportedLockCount += 1;
+      if (reportedLockCount >= expectedLockCount) {
+        resolve();
+      }
+    };
   });
   const waitUntilReleased = new Promise<void>((resolve) => {
     release = resolve;
@@ -5793,6 +6050,7 @@ function createSqlLockBarrier(): SqlLockBarrier {
 function withSqlLockBarrierTx(input: {
   barrier: SqlLockBarrier;
   matches: (sql: string) => boolean;
+  observe?: (sql: string) => void;
   tx: Prisma.TransactionClient;
 }): Prisma.TransactionClient {
   let paused = false;
@@ -5804,7 +6062,9 @@ function withSqlLockBarrierTx(input: {
       }
       return async (...args: unknown[]) => {
         const result = await Reflect.apply(value, target, args);
-        if (!paused && input.matches(readTaggedSql(args[0]))) {
+        const sql = readTaggedSql(args[0]);
+        input.observe?.(sql);
+        if (!paused && input.matches(sql)) {
           paused = true;
           input.barrier.reportLocked();
           await input.barrier.waitUntilReleased;
@@ -5830,6 +6090,7 @@ function withAccountDeletionGroupLockBarrier(
 function withPrismaTransactionSqlLockBarrier(input: {
   barrier: SqlLockBarrier;
   matches: (sql: string) => boolean;
+  observe?: (sql: string) => void;
   prisma: PrismaClient;
 }): PrismaClient {
   return new Proxy(input.prisma, {
@@ -5850,6 +6111,7 @@ function withPrismaTransactionSqlLockBarrier(input: {
           (tx: Prisma.TransactionClient) => callback(withSqlLockBarrierTx({
             barrier: input.barrier,
             matches: input.matches,
+            observe: input.observe,
             tx,
           })),
           ...rest,
@@ -5869,7 +6131,14 @@ function isOwnerCreatedGroupFundingLockQuery(sql: string): boolean {
   const normalized = sql.toLowerCase();
   return normalized.includes('from "hosted_group" as "group"')
     && normalized.includes('inner join "hosted_thread_container" as "container"')
-    && normalized.includes('for share of "group", "container"');
+    && normalized.includes('for share of "group"')
+    && !normalized.includes('for share of "group", "container"');
+}
+
+function isFundingContainerShareQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_thread_container" as "container"')
+    && normalized.includes('for share of "container"');
 }
 
 function isHostedMemberRowLockQuery(sql: string): boolean {
