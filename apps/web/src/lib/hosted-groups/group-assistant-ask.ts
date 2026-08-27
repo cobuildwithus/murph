@@ -2008,7 +2008,13 @@ async function replayHostedGroupAssistantAskTx(input: {
     || wake.ask.expiresAt !== input.expiresAt
     || "origin" in wake.ask
     || wake.ask.target.kind !== "joined_group"
-    || wake.ask.originAssistantInputId !== input.originAssistantInputId
+    || !("originAssistantInputId" in wake.ask)
+    || !("originSessionId" in wake.ask)
+  ) {
+    return unavailableAdmission("request_conflict");
+  }
+  if (
+    wake.ask.originAssistantInputId !== input.originAssistantInputId
     || wake.ask.originSessionId !== input.originSessionId
     || wake.ask.question !== input.question
     || wake.ask.target.requestedLabel !== input.requestedLabel
@@ -2202,6 +2208,13 @@ async function readHostedAssistantAskAuthorityTx(input: {
   }
 
   if (!("origin" in wake.ask)) {
+    if (
+      wake.ask.target.kind !== "joined_group"
+      || !("originAssistantInputId" in wake.ask)
+      || !("originSessionId" in wake.ask)
+    ) {
+      return { authority: null, terminalReason: "unavailable" };
+    }
     const membershipAuthority = await readHostedAssistantAskMembershipAuthorityTx({
       expectedOriginMemberId: null,
       expectedTargetRuntimeMemberId: item.userId,

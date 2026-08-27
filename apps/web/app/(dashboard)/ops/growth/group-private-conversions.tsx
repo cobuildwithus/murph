@@ -45,11 +45,12 @@ export function GroupPrivateConversions(input: {
           Group to private
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Counts a member once when Murph still has a group message from the
-          prior 14 days and that message came before their first private
-          activation. This is sequence-based attribution, not proof the group
-          caused activation. The marker remains after message content retires,
-          but sequences outside that rolling evidence window are not counted.
+          Counts a member once when Murph has a live group-roster observation
+          or retained group message from the prior 14 days that came before
+          their first private activation. This is sequence-based exposure
+          attribution, not proof of engagement or causation. The marker remains
+          after the source evidence retires, but sequences outside that rolling
+          window are not counted.
         </p>
       </div>
 

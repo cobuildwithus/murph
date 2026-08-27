@@ -22,18 +22,31 @@ test("ReferralSection presents every available referral path on the homepage", (
   );
 
   assert.match(markup, /Murph referrals/);
-  assert.match(markup, /Bring your people\. Earn more Murph time\./);
-  assert.match(markup, /Share your link or start a group with Murph/);
+  assert.match(markup, /Referral rewards, your way\./);
+  assert.match(markup, /Bring your people\.<\/span>/);
+  assert.match(markup, /Earn more Murph\.<\/span>/);
+  assert.match(
+    markup,
+    /Bring someone into Murph—or start a fresh group—and you can earn more room to keep going/,
+  );
   assert.match(markup, /Share your referral link/);
   assert.match(markup, /Bring someone new to Murph/);
   assert.match(markup, /Start a group conversation/);
-  assert.match(markup, /About 10 more days of Murph usage/);
-  assert.match(markup, /About 14 more days of Murph usage/);
+  assert.match(markup, />10</);
+  assert.match(markup, />14</);
+  assert.match(markup, /days of/);
+  assert.match(
+    markup,
+    /aria-label="About 10 more days of Murph usage"/,
+  );
   assert.match(markup, /href="\/refer"/);
   assert.match(markup, /See ways to earn/);
-  assert.match(markup, /Typical-use estimate\. Actual capacity varies\./);
+  assert.match(
+    markup,
+    /Typical Murph usage added—not calendar access\. Actual capacity varies\./,
+  );
   assert.doesNotMatch(markup, /If eligible/);
-  assert.doesNotMatch(markup, /\$|≈|usage credit/i);
+  assert.doesNotMatch(markup, /\$|usage credit/i);
   assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
   assert.doesNotMatch(markup, /applies earned usage automatically when/);
 });
@@ -46,7 +59,10 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
     createElement(ReferralSection, { rewards: signupReward }),
   );
 
-  assert.match(signupMarkup, /Share your personal link with someone new\./);
+  assert.match(
+    signupMarkup,
+    /Bring someone new into Murph and you can earn more room to keep going\./,
+  );
   assert.match(signupMarkup, /Share your referral link/);
   assert.doesNotMatch(signupMarkup, /group mission/i);
   assert.doesNotMatch(signupMarkup, /Bring someone new to Murph/);
@@ -59,14 +75,17 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
     createElement(ReferralSection, { rewards: groupRewards }),
   );
 
-  assert.match(groupMarkup, /Start a fresh group with Murph\./);
+  assert.match(
+    groupMarkup,
+    /Start a fresh group and you can earn more room to keep going\./,
+  );
   assert.match(groupMarkup, /Bring someone new to Murph/);
   assert.match(groupMarkup, /Start a group conversation/);
-  assert.match(groupMarkup, /About 10 more days of Murph usage/);
-  assert.match(groupMarkup, /About 14 more days of Murph usage/);
+  assert.match(groupMarkup, />10</);
+  assert.match(groupMarkup, />14</);
   assert.doesNotMatch(
     `${signupMarkup}${groupMarkup}`,
-    /\$|≈|usage credit/i,
+    /\$|usage credit/i,
   );
   assert.doesNotMatch(
     `${signupMarkup}${groupMarkup}`,

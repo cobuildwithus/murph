@@ -202,6 +202,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes decrypted user-facing phone, Privy, and wallet identity fields while omitting lookup keys and active phone-code attempt IDs.",
   },
   {
+    slug: "prisma.hosted_group_participant_observation",
+    label: "Short-lived group roster attribution evidence",
+    deletion: "documented-retention",
+    note: "Global blinded roster evidence is not member-owned authority, is omitted from user exports, and expires no later than 14 days after its latest observation.",
+  },
+  {
     slug: "prisma.hosted_address_book_projection",
     label: "Optional address-book projection state",
     deletion: "live-delete",

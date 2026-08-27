@@ -79,6 +79,7 @@ export function resolveAssistantUsageFeatureKey(input: {
     | 'conversation'
     | 'creative-notification'
     | 'maintenance'
+    | 'operator-message'
     | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {

@@ -4031,16 +4031,23 @@ test('sendAssistantNotificationLocal rejects an empty context handoff response b
 
 test.each([
   {
+    expectedPromptProfile: 'creative-notification',
     expectedToolProfile: 'provider-turn',
     profile: 'creative-response' as const,
   },
   {
+    expectedPromptProfile: 'creative-notification',
     expectedToolProfile: 'output-only-turn',
     profile: 'creative-response-text' as const,
   },
+  {
+    expectedPromptProfile: 'operator-message',
+    expectedToolProfile: 'output-only-turn',
+    profile: 'operator-message' as const,
+  },
 ])(
-  'sendAssistantNotificationLocal maps $profile to $expectedToolProfile',
-  async ({ expectedToolProfile, profile }) => {
+  'sendAssistantNotificationLocal maps $profile to its isolated prompt and tool profile',
+  async ({ expectedPromptProfile, expectedToolProfile, profile }) => {
     const providerResult = createProviderResult({
       response: JSON.stringify({
         kind: 'send_message',
@@ -4076,7 +4083,7 @@ test.each([
     expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
       expect.objectContaining({
         profile: expect.objectContaining({
-          promptProfile: 'creative-notification',
+          promptProfile: expectedPromptProfile,
           threadScope: 'isolated-thread',
           toolProfile: expectedToolProfile,
         }),

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "support-escalations-recover",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Support escalations handle more detail",
+    "summary": "When you ask Murph to pass a product problem to human support, it can now include more detail and correct one invalid submission instead of stopping immediately.",
+    "details": "Corrections remain limited to input validation. Murph does not retry an accepted or duplicate escalation, or one that is unavailable or fails during the support handoff.",
+    "relevanceTags": ["assistant", "support", "reliability"],
+    "sourcePullRequests": [2349]
+  }
+}
