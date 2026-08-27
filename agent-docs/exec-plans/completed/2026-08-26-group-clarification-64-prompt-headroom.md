@@ -1,8 +1,8 @@
 # Remove group cardinality cliffs while preserving bounded work
 
-Status: active
+Status: completed
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -66,3 +66,4 @@ Updated: 2026-08-26
 - Focused real-Codex named handoff and independent dual-cursor journeys with
   exact tool-call assertions and reply review.
 - Diff/privacy checks, ReviewGPT correction round, and required PR CI.
+Completed: 2026-08-27
