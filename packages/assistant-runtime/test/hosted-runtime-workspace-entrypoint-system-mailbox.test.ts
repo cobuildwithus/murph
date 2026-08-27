@@ -4976,13 +4976,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       lane: "system",
       laneSeq: "2",
     });
+    const ordinaryAsk = createMailboxItem({
+      dedupeKey: "assistant.ask.requested:exact-owner-ordinary",
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      id: "mailbox_item_exact_owner_ask_ordinary",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "3",
+    });
     const laterAsk = createMailboxItem({
       dedupeKey: "assistant.ask.requested:exact-owner-later",
       expiresAt: "2026-04-27T00:10:00.000Z",
       id: "mailbox_item_exact_owner_ask_later",
       kind: "assistant.ask.requested",
       lane: "system",
-      laneSeq: "3",
+      laneSeq: "4",
     });
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -5030,15 +5038,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             };
           },
           async importItem(item) {
-            assert.equal(item.item.id, laterAsk.id);
-            events.push("ask.later.imported");
+            assert.ok(
+              item.item.id === ordinaryAsk.id || item.item.id === laterAsk.id,
+            );
+            events.push(
+              item.item.id === ordinaryAsk.id
+                ? "ask.ordinary.imported"
+                : "ask.later.imported",
+            );
             return await enqueueHostedSystemMailboxItem({
               item,
               vaultRoot,
-              wake: approved
+              wake: approved && item.item.id === laterAsk.id
                 ? createAssistantAskRequestedWake({ eventId: laterAsk.dedupeKey })
                 : createConsentedMemberAssistantAskRequestedWake({
-                    eventId: laterAsk.dedupeKey,
+                    eventId: item.item.dedupeKey,
                   }),
             });
           },
@@ -5053,10 +5067,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                   events.push("ask.first.prepare");
                   firstPrepareStarted.resolve();
                   await firstPrepareRelease.promise;
-                  remoteItems.push(laterAsk);
+                  remoteItems.push(ordinaryAsk, laterAsk);
                   runtimeWakeSignal.notify();
                   events.push("ask.first.terminal");
                 } else {
+                  assert.equal(request.requestId, laterAsk.dedupeKey);
                   events.push("ask.later.prepare");
                 }
                 return {
@@ -5115,13 +5130,18 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.ok(events.indexOf("device.snapshot") < laterAskIndex);
       }
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(result.status, approved ? "idle" : "scheduled");
+      assert.equal(result.status, "scheduled");
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
           item.itemId,
           item.status,
         ]),
-        approved ? [] : [[laterAsk.id, "pending"]],
+        approved
+          ? [[ordinaryAsk.id, "pending"]]
+          : [
+              [ordinaryAsk.id, "pending"],
+              [laterAsk.id, "pending"],
+            ],
       );
     } finally {
       firstPrepareRelease.resolve();

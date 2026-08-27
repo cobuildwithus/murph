@@ -1630,6 +1630,26 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
+    const selectNextApprovedDetachedAssistantAskItemId = async (): Promise<
+      string | null
+    > => {
+      if (
+        runtimeAbortController.signal.aborted
+        || options.shutdownSignal?.aborted === true
+      ) {
+        return null;
+      }
+      const selectedItem = findNextHostedSystemMailboxQueueItem({
+        allowedRouteActions: null,
+        now: new Date().toISOString(),
+        state: await readHostedSystemMailboxState(restored.vaultRoot),
+      });
+      return selectedItem?.routeAction === "run-assistant-ask"
+        && selectedItem.wake.kind === "assistant.ask.requested"
+        && isHostedApprovedContinuationSystemMailboxItem(selectedItem)
+        ? selectedItem.itemId
+        : null;
+    };
     const kickDetachedAssistantAskAfterImport = async (
       item: HostedMailboxResolvedImportItem,
       outcome: HostedMailboxItemImportOutcome,
@@ -1643,29 +1663,24 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (!ordinaryConsentedAssistantAskSelected) {
             controller.kick();
           } else {
-            const state = await readHostedSystemMailboxState(restored.vaultRoot);
-            const selectedItem = findNextHostedSystemMailboxQueueItem({
-              allowedRouteActions: null,
-              now: new Date().toISOString(),
-              state,
-            });
-            if (
-              selectedItem
-              && isHostedApprovedContinuationSystemMailboxItem(selectedItem)
-            ) {
-              const exactOwnerItemId = selectedSystemMailboxOwnerItem?.itemId ?? null;
+            const selectedItemId =
+              await selectNextApprovedDetachedAssistantAskItemId();
+            if (selectedItemId) {
+              const exactCompletion = exactDetachedAssistantAskCompletion;
               startExactDetachedAssistantAsk = null;
-              controller.resume();
-              if (
-                exactDetachedAssistantAskCompletion === null
-                && exactOwnerItemId
-                && state.pending.some((pendingItem) =>
-                  pendingItem.itemId === exactOwnerItemId
-                )
-              ) {
-                void controller.kickExact(selectedItem.itemId).catch(() => undefined);
-              } else {
-                controller.kick();
+              controller.kick();
+              if (exactCompletion) {
+                void exactCompletion.then(
+                  () => {
+                    if (
+                      !runtimeAbortController.signal.aborted
+                      && options.shutdownSignal?.aborted !== true
+                    ) {
+                      controller.resume();
+                    }
+                  },
+                  () => undefined,
+                );
               }
             }
           }
@@ -4081,6 +4096,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       resolveProviderAuthority:
         resolveInvocationAssistantProviderAuthority,
+      ...(ordinaryConsentedAssistantAskSelected
+        ? {
+            selectNextExactItemId:
+              selectNextApprovedDetachedAssistantAskItemId,
+          }
+        : {}),
       usageRecordPort: runtime.platform.usageRecordPort ?? null,
       userEnvKeys: Object.keys(runtime.userEnv),
       vaultRoot: restored.vaultRoot,

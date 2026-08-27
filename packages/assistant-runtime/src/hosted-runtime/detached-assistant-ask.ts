@@ -77,6 +77,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   now?: () => string;
   onStateMutation(): void;
   resolveProviderAuthority?(): Promise<"current" | "handoff">;
+  selectNextExactItemId?(): Promise<string | null>;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   userEnvKeys?: readonly string[];
   vaultRoot: string;
@@ -91,42 +92,54 @@ export function createHostedDetachedAssistantAskController(
   const now = input.now ?? (() => new Date().toISOString());
   let activeAbortController: AbortController | null = null;
   let activePromise: Promise<HostedDetachedAssistantAskRunResult> | null = null;
-  let activeExactItemId: string | null = null;
   let closed = false;
   let kickRequested = false;
   let paused = false;
 
-  const start = (itemId: string | null): Promise<HostedDetachedAssistantAskRunResult> => {
+  const start = (
+    itemId: string | null,
+    selectExactItemId = false,
+  ): Promise<HostedDetachedAssistantAskRunResult> => {
     if (activePromise !== null) {
       throw new TypeError("Detached assistant ask controller already owns an active request.");
     }
 
     const abortController = new AbortController();
-    const completion = runOneHostedDetachedAssistantAsk({
-      abortSignal: abortController.signal,
-      assistantAskPort: input.assistantAskPort,
-      codexHome: input.codexHome,
-      ...(input.createGroupSharedReader
-        ? { createGroupSharedReader: input.createGroupSharedReader }
-        : {}),
-      env: input.env,
-      executeAsk,
-      executeConsentedAsk,
-      deferUsageUntilAfterDurableCheckpoint:
-        input.deferUsageUntilAfterDurableCheckpoint ?? null,
-      itemId,
-      memberId: input.memberId ?? null,
-      model: input.model ?? null,
-      modelProvider: input.modelProvider ?? null,
-      now,
-      onStateMutation: input.onStateMutation,
-      resolveProviderAuthority: input.resolveProviderAuthority ?? null,
-      usageRecordPort: input.usageRecordPort ?? null,
-      userEnvKeys: input.userEnvKeys ?? [],
-      vaultRoot: input.vaultRoot,
-    });
+    const exactRequest = itemId !== null || selectExactItemId;
+    const run = (selectedItemId: string | null) =>
+      runOneHostedDetachedAssistantAsk({
+        abortSignal: abortController.signal,
+        assistantAskPort: input.assistantAskPort,
+        codexHome: input.codexHome,
+        ...(input.createGroupSharedReader
+          ? { createGroupSharedReader: input.createGroupSharedReader }
+          : {}),
+        env: input.env,
+        executeAsk,
+        executeConsentedAsk,
+        deferUsageUntilAfterDurableCheckpoint:
+          input.deferUsageUntilAfterDurableCheckpoint ?? null,
+        itemId: selectedItemId,
+        memberId: input.memberId ?? null,
+        model: input.model ?? null,
+        modelProvider: input.modelProvider ?? null,
+        now,
+        onStateMutation: input.onStateMutation,
+        resolveProviderAuthority: input.resolveProviderAuthority ?? null,
+        usageRecordPort: input.usageRecordPort ?? null,
+        userEnvKeys: input.userEnvKeys ?? [],
+        vaultRoot: input.vaultRoot,
+      });
+    const completion = selectExactItemId
+      ? (async () => {
+          const selectedItemId = await input.selectNextExactItemId?.() ?? null;
+          if (abortController.signal.aborted) {
+            return "settled";
+          }
+          return selectedItemId ? await run(selectedItemId) : "idle";
+        })()
+      : run(itemId);
     activeAbortController = abortController;
-    activeExactItemId = itemId;
     activePromise = completion;
 
     void completion.then(
@@ -134,17 +147,19 @@ export function createHostedDetachedAssistantAskController(
         if (activePromise !== completion) {
           return;
         }
-        const exactRequest = activeExactItemId !== null;
         if (result === "handoff") {
           closed = true;
           paused = true;
           kickRequested = false;
         }
         const shouldKick = !closed
-          && (kickRequested || (!exactRequest && result === "settled"));
+          && (
+            kickRequested
+            || (!exactRequest && result === "settled")
+            || (selectExactItemId && result === "settled")
+          );
         kickRequested = false;
         activeAbortController = null;
-        activeExactItemId = null;
         activePromise = null;
         if (!closed && shouldKick) {
           if (paused) {
@@ -172,14 +187,10 @@ export function createHostedDetachedAssistantAskController(
       return;
     }
     if (activePromise !== null) {
-      if (activeExactItemId !== null) {
-        kickRequested = true;
-        return;
-      }
       kickRequested = true;
       return;
     }
-    void start(null);
+    void start(null, input.selectNextExactItemId !== undefined);
   };
 
   const requestPauseAndRequeue = (): void => {
@@ -201,7 +212,6 @@ export function createHostedDetachedAssistantAskController(
     await completion;
     if (activePromise === completion) {
       activeAbortController = null;
-      activeExactItemId = null;
       activePromise = null;
     }
   };
