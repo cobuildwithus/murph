@@ -1094,7 +1094,7 @@ export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS =
   HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX = 25;
-export const HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS = 512;
 
 export interface HostedRuntimeGroupDisclosureGrantSummary {
   grantId: string;
@@ -1193,7 +1193,9 @@ export interface HostedRuntimeUsageReferralSourceContext {
   sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
 }
 
+export const HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX = 64;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS = 512;
 
 export interface HostedRuntimeGroupMembershipSummary {
   displayName: string | null;
@@ -1520,7 +1522,7 @@ export type HostedRuntimeGroupToolRequest =
       permissionText: string;
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
-  | { action: "read_current" }
+  | { action: "read_current"; disclosureGrantCursor?: string }
   | {
       action: "prepare_next_group";
       setup?: HostedRuntimePendingGroupSetupInput;
@@ -1574,7 +1576,11 @@ export type HostedRuntimeGroupToolRequest =
       action: "prepare_email";
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
     }
-  | { action: "list_memberships" }
+  | {
+      action: "list_memberships";
+      cursor?: string;
+      disclosureGrantCursor?: string;
+    }
   | { action: "leave_membership"; membershipId: string }
   | {
       action: "update_display_name";
@@ -1678,7 +1684,12 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "read_current";
       result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | {
+            status: "ok";
+            disclosureGrantsTruncated?: boolean;
+            group: HostedRuntimeGroupSummary;
+            nextDisclosureGrantCursor?: string | null;
+          }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
@@ -1744,7 +1755,10 @@ export type HostedRuntimeGroupToolResponse =
         | {
             status: "ok";
             disclosureGrants: HostedRuntimeGroupDisclosureGrantListEntry[];
+            disclosureGrantsTruncated?: boolean;
             memberships: HostedRuntimeGroupMembershipSummary[];
+            nextDisclosureGrantCursor?: string | null;
+            nextCursor?: string | null;
             truncated: boolean;
           }
         | {

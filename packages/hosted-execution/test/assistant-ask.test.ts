@@ -24,6 +24,9 @@ import {
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
 } from "../src/parsers.ts";
+import {
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
+} from "../src/runtime-control.ts";
 
 const ORIGIN_ASSISTANT_INPUT_ID = "ain_0123456789abcdef0123456789abcdef";
 const ORIGIN_SESSION_ID = "session_private";
@@ -274,12 +277,25 @@ describe("hosted Assistant Ask runtime control", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
       result: {
-        groupLabels: ["100 Club", "Wednesday Training"],
+        groupLabels: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX },
+          (_, index) => `Group ${index + 1}`,
+        ),
         status: "clarification_required",
       },
     })).toMatchObject({
       result: { status: "clarification_required" },
     });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "ask",
+      result: {
+        groupLabels: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX + 1 },
+          (_, index) => `Group ${index + 1}`,
+        ),
+        status: "clarification_required",
+      },
+    })).toThrow(/between 1 and 64 entries/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask",
       result: { status: "no_groups" },

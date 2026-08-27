@@ -707,6 +707,43 @@ function buildInitialLiveWorkoutExercises(
         'Exercise repetitions per set must be an integer between 1 and 999.',
       )
     }
+    if (
+      (exercise.targetWeight === undefined)
+      !== (exercise.targetWeightUnit === undefined)
+      || (
+        exercise.targetWeight !== undefined
+        && (
+          !Number.isFinite(exercise.targetWeight)
+          || exercise.targetWeight < 0.01
+          || exercise.targetWeight > 9999
+        )
+      )
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight must be between 0.01 and 9999 with at most two decimal places and an lb or kg unit.',
+      )
+    }
+    if (
+      exercise.targetWeight !== undefined
+      && exercise.mode !== undefined
+      && exercise.mode !== 'weight_reps'
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight requires weight_reps mode.',
+      )
+    }
+    if (
+      exercise.targetWeightUnit !== undefined
+      && exercise.unitOverride !== undefined
+      && exercise.targetWeightUnit !== exercise.unitOverride
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight unit must match unitOverride.',
+      )
+    }
 
     const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
     const groupId = normalizeOptionalText(exercise.groupId)
@@ -716,12 +753,26 @@ function buildInitialLiveWorkoutExercises(
       order: index + 1,
       ...(sourceExerciseId ? { sourceExerciseId } : {}),
       ...(groupId ? { groupId } : {}),
-      ...(exercise.mode ? { mode: exercise.mode } : {}),
-      ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
+      ...(exercise.mode
+        ? { mode: exercise.mode }
+        : exercise.targetWeight === undefined
+          ? {}
+          : { mode: 'weight_reps' as const }),
+      ...(exercise.unitOverride
+        ? { unitOverride: exercise.unitOverride }
+        : exercise.targetWeightUnit
+          ? { unitOverride: exercise.targetWeightUnit }
+          : {}),
       ...(note ? { note } : {}),
       ...(exercise.reps === undefined
         ? {}
         : { memberRepsPerSet: exercise.reps }),
+      ...(exercise.targetWeight === undefined
+        ? {}
+        : {
+            targetWeightPerSet: exercise.targetWeight,
+            targetWeightUnit: exercise.targetWeightUnit,
+          }),
       setPlanIsFinite: exercise.setCount !== undefined,
       sets: Array.from({ length: setCount }, (_, setIndex) => ({
         order: setIndex + 1,

@@ -25,7 +25,7 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 
 ## Live workout command surface
 
-- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;sets=...;reps=...'` value per ordered ad-hoc exercise. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
+- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise. `targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load; use the unit-selection rule in the required start flow below. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
 - Read one workout: `vault-cli workout show <evt_id> --format json`.
 - Delete one exact workout: `vault-cli workout delete <evt_id> --expected-revision <n>`. The expected revision must come from the exact approved workout read.
 - Add an exercise: `vault-cli workout exercise add <name> --workout-id <evt_id> --order <n> [--sets <n>]`. An explicit `--sets` count is a finite plan; omitting it creates one targetless log slot.
@@ -140,8 +140,9 @@ The legacy `workout edit` full-structure replacement remains available only for 
 2. For a complete unambiguous new-workout request, run exactly one `vault-cli workout start`, passing `--routine` only for a saved format already resolved in step 1 or one repeated `--exercise` specification per ad-hoc exercise. Never pass an inline exercise plan as `--routine`, and never retry the start after a card or reply problem. Never combine routine and ad-hoc inputs, and never create an empty workout followed by initial exercise mutations. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
 3. Put each stated set count in that exercise's initial specification; the count is finite. When no count is stated, omit `sets` so creation supplies one targetless unlogged slot, not a claimed plan or completed set.
 4. Put `reps=<n>` in the initial specification only when the member assigns one exact integer repetition count to every set of that exercise. Use `workout exercise set-reps` only for a later change to that exercise-owned fact.
-5. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification and use its event id for the card immediately. Read the format separately before presenting planned targets.
-6. On a supported private card route, immediately attach exactly one structured workout card from that verified snapshot and end with no companion prose. For each returned exercise with `memberRepsPerSet`, copy `<n> reps` into every pending set's card target; never drop that canonical target from the widget. Never stop after the start command with a text-only acknowledgement or wait for another card request.
+5. For an ad-hoc exact load, include `targetWeight` and `targetWeightUnit` in the matching `--exercise` value; never leave a member-stated load only in the workout title or response prose. An explicit unit in the current request wins. If the member gives a load without a unit, read `vault-cli workout units show --format json` and use the saved strength unit; when no preference exists, ask which unit they mean.
+6. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification and use its event id for the card immediately. Read the format separately before presenting saved-format targets.
+7. On a supported private card route, immediately attach exactly one structured workout card from that verified snapshot and end with no companion prose. For each returned exercise with `memberRepsPerSet`, copy `<n> reps` into every pending set's card target; never drop that canonical target from the widget. When `targetWeightPerSet` and `targetWeightUnit` are present, combine those exact typed facts with the repetition target instead of omitting the load. Never stop after the start command with a text-only acknowledgement or wait for another card request.
 
 Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session keeps targets in the format and actual performance in the event.
 
@@ -171,7 +172,7 @@ An exact replay converges on the same coordinate and never appends a duplicate. 
 - “Bench 185 for 8” may log the next unlogged bench set only when immediate causal context identifies one exact workout and one bench exercise.
 - “Same weight, 6” may reuse only the immediately preceding canonical set for that same exercise, and only because the member explicitly said “same.”
 - “The next set was 8 reps” may target the clearly current exercise only when the exact workout id remains causal. If more than one workout or exercise is plausible, ask one narrow disambiguating question.
-- Never infer weight, repetitions, effort, assistance, rest, or failure from a plan, prior workout, elapsed time, reminder, or assistant suggestion. The only durable carry-forward is the exact member-owned `memberRepsPerSet` fact on that workout exercise.
+- Never infer weight, repetitions, effort, assistance, rest, or failure from a plan, prior workout, elapsed time, reminder, or assistant suggestion. Exact member-stated ad-hoc targets may be read from `memberRepsPerSet`, `targetWeightPerSet`, and `targetWeightUnit`; they remain planned defaults until the member explicitly logs the set.
 - Treat member-defined shorthand as ambiguous until explained. Once defined as spotted repetitions, persist a plain set note such as `note=final rep spotted` or `note=final 2 reps spotted`; do not reinterpret it as assisted-load data.
 - Persist every qualitative annotation on that exact set's canonical `note`. Never leave meaningful notation only in conversation text, an exercise summary, or the card snapshot.
 - An isolated completion with no exact causal workout identity does not authorize choosing an unfinished workout or inventing one. Ask which workout and set is intended.
@@ -192,7 +193,7 @@ Use `murph.attach_response_card` with `kind="compact_table"` and structured `wor
 
 Build it from the verified canonical workout event and, when present, its verified workout format:
 
-- `target`: the matching planned set from the verified format, otherwise `null`;
+- `target`: the matching planned set from the verified format, otherwise the exact typed ad-hoc target on the canonical exercise, otherwise `null`;
 - `actual` and targetless log-slot coordinates: the verified canonical event.
 
 Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text, provider-layout, and native-envelope consumers derive progress directly from `workout.exercises`. Map each planned set in `workout.exercises` to:

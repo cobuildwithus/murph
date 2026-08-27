@@ -30,6 +30,122 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('projects exact ad-hoc prescriptions into every pending editor row', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        memberRepsPerSet: 8,
+        targetWeightPerSet: 135,
+        targetWeightUnit: 'lb',
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+      }],
+    })
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_test_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: Array.from({ length: 3 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+
+    assert.deepEqual(
+      projected?.workout.exercises[0]?.sets,
+      Array.from({ length: 3 }, () => ({
+        status: 'pending',
+        target: '135 lb × 8',
+        actual: null,
+      })),
+    )
+    assert.deepEqual(
+      projected?.editor.exercises[0]?.sets,
+      Array.from({ length: 3 }, () => ({
+        logged: false,
+        result: null,
+      })),
+    )
+
+    const decimalWorkout = workoutSessionSchema.parse({
+      ...workout,
+      exercises: [{
+        ...workout.exercises[0],
+        targetWeightPerSet: 72.6,
+        targetWeightUnit: 'kg',
+        unitOverride: 'kg',
+      }],
+    })
+    const decimalProjection = buildLiveWorkoutCardEditor({
+      workout: decimalWorkout,
+      workoutId: 'evt_decimal_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: Array.from({ length: 3 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+    assert.equal(
+      decimalProjection?.workout.exercises[0]?.sets[0]?.target,
+      '72.6 kg × 8',
+    )
+  })
+
+  test('preserves saved-routine targets when member repetitions are present', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      routineId: 'wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        memberRepsPerSet: 8,
+        sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+      }],
+    })
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Bench press',
+        sets: Array.from({ length: 3 }, () => ({
+          status: 'pending' as const,
+          target: '95 lb × 10',
+          actual: null,
+        })),
+      }],
+    }
+
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_routine_workout',
+      presentation,
+    })
+
+    assert.deepEqual(projected?.workout.exercises, presentation.exercises)
+  })
+
   test('refreshes stale progress while retaining positional targets', () => {
     const workout = workoutSessionSchema.parse({
       sourceApp: LIVE_WORKOUT_SOURCE_APP,

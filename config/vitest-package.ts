@@ -41,9 +41,7 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
   });
 
   return defineConfig({
-    ...(input.rootRelativePath
-      ? { root: path.resolve(packageDir, input.rootRelativePath) }
-      : {}),
+    root: path.resolve(packageDir, input.rootRelativePath ?? "."),
     ...(aliases.length > 0 ? { resolve: { alias: aliases } } : {}),
     test: {
       ...(input.useDefaultTimeouts === false ? {} : murphVitestNoTimeouts),

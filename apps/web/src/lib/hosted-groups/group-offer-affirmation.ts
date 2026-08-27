@@ -20,7 +20,6 @@ import { acceptHostedGroupJoinOfferTx } from "./group-store";
 import type { HostedGroupOfferChannel } from "./offer-message-binding";
 
 export type HostedGroupOfferAffirmationSkipReason =
-  | "disclosure_grant_limit_reached"
   | "launch_consent_missing"
   | "no_offer_match"
   | "not_a_member"
@@ -119,9 +118,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     }
     if (disclosureResult.kind === "wrong_thread") {
       return { status: "ignored", reason: "no_offer_match" };
-    }
-    if (disclosureResult.kind === "limit_reached") {
-      return { status: "ignored", reason: "disclosure_grant_limit_reached" };
     }
     if (!input.kinds.includes("join")) {
       return { status: "ignored", reason: "no_offer_match" };
