@@ -25,3 +25,13 @@ Bind the base measurement to the already-verified merge candidate first parent, 
 ## Context
 
 This blocks exact-head CI for an otherwise mergeable reviewed patch and encourages unnecessary head or base churn. A docs-only synchronize refresh updates the event snapshot, but that is a workaround rather than the intended CI contract.
+
+The same pull request reproduced this twice on an unchanged reviewed head after
+ready-state retriggers. In both runs, the production bundle job stopped during
+the merge-candidate identity preflight, before dependency installation or
+bundle assembly, while every substantive sibling host-support job passed. The
+pull-request API continued to report the cached base commit even though the
+generated merge ref used the newer base as its first parent. Recording this
+second occurrence provides the docs-only head synchronization needed to refresh
+the event snapshot without changing product behavior or rebasing the reviewed
+patch again.
