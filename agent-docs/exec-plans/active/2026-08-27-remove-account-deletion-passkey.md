@@ -128,5 +128,17 @@ Updated: 2026-08-27
 - The Product UX walkthrough and parent candidate review are complete: the
   confirmation, recovery, and responsive presentation are unchanged, with one
   unrelated setup action removed.
-- Draft PR #2435 is open; preliminary specialist review, final ReviewGPT, exact
-  PR CI, parent final review, and plan closure remain.
+- Final ReviewGPT round 1 passed with no findings on candidate `2d0c847788`.
+- Preliminary specialist review found that the old shared secure-approval
+  fallback still disabled deletion, the recovery study described stale retry
+  authorization, and rollout proof mocked the real parser. All three findings
+  were accepted and corrected without adding an authority or state owner.
+- Secure-approval-unavailable component and both Settings entry points now
+  prove export stays disabled while deletion submits without authorization.
+  The real request parser directly proves legacy authorization is ignored.
+- The corrected focused suite passes 248 tests and Web typecheck passes.
+  Repository-owned production-component studies were inspected at desktop and
+  390px with truthful copy, enabled deletion, disabled export, and no visible
+  containment issue.
+- PR #2435 is open; corrected-head final ReviewGPT, exact PR CI, parent final
+  review, and plan closure remain.

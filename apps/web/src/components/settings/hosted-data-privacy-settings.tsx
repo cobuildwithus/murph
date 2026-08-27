@@ -68,26 +68,37 @@ interface HostedAccountDeleteResponse {
 
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
+type SensitiveActionAuthorizer =
+  ReturnType<typeof useSensitiveActionAuthorization>["authorize"];
 
 export function HostedDataPrivacySettings(props: {
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
-  if (props.authorizationEnabled === false) {
-    return <HostedDataPrivacyUnavailable authenticated={props.authenticated} />;
+  if (!props.authenticated) {
+    return (
+      <HostedSettingsSessionState
+        authenticated={false}
+        signedOutDescription="Sign in to export your data or delete your account."
+      />
+    );
   }
 
-  return (
-    <HostedDataPrivacySettingsAuthorized
-      authenticated={props.authenticated}
-    />
-  );
+  return props.authorizationEnabled === false
+    ? <HostedDataPrivacySettingsContent authorize={null} />
+    : <HostedDataPrivacySettingsWithSecureApproval />;
 }
 
-function HostedDataPrivacySettingsAuthorized(props: {
-  authenticated: boolean;
-}) {
+function HostedDataPrivacySettingsWithSecureApproval() {
   const { authorize } = useSensitiveActionAuthorization();
+
+  return <HostedDataPrivacySettingsContent authorize={authorize} />;
+}
+
+function HostedDataPrivacySettingsContent(props: {
+  authorize: SensitiveActionAuthorizer | null;
+}) {
+  const { authorize } = props;
   const [exportPending, setExportPending] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [acknowledgedSensitiveDownload, setAcknowledgedSensitiveDownload] = useState(false);
@@ -108,7 +119,9 @@ function HostedDataPrivacySettingsAuthorized(props: {
   const [cleanupPending, setCleanupPending] = useState(false);
   const deletedPageRef = useRef<HTMLDivElement | null>(null);
 
-  const exportReady = acknowledgedSensitiveDownload && !exportPending;
+  const exportReady = authorize !== null
+    && acknowledgedSensitiveDownload
+    && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
   const deleteReady = phraseMatches
     && (
@@ -141,7 +154,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
   }, [deleted, redirectToFarewell]);
 
   async function handleExportConfirmed() {
-    if (!exportReady) {
+    if (!exportReady || !authorize) {
       return;
     }
 
@@ -304,15 +317,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
     setDialogStep("confirm");
   }
 
-  if (!props.authenticated) {
-    return (
-      <HostedSettingsSessionState
-        authenticated={props.authenticated}
-        signedOutDescription="Sign in to export your data or delete your account."
-      />
-    );
-  }
-
   if (deleted) {
     return (
       <>
@@ -328,17 +332,33 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
   return (
     <div className="flex flex-col gap-4">
-      {exportSuccess ? (
+      {authorize === null ? (
+        <Alert role="status">
+          <AlertTitle>Secure approval unavailable</AlertTitle>
+          <AlertDescription>
+            Data export is temporarily unavailable. You can still delete your account.
+          </AlertDescription>
+        </Alert>
+      ) : exportSuccess ? (
         <HostedDataExportSuccess message={exportSuccess} />
       ) : null}
 
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
           <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-          <span className="font-serif text-base tracking-tight text-foreground">
+          <span className={authorize === null
+            ? "font-serif text-base tracking-tight text-muted-foreground"
+            : "font-serif text-base tracking-tight text-foreground"}
+          >
             Export data
           </span>
-          <Button disabled={exportPending || deletePending} onClick={openExportDialog} size="default" type="button" variant="ghost">
+          <Button
+            disabled={authorize === null || exportPending || deletePending}
+            onClick={authorize === null ? undefined : openExportDialog}
+            size="default"
+            type="button"
+            variant="ghost"
+          >
             {exportPending ? "Exporting..." : "Export"}
           </Button>
         </div>
@@ -353,24 +373,26 @@ function HostedDataPrivacySettingsAuthorized(props: {
         </div>
       </div>
 
-      <Dialog open={exportDialogOpen} onOpenChange={(open) => (open ? setExportDialogOpen(true) : closeExportDialog())}>
-        <DialogContent
-          aria-busy={exportPending}
-          aria-describedby="hosted-data-export-description"
-          aria-labelledby="hosted-data-export-title"
-          className="max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto p-6 md:p-7"
-          showCloseButton={!exportPending}
-        >
-          <HostedDataExportDialogContent
-            acknowledgedSensitiveDownload={acknowledgedSensitiveDownload}
-            errorMessage={exportDialogError}
-            onAcknowledgedChange={setAcknowledgedSensitiveDownload}
-            onCancel={closeExportDialog}
-            onConfirm={() => void handleExportConfirmed()}
-            pending={exportPending}
-          />
-        </DialogContent>
-      </Dialog>
+      {authorize ? (
+        <Dialog open={exportDialogOpen} onOpenChange={(open) => (open ? setExportDialogOpen(true) : closeExportDialog())}>
+          <DialogContent
+            aria-busy={exportPending}
+            aria-describedby="hosted-data-export-description"
+            aria-labelledby="hosted-data-export-title"
+            className="max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto p-6 md:p-7"
+            showCloseButton={!exportPending}
+          >
+            <HostedDataExportDialogContent
+              acknowledgedSensitiveDownload={acknowledgedSensitiveDownload}
+              errorMessage={exportDialogError}
+              onAcknowledgedChange={setAcknowledgedSensitiveDownload}
+              onCancel={closeExportDialog}
+              onConfirm={() => void handleExportConfirmed()}
+              pending={exportPending}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
         <DialogContent
@@ -643,40 +665,6 @@ export function HostedDataExportDialogContent({
         >
           Cancel
         </Button>
-      </div>
-    </div>
-  );
-}
-
-function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
-  if (!props.authenticated) {
-    return (
-      <HostedSettingsSessionState
-        authenticated={false}
-        signedOutDescription="Sign in to export your data or delete your account."
-      />
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Alert role="status">
-        <AlertTitle>Secure approval unavailable</AlertTitle>
-        <AlertDescription>
-          Data export and account deletion are temporarily unavailable.
-        </AlertDescription>
-      </Alert>
-      <div className="divide-y divide-[rgba(196,168,130,0.25)]">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
-          <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-          <span className="font-serif text-base tracking-tight text-muted-foreground">Export data</span>
-          <Button disabled size="default" type="button" variant="ghost">Export</Button>
-        </div>
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pt-4">
-          <Trash2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-          <span className="font-serif text-base tracking-tight text-muted-foreground">Delete account</span>
-          <Button disabled size="default" type="button" variant="destructive">Delete</Button>
-        </div>
       </div>
     </div>
   );

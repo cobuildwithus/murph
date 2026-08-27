@@ -10,7 +10,7 @@ Murph hosted users need a real way to export useful private vault data and delet
 
 - `/settings` includes a **Data & privacy** section.
 - **Export vault** opens a confirmation dialog that requires a sensitive-data acknowledgement, creates a short-lived authorization challenge, signs it with the passkey-MFA-protected Privy wallet, then loads the current browser-vault replica through `/api/settings/vault-export/session` and downloads it as JSON in the browser.
-- **Delete account** explains that deletion is permanent and requires the exact phrase `DELETE MY ACCOUNT`. It uses the current authenticated Murph app session without creating or signing a passkey-wallet challenge. After success the Settings page shows a short confirmation and redirects home; the hosted session is revoked server-side.
+- **Delete account** explains that deletion is permanent and requires the exact phrase `DELETE MY ACCOUNT`. It uses the current authenticated Murph app session without creating or signing a passkey-wallet challenge, and remains available if secure approval is unavailable while vault export stays disabled. After success the Settings page shows a short confirmation and redirects home; the hosted session is revoked server-side.
 
 ## Security model
 

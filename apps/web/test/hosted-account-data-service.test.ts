@@ -660,6 +660,20 @@ describe("parseHostedAccountDeletionRequest", () => {
     });
   });
 
+  it("ignores the legacy account-delete authorization payload", () => {
+    expect(parseHostedAccountDeletionRequest({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+    })).toEqual({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitFeedback: null,
+      providerAccessRemovalConfirmationToken: null,
+    });
+  });
+
   it("carries an answered exit reason and note", () => {
     expect(parseHostedAccountDeletionRequest({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,

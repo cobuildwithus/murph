@@ -474,6 +474,45 @@ describe("HostedDataPrivacySettings", () => {
     ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
   });
 
+  test("keeps deletion available when secure approval is unavailable", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, {
+        authenticated: true,
+        authorizationEnabled: false,
+      }));
+    });
+
+    expect(container.textContent).toContain("Data export is temporarily unavailable.");
+    assert.equal(findButton(container, "Export").disabled, true);
+    assert.equal(findButton(container, "Delete").disabled, false);
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.authorize).not.toHaveBeenCalled();
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { confirmationPhrase: "DELETE MY ACCOUNT" },
+        url: "/api/settings/privacy/delete",
+      }),
+    );
+  });
+
   test("sends the answered exit reason and note alongside the deletion", async () => {
     mockHostedDataPrivacyDeleteFlowState({
       exitNote: "Texts were great, price was not.",
