@@ -5490,6 +5490,56 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
     }
   }, 360_000)
 
+  it('skips a same-window cue after the member already completed it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-reminder-completion-skip-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions:
+          buildIndependentReminderDeveloperInstructions('direct'),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Recent conversation history for context only; do not answer these prior messages:',
+          'User:\nI already finished today\'s short balance routine.',
+          'Assistant:\nGreat—you already got it done today.',
+          'User message:',
+          'Remind the member to do today\'s short balance routine.',
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          'The immediately prior reminder from this automation, "Time for your short balance routine.", was provider-accepted and sent yesterday.',
+          'The human current-day completion and assistant acknowledgment shown above followed that output.',
+        ].join('\n\n'),
+        reasoningEffort: 'high',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(
+        `[reminder-completion-skip-e2e] ${JSON.stringify({ decision })}\n`,
+      )
+      expect(decision.kind).toBe('skip')
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+
   it('expires a cold-history marker before later native-resume decisions', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(

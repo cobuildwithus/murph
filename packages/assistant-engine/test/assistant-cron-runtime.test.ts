@@ -4263,6 +4263,37 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('prioritizes current occurrence completion over recurring delivery', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-current-completion-skip-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'balance routine reminder',
+    )
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'if a relevant human message clearly proves the exact requested action already happened in the current occurrence window, return `skip` even when this automation has no prior confirmed output.',
+    )
+    expect(providerInput?.instructions).toContain(
+      'Before applying any cadence or silence policy below',
+    )
+    expect(providerInput?.instructions).toContain(
+      'This completion skip consumes only the current occurrence. Future recurrence remains unchanged',
+    )
+    expect(providerInput?.instructions).toContain(
+      'an assistant acknowledgment alone is not proof',
+    )
+  })
+
   it('sends one recurring reminder cadence question and then skips after continued room silence', async () => {
     vi.useFakeTimers()
     const { vaultRoot } = await createRuntimeContext(
@@ -4326,7 +4357,7 @@ describe('assistant cron runtime orchestration', () => {
         'In a group, address the room collectively.',
       )
       expect(notificationInput.instructions).toContain(
-        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
         ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
@@ -4450,10 +4481,10 @@ describe('assistant cron runtime orchestration', () => {
         input as AssistantNotificationInput,
       )
       expect(notificationInput.instructions).toContain(
-        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
-        'For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+        'When exact current-occurrence completion is absent, send those cues normally unless the member explicitly changes or pauses them or another authoritative skip condition applies.',
       )
       if (occurrenceIndex > 0) {
         expect(notificationInput.instructions).toContain(
