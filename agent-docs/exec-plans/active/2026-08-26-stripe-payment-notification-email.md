@@ -1,7 +1,7 @@
 # Stripe payment notification email
 
 Status: active
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -52,8 +52,10 @@ Effort: Feature.
   after provider success or receipt-finalization failure. An unconfigured
   operational channel leaves the already-committed billing result intact while
   keeping notification delivery pending on that receipt until configuration is
-  restored. Any activation mailbox item already committed by that attempt is
-  still signaled through the existing activation-wake owner.
+  restored. An activation mailbox pointer is retained on that receipt in the
+  activation transaction, so a rejected first wake plus a provider, marker, or
+  completion failure still retries the exact target through the existing
+  activation-wake owner.
 - Proof: provider-shaped positive invoice, usage Checkout, asynchronous Checkout,
   and saved-card events reach one email; zero-dollar and unrelated events do not;
   send failure retries; marked success does not resend after finalization loss.
@@ -128,5 +130,13 @@ and no visual surface or screenshot proof applies.
   suggestion to suppress later-refunded positive invoice events is intentionally
   out of scope after the operator clarified that every observed positive payment
   event should notify.
+- [x] Resolve ReviewGPT round 3's overlapping-failure finding without new
+  state or another owner: the existing `activationResultJson` pointer is now
+  retained on the Stripe receipt in the same transaction as activation,
+  canonical replay restores rather than clears it, and every positive-payment
+  retry re-signals that exact target even when the email marker already exists.
+  One table-driven owner test directly covers a rejected first wake combined
+  independently with provider, marker, and completion failure; all three
+  retries reuse the original pointer without a second activation.
 - [ ] Push the exact candidate, run CI and ReviewGPT, resolve findings, and
   close the plan.

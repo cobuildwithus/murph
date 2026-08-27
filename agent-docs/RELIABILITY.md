@@ -854,12 +854,15 @@ Last verified: 2026-08-23
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
-  the marker must skip send and finish remaining work. When the same attempt
-  committed activation mailbox items, the unsent notification stage first
-  best-effort signals those exact durable pointers through the existing
-  activation-wake owner. Provider failure and sent-marker persistence failure
-  therefore return only the notification receipt to its retry lane. Zero-dollar
-  invoices and no-charge plan changes complete without notification.
+  the marker must skip send and finish remaining work. When canonical billing
+  commits activation mailbox items, their exact pointers are retained on the
+  receipt in that same transaction. Every positive-payment attempt restores
+  retained pointers and best-effort signals them through the existing
+  activation-wake owner before notification work, even when provider success
+  already wrote the sent marker. A rejected first wake can therefore overlap
+  provider, sent-marker, or receipt-completion failure without losing the exact
+  retry target or creating another activation. Zero-dollar invoices and
+  no-charge plan changes complete without notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
