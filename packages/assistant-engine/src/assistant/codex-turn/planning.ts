@@ -537,6 +537,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const authenticatedGroupProviderTurn =
+    authenticatedGroupChatRuntime &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const ordinaryInboundTurn =
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn' &&
@@ -1069,7 +1073,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         analyzeVideoAvailable:
-          privateInteractiveProviderTurn &&
+          (privateInteractiveProviderTurn || authenticatedGroupProviderTurn) &&
           userActionAcceptedInputIds.length > 0 &&
           normalizeNullableString(
             input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],

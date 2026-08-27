@@ -3686,14 +3686,21 @@ cards already in transcripts remain readable but cannot open the direct editor.
 ## On-demand Gemini video analysis
 
 `murph.analyze_video` is an explicit, turn-scoped assistant capability for one
-video attached to an accepted message. The first release offers it only in a
-private direct turn with accepted user-action input when the Worker-held
-credential is configured; group runtimes do not receive it. A direct turn may
-receive the schema before its accepted input has video authority because the
-provider tool set freezes at turn start. Keeping the tool available lets the
-first live-steered video be drained, frozen, and authorized by the
-`beforeToolExecution` boundary in that same turn; the consumed steer is not
-carried forward as next-turn authority. Before Codex can act on the initial
+video attached to an accepted message. It is offered in a private direct turn
+or an authenticated Linq/Telegram group turn with accepted user-action input
+when the Worker-held credential is configured. Any participant in an
+authenticated group may explicitly request analysis of a video sent by any
+participant in that same accepted group turn. The call names only the exact
+accepted video message; current group-route authority, accepted-input membership,
+and the frozen attachment record bind it to the active group before any bytes
+are materialized or read. No requester/uploader identity comparison exists.
+Unverified external groups continue to omit the tool.
+
+An eligible turn may receive the schema before its accepted input has video
+authority because the provider tool set freezes at turn start. Keeping the tool
+available lets the first live-steered video be drained, frozen, and authorized
+by the `beforeToolExecution` boundary in that same turn; the consumed steer is
+not carried forward as next-turn authority. Before Codex can act on the initial
 input, the turn owner snapshots each eligible attachment's normalized raw path,
 byte count, SHA-256 digest, MIME type, message ref, and ordinal into process
 memory. For active steering it freezes new attachments in the accepted-input

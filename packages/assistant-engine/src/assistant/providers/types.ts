@@ -52,6 +52,9 @@ import type {
   AssistantProviderStartCriticalPathContext,
   AssistantProviderStartCriticalPathTiming,
 } from '../provider-start-critical-path.js'
+import type {
+  AnalyzeVideoTurnState,
+} from '../../assistant-codex/analyze-video-tool.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -141,6 +144,7 @@ export interface AssistantProviderTurn {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal

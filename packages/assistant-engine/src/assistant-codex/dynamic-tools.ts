@@ -3463,10 +3463,13 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'analyze-video': {
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (userActionScope?.conversationScope !== 'direct') {
+      if (
+        userActionScope?.conversationScope === 'unverified-external'
+        || !userActionScope
+      ) {
         return toolTextResult(
           false,
-          'video analysis requires a verified private direct conversation',
+          'video analysis requires a verified direct or authenticated group conversation',
         )
       }
       return await executeAnalyzeVideoDynamicTool({

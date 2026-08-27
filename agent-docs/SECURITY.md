@@ -334,13 +334,19 @@ Last verified: 2026-08-26
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode key and a synthetic missing Subscription.
 - Gemini video analysis is explicit cross-provider private-media egress. It may
-  be offered only for a private direct turn with accepted user-action input and
-  the Worker-held credential; group runtimes omit the tool. The schema may be
+  be offered only for a private direct turn or authenticated Linq/Telegram
+  group turn with accepted user-action input and the Worker-held credential;
+  unverified external groups omit the tool. Any participant in an authenticated
+  group may explicitly request analysis of a video sent by any participant in
+  that same accepted group turn. The tool selects only the exact accepted video
+  message; current route authority, accepted-input membership, and frozen
+  attachment evidence bind it to the active group. It does not compare the
+  requester with the uploader. The schema may be
   present before that input has video authority because provider tools freeze
   at turn start and the first video may arrive through live steering. Group
-  sharing alone is not requester/uploader authorization and remains outside the
-  first release. The tool may
-  select only an accepted-message video whose path, size, digest, MIME, message
+  participation does not authorize videos outside the current accepted group
+  turn. The tool may select only an accepted-message video whose path, size,
+  digest, MIME, message
   ref, and ordinal were snapshotted in turn-owned memory before Codex could act
   on that input. Freeze initial inputs before provider start and active-steered
   inputs in the accepted-input validator before forwarding the steer; never
