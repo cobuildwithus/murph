@@ -131,13 +131,11 @@ test("backdated writes and hosted replay amend archived event shards exactly onc
   assert.equal(second.ledgerFile, first.ledgerFile);
   const persistedWrite = capture.persisted;
   assert.ok(persistedWrite);
-  assert.equal(
+  assert.ok(
     persistedWrite.receipt.actions.some(
       (action) => action.kind === "jsonl_append"
-        && action.targetRelativePath === first.ledgerFile
-        && action.allowArchivedEventLedgerAmendment === true,
+        && action.targetRelativePath === first.ledgerFile,
     ),
-    true,
   );
 
   const payloads = new Map(
@@ -160,6 +158,46 @@ test("backdated writes and hosted replay amend archived event shards exactly onc
     await assert.rejects(fs.access(path.join(root, first.ledgerFile)));
     await fs.access(path.join(root, `${first.ledgerFile}.gz`));
   }
+});
+
+test("event append follows an archive transition that happens after staging", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-stage-archive-race");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const event = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-05T09:00:00.000Z",
+      note: "Stored event body.",
+      title: "Stored event",
+    },
+  });
+  const appendedId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1D3";
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "event_archive_race_test",
+    summary: "Commit after the staged event shard is archived.",
+  });
+  await batch.stageJsonlAppend(
+    event.ledgerFile,
+    `${JSON.stringify({ id: appendedId, kind: "note" })}\n`,
+  );
+
+  await archiveClosedEventLedgerShards({
+    now: new Date("2026-02-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+  await batch.commit();
+
+  await assert.rejects(fs.access(path.join(vaultRoot, event.ledgerFile)));
+  await fs.access(path.join(vaultRoot, `${event.ledgerFile}.gz`));
+  assert.deepEqual(
+    (await readEventLedgerShardRecords({
+      relativePath: event.ledgerFile,
+      vaultRoot,
+    })).map((record) => record.id),
+    [event.eventId, appendedId],
+  );
 });
 
 test("archived event append resumes exactly once after finalization failure", async () => {
@@ -239,7 +277,6 @@ test("archived event append resumes exactly once after finalization failure", as
   assert.equal(recoverable?.actions[0]?.state, "staged");
   const recoverableAction = recoverable?.actions[0];
   assert.ok(recoverableAction && recoverableAction.kind === "jsonl_append");
-  assert.equal(recoverableAction.allowArchivedEventLedgerAmendment, true);
 
   Reflect.set(action, "state", "staged");
   Reflect.set(action, "appliedAt", undefined);

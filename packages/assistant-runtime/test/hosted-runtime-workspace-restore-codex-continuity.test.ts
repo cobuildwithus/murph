@@ -1370,7 +1370,6 @@ describe("hosted workspace restore Codex continuity", () => {
       const receiptArtifact = createJsonArtifact({
         actions: [
           {
-            allowArchivedEventLedgerAmendment: true,
             appendByteLength: appendBytes.byteLength,
             appendSha256,
             baseByteLength: baseBytes.byteLength,

@@ -43,8 +43,9 @@ Updated: 2026-08-27
 
 1. Risk: a backdated revision targets a compressed historical month.
    Mitigation: use one archive-aware append primitive that reads the closed
-   shard, adds the record, and atomically replaces the archive before retiring
-   any plain source.
+   shard, adds the record, and atomically replaces the archive. Select the
+   physical representation under the existing canonical write lock rather than
+   persisting a stage-time representation flag.
 2. Risk: removing audits from general projection breaks explicit audit tools or
    vault statistics.
    Mitigation: route those exact consumers to canonical audit storage and add
@@ -74,6 +75,9 @@ Updated: 2026-08-27
   commands and canonical-source export remain the explicit owners.
 - Prefer existing integration-ingest compression/atomic-replacement patterns
   over a new archival subsystem.
+- Keep event append operations and hosted receipts representation-neutral. The
+  logical event path and base receipt are authoritative; the existing canonical
+  write owner derives plain versus gzip when it mutates.
 - Do not normalize metric payloads or integration receipts: measured savings
   do not justify a new storage format.
 - Keep event archive creation explicit and inactive in this compatibility
@@ -94,8 +98,10 @@ Updated: 2026-08-27
   policy guards; focused archived-reference retention and query-source tests;
   archived append resume/rollback/stale-base tests; hosted restore replay; and
   audit-preserving export-pack fallback.
-- Review disposition: accepted the final-review restore finding by preserving
-  the archived-event amendment flag during receipt parsing. Accepted the
-  specialist coverage gaps. For the specialist UX finding, removed `audit`
-  from the generic projected family enum instead of adding a canonical audit
-  scan to generic search.
+- Review disposition: accepted the round-two retrospective and deleted the
+  event-specific archive flag from staging, stored operations, hosted receipts,
+  restore parsing, replay, resume, and rollback. Added deterministic proof for
+  staging against plain JSONL, archiving before commit, and committing into the
+  single gzip representation. Accepted the specialist coverage gaps. For the
+  specialist UX finding, removed `audit` from the generic projected family
+  enum instead of adding a canonical audit scan to generic search.

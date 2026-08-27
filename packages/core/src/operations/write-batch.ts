@@ -16,7 +16,6 @@ import {
   appendArchivedEventLedgerShard,
   createArchivedEventLedgerShardContentReceipt,
   inspectArchivedEventLedgerShardAppend,
-  isArchivedEventLedgerShard,
   isEventLedgerLogicalPath,
   truncateArchivedEventLedgerShard,
 } from "../event-ledger-storage.ts";
@@ -114,7 +113,6 @@ export type HostedCanonicalWriteReceiptAction =
       baseSha256: string;
       baseByteLength: number;
       originalSize: number | null;
-      allowArchivedEventLedgerAmendment?: boolean;
       allowArchivedIntegrationIngestAmendment?: boolean;
       contentRef?: HostedCanonicalWriteReceiptContentRef;
     }
@@ -296,7 +294,6 @@ type StoredWriteAction =
       committedPayloadReceipt?: CommittedPayloadReceipt;
       appliedAt?: string;
       rolledBackAt?: string;
-      allowArchivedEventLedgerAmendment?: boolean;
       allowArchivedIntegrationIngestAmendment?: boolean;
     }
   | {
@@ -613,7 +610,6 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           ref: action.contentRef,
         });
         await applyHostedCanonicalJsonlAppendReceiptAction({
-          allowArchivedEventLedgerAmendment: action.allowArchivedEventLedgerAmendment === true,
           allowArchivedIntegrationIngestAmendment: action.allowArchivedIntegrationIngestAmendment === true,
           baseByteLength: action.baseByteLength,
           baseSha256: action.baseSha256,
@@ -747,7 +743,6 @@ async function applyHostedCanonicalTextReceiptAction(input: {
 }
 
 async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
-  allowArchivedEventLedgerAmendment: boolean;
   allowArchivedIntegrationIngestAmendment: boolean;
   baseByteLength: number;
   baseSha256: string;
@@ -756,7 +751,7 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
-  if (input.allowArchivedEventLedgerAmendment) {
+  if (isEventLedgerLogicalPath(input.targetRelativePath)) {
     const archivedReceipt = await createArchivedEventLedgerShardContentReceipt(
       input.vaultRoot,
       input.targetRelativePath,
@@ -1561,7 +1556,6 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       return {
         kind: "jsonl_append",
         ...base,
-        allowArchivedEventLedgerAmendment: record.allowArchivedEventLedgerAmendment === true,
         allowArchivedIntegrationIngestAmendment: record.allowArchivedIntegrationIngestAmendment === true,
         baseContentReceipt,
         committedPayloadReceipt,
@@ -2184,10 +2178,6 @@ export class WriteBatch {
   ): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    const allowArchivedEventLedgerAmendment =
-      !allowArchivedIntegrationIngestAmendment
-      && isEventLedgerLogicalPath(normalizedTarget)
-      && await isArchivedEventLedgerShard(this.vaultRoot, normalizedTarget);
     await assertWriteTargetPolicyForVault(this.vaultRoot, normalizedTarget, {
       kind: "jsonl_append",
       messages: {
@@ -2208,7 +2198,6 @@ export class WriteBatch {
       targetRelativePath: normalizedTarget,
       stageRelativePath,
       stagedPayloadReceipt,
-      allowArchivedEventLedgerAmendment,
       allowArchivedIntegrationIngestAmendment,
     });
     await this.persist();
@@ -2619,9 +2608,6 @@ export class WriteBatch {
           baseSha256: baseContentReceipt.sha256,
           baseByteLength: baseContentReceipt.byteLength,
           originalSize: action.originalSize ?? null,
-          ...(action.allowArchivedEventLedgerAmendment
-            ? { allowArchivedEventLedgerAmendment: true as const }
-            : {}),
           ...(action.allowArchivedIntegrationIngestAmendment
             ? { allowArchivedIntegrationIngestAmendment: true as const }
             : {}),
@@ -3224,6 +3210,7 @@ export class WriteBatch {
     const comparisonOptions: VaultPathComparisonOptions = {
       caseInsensitive: await isVaultFilesystemCaseInsensitive(this.vaultRoot),
     };
+    let appendToArchivedEventLedger = false;
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyJsonlAppendTarget>>) => {
@@ -3239,7 +3226,7 @@ export class WriteBatch {
         }
 
         const baseContentReceipt = this.getPreparedJsonlBaseReceipt(action);
-        if (action.allowArchivedEventLedgerAmendment) {
+        if (isEventLedgerLogicalPath(action.targetRelativePath)) {
           const archivedState = await inspectArchivedEventLedgerShardAppend({
             expectedBaseByteLength: action.originalSize,
             expectedBaseSha256: baseContentReceipt.sha256,
@@ -3332,7 +3319,7 @@ export class WriteBatch {
         } as const;
       },
       mutateTarget: async (target) => {
-        if (action.allowArchivedEventLedgerAmendment) {
+        if (appendToArchivedEventLedger) {
           const baseContentReceipt = action.baseContentReceipt;
           if (!baseContentReceipt) {
             throw this.buildResumeConflictError(
@@ -3388,46 +3375,43 @@ export class WriteBatch {
         }
       },
       prepareMutation: async (target) => {
-        if (action.allowArchivedEventLedgerAmendment) {
+        if (isEventLedgerLogicalPath(action.targetRelativePath)) {
           const archivedReceipt = await createArchivedEventLedgerShardContentReceipt(
             this.vaultRoot,
             action.targetRelativePath,
           );
-          if (!archivedReceipt) {
-            throw this.buildResumeConflictError(
-              action,
-              `Archived append target "${action.targetRelativePath}" is no longer archived.`,
-            );
+          if (archivedReceipt) {
+            appendToArchivedEventLedger = true;
+            const originalSize = action.originalSize ?? archivedReceipt.byteLength;
+            const baseContentReceipt = action.baseContentReceipt ?? archivedReceipt;
+            if (baseContentReceipt.byteLength !== originalSize) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" base size changed while preparing the write batch.`,
+              );
+            }
+            await this.persistPreparedAction(() => {
+              let changed = false;
+              if (action.baseContentReceipt === undefined) {
+                action.baseContentReceipt = baseContentReceipt;
+                changed = true;
+              }
+              if (action.committedPayloadReceipt === undefined) {
+                action.committedPayloadReceipt = payloadReceipt;
+                changed = true;
+              }
+              if (action.existedBefore === undefined) {
+                action.existedBefore = true;
+                changed = true;
+              }
+              if (action.originalSize === undefined) {
+                action.originalSize = originalSize;
+                changed = true;
+              }
+              return changed;
+            });
+            return;
           }
-          const originalSize = action.originalSize ?? archivedReceipt.byteLength;
-          const baseContentReceipt = action.baseContentReceipt ?? archivedReceipt;
-          if (baseContentReceipt.byteLength !== originalSize) {
-            throw this.buildResumeConflictError(
-              action,
-              `Archived append target "${action.targetRelativePath}" base size changed while preparing the write batch.`,
-            );
-          }
-          await this.persistPreparedAction(() => {
-            let changed = false;
-            if (action.baseContentReceipt === undefined) {
-              action.baseContentReceipt = baseContentReceipt;
-              changed = true;
-            }
-            if (action.committedPayloadReceipt === undefined) {
-              action.committedPayloadReceipt = payloadReceipt;
-              changed = true;
-            }
-            if (action.existedBefore === undefined) {
-              action.existedBefore = true;
-              changed = true;
-            }
-            if (action.originalSize === undefined) {
-              action.originalSize = originalSize;
-              changed = true;
-            }
-            return changed;
-          });
-          return;
         }
         if (action.allowArchivedIntegrationIngestAmendment) {
           const archivedReceipt = await createArchivedIntegrationIngestShardContentReceipt(
@@ -3653,7 +3637,7 @@ export class WriteBatch {
       } else if (action.kind === "jsonl_append") {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
         if (
-          action.allowArchivedEventLedgerAmendment &&
+          isEventLedgerLogicalPath(action.targetRelativePath) &&
           action.baseContentReceipt &&
           action.originalSize !== undefined &&
           await createArchivedEventLedgerShardContentReceipt(

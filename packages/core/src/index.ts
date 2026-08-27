@@ -425,7 +425,6 @@ export {
   MAX_EVENT_LEDGER_ARCHIVE_BYTES,
   MAX_EVENT_LEDGER_SHARD_BYTES,
   archiveClosedEventLedgerShards,
-  isArchivedEventLedgerShard,
   isEventLedgerLogicalPath,
   listEventLedgerShardPaths,
   listEventLedgerShardPathsInterruptible,

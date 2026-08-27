@@ -165,13 +165,6 @@ export async function resolveEventLedgerShardSource(
   return plainExists ? { kind: "jsonl", logicalPath, sourcePath: logicalPath } : null;
 }
 
-export async function isArchivedEventLedgerShard(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<boolean> {
-  return (await resolveEventLedgerShardSource(vaultRoot, relativePath))?.kind === "gzip";
-}
-
 async function readBoundedEventLedgerSourceBytes(
   vaultRoot: string,
   source: EventLedgerShardSource,
