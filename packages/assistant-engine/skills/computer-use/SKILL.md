@@ -152,8 +152,8 @@ TypeScript/JavaScript in `code`; `page`, `context`, and `browser` are available
 in scope. Make each call one decision-bounded macro-step: combine every
 deterministic operation, bounded wait, and final verification until the next
 operation requires new model judgment. Split only at ambiguous intent, missing
-data, sensitive input or handoff, an irreversible confirmation, an unknown
-transition, or a timeout. Return concise JSON-serializable
+data, an action not authorized under the point-of-risk checks below, credential
+or user handoff, an unknown transition, or a timeout. Return concise JSON-serializable
 state from the completed macro-step.
 
 ```json
@@ -207,7 +207,8 @@ Do not query or return cookies, local storage, storage state, hidden browser
 credentials, passwords, card numbers, one-time codes, raw tokens, or other
 secrets. Do not disable the host-installed route guard, create alternate
 browser contexts for egress, or use Node/network APIs to bypass browser
-navigation policy. Pause for handoff when sensitive user input is needed.
+navigation policy. Pause for handoff when credentials, one-time codes, full
+payment details, or another field reserved to the user below is needed.
 
 ## Browser control loop
 

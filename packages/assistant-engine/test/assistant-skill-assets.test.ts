@@ -955,7 +955,10 @@ describe('assistant skill assets', () => {
     expect(actPrimitive).toMatch(/combine every\s+deterministic operation/iu)
     expect(actPrimitive).toMatch(/final verification/iu)
     expect(actPrimitive).toMatch(
-      /ambiguous intent.*missing\s+data.*sensitive\s+input.*irreversible\s+confirmation.*unknown\s+transition.*timeout/isu,
+      /ambiguous intent.*missing\s+data.*not authorized under the point-of-risk checks.*credential\s+or user handoff.*unknown\s+transition.*timeout/isu,
+    )
+    expect(actPrimitive).toMatch(
+      /Pause for handoff when credentials, one-time codes, full\s+payment details, or another field reserved to the user below is needed/iu,
     )
     expect(actPrimitive).toMatch(/waitFor/iu)
     expect(actPrimitive).not.toMatch(/one small browser step|one small inspection/iu)

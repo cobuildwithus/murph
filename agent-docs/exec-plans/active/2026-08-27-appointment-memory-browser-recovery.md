@@ -41,8 +41,8 @@ Updated: 2026-08-27
 - A failed or unresponsive control is not yet a blocker. Re-inspect state before
   retrying, use a safe alternate path and OS fallback when appropriate, and
   refresh only when no side effect is unknown and user-entered state is safe.
-- Never bypass CAPTCHA, access controls, sensitive-entry boundaries, or a real
-  missing user choice.
+- Never bypass CAPTCHA, access controls, credentials, payment entry, an
+  unapproved sensitive disclosure, or a real missing user choice.
 
 ## Tasks
 
@@ -84,9 +84,17 @@ Updated: 2026-08-27
   browser escalation proof.
 - Additional focused GPT-5.6 TERRA journeys passed for a form that does not
   require DOB and for a DOB-required form where the member declines storage.
-- Final direct/group first-request measurement against the base candidate: +132
-  provider-visible tokens and +711 bytes in each representative initial
-  request, with no tool-schema delta.
+- Final representative first-request measurement against the current base uses
+  the prior complete pinned-App-Server capture plus the exact current serialized
+  deltas under `gpt-tokenizer` 3.4.0 `o200k_harmony`. The private
+  browser-enabled route changes from 28,985 tokens / 132,847 bytes to 29,104 /
+  133,470 (+119, +0.4106%; +623 bytes, +0.4690%): +105 tokens / +553 bytes are
+  assembled instructions and +14 / +70 are the `computer_act` descriptor. The
+  group route, where private computer tools are unavailable, changes from
+  25,475 / 116,870 to 25,580 / 117,423 (+105, +0.4122%; +553 bytes, +0.4732%),
+  all in assembled instructions. Conversation content, other tool/schema or
+  generated guidance, transport framing, provider output, and later turns are
+  unchanged or excluded identically.
 - Second ReviewGPT on the exact follow-up head confirmed the original global
   evidence and durable-DOB findings were resolved. It returned three medium
   findings plus a SHA-identified coverage patch: split booking-call identity
@@ -108,3 +116,26 @@ Updated: 2026-08-27
 - Focused prompt and skill contracts after the second review: 33 passed and 7
   skipped. The saved-DOB/no-DOB live journey also passed with no DOB disclosure
   and zero memory writes.
+- Merged the current `origin/main` into the branch without dropping either the
+  appointment regressions or the base branch's independent real-provider
+  fixture. On that merged candidate, 108 deterministic tests passed with 7
+  provider cases skipped, Assistant Engine typecheck passed, and the TERRA
+  recovery journey passed with five browser actions, four current-state opens,
+  one OS fallback, no takeover, and verified completion.
+- A third exact-head preliminary ReviewGPT follow-up applied the current
+  official GPT-5.6 guidance and returned two medium findings plus a
+  SHA-256-identified test-only patch. Both findings were accepted: the generic
+  browser approval/disclosure policy now has one owner in `computer-use`, the
+  immediate `computer_act` contract permits specifically authorized
+  non-credential health or identity input and approved final terms, and the
+  supplied recovery fixture patch rejects duplicate OS effects or a stale
+  post-OS browser action.
+- ReviewGPT's coverage patch reverse-applies cleanly after application. The
+  corrected focused suite passed 40/40, the full changed prompt/skill/tool set
+  passed 95 tests with 124 opt-in provider cases skipped, the changed skill
+  asset rerun passed 25 tests with 7 skipped, and Assistant Engine typecheck
+  passed.
+- The strengthened GPT-5.6 TERRA journey passed against the strict recovery
+  state machine with five browser actions, four opens, exactly one OS fallback,
+  no takeover, verified completion, and a truthful current-task-only statement
+  for the synthetic insurance identifier.

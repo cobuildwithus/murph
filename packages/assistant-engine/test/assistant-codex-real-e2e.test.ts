@@ -10701,6 +10701,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
       let insuranceEntered = false
       let osControlCount = 0
       let openCount = 0
+      let reopenedAfterOsControl = false
       let safeAlternateAttempted = false
 
       try {
@@ -10760,7 +10761,10 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               === 'http://web-control.worker/api/internal/computer/runs'
             ) {
               openCount += 1
-              const controlChecked = osControlCount >= 1
+              if (osControlCount === 1) {
+                reopenedAfterOsControl = true
+              }
+              const controlChecked = osControlCount === 1
               return new Response(JSON.stringify({
                 expiresAt: '2026-08-27T20:00:00.000Z',
                 reused: openCount > 1,
@@ -10869,6 +10873,17 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   status: 200,
                 })
               }
+              if (osControlCount >= 1 && !reopenedAfterOsControl) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_RECOVERY_SEQUENCE_INVALID',
+                    message: 'Re-open current state after OS control before acting.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
               const missingFields: string[] = []
               if (!dateOfBirthEntered) {
                 missingFields.push('date of birth')
@@ -10919,6 +10934,17 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   status: 409,
                 })
               }
+              if (osControlCount >= 1) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_RECOVERY_SEQUENCE_INVALID',
+                    message: 'Use exactly one OS fallback for the verified control.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
               const keys = Array.isArray(body.keys) ? body.keys : []
               const targetsCheckboxWithMouse =
                 body.action === 'clickMouse'
@@ -10943,6 +10969,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                 })
               }
               osControlCount += 1
+              reopenedAfterOsControl = false
               return new Response(JSON.stringify({
                 action: body.action,
                 ok: true,
@@ -11039,8 +11066,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
         expect(computerSkillRead, 'computer-use skill read').toBeDefined()
         expect(openCalls.length, `final reply: ${reply}`).toBeGreaterThanOrEqual(2)
         expect(actCalls.length).toBeGreaterThanOrEqual(3)
-        expect(osCalls.length, `final reply: ${reply}`).toBeGreaterThanOrEqual(1)
-        expect(osCalls.length).toBeLessThanOrEqual(2)
+        expect(osCalls, `final reply: ${reply}`).toHaveLength(1)
         expect(pauseCalls).toHaveLength(0)
         expect(finishCalls).toHaveLength(1)
         expect(memoryRead?.eventIndex).toBeLessThan(
@@ -11053,10 +11079,17 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
         expect(osCalls[0]?.eventIndex).toBeGreaterThan(
           actCalls[1]?.eventIndex ?? Number.POSITIVE_INFINITY,
         )
-        const finalOsCall = osCalls.at(-1)
+        const reopenAfterOsControl = openCalls.find((call) =>
+          call.eventIndex > (osCalls[0]?.eventIndex ?? Number.POSITIVE_INFINITY)
+        )
+        expect(
+          reopenAfterOsControl,
+          're-open after the one OS fallback',
+        ).toBeDefined()
         expect(
           actCalls.find((call) =>
-            call.eventIndex > (finalOsCall?.eventIndex ?? Number.POSITIVE_INFINITY)
+            call.eventIndex
+              > (reopenAfterOsControl?.eventIndex ?? Number.POSITIVE_INFINITY)
           ),
         ).toBeDefined()
         expect(submittedCodes[1]).not.toBe(submittedCodes[0])

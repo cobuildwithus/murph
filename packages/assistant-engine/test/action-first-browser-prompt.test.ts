@@ -28,14 +28,14 @@ describe('action-first browser prompt contract', () => {
     )
   })
 
-  it('preserves point-of-risk pauses instead of premature search-only replies', () => {
+  it('delegates point-of-risk decisions and preserves bounded recovery', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For irreversible browser actions, make reversible progress first and stop only at a real point of risk',
+      'For browser approval, sensitive-data transmission, takeover, and retry boundaries, follow `computer-use` as the single policy owner',
     )
     expect(prompt).toContain(
-      'login/private handoff, missing material choice, unavailable payment or sensitive input, final confirmation, or a site/tool blocker proven after bounded recovery',
+      'Make reversible progress first',
     )
     expect(prompt).toContain(
       'An ordinary failed or unresponsive control is not yet a blocker',
@@ -61,13 +61,10 @@ describe('action-first browser prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'ask for approval in chat so a simple "yes" or "go ahead" can resume the run',
+      'When `computer-use` requires in-chat approval, ask the smallest concrete question',
     )
     expect(prompt).toContain(
-      'A handoff link may be included for optional inspection or takeover',
-    )
-    expect(prompt).toContain(
-      'do not require the user to open it or instruct them to click the final site control',
+      'Keep a handoff link optional unless automation cannot proceed after approval',
     )
   })
 
