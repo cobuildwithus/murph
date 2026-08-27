@@ -125,7 +125,7 @@ Updated: 2026-08-26
 - Implementation and deterministic boundary coverage are complete. The live
   scan uses set reads, four provider/KMS workers, one five-second deadline, a
   fail-closed 100-membership ceiling, and polynomial distinct-person matching.
-- Green focused proof: hosted-execution typecheck and 10 contract tests;
+- Green focused proof: hosted-execution typecheck and 9 contract tests;
   assistant-engine typecheck and 97 group-tool tests; Web prepared typecheck,
   six participant-resolver tests, 318 group/address-book tests, 220 Linq
   onboarding tests, and the isolated stalled-response deadline regression.
@@ -135,6 +135,13 @@ Updated: 2026-08-26
 - The focused real-Codex journey passed. Murph made exactly one handoff call,
   used a participant display-name clue without a group title or handle, and
   truthfully replied that the handoff was queued.
+- Pinned real-App-Server measurement of the complete initial provider request
+  is byte-for-byte identical at base and head: direct is 24,675
+  `o200k_harmony` tokens / 114,319 UTF-8 bytes and group is 20,259 tokens /
+  94,076 bytes. The changed group-consult schema remains deferred behind native
+  tool discovery, so the initial-request delta is zero for both scopes.
+- Draft PR #2385 is open, and its changelog source now points to that PR. The
+  exact ReviewGPT candidate head and required review rounds remain pending.
 
 ## Product UX walkthrough
 
