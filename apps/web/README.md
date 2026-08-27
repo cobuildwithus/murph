@@ -292,6 +292,18 @@ The Overview Personal Patterns section also uses the encrypted browser-vault rep
   usage-credit reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
+Hosted Stripe receipt reconciliation emits one failure-only structured log per
+failed attempt. Its closed `stage` vocabulary is `event_retrieval`,
+`event_application`, `post_commit`, and `receipt_finalization`. The payload keeps
+the existing bounded event suffix and may add only a bounded sanitized error
+name, stable error code, sanitized top-level error message, and the existing
+Stripe-safe type, raw type, code, decline code, parameter, status, and validated
+opaque request-id projection. A top-level retry wrapper may inspect only its
+direct cause for those same Stripe-safe fields. The log never includes a raw
+error, stack, provider object or payload, member/customer/subscription/payment
+identifiers, submitted values, credentials, URLs, paths, or message content;
+Stripe request ids are correlation-only.
+
 ## Non-goals
 
 - canonical health-data storage

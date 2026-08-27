@@ -796,6 +796,11 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.cleanupHostedStandardCheckoutLoser.mockRejectedValue(
       Object.assign(new Error("Stripe rejected cleanup"), {
+        code: "parameter_missing",
+        decline_code: "do_not_honor",
+        param: "payment_method[card]",
+        rawType: "invalid_request_error",
+        requestId: "req_cleanup_123",
         statusCode: 400,
         type: "StripeInvalidRequestError",
       }),
@@ -816,7 +821,19 @@ describe("hosted Stripe event reconciliation", () => {
     }));
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted Stripe event reconciliation failed.",
-      expect.objectContaining({ poisoned: true }),
+      expect.objectContaining({
+        errorCode: "parameter_missing",
+        errorName: "Error",
+        poisoned: true,
+        stage: "post_commit",
+        stripeCode: "parameter_missing",
+        stripeDeclineCode: "do_not_honor",
+        stripeParam: "payment_method[card]",
+        stripeRawType: "invalid_request_error",
+        stripeRequestId: "req_cleanup_123",
+        stripeStatusCode: 400,
+        stripeType: "StripeInvalidRequestError",
+      }),
     );
     errorSpy.mockRestore();
   });
@@ -1036,6 +1053,14 @@ describe("hosted Stripe event reconciliation", () => {
       processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted Stripe event reconciliation failed.",
+      expect.objectContaining({
+        errorCode: "ETIMEDOUT",
+        errorName: "Error",
+        stage: "event_application",
+      }),
+    );
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -1482,17 +1507,31 @@ describe("hosted Stripe event reconciliation", () => {
     };
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let grantCount = 0;
-    mocks.stripe.events.retrieve
-      .mockRejectedValueOnce(Object.assign(
-        new Error("Stripe requested a retry"),
-        {
-          headers: {
-            "StRiPe-ShOuLd-ReTrY": " TRUE ",
-          },
-          statusCode: 400,
-          type: "StripeInvalidRequestError",
+    const providerError = Object.assign(
+      new Error(
+        "Stripe retry for person@example.com at https://example.com/private",
+      ),
+      {
+        code: "api_connection_error",
+        decline_code: "do_not_honor",
+        headers: {
+          "StRiPe-ShOuLd-ReTrY": " TRUE ",
         },
-      ))
+        param: "payment method for person@example.com",
+        payload: {
+          value: "do_not_log_payload_value",
+        },
+        raw: {
+          message: "do_not_log_raw_value",
+        },
+        rawType: "api_error",
+        requestId: "req_reconciliation_retry_123",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+    );
+    mocks.stripe.events.retrieve
+      .mockRejectedValueOnce(providerError)
       .mockResolvedValueOnce(event);
     mocks.reconcileHostedUsageCreditStripeEvent.mockImplementation(async () => {
       grantCount += 1;
@@ -1519,6 +1558,43 @@ describe("hosted Stripe event reconciliation", () => {
       status: HostedStripeEventStatus.failed,
     }));
     expect(mocks.reconcileHostedUsageCreditStripeEvent).not.toHaveBeenCalled();
+
+    const reconciliationFailureLogs = errorSpy.mock.calls.filter(
+      ([message]) => message === "Hosted Stripe event reconciliation failed.",
+    );
+    expect(reconciliationFailureLogs).toHaveLength(1);
+    const reconciliationFailureLog = reconciliationFailureLogs[0]?.[1];
+    expect(reconciliationFailureLog).toEqual(expect.objectContaining({
+      errorCode: "HOSTED_STRIPE_EVENT_RETRIEVE_RETRYABLE",
+      errorMessage:
+        "Stripe retry for <redacted-email> at <redacted-url>",
+      errorName: "HostedStripeEventRetrieveRetryableError",
+      stage: "event_retrieval",
+      stripeCode: "api_connection_error",
+      stripeDeclineCode: "do_not_honor",
+      stripeRawType: "api_error",
+      stripeRequestId: "req_reconciliation_retry_123",
+      stripeStatusCode: 400,
+      stripeType: "StripeInvalidRequestError",
+    }));
+    expect(reconciliationFailureLog).not.toHaveProperty("error");
+    expect(reconciliationFailureLog).not.toHaveProperty("errorStack");
+    expect(reconciliationFailureLog).not.toHaveProperty("payload");
+    expect(reconciliationFailureLog).not.toHaveProperty("raw");
+    expect(reconciliationFailureLog).not.toHaveProperty("stripeParam");
+    const serializedReconciliationFailureLog = JSON.stringify(
+      reconciliationFailureLog ?? {},
+    );
+    expect(serializedReconciliationFailureLog).not.toContain("person@example.com");
+    expect(serializedReconciliationFailureLog).not.toContain(
+      "https://example.com/private",
+    );
+    expect(serializedReconciliationFailureLog).not.toContain(
+      "do_not_log_payload_value",
+    );
+    expect(serializedReconciliationFailureLog).not.toContain(
+      "do_not_log_raw_value",
+    );
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -3750,6 +3826,14 @@ describe("hosted Stripe event reconciliation", () => {
       status: HostedStripeEventStatus.failed,
       subscriptionCancellationEmailSentAt: expect.any(Date),
     }));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted Stripe event reconciliation failed.",
+      expect.objectContaining({
+        errorMessage: "receipt completion failed",
+        errorName: "Error",
+        stage: "receipt_finalization",
+      }),
+    );
 
     prisma.rows[0].nextAttemptAt = new Date(0);
 
@@ -3826,6 +3910,7 @@ describe("hosted Stripe event reconciliation", () => {
       eventIdSuffix: "ed_123",
       eventType: "customer.subscription.deleted",
       poisoned: false,
+      stage: "event_application",
     });
     errorSpy.mockRestore();
   });
@@ -4072,11 +4157,13 @@ describe("hosted Stripe event reconciliation", () => {
     }));
     expect(errorSpy).toHaveBeenCalledWith("Hosted Stripe event reconciliation failed.", {
       attemptCount: 1,
+      errorCode: "HOSTED_STRIPE_EVENT_RETRIEVE_RETRYABLE",
       errorMessage: "Stripe unavailable",
       errorName: "HostedStripeEventRetrieveRetryableError",
       eventIdSuffix: "id_123",
       eventType: "invoice.paid",
       poisoned: false,
+      stage: "event_retrieval",
     });
   });
 
@@ -4133,6 +4220,7 @@ describe("hosted Stripe event reconciliation", () => {
         modelName: "HostedMailboxItem",
         table: "missing_table",
       },
+      stage: "event_application",
     });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastErrorCode: "P2010",
