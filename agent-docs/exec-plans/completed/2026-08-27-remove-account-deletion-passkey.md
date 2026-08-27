@@ -1,6 +1,6 @@
 # Remove passkey requirement from account deletion
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -140,5 +140,13 @@ Updated: 2026-08-27
   Repository-owned production-component studies were inspected at desktop and
   390px with truthful copy, enabled deletion, disabled export, and no visible
   containment issue.
-- PR #2435 is open; corrected-head final ReviewGPT, exact PR CI, parent final
-  review, and plan closure remain.
+- PR #2435 exact-head GitHub Actions and Vercel checks are green. Parent final
+  review found no additional concerns across the source, test, documentation,
+  changelog, and rollout-compatibility diff.
+- Corrected-head final ReviewGPT round 2 passed with no findings. The review
+  confirmed the no-passkey deletion boundary, secure-approval-unavailable
+  journey, real-parser proof, cleanup invariants, and bounded rollout
+  compatibility. Its rendered-evidence caveat is covered by the separately
+  inspected desktop and 390px production-component studies.
+- Plan closure remains.
+Completed: 2026-08-27
