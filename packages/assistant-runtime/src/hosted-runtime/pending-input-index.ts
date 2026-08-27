@@ -20,6 +20,7 @@ import {
   type AssistantInputAttachmentEvidence,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
+  type AssistantInputProjectionStatus,
 } from "@murphai/assistant-engine";
 import {
   readAssistantAutomationState,
@@ -133,6 +134,7 @@ type HostedPendingAssistantInputReplyabilityEvent = Pick<
   | "attachmentEvidence"
   | "content"
   | "conversation"
+  | "projection"
   | "replyTarget"
   | "sourceRef"
 >;
@@ -1432,15 +1434,28 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   ) {
     return false;
   }
-  if (input.event.content.attachmentDescriptors.length > 0) {
-    if (!isHostedAssistantInputAttachmentEvidenceSettled(
+  if (
+    requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount:
+        input.event.content.attachmentDescriptors.length,
+      projectionStatus: input.event.projection.status,
+    })
+    && !isHostedAssistantInputAttachmentEvidenceSettled(
       input.event.attachmentEvidence,
-    )) {
-      return false;
-    }
+    )
+  ) {
+    return false;
   }
 
   return input.enabledAutoReplyChannels.has(replyChannel);
+}
+
+export function requiresHostedAssistantInputAttachmentEvidence(input: {
+  attachmentDescriptorCount: number;
+  projectionStatus: AssistantInputProjectionStatus;
+}): boolean {
+  return input.attachmentDescriptorCount > 0
+    && input.projectionStatus !== "not_attempted";
 }
 
 export function isHostedAssistantInputAttachmentEvidenceSettled(

@@ -47,6 +47,7 @@ import {
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantImageCompletionHintPath,
   resolveHostedPendingAssistantInputStatePath,
+  requiresHostedAssistantInputAttachmentEvidence,
   runHostedPendingAssistantInputContentRetention,
   selectHostedConversationMailboxHandledItemBatch,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -70,6 +71,25 @@ afterEach(async () => {
 });
 
 describe("hosted pending assistant input index", () => {
+  it("requires attachment evidence only when persisted projection was elected", () => {
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 1,
+      projectionStatus: "not_attempted",
+    })).toBe(false);
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 1,
+      projectionStatus: "pending",
+    })).toBe(true);
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 1,
+      projectionStatus: "succeeded",
+    })).toBe(true);
+    expect(requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: 0,
+      projectionStatus: "pending",
+    })).toBe(false);
+  });
+
   it("admits attachment evidence only after parser work settles", () => {
     const attachment: AssistantInputAttachmentEvidenceItem = {
       byteSize: 128,

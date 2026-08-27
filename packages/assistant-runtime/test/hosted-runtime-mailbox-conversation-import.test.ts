@@ -1269,6 +1269,7 @@ describe("hosted mailbox conversation import adapter", () => {
           },
         }),
         stageAssistantInputEvent: async () => ({
+          attachmentEvidenceRequired: false,
           async enqueuePendingReply() {},
           inputId: "input_import_timing",
           async recordProjection() {},
@@ -1512,6 +1513,7 @@ describe("hosted mailbox conversation import adapter", () => {
             }],
           );
           return {
+            attachmentEvidenceRequired: false,
             async enqueuePendingReply() {},
             inputId: "input_linq_admission",
             async recordProjection() {},
@@ -2016,6 +2018,7 @@ describe("hosted mailbox conversation import adapter", () => {
             }],
           );
           return {
+            attachmentEvidenceRequired: false,
             async enqueuePendingReply() {},
             inputId: "input_email_admission",
             async recordProjection() {},
@@ -3757,6 +3760,7 @@ describe("hosted mailbox conversation import adapter", () => {
         stageAssistantInputEvent: async () => {
           stageCalls += 1;
           return {
+            attachmentEvidenceRequired: false,
             async enqueuePendingReply() {},
             inputId: "ain_00000000000000000000000000000000",
             async recordProjection() {},
@@ -3911,6 +3915,7 @@ describe("hosted mailbox conversation import adapter", () => {
       runtime: createRuntime(),
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
+        attachmentEvidenceRequired: true,
         async enqueuePendingReply() {},
         inputId: "ain_00000000000000000000000000000000",
         async recordAttachmentEvidence() {
@@ -3953,6 +3958,7 @@ describe("hosted mailbox conversation import adapter", () => {
       runtime: createRuntime(),
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
+        attachmentEvidenceRequired: true,
         async enqueuePendingReply() {
           enqueueCount += 1;
         },
@@ -4739,10 +4745,11 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(legacySecond?.conversation?.threadId, legacyFirst.conversation.threadId);
   });
 
-  test("omits group-routed hosted email raw inbox projection and redacts attachment descriptors", async () => {
+  test("keeps projection-exempt group email attachments restart-replyable", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-raw-sweep-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
+    const occurredAt = "2026-08-26T12:00:00.000Z";
     const groupThreadTarget = serializeHostedEmailThreadTarget({
       groupId: "hgrp_AAAAAAAAAAAAAAAA",
       lastMessageId: "<group-raw-message@example.test>",
@@ -4765,6 +4772,7 @@ describe("hosted mailbox conversation import adapter", () => {
     ].join("\r\n"));
     const readRawEmailMessage = vi.fn(async () => rawEmailBytes);
     const decodedWake = createConversationWake({
+      occurredAt,
       message: {
         attachmentSummaries: [
           {
@@ -4787,7 +4795,10 @@ describe("hosted mailbox conversation import adapter", () => {
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       prepareWakeContext,
-      item: createResolvedConversationMailboxItem(),
+      item: createResolvedConversationMailboxItem({
+        createdAt: occurredAt,
+        occurredAt,
+      }),
       runtime: createRuntime({
         platform: {
           effectsPort: {
@@ -4800,10 +4811,12 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    if (outcome.status === "imported") {
-      assert.equal(outcome.captureId, null);
-      assert.equal(outcome.reasonCode ?? null, null);
+    if (outcome.status !== "imported") {
+      throw new Error("Expected projection-exempt group email to import.");
     }
+    assert.equal(outcome.captureId, null);
+    assert.equal(outcome.reasonCode ?? null, null);
+    assert.ok(outcome.assistantInputId);
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -4834,6 +4847,22 @@ describe("hosted mailbox conversation import adapter", () => {
     expect(prepareWakeContext).not.toHaveBeenCalled();
     assert.equal(event.projection.status, "not_attempted");
     assert.equal(event.projection.captureId, null);
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "email",
+        eligibleAfter: null,
+        enabledAt: occurredAt,
+      }],
+      updatedAt: occurredAt,
+      version: 1,
+    });
+    assert.deepEqual(
+      (await selectHostedAssistantInputIds({
+        mode: "background",
+        vaultRoot,
+      })).inputIds,
+      [outcome.assistantInputId],
+    );
     const persistedSurface = await collectVaultTextSurface(vaultRoot);
     for (const forbidden of [
       rawOnlyAddress,
@@ -5096,6 +5125,7 @@ function createAssistantInputEventStager(input: {
       ...(input.attachmentDescriptorCount === undefined
         ? {}
         : { attachmentDescriptorCount: input.attachmentDescriptorCount }),
+      attachmentEvidenceRequired: (input.attachmentDescriptorCount ?? 0) > 0,
       async enqueuePendingReply() {},
       inputId: "ain_00000000000000000000000000000000",
       async recordProjection(projection: unknown) {

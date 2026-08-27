@@ -73,6 +73,7 @@ import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
   isHostedAssistantInputAttachmentEvidenceSettled,
+  requiresHostedAssistantInputAttachmentEvidence,
 } from "./pending-input-index.ts";
 import {
   prepareHostedAssistantAutoReplyForWake,
@@ -183,6 +184,7 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   attachmentDescriptorCount?: number;
+  attachmentEvidenceRequired: boolean;
   enqueuePendingReply(): Promise<void>;
   inputId: string;
   recordAttachmentEvidence?(
@@ -396,9 +398,7 @@ export async function importHostedConversationMailboxItem(input: {
     attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
     wake: decoded.wake,
   });
-  const attachmentAdmissionDeferred =
-    inboxProjectionRequired
-    && shouldRecordHostedConversationAttachmentEvidence(stagedInput);
+  const attachmentAdmissionDeferred = stagedInput.attachmentEvidenceRequired;
   const notifyActiveTurnInputAvailable = async (): Promise<void> => {
     if (!foregroundAssistantInputId) {
       return;
@@ -1006,29 +1006,36 @@ async function stageHostedConversationAssistantInputEvent(input: {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
     wake: input.wake,
   });
+  let projectionStatus = event.projection.status;
   if (
     projectionRequired
     && event.projection.status === "not_attempted"
   ) {
-    await updateAssistantInputProjection({
+    const updated = await updateAssistantInputProjection({
       inputId: event.inputId,
       projection: {
         status: "pending",
       },
       vault: input.vaultRoot,
     });
+    projectionStatus = updated.projection.status;
   }
   if (!projectionRequired && event.projection.status === "pending") {
-    await updateAssistantInputProjection({
+    const updated = await updateAssistantInputProjection({
       inputId: event.inputId,
       projection: {
         status: "not_attempted",
       },
       vault: input.vaultRoot,
     });
+    projectionStatus = updated.projection.status;
   }
   return {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+    attachmentEvidenceRequired: requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+      projectionStatus,
+    }),
     async enqueuePendingReply() {
       if (!event.replyTarget) {
         return;

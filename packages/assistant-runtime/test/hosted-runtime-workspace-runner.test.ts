@@ -8149,6 +8149,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       runtime: createConversationRuntime(),
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
+        attachmentEvidenceRequired: true,
         async enqueuePendingReply() {},
         inputId: "ain_00000000000000000000000000000000",
         async recordAttachmentEvidence() {
