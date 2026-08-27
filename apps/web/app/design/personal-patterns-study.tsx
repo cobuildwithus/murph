@@ -1,3 +1,5 @@
+"use client";
+
 import type {
   PersonalPatternCell,
   PersonalPatternReport,
@@ -37,6 +39,7 @@ const POPULATED_REPORT: PersonalPatternReport = {
     { id: "readiness-score", label: "Readiness score", unit: "score" },
     { id: "deep-sleep", label: "Deep sleep", unit: "min" },
     { id: "respiratory-rate", label: "Respiratory rate", unit: "rpm" },
+    { id: "sleep-score", label: "Sleep score", unit: "score" },
     { id: "sleep-efficiency", label: "Sleep efficiency", unit: "%" },
     { id: "unsupported", label: "Unsupported outcome", unit: "score" },
   ],
@@ -74,6 +77,7 @@ const POPULATED_REPORT: PersonalPatternReport = {
       14.9,
       8,
     ),
+    cell("running", "sleep-score", "seen_again", "higher", 4.8, 82, 78, 8),
     cell("running", "sleep-efficiency", "new_clue", "higher", 3.1, 91, 88, 7),
     cell("sauna", "hrv", "worth_testing", "higher", 17.8, 50.2, 42.6, 10),
     cell("sauna", "total-sleep", "seen_again", "higher", 6.5, 458, 430, 8),

@@ -7,6 +7,7 @@ import { useId } from "react";
 import type {
   PersonalPatternCell,
   PersonalPatternClassification,
+  PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,
 } from "@murphai/query/browser-overview";
@@ -154,7 +155,10 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
 }
 
 function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
-  const outcomeGroups = chunkOutcomes(report.outcomes, 3);
+  const outcomeGroups = chunkOutcomeColumns(
+    buildOutcomeColumns(report.outcomes),
+    3,
+  );
 
   return (
     <div className="sm:hidden" data-patterns-layout="mobile">
@@ -180,6 +184,7 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
                 <div
                   key={outcome.id}
                   className="flex min-w-0 items-end justify-center px-1 py-3 text-center"
+                  data-pattern-outcome-column={outcome.id}
                 >
                   <span className="text-[10px] font-medium leading-[1.15] text-foreground">
                     {outcome.label}
@@ -217,14 +222,13 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
                       key={outcome.id}
                       className="flex min-w-0 items-center justify-center px-0.5 py-2"
                     >
-                      <PatternBubble
-                        cell={findPatternCell(report, factor.id, outcome.id)}
+                      <PatternOutcomeColumnCell
                         compact
                         factorLabel={factor.label}
                         factorObservedDays={factor.observedDays}
-                        outcomeLagDays={outcome.lagDays}
-                        outcomeLabel={outcome.label}
-                        outcomeUnit={outcome.unit}
+                        outcomes={outcome.outcomes}
+                        report={report}
+                        factorId={factor.id}
                       />
                     </div>
                   );
@@ -239,7 +243,8 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
 }
 
 function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
-  const columns = `17rem repeat(${report.outcomes.length}, minmax(8.5rem, 1fr))`;
+  const outcomeColumns = buildOutcomeColumns(report.outcomes);
+  const columns = `17rem repeat(${outcomeColumns.length}, minmax(8.5rem, 1fr))`;
 
   return (
     <div
@@ -256,8 +261,12 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
               Action
             </span>
           </div>
-          {report.outcomes.map((outcome) => (
-            <div key={outcome.id} className="px-3 py-4 text-center">
+          {outcomeColumns.map((outcome) => (
+            <div
+              key={outcome.id}
+              className="px-3 py-4 text-center"
+              data-pattern-outcome-column={outcome.id}
+            >
               <span className="text-xs font-medium leading-tight text-foreground">
                 {outcome.label}
               </span>
@@ -287,16 +296,15 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
               </div>
             </div>
 
-            {report.outcomes.map((outcome) => {
+            {outcomeColumns.map((outcome) => {
               return (
                 <div key={outcome.id} className="flex justify-center px-3 py-3">
-                  <PatternBubble
-                    cell={findPatternCell(report, factor.id, outcome.id)}
+                  <PatternOutcomeColumnCell
                     factorLabel={factor.label}
                     factorObservedDays={factor.observedDays}
-                    outcomeLagDays={outcome.lagDays}
-                    outcomeLabel={outcome.label}
-                    outcomeUnit={outcome.unit}
+                    outcomes={outcome.outcomes}
+                    report={report}
+                    factorId={factor.id}
                   />
                 </div>
               );
@@ -304,6 +312,98 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+interface PatternOutcomeColumn {
+  id: string;
+  label: string;
+  outcomes: PersonalPatternOutcome[];
+}
+
+function PatternOutcomeColumnCell({
+  compact = false,
+  factorId,
+  factorLabel,
+  factorObservedDays,
+  outcomes,
+  report,
+}: {
+  compact?: boolean;
+  factorId: string;
+  factorLabel: string;
+  factorObservedDays: number;
+  outcomes: PersonalPatternOutcome[];
+  report: PersonalPatternReport;
+}) {
+  const entries = outcomes.map((outcome) => ({
+    cell: findPatternCell(report, factorId, outcome.id),
+    outcome,
+  }));
+  const effects = entries.filter(
+    ({ cell }) =>
+      cell !== undefined &&
+      cell.stage !== "insufficient" &&
+      cell.stage !== "no_clear_pattern" &&
+      cell.direction !== "flat",
+  );
+
+  if (effects.length === 0) {
+    const checked = entries.find(
+      ({ cell }) => cell !== undefined && cell.stage === "no_clear_pattern",
+    );
+    const outcome = checked?.outcome ?? outcomes[0];
+
+    return (
+      <PatternBubble
+        cell={checked?.cell}
+        compact={compact}
+        factorLabel={factorLabel}
+        factorObservedDays={factorObservedDays}
+        outcomeLagDays={outcome?.lagDays}
+        outcomeLabel={outcome?.label ?? "this result"}
+        outcomeUnit={outcome?.unit ?? "score"}
+      />
+    );
+  }
+
+  if (effects.length === 1 && outcomes.length === 1) {
+    const [{ cell, outcome }] = effects;
+    return (
+      <PatternBubble
+        cell={cell}
+        compact={compact}
+        factorLabel={factorLabel}
+        factorObservedDays={factorObservedDays}
+        outcomeLagDays={outcome.lagDays}
+        outcomeLabel={outcome.label}
+        outcomeUnit={outcome.unit}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      {effects.map(({ cell, outcome }) => (
+        <div
+          key={outcome.id}
+          className="grid grid-cols-[3.75rem_auto] items-center gap-1.5"
+        >
+          <span className="text-[10px] leading-none text-muted-foreground">
+            {shortOutcomeLabel(outcome)}
+          </span>
+          <PatternBubble
+            cell={cell}
+            compact={compact}
+            factorLabel={factorLabel}
+            factorObservedDays={factorObservedDays}
+            outcomeLagDays={outcome.lagDays}
+            outcomeLabel={outcome.label}
+            outcomeUnit={outcome.unit}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -560,15 +660,48 @@ function PatternPopoverContent({
   );
 }
 
-function chunkOutcomes(
+function buildOutcomeColumns(
   outcomes: PersonalPatternReport["outcomes"],
+): PatternOutcomeColumn[] {
+  const sleepQualityOutcomes = outcomes.filter(
+    (outcome) =>
+      outcome.id === "sleep-score" || outcome.id === "sleep-efficiency",
+  );
+  const firstSleepQualityIndex = outcomes.findIndex(
+    (outcome) =>
+      outcome.id === "sleep-score" || outcome.id === "sleep-efficiency",
+  );
+
+  return outcomes.flatMap((outcome, index) => {
+    if (outcome.id !== "sleep-score" && outcome.id !== "sleep-efficiency") {
+      return [{ id: outcome.id, label: outcome.label, outcomes: [outcome] }];
+    }
+    if (index !== firstSleepQualityIndex) {
+      return [];
+    }
+    return [
+      {
+        id: "sleep-quality",
+        label: "Sleep quality",
+        outcomes: sleepQualityOutcomes,
+      },
+    ];
+  });
+}
+
+function chunkOutcomeColumns(
+  outcomes: PatternOutcomeColumn[],
   size: number,
-): PersonalPatternReport["outcomes"][] {
-  const groups: PersonalPatternReport["outcomes"][] = [];
+): PatternOutcomeColumn[][] {
+  const groups: PatternOutcomeColumn[][] = [];
   for (let index = 0; index < outcomes.length; index += size) {
     groups.push(outcomes.slice(index, index + size));
   }
   return groups;
+}
+
+function shortOutcomeLabel(outcome: PersonalPatternOutcome): string {
+  return outcome.id === "sleep-efficiency" ? "Efficiency" : "Score";
 }
 
 function findPatternCell(

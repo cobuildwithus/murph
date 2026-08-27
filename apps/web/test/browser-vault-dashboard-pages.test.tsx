@@ -467,7 +467,19 @@ test("Personal Patterns comparison controls name their factor and next-day outco
   assert.match(markup, /data-patterns-layout="mobile"/u);
   assert.match(markup, /data-patterns-layout="desktop"/u);
   assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
-  assert.match(markup, /Sleep efficiency/u);
+  assert.equal(
+    (markup.match(/data-pattern-outcome-column="sleep-quality"/gu) ?? [])
+      .length,
+    2,
+  );
+  assert.doesNotMatch(
+    markup,
+    /data-pattern-outcome-column="sleep-(?:score|efficiency)"/u,
+  );
+  assert.match(markup, />Sleep quality</u);
+  assert.match(markup, />Score<\/span>/u);
+  assert.match(markup, />Efficiency<\/span>/u);
+  assert.match(markup, /sleep efficiency/u);
   assert.doesNotMatch(markup, /Unsupported outcome/u);
   assert.doesNotMatch(markup, /Sparse factor/u);
   assert.match(markup, /aria-label="Seen on 14 days"/u);
