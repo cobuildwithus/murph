@@ -463,7 +463,8 @@ describe("hosted Linq instant first turn", () => {
     expect(body).toMatchObject({
       input: [{ content: REQUEST.text, role: "user" }],
       model: "gpt-5.6-luna",
-      reasoning: { effort: "high" },
+      reasoning: { effort: "medium" },
+      service_tier: "priority",
       store: false,
       text: {
         format: {
@@ -474,7 +475,6 @@ describe("hosted Linq instant first turn", () => {
       },
     });
     expect(body).not.toHaveProperty("max_output_tokens");
-    expect(body).not.toHaveProperty("service_tier");
     expect(body.instructions).toContain("cannot see account history");
     expect(body.instructions).toContain("Return kind \"welcome\"");
     expect(body.instructions).not.toContain("Luna");
@@ -496,7 +496,7 @@ describe("hosted Linq instant first turn", () => {
     });
   });
 
-  it("runs one high-reasoning reply from durable claim through the runtime handoff", async () => {
+  it("runs one priority medium-reasoning reply from durable claim through the runtime handoff", async () => {
     const prisma = createPrisma();
     const reply =
       "A short walk after dinner can help your muscles use glucose, which may soften the post-meal blood-sugar rise.";
@@ -531,10 +531,10 @@ describe("hosted Linq instant first turn", () => {
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(requestBody).toMatchObject({
-      reasoning: { effort: "high" },
+      reasoning: { effort: "medium" },
+      service_tier: "priority",
     });
     expect(requestBody).not.toHaveProperty("max_output_tokens");
-    expect(requestBody).not.toHaveProperty("service_tier");
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
       .toHaveBeenNthCalledWith(1, expect.objectContaining({
         sourceRef: REQUEST.eventId,

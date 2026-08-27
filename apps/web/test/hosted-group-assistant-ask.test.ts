@@ -119,6 +119,24 @@ function membership(input: {
   };
 }
 
+function manyMembershipsWithTarget(leadingMembershipCount = 26) {
+  const target = membership({
+    displayName: "Trail Crew",
+    id: "membership-target",
+  });
+  return {
+    memberships: [
+      ...Array.from({ length: leadingMembershipCount }, (_, index) => membership({
+        displayName: `Group ${String(index + 1).padStart(2, "0")}`,
+        id: `membership-${String(index + 1).padStart(2, "0")}`,
+        runtimeMemberId: `member-group-runtime-${String(index + 1).padStart(2, "0")}`,
+      })),
+      target,
+    ],
+    target,
+  };
+}
+
 function createPrisma(input: {
   memberships?: ReturnType<typeof membership>[];
   selectedMembership?: ReturnType<typeof membership> | null;
@@ -412,6 +430,33 @@ describe("Hosted group Assistant Ask admission", () => {
     );
   });
 
+  it("resolves a unique named group beyond the clarification window", async () => {
+    const { memberships, target } = manyMembershipsWithTarget();
+    const { prisma, tx } = createPrisma({
+      memberships,
+      selectedMembership: target,
+    });
+
+    await expect(requestHostedGroupAssistantAsk({
+      groupLabel: "  TRAIL   crew ",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toMatchObject({
+      result: { status: "accepted", targetLabel: "Trail Crew" },
+    });
+
+    expect(tx.hostedGroupMember.findMany).toHaveBeenCalledWith(
+      expect.not.objectContaining({ take: expect.anything() }),
+    );
+    expect(tx.hostedGroupMember.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "membership-target" } }),
+    );
+  });
+
   it("asks for a label when multiple groups exist and no selector was supplied", async () => {
     const { prisma } = createPrisma({
       memberships: [
@@ -437,6 +482,33 @@ describe("Hosted group Assistant Ask admission", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
+  it("bounds unnamed clarification without making group access unavailable", async () => {
+    const { memberships } = manyMembershipsWithTarget(64);
+    const { prisma, tx } = createPrisma({ memberships });
+
+    await expect(requestHostedGroupAssistantAsk({
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      prisma: prisma as never,
+      question: QUESTION,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        groupLabels: Array.from(
+          { length: 64 },
+          (_, index) => `Group ${String(index + 1).padStart(2, "0")}`,
+        ),
+        status: "clarification_required",
+      },
+    });
+    expect(tx.hostedGroupMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 65 }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
   it("reports no groups without manufacturing a destination", async () => {
     const { prisma } = createPrisma({ memberships: [] });
 
@@ -455,15 +527,20 @@ describe("Hosted group Assistant Ask admission", () => {
   });
 
   it("fails closed when two memberships have the same normalized label", async () => {
+    const { memberships } = manyMembershipsWithTarget();
     const { prisma } = createPrisma({
       memberships: [
-        membership({ displayName: "100 Club", id: "membership-one" }),
-        membership({ displayName: " 100   CLUB ", id: "membership-two" }),
+        ...memberships,
+        membership({
+          displayName: "  TRAIL   crew ",
+          id: "membership-duplicate-target",
+          runtimeMemberId: "member-duplicate-group-runtime",
+        }),
       ],
     });
 
     await expect(requestHostedGroupAssistantAsk({
-      groupLabel: "100 club",
+      groupLabel: "trail crew",
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -670,6 +747,31 @@ describe("Hosted private-to-group context handoff admission", () => {
     });
   });
 
+  it("queues a handoff to a unique named group beyond the clarification window", async () => {
+    const { memberships, target } = manyMembershipsWithTarget();
+    const { prisma, tx } = createPrisma({
+      memberships,
+      selectedMembership: target,
+    });
+
+    await expect(requestHostedGroupContextHandoff({
+      context: "The member finished today's mobility session.",
+      groupLabel: "trail crew",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      result: { status: "accepted", targetLabel: "Trail Crew" },
+    });
+
+    expect(tx.hostedGroupMember.findMany).toHaveBeenCalledWith(
+      expect.not.objectContaining({ take: expect.anything() }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledOnce();
+  });
+
   it("keeps multiple unnamed organic memberships fail-closed", async () => {
     const { prisma } = createPrisma({
       memberships: [
@@ -853,14 +955,28 @@ describe("Hosted private-to-group context handoff admission", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("replays a committed wake without selecting or appending again", async () => {
+  it("replays a pinned wake without reselecting after membership-label changes", async () => {
     const context = "The original bounded fact.";
     const eventId = createHostedGroupContextHandoffEventId({
       memberId: ORIGIN_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
     let persistedWake: ReturnType<typeof contextHandoffWake> | null = null;
-    const { prisma } = createPrisma();
+    const { memberships, target } = manyMembershipsWithTarget();
+    const { prisma, tx } = createPrisma({
+      memberships: [target],
+      selectedMembership: target,
+    });
+    tx.hostedGroupMember.findMany
+      .mockResolvedValueOnce([target])
+      .mockResolvedValue([
+        ...memberships,
+        membership({
+          displayName: "  TRAIL   CREW ",
+          id: "membership-later-duplicate",
+          runtimeMemberId: "member-later-duplicate-runtime",
+        }),
+      ]);
     mocks.readHostedMailboxItemById.mockImplementation(async () =>
       persistedWake ? mailboxItemForContextHandoff(persistedWake) : null
     );
@@ -885,7 +1001,7 @@ describe("Hosted private-to-group context handoff admission", () => {
     );
     const request = {
       context,
-      groupLabel: "100 Club",
+      groupLabel: "Trail Crew",
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -904,8 +1020,9 @@ describe("Hosted private-to-group context handoff admission", () => {
         expectedUserId: TARGET_RUNTIME_MEMBER_ID,
         mailboxItemId: eventId,
       },
-      result: { status: "accepted", targetLabel: "100 Club" },
+      result: { status: "accepted", targetLabel: "Trail Crew" },
     });
+    expect(tx.hostedGroupMember.findMany).toHaveBeenCalledOnce();
     expect(mocks.resolveHostedAssistantNotificationDestination)
       .toHaveBeenCalledOnce();
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)

@@ -1,6 +1,7 @@
 ---
 title: 'Changelog guidance omits structured tryIt schema'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2426'
 ---
 
 ## Expected Behavior

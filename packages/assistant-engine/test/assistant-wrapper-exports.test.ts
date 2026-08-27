@@ -215,6 +215,7 @@ describe('assistant-engine wrapper exports', () => {
     ).filter((exportKey) => exportKey.startsWith('./assistant/'))
 
     expect(implementationShapedAssistantExports).toEqual([])
+    expect(packageManifest.exports?.['./device-dynamic-tool']).toBeUndefined()
   })
 
   it('keeps raw provider execution and catalog internals off the public facades', async () => {

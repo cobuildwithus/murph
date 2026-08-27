@@ -372,7 +372,7 @@ export async function renderMurphCliEntrypointError(
   options: { human?: boolean | undefined } = {},
 ): Promise<RenderedMurphCliError> {
   const { projectVaultCliError } = await import(
-    '@murphai/operator-config/vault-cli-error-projection'
+    './vault-cli-error-projection.js'
   )
   const projected = projectVaultCliError(error)
   const explicitFormat = findExplicitOutputFormat(argv)

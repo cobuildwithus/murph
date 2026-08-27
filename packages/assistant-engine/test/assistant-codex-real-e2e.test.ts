@@ -91,8 +91,10 @@ import {
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
   MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
 } from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import {
@@ -126,6 +128,7 @@ import {
 import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedDeviceToolRequest,
+  AssistantHostedGroupSharedReadResponse,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
@@ -197,6 +200,12 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
+  'allow_login_shell=false',
+  'features.plugins=false',
+  'skills.include_instructions=false',
+  'skills.bundled.enabled=false',
+] as const
 const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
 const REPEATED_SET_ALPHA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7Q'
 const REPEATED_SET_BETA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7R'
@@ -500,6 +509,134 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
         expect(result.response).toMatch(/cobalt/iu)
         expect(result.response).not.toMatch(
           /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
+  it(
+    'answers from the admitted voice memo transcript without claiming the memo is unavailable',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-voice-memo-attachment-evidence-e2e-'),
+      )
+      const transcript = [
+        'The synthetic verification phrase is amber lighthouse.',
+        'Reply with that two-word phrase.',
+      ].join(' ')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const promptInput: AssistantAutoReplyPromptInput = {
+          actorIsSelf: false,
+          attachmentDescriptors: [{
+            attachmentId: 'attachment-voice-evidence',
+            contentType: 'audio/mp4',
+            fileName: 'voice-note.m4a',
+            kind: 'voice_memo',
+            sizeBytes: 1_024,
+          }],
+          attachmentEvidence: {
+            attachments: [{
+              byteSize: 1_024,
+              derived: null,
+              descriptorAttachmentId: 'attachment-voice-evidence',
+              fileName: 'voice-note.m4a',
+              inlineFragments: [{
+                kind: 'attachment_transcript',
+                label: 'attachment-1-transcript',
+                text: transcript,
+                truncated: false,
+              }],
+              kind: 'audio',
+              mime: 'audio/mp4',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: null,
+              sourceAttachmentId: 'attachment-voice-evidence',
+            }],
+            optionalInboxCaptureId: 'capture-voice-evidence',
+            reasonCode: null,
+            source: 'hosted-inbox-projection',
+            status: 'available',
+            updatedAt: '2026-08-26T20:00:01.000Z',
+          },
+          conversation: {
+            accountId: 'account-voice-evidence',
+            actorId: 'actor-voice-evidence',
+            actorIsSelf: false,
+            source: 'linq',
+            threadId: 'thread-voice-evidence',
+            threadIsDirect: true,
+          },
+          inputId: 'input-voice-evidence',
+          occurredAt: '2026-08-26T20:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'capture-voice-evidence',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T20:00:00.000Z',
+          replyContext: null,
+          replyTarget: {
+            channel: 'linq',
+            messageId: 'message-voice-evidence',
+            threadId: 'thread-voice-evidence',
+          },
+          source: 'linq',
+          sourceMetadata: null,
+          telegramMetadata: null,
+          text: 'Received a voice memo.',
+        }
+        const prepared = await prepareAssistantAutoReplyInput(
+          [promptInput],
+          workingDirectory,
+        )
+        if (prepared.kind !== 'ready') {
+          throw new Error(`Expected a ready voice memo prompt, received ${prepared.kind}.`)
+        }
+        expect(prepared.prompt).toContain(transcript)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: prepared.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[voice-memo-attachment-evidence-e2e] ${JSON.stringify({
+            promptBytes: Buffer.byteLength(prepared.prompt, 'utf8'),
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
+        expect(result.finalMessage).toMatch(/amber lighthouse/iu)
+        expect(result.finalMessage).not.toMatch(
+          /(?:could(?:n't| not)|can(?:'t|not)) access|did(?:n't| not) come through|resend|type it out/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -1600,6 +1737,157 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
 })
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
+  it(
+    'starts one exact ad-hoc planned workout without logging its sets',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-exact-planned-workout-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic planned workout proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] [--exercise <name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=...>]',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout units show --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: 'Start a workout: bench press, 3 sets of 8 reps at 135 lb.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const matching = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          const exercise = parsed.success
+            ? parsed.data.exercises.find((entry) => entry.name === 'Bench press')
+            : undefined
+          return parsed.success
+            && exercise?.memberRepsPerSet === 8
+            && exercise.targetWeightPerSet === 135
+            && exercise.targetWeightUnit === 'lb'
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const workoutCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const startCommands = workoutCommands.filter((command) =>
+          command.startsWith('workout start ')
+        )
+
+        process.stdout.write(
+          `[workout-planned-prefill-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            scenario: 'three exact bench sets at a member-stated load',
+          })}\n`,
+        )
+        expect(matching).toHaveLength(1)
+        const workout = matching[0]!
+        expect(workout.workout.exercises[0]).toMatchObject({
+          memberRepsPerSet: 8,
+          mode: 'weight_reps',
+          name: 'Bench press',
+          setPlanIsFinite: true,
+          targetWeightPerSet: 135,
+          targetWeightUnit: 'lb',
+          unitOverride: 'lb',
+        })
+        expect(workout.workout.exercises[0]?.sets).toEqual([
+          { order: 1 },
+          { order: 2 },
+          { order: 3 },
+        ])
+        expect(startCommands).toHaveLength(1)
+        expect(startCommands[0]).toContain(
+          '--exercise name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
+        )
+        expect(workoutCommands.join('\n')).not.toMatch(
+          /workout (?:exercise (?:add|set-reps)|set log)/u,
+        )
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: workout.id,
+            kind: 'workout',
+          },
+          workout: {
+            exercises: [{
+              name: 'Bench press',
+              sets: [
+                { actual: null, status: 'pending', target: '135 lb × 8' },
+                { actual: null, status: 'pending', target: '135 lb × 8' },
+                { actual: null, status: 'pending', target: '135 lb × 8' },
+              ],
+            }],
+            state: 'active',
+          },
+        })
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
     async () => {
@@ -3199,13 +3487,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          configOverrides: ['allow_login_shell=false'],
           developerInstructions: [
             buildRoutinePresentationDeveloperInstructions({
               channel: 'telegram' as const,
             }),
             exerciseGuidance,
-            'Test harness tool result contract: when calling a Murph tool inside functions.exec, pass its returned value directly to text(). Do not read a content property from the result.',
           ].join('\n\n'),
           env: {
             ...config.env,
@@ -4463,6 +4749,226 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'attributes a scheduled group comparison from labeled shared rows',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-labeled-summary-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildScheduledAutomationDeveloperInstructions(
+              'group',
+              'shared_read',
+            ),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return buildLabeledSharedStepsReadResponse({
+                  averyValue: 12_345,
+                  date: '2026-08-04',
+                  jordanValue: 4_321,
+                })
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation recipe:',
+            'Create one concise current-chat activity update. State each participant\'s latest completed-day shared steps as a participant-specific observation, then compare them using the exact returned totals.',
+            'The group did not request anonymization.',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
+        )
+
+        process.stdout.write(
+          `[group-labeled-summary-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            sharedReads,
+          })}\n`,
+        )
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+          },
+        })
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+        }])
+        expectTwoLabeledSharedValues({
+          first: { displayName: 'Avery', value: 12_345 },
+          message: result.finalMessage,
+          second: { displayName: 'Jordan', value: 4_321 },
+        })
+        expect(result.finalMessage).toMatch(
+          /\b(?:ahead|behind|compared|difference|exceeded|fewer|gap|higher|led|lower|more|outpaced|spread|trailed|versus|vs\.?|while)\b/iu,
+        )
+        expectNoSharedAttributionRefusal(result.finalMessage)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'refreshes labeled shared rows before an explicit current attribution question',
+    async () => {
+      const journey = await runGroupSharedStepsReadJourney({
+        fixture: {
+          averyValue: 13_579,
+          date: '2026-07-28',
+          jordanValue: 6_246,
+        },
+        prompt: [
+          'Earlier group update:',
+          '"The shared step totals were 12,345 and 4,321."',
+          'Current group message:',
+          '"Murph, who has which shared step totals now?"',
+        ],
+        temporaryLabel: 'current-attribution',
+      })
+
+      expectOneSharedStepsRead(journey)
+      expectTwoLabeledSharedValues({
+        first: { displayName: 'Avery', value: 13_579 },
+        message: journey.finalMessage,
+        second: { displayName: 'Jordan', value: 6_246 },
+      })
+      expect(journey.finalMessage).not.toMatch(/12,?345|4,?321/u)
+      expectNoSharedAttributionRefusal(journey.finalMessage)
+    },
+    360_000,
+  )
+
+  it(
+    'does not remap referenced historical shared values from a fresh read',
+    async () => {
+      const journey = await runGroupSharedStepsReadJourney({
+        fixture: {
+          averyValue: 13_579,
+          date: '2026-07-28',
+          jordanValue: 6_246,
+        },
+        prompt: [
+          'Earlier group update:',
+          '"The unlabeled shared step totals for July 21 were 12,345 and 4,321."',
+          'Current group message:',
+          '"Who had those July 21 totals, and what are the current shared step totals now?"',
+        ],
+        temporaryLabel: 'historical-attribution',
+      })
+
+      expectOneSharedStepsRead(journey)
+      expectTwoLabeledSharedValues({
+        first: { displayName: 'Avery', value: 13_579 },
+        message: journey.finalMessage,
+        second: { displayName: 'Jordan', value: 6_246 },
+      })
+      expectNoHistoricalValueRemap(journey.finalMessage)
+      expectHistoricalMappingLimitation(journey.finalMessage)
+    },
+    360_000,
+  )
+
+  it(
+    'does not guess across ambiguous shared-row labels',
+    async () => {
+      const journey = await runGroupSharedStepsReadJourney({
+        fixture: {
+          averyValue: 12_345,
+          date: '2026-08-04',
+          displayNames: [null, null],
+          jordanValue: 4_321,
+        },
+        prompt: [
+          'Current group message:',
+          '"Who has which shared step total now?"',
+        ],
+        temporaryLabel: 'ambiguous-labels',
+      })
+
+      expectOneSharedStepsRead(journey)
+      expect(journey.finalMessage).not.toMatch(
+        /(?:member|participant)_(?:avery|jordan)/iu,
+      )
+      expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
+      expect(journey.finalMessage).toMatch(
+        /(?:(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:absent|ambiguous|missing|unavailable|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
+      )
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a requested group shared update anonymous',
+    async () => {
+      const journey = await runGroupSharedStepsReadJourney({
+        fixture: {
+          averyValue: 12_345,
+          date: '2026-08-04',
+          jordanValue: 4_321,
+        },
+        prompt: [
+          'Current group message:',
+          '"Give us a useful current shared-steps update, but anonymize the participants and do not use their names."',
+        ],
+        temporaryLabel: 'anonymous-update',
+      })
+
+      expectOneSharedStepsRead(journey)
+      expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
+      const normalized = journey.finalMessage.replaceAll(',', '')
+      expect(normalized).toContain('12345')
+      expect(normalized).toContain('4321')
+    },
+    360_000,
+  )
+
+  it(
     'reads fresh shared data before answering a visibility check',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -4844,7 +5350,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'uses the saved preferred name in a private-to-group handoff',
+    'queues an exact named private-to-group handoff without listing memberships',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -4901,7 +5407,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          dynamicTools: [
+            MURPH_GROUP_CONSULT_TOOL,
+            MURPH_GROUP_MEMBERSHIP_TOOL,
+          ],
           env: {
             ...config.env,
             PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,
@@ -4927,11 +5436,32 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             groupTool: {
               request: async (request) => {
                 groupRequests.push(request)
+                if (request.action === 'list_memberships') {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [],
+                      memberships: [{
+                        displayName: 'Trail Crew',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 8,
+                        membershipId: 'membership_trail_crew',
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
                 return {
                   action: 'handoff',
                   result: {
                     status: 'accepted',
-                    targetLabel: 'Training Circle',
+                    targetLabel: 'Trail Crew',
                   },
                 }
               },
@@ -4944,7 +5474,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'Tell Training Circle that I completed the planned session.',
+            'Tell Trail Crew that I completed the planned session.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,
@@ -4971,6 +5501,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                 : null,
             memoryCommands,
             reply: result.finalMessage.trim(),
+            toolActions: groupRequests.flatMap((request) =>
+              request
+              && typeof request === 'object'
+              && 'action' in request
+              && typeof request.action === 'string'
+                ? [request.action]
+                : []
+            ),
             toolCallCount: groupRequests.length,
           })}\n`,
         )
@@ -4979,7 +5517,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const handoffRequest = groupRequests[0]
         expect(handoffRequest).toMatchObject({
           action: 'handoff',
-          groupLabel: 'Training Circle',
+          groupLabel: 'Trail Crew',
         })
         if (
           !handoffRequest
@@ -4995,6 +5533,240 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           memoryCommands.filter((command) => command.startsWith('memory show')),
         ).toHaveLength(1)
         expect(result.finalMessage).toMatch(/queu/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'paginates memberships and disclosure grants independently before leaving one exact group',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-dual-cursor-e2e-'),
+      )
+      const membershipCursor =
+        'eyJjcmVhdGVkQXQiOiIyMDI2LTA4LTI2VDEwOjAwOjAwLjAwMFoiLCJpZCI6Im1lbWJlcnNoaXBfcGFnZV8yIn0'
+      const firstDisclosureCursor =
+        'eyJncmFudGVkQXQiOiIyMDI2LTA4LTI2VDEwOjAwOjAwLjAwMFoiLCJpZCI6ImRpc2Nsb3N1cmVfcGFnZV8yIn0'
+      const secondDisclosureCursor =
+        'eyJncmFudGVkQXQiOiIyMDI2LTA4LTI1VDEwOjAwOjAwLjAwMFoiLCJpZCI6ImRpc2Nsb3N1cmVfcGFnZV8zIn0'
+      const targetMembershipId = 'membership_summit_circle'
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_dual_cursor',
+              recipientKey: 'recipient_private_group_dual_cursor',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_dual_cursor'],
+              conversationId: 'conversation_private_group_dual_cursor',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_dual_cursor'],
+              originSessionId: 'session_private_group_dual_cursor',
+              recipientKey: 'recipient_private_group_dual_cursor',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'leave_membership') {
+                  if (request.membershipId !== targetMembershipId) {
+                    throw new Error('Expected the exact paginated membership id.')
+                  }
+                  return {
+                    action: 'leave_membership',
+                    result: { status: 'left' },
+                  }
+                }
+                if (request.action !== 'list_memberships') {
+                  throw new Error(`Unexpected synthetic group action: ${request.action}`)
+                }
+                if (
+                  request.cursor === undefined
+                  && request.disclosureGrantCursor === undefined
+                ) {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [{
+                        grantId: 'grant_harbor_training_photo',
+                        groupLabel: 'Harbor Walkers',
+                        permissionText: 'Ask for a training photo after weekend walks.',
+                      }],
+                      disclosureGrantsTruncated: true,
+                      memberships: [{
+                        displayName: 'Harbor Walkers',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 6,
+                        membershipId: 'membership_harbor_walkers',
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      nextCursor: membershipCursor,
+                      nextDisclosureGrantCursor: firstDisclosureCursor,
+                      status: 'ok',
+                      truncated: true,
+                    },
+                  }
+                }
+                if (
+                  request.cursor === membershipCursor
+                  && request.disclosureGrantCursor === firstDisclosureCursor
+                ) {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [{
+                        grantId: 'grant_garden_sleep_check',
+                        groupLabel: 'Garden Circle',
+                        permissionText: 'Ask whether last night felt restful.',
+                      }],
+                      disclosureGrantsTruncated: true,
+                      memberships: [{
+                        displayName: 'Summit Circle',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'team',
+                        memberCount: 9,
+                        membershipId: targetMembershipId,
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      nextCursor: null,
+                      nextDisclosureGrantCursor: secondDisclosureCursor,
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
+                if (
+                  request.cursor === undefined
+                  && request.disclosureGrantCursor === secondDisclosureCursor
+                ) {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [{
+                        grantId: 'grant_summit_recovery_reflection',
+                        groupLabel: 'Summit Circle',
+                        permissionText: 'Ask for a weekly recovery reflection.',
+                      }],
+                      disclosureGrantsTruncated: false,
+                      memberships: [{
+                        displayName: 'Harbor Walkers',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 6,
+                        membershipId: 'membership_harbor_walkers',
+                        permissionsUrl: null,
+                        requestedVaultShareProjectionScopes: [],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      nextCursor: membershipCursor,
+                      nextDisclosureGrantCursor: null,
+                      status: 'ok',
+                      truncated: true,
+                    },
+                  }
+                }
+                throw new Error(
+                  'Membership and disclosure cursors must be forwarded unchanged in their own fields.',
+                )
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Please leave whichever of my groups can currently ask me for a weekly recovery reflection. I do not remember which group that is.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[group-dual-cursor-e2e] ${JSON.stringify({
+            reply: result.finalMessage.trim(),
+            toolActions: groupRequests.flatMap((request) =>
+              request
+              && typeof request === 'object'
+              && 'action' in request
+              && typeof request.action === 'string'
+                ? [request.action]
+                : []
+            ),
+            toolCallCount: groupRequests.length,
+          })}\n`,
+        )
+
+        expect(groupRequests).toEqual([
+          { action: 'list_memberships' },
+          {
+            action: 'list_memberships',
+            cursor: membershipCursor,
+            disclosureGrantCursor: firstDisclosureCursor,
+          },
+          {
+            action: 'list_memberships',
+            disclosureGrantCursor: secondDisclosureCursor,
+          },
+          {
+            action: 'leave_membership',
+            membershipId: targetMembershipId,
+          },
+        ])
+        expect(
+          groupRequests.filter((request) =>
+            request !== null
+            && typeof request === 'object'
+            && 'action' in request
+            && request.action === 'leave_membership'
+          ),
+        ).toHaveLength(1)
+        expect(result.finalMessage).toMatch(/left|removed|no longer/iu)
+        expect(result.finalMessage).toMatch(/Summit Circle/iu)
+        expect(result.finalMessage).not.toMatch(
+          /could(?: not|'t) find|not (?:available|found)|no (?:matching )?group/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -9062,6 +9834,139 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
   )
 })
 
+describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
+  it(
+    'checks and clears one stuck physical note without generating or sending another',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-physical-note-stuck-recovery-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const messageRef = `ain_${'6'.repeat(32)}`
+      const targetMessageRef = `ain_${'7'.repeat(32)}`
+      const resolveRequests: unknown[] = []
+      let sendCount = 0
+
+      try {
+        await materializePhysicalNoteSkill({ skillsRoot })
+        const hostedToolContext = {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [messageRef],
+            conversationId: 'conversation-physical-note-stuck-recovery',
+            conversationScope: 'direct' as const,
+            inboundMailboxItemIds: ['mailbox-physical-note-stuck-recovery'],
+            originSessionId: 'session-physical-note-stuck-recovery',
+            recipientKey: 'recipient-physical-note-stuck-recovery',
+          }),
+          physicalNotes: {
+            async resolve(request: unknown) {
+              resolveRequests.push(request)
+              return {
+                remainingUnresolved: false,
+                retryAfter: null,
+                settledUsageCostUsdMicros: null,
+                status: 'clear' as const,
+              }
+            },
+            async send() {
+              sendCount += 1
+              return {
+                complimentary: false,
+                costUsdMicros: '250000',
+                failureReason: 'unknown' as const,
+                physicalNoteId: 'hpn_unexpected_send',
+                status: 'failed' as const,
+              }
+            },
+          },
+          privateImageUrlPublisher: {
+            async publishPrivateImageUrl() {
+              throw new Error('Recovery must not publish artwork.')
+            },
+          },
+          sendVaultFile: async () => ({
+            filename: 'unused',
+            status: 'denied' as const,
+          }),
+          vaultFileSendAvailable: false,
+        } satisfies AssistantHostedToolContext
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          authorizeAcceptedMessageTarget: async ({ messageRef: requested }) =>
+            requested === messageRef ? { targetInputId: messageRef } : null,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: resolveMurphDynamicTools({
+            physicalNotesAvailable: true,
+          }),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            `Earlier physical-note send Message ref: ${targetMessageRef}`,
+            'That earlier physical note is stuck. Please check it and safely clear the blocker if the provider record allows. Do not create or send a new note.',
+          ].join('\n\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const recoveryCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name
+        )
+        const imageCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )
+        const sendCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )
+
+        process.stdout.write(
+          `[physical-note-stuck-recovery-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            scenario: 'clears one provider-absent blocker without a new send',
+          })}\n`,
+        )
+        expect(recoveryCalls).toHaveLength(1)
+        expect(imageCalls).toHaveLength(0)
+        expect(sendCalls).toHaveLength(0)
+        expect(resolveRequests).toEqual([{
+          originAssistantInputId: messageRef,
+          targetKind: 'send',
+          targetOriginAssistantInputId: targetMessageRef,
+        }])
+        expect(sendCount).toBe(0)
+        expect(result.finalMessage).toMatch(/clear|no longer block/iu)
+        expect(result.finalMessage).toMatch(/no unresolved|nothing (?:new )?was sent/iu)
+        expect(result.finalMessage).not.toMatch(/generat|new artwork|sent a new note/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 const PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH =
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength
 
@@ -10754,6 +11659,31 @@ describe('real Codex app-server cache usage e2e harness', () => {
       'features.multi_agent_v2.enabled=true',
       'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
       'features.multi_agent_v2.max_concurrent_threads_per_session=4',
+    ])
+  })
+
+  it('pins live turns to the hosted shell and plugin boundaries', async () => {
+    let observedConfigOverrides: readonly string[] | undefined
+
+    await expect(executeRealCodexAppServerTurn(
+      {
+        configOverrides: ['features.shell_tool=false'],
+        dynamicTools: [],
+        prompt: 'Capture the real-Codex harness configuration.',
+        workingDirectory: '/synthetic-workspace',
+      },
+      async (input) => {
+        observedConfigOverrides = input.configOverrides
+        throw new Error('Stop after capturing the launch input.')
+      },
+    )).rejects.toThrow('Real Codex cache probe failed')
+
+    expect(observedConfigOverrides).toEqual([
+      'allow_login_shell=false',
+      'features.plugins=false',
+      'skills.include_instructions=false',
+      'skills.bundled.enabled=false',
+      'features.shell_tool=false',
     ])
   })
 
@@ -14567,10 +15497,15 @@ async function executeRealCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
     dynamicTools?: CodexAppServerTurnInput['dynamicTools']
   },
+  executeTurn: typeof executeCodexAppServerTurn = executeCodexAppServerTurn,
 ): ReturnType<typeof executeCodexAppServerTurn> {
   try {
-    return await executeCodexAppServerTurn({
+    return await executeTurn({
       ...input,
+      configOverrides: [
+        ...REAL_CODEX_HOSTED_CONFIG_OVERRIDES,
+        ...(input.configOverrides ?? []),
+      ],
       dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
         allowFinishWithoutReply: input.allowFinishWithoutReply,
         messageTargetingAvailable:
@@ -16075,12 +17010,17 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
 
 function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
+  assistantHostedGroupToolSurface:
+    | 'families'
+    | 'shared_read'
+    | 'none' = 'families',
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
+    assistantHostedGroupToolSurface,
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
@@ -16098,12 +17038,257 @@ function buildScheduledAutomationDeveloperInstructions(
   })
 }
 
-function buildHostedGroupStatusDeveloperInstructions(): string {
+interface GroupSharedStepsFixtureInput {
+  averyValue: number
+  date: string
+  displayNames?: readonly [string | null, string | null]
+  jordanValue: number
+}
+
+async function runGroupSharedStepsReadJourney(input: {
+  fixture: GroupSharedStepsFixtureInput
+  prompt: readonly string[]
+  temporaryLabel: string
+}) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), `murph-group-${input.temporaryLabel}-e2e-`),
+  )
+  const sharedRequests: unknown[] = []
+
+  try {
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    await materializeAssistantSkill({
+      skillsRoot,
+      slug: 'group-chat',
+    })
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions:
+        buildHostedGroupStatusDeveloperInstructions('shared_read'),
+      dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+      env: {
+        ...config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      excludeResumeTurns: true,
+      groupConversation: true,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async (request) => {
+            sharedRequests.push(request)
+            return buildLabeledSharedStepsReadResponse(input.fixture)
+          },
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt: input.prompt.join('\n'),
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+    const sharedReads = readCapabilityRoutingActions(result.jsonEvents).filter(
+      (action) =>
+        action.kind === 'dynamic'
+        && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name,
+    )
+    const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
+      const record = readRecord(event)
+      if (readString(record?.method, record?.type) !== 'item/completed') {
+        return false
+      }
+      const item = readRecord(readRecord(record?.params)?.item)
+      return readString(item?.type) === 'agentMessage'
+        && readString(item?.text)?.trim() === result.finalMessage.trim()
+    })
+
+    process.stdout.write(
+      `[group-${input.temporaryLabel}-e2e] ${JSON.stringify({
+        finalMessage: result.finalMessage,
+        sharedReads,
+      })}\n`,
+    )
+    return {
+      finalAnswerEventIndex,
+      finalMessage: result.finalMessage,
+      sharedReads,
+      sharedRequests,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+type GroupSharedStepsReadJourney = Awaited<
+  ReturnType<typeof runGroupSharedStepsReadJourney>
+>
+
+function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney): void {
+  expect(journey.sharedReads).toHaveLength(1)
+  expect(journey.sharedReads[0]).toMatchObject({
+    argumentsValue: {
+      action: 'read_shared',
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    },
+  })
+  expect(journey.sharedRequests).toEqual([{
+    projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+  }])
+  expect(journey.finalAnswerEventIndex).toBeGreaterThan(
+    journey.sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,
+  )
+}
+
+function buildLabeledSharedStepsReadResponse(
+  input: GroupSharedStepsFixtureInput,
+): AssistantHostedGroupSharedReadResponse {
+  const displayNames = input.displayNames ?? ['Avery', 'Jordan']
+  const buildMember = (
+    displayName: string | null,
+    participantKey: string,
+    value: number,
+  ) => ({
+    currentTurnHandles: [],
+    displayName,
+    memberId: `member_${participantKey}`,
+    participantId: `participant_${participantKey}`,
+    projections: [{
+      dataStatus: 'available' as const,
+      grantedAt: '2026-07-01T12:00:00.000Z',
+      grantStatus: 'granted' as const,
+      projectionScope: {
+        projectionKind: 'steps-days.v0' as const,
+      },
+      projectionScopeKey: 'steps-days.v0',
+      records: [{
+        data: {
+          date: input.date,
+          metricKey: 'steps' as const,
+          unit: 'count' as const,
+          value,
+        },
+        occurredAt: `${input.date}T00:00:00.000Z`,
+        recordKey: input.date,
+      }],
+    }],
+  })
+
+  return {
+    members: [
+      buildMember(displayNames[0], 'avery', input.averyValue),
+      buildMember(displayNames[1], 'jordan', input.jordanValue),
+    ],
+    requestedProjectionScopeKeys: ['steps-days.v0'],
+    status: 'ok',
+  }
+}
+
+function expectTwoLabeledSharedValues(input: {
+  first: { displayName: string; value: number }
+  message: string
+  second: { displayName: string; value: number }
+}): void {
+  const message = input.message.replaceAll(',', '')
+  const firstLabel = escapeRegExp(input.first.displayName)
+  const firstValue = String(input.first.value)
+  const secondLabel = escapeRegExp(input.second.displayName)
+  const secondValue = String(input.second.value)
+  const hasDirectAssociation = (
+    label: string,
+    value: string,
+    otherLabel: string,
+    otherValue: string,
+  ): boolean => {
+    const boundary = `(?:(?!${otherLabel}|${otherValue})[^.!?\\n]){0,120}`
+    return new RegExp(
+      `(?:${label}${boundary}${value}|${value}${boundary}${label})`,
+      'iu',
+    ).test(message)
+  }
+  const direct = hasDirectAssociation(
+    firstLabel,
+    firstValue,
+    secondLabel,
+    secondValue,
+  ) && hasDirectAssociation(
+    secondLabel,
+    secondValue,
+    firstLabel,
+    firstValue,
+  )
+  const labelsThenValuesRespectively = new RegExp(
+    `${firstLabel}[^.!?\\n]{0,100}${secondLabel}[^.!?\\n]{0,100}${firstValue}[^.!?\\n]{0,100}${secondValue}[^.!?\\n]{0,100}respectively`,
+    'iu',
+  ).test(message)
+  const valuesThenLabelsRespectively = new RegExp(
+    `${firstValue}[^.!?\\n]{0,100}${secondValue}[^.!?\\n]{0,100}${firstLabel}[^.!?\\n]{0,100}${secondLabel}[^.!?\\n]{0,100}respectively`,
+    'iu',
+  ).test(message)
+
+  expect(
+    direct || labelsThenValuesRespectively || valuesThenLabelsRespectively,
+  ).toBe(true)
+}
+
+function expectNoSharedAttributionRefusal(message: string): void {
+  expect(message).not.toMatch(
+    /(?:mapping|who had which|which (?:member|participant|person))[^.!?]{0,100}(?:unavailable|unknown|cannot|can't|need[^.!?]{0,30}confirm)/iu,
+  )
+  expect(message).not.toMatch(
+    /(?:cannot|can't|unable to|do not know|don't know)[^.!?\n]{0,80}(?:tell|determine|map|attribute|know)[^.!?\n]{0,80}(?:who|which|value|number)/iu,
+  )
+  expect(message).not.toMatch(
+    /(?:ask|check with|wait for)[^.!?\n]{0,50}(?:Avery|Jordan|members?|participants?|people|humans?)[^.!?\n]{0,50}(?:confirm|reconfirm|verify)/iu,
+  )
+  expect(message).not.toMatch(
+    /(?:Avery|Jordan|members?|participants?|people|humans?)[^.!?\n]{0,50}(?:must|need to|have to)[^.!?\n]{0,30}(?:confirm|reconfirm|verify)/iu,
+  )
+}
+
+function expectNoHistoricalValueRemap(message: string): void {
+  const normalized = message.replaceAll(',', '')
+  expect(normalized).not.toMatch(
+    /(?:(?:Avery|Jordan)[^.!?\n]{0,60}(?:had|logged|recorded|was)[^.!?\n]{0,30}(?:12345|4321)|(?:12345|4321)[^.!?\n]{0,60}(?:was|belonged to)[^.!?\n]{0,30}(?:Avery|Jordan))/iu,
+  )
+}
+
+function expectHistoricalMappingLimitation(message: string): void {
+  expect(message).toMatch(
+    /(?:(?:earlier|historical|July 21|prior)[^.!?\n]{0,120}(?:cannot|can't|unable|unknown|unlabeled|no (?:reliable )?mapping)|(?:cannot|can't|unable)[^.!?\n]{0,120}(?:earlier|historical|July 21|prior))/iu,
+  )
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function buildHostedGroupStatusDeveloperInstructions(
+  assistantHostedGroupToolSurface:
+    | 'families'
+    | 'shared_read'
+    | 'none' = 'families',
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
+    assistantHostedGroupToolSurface,
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
