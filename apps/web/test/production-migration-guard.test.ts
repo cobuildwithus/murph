@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,8 +51,197 @@ import {
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
+const normalizeShellContinuations = (source: string): string =>
+  source.replace(/\\\r?\n[\t ]*/gu, " ");
+const productionVercelEnvRun =
+  /vercel env run[^\n]*(?:--environment(?:=|\s+)|-e(?:=|\s+))production/u;
 
 describe("hosted web production migration guard", () => {
+  test("stops local work before production-secret maintenance", async () => {
+    const repoRoot = path.resolve(appRoot, "..", "..");
+    const scriptPaths = (await readdir(path.join(appRoot, "scripts")))
+      .filter((entry) => entry.endsWith(".ts"))
+      .map((entry) => path.join(appRoot, "scripts", entry));
+    const operatorSurfaces = [
+      path.join(appRoot, "README.md"),
+      path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
+      ...scriptPaths,
+    ];
+
+    assert.match(
+      normalizeShellContinuations(String.raw`vercel env run \
+        --environment=production -- command`),
+      productionVercelEnvRun,
+      "the guard must detect production commands split across a shell continuation",
+    );
+
+    for (const surfacePath of operatorSurfaces) {
+      const surface = await readFile(surfacePath, "utf8");
+      assert.doesNotMatch(
+        normalizeShellContinuations(surface),
+        productionVercelEnvRun,
+        `${path.relative(repoRoot, surfacePath)} must not read production secrets into a local command`,
+      );
+    }
+
+    const agentPolicy = await readFile(path.join(repoRoot, "AGENTS.md"), "utf8");
+    assert.match(
+      agentPolicy,
+      /Treat production secret values as unavailable to local agents and local commands/u,
+    );
+    assert.match(agentPolicy, /Do not build that path before the user decides/u);
+
+    const securityPolicy = await readFile(
+      path.join(repoRoot, "agent-docs", "SECURITY.md"),
+      "utf8",
+    );
+    assert.match(securityPolicy, /### Local production-secret stop boundary/u);
+    assert.match(securityPolicy, /stop before\s+implementation or execution/u);
+    assert.match(securityPolicy, /discuss the decision with the user/u);
+
+    const webReadme = await readFile(path.join(appRoot, "README.md"), "utf8");
+    assert.match(webReadme, /### Production-secret boundary for maintenance/u);
+    assert.match(webReadme, /Vercel\s+Sensitive values/u);
+    assert.match(
+      webReadme,
+      /Local agents and local commands must treat every production secret value/u,
+    );
+    assert.match(webReadme, /stop before implementation or execution/u);
+    assert.match(webReadme, /discuss the decision with the user/u);
+    assert.doesNotMatch(webReadme, /secrets\.HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.doesNotMatch(
+      webReadme,
+      /task-specific step in the existing `Hosted Web Contract Migrations` workflow/u,
+    );
+    assert.doesNotMatch(
+      webReadme,
+      /production\s+environment\s+wrapper\s+shown\s+by\s+the\s+script's\s+`--help`/u,
+    );
+
+    const phoneCallMigration = webReadme.match(
+      /### Hosted phone-call private-content migration\n(?<section>[\s\S]*?)(?=\n#{1,3} )/u,
+    )?.groups?.section;
+    assert.ok(phoneCallMigration, "the phone-call migration guide must remain present");
+    assert.match(
+      phoneCallMigration,
+      /no approved local execution path/u,
+    );
+    assert.match(
+      phoneCallMigration,
+      /discuss the required\s+operation and execution owner with the user/u,
+    );
+    const phoneCallStopIndex = phoneCallMigration.search(
+      /Stop before any\s+production migration/u,
+    );
+    assert.ok(phoneCallStopIndex >= 0, "the phone-call guide must contain its stop gate");
+    for (const productionAction of [
+      /Any later user-authorized path must deploy the additive migration/u,
+      /freeze production deploys and rollbacks/u,
+      /count-only dry runs/u,
+      /`HOSTED_WEB_VERCEL_\*` operator environment/u,
+    ]) {
+      const productionActionIndex = phoneCallMigration.search(productionAction);
+      assert.ok(
+        productionActionIndex > phoneCallStopIndex,
+        `the phone-call stop gate must precede ${productionAction}`,
+      );
+    }
+
+    const linqGuide = await readFile(
+      path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
+      "utf8",
+    );
+    const linqDeployOrder = linqGuide.match(
+      /## Deploy Order\n(?<section>[\s\S]*?)(?=\n## )/u,
+    )?.groups?.section;
+    assert.ok(linqDeployOrder, "the Linq deploy-order guide must remain present");
+    assert.match(linqDeployOrder, /no\s+approved local execution path/u);
+    assert.match(linqDeployOrder, /to the user before implementation\s+or execution/u);
+    const linqStopIndex = linqDeployOrder.search(/Stop before any production migration/u);
+    assert.ok(linqStopIndex >= 0, "the Linq guide must contain its stop gate");
+    for (const productionAction of [
+      /may deploy through the\s+normal production web build path/u,
+      /aggregate-only dry run/u,
+      /freeze rollbacks/u,
+      /production alias/u,
+    ]) {
+      const productionActionIndex = linqDeployOrder.search(productionAction);
+      assert.ok(
+        productionActionIndex > linqStopIndex,
+        `the Linq stop gate must precede ${productionAction}`,
+      );
+    }
+  });
+
+  test("renders the production-secret boundary in changed script help", () => {
+    const repoRoot = path.resolve(appRoot, "..", "..");
+    const helpExpectations = [
+      {
+        path: "apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
+        productionOwner: /no approved local production execution path/u,
+        requiresDiscussion: true,
+      },
+      {
+        path: "apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
+        productionOwner: /no approved local production execution path/u,
+        requiresDiscussion: true,
+      },
+      {
+        path: "apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts",
+        productionOwner: /no approved local production execution path/u,
+        requiresDiscussion: true,
+      },
+      {
+        path: "apps/web/scripts/prepare-app-review-member.ts",
+        productionOwner: /authenticated same-origin hosted Ops route/u,
+        requiresDiscussion: false,
+      },
+    ];
+
+    for (const expectation of helpExpectations) {
+      const result = spawnSync(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          "--tsconfig",
+          "apps/web/tsconfig.json",
+          expectation.path,
+          "--help",
+        ],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: process.env,
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /Local\/test usage from the repository root/u);
+      assert.match(result.stdout, /approved non-production DATABASE_URL/u);
+      assert.match(result.stdout, expectation.productionOwner);
+      if (expectation.requiresDiscussion) {
+        assert.match(
+          result.stdout,
+          /Stop before\s+production work and discuss the required operation and execution owner with\s+the user/u,
+        );
+        assert.match(
+          result.stdout,
+          /Do not retrieve or inject production secrets locally/u,
+        );
+        assert.doesNotMatch(
+          result.stdout,
+          /Hosted Web Contract Migrations workflow/u,
+        );
+      }
+      assert.doesNotMatch(result.stdout, /Perform production writes/u);
+      assert.doesNotMatch(
+        normalizeShellContinuations(result.stdout),
+        productionVercelEnvRun,
+      );
+    }
+  });
+
   test("runs only for main-branch Vercel production deploys", () => {
     const runnable: HostedWebProductionMigrationEnvironment = {
       VERCEL: "1",

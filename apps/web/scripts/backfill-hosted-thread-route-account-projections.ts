@@ -13,24 +13,26 @@ interface HostedThreadRouteAccountProjectionScriptOptions {
 }
 
 const usage = `
-Usage:
+Local/test usage from the repository root (the caller must provide an approved non-production DATABASE_URL):
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-thread-route-account-projections.ts [--batch-size 50]
 
   # Apply one bounded, idempotent batch only after the production alias is
   # proven on the new build and the prior-function drain has elapsed:
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-thread-route-account-projections.ts --apply [--batch-size 50]
 
   # Fail unless every Linq/Telegram thread route has a projected account key:
   NODE_OPTIONS=--conditions=react-server \\
-    vercel env run --environment=production -- \\
-    pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
+    pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
     apps/web/scripts/backfill-hosted-thread-route-account-projections.ts --check
+
+Production:
+  This script has no approved local production execution path. Stop before
+  production work and discuss the required operation and execution owner with
+  the user. Do not retrieve or inject production secrets locally.
 
 Options:
   --apply                 Project one bounded batch. Dry-run is the default.
