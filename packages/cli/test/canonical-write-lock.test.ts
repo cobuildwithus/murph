@@ -448,6 +448,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                     kind: "note",
                     occurredAt: "2026-03-12T12:00:00.000Z",
                     title: "Mock note",
+                    note: "Mock note body.",
                   },
                 }),
               (error: unknown) =>
@@ -455,9 +456,9 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                   code: failure.cliCode,
                   message: failure.message,
                   vaultCode: failure.vaultCode,
-                  context: {
-                    exampleDetail: failure.vaultCode.toLowerCase(),
-                  },
+                  context: failure.vaultCode === "EVENT_CONTRACT_INVALID"
+                    ? { stage: "validation" }
+                    : { exampleDetail: failure.vaultCode.toLowerCase() },
                 }),
             );
           },
@@ -491,9 +492,9 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                   code: failure.cliCode,
                   message: failure.message,
                   vaultCode: failure.vaultCode,
-                  context: {
-                    exampleDetail: failure.vaultCode.toLowerCase(),
-                  },
+                  context: failure.vaultCode === "EVENT_CONTRACT_INVALID"
+                    ? { stage: "validation" }
+                    : { exampleDetail: failure.vaultCode.toLowerCase() },
                 }),
             );
           },

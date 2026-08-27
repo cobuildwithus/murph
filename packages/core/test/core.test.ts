@@ -472,6 +472,7 @@ test("upsertEvent gives canonical id precedence over the legacy eventId alias", 
       kind: "note",
       occurredAt: "2026-03-26T21:00:00.000Z",
       title: "Identity precedence baseline",
+      note: "Baseline identity note.",
     },
   });
   const updated = await upsertEvent({
@@ -482,6 +483,7 @@ test("upsertEvent gives canonical id precedence over the legacy eventId alias", 
       kind: "note",
       occurredAt: "2026-03-26T21:00:00.000Z",
       title: "Identity precedence update",
+      note: "Updated identity note.",
     },
   });
 
@@ -498,6 +500,7 @@ test("upsertEvent gives canonical id precedence over the legacy eventId alias", 
           kind: "note",
           occurredAt: "2026-03-26T21:00:00.000Z",
           title: "Invalid canonical identity",
+          note: "Invalid identity note.",
         },
       }),
     (error: unknown) =>
