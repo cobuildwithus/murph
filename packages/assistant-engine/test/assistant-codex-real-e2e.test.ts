@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -17,6 +17,7 @@ import {
   initializeVault,
   readHabitatAspect,
   removeAutomaticMealPhoto,
+  upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
 } from '@murphai/core'
@@ -25,6 +26,7 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import {
   listEntitySchema,
   showResultSchema,
@@ -125,7 +127,17 @@ import {
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+  buildAssistantCronExecutionInstructions,
 } from '../src/assistant/cron/execution.ts'
+import {
+  findCanonicalAssistantCronRecordInList,
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  resolveCanonicalAssistantCronJobId,
+} from '../src/assistant/cron/canonical-jobs.ts'
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+} from '../src/assistant/cron/runtime-state.ts'
 import {
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
@@ -325,6 +337,10 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 )
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
+)
+const HABITAT_VOICE_E2E_TSX_LOADER = path.resolve(
+  path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+  '../tsx/dist/loader.mjs',
 )
 const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.enabled=true',
@@ -804,6 +820,271 @@ describe('onboarding policy read detection', () => {
   })
 })
 
+describeRealCodex('real Codex coordinated workout exercise e2e', () => {
+  it(
+    'expands coordinated workout exercise modifiers',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-coordinated-workout-exercise-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic coordinated workout proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] [--routine <format>]',
+              'vault-cli workout show <event-id> --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-20',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          groupConversation: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start a live workout called Position circuit with standing seated and kneeling cable presses two sets of 10 reps each none are complete yet',
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const workouts = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const observedExerciseNames = workouts.flatMap(({ workout }) =>
+          workout.exercises.map((exercise) => exercise.name.toLowerCase())
+        )
+        const hasUnexpectedDelivery =
+          (result.providerAuthoredFinalMessage ?? '').trim() !== ''
+          || result.responseCard === null
+          || result.runtimeIssueInputs.length > 0
+        const failedTurnActions =
+          workouts.length !== 1 || hasUnexpectedDelivery
+          ? readCapabilityRoutingActions(result.jsonEvents).map((action) =>
+            action.kind === 'command'
+              ? {
+                command: redactRealCodexDiagnosticText(action.command),
+                kind: action.kind,
+                outputHead: redactRealCodexDiagnosticText(action.output).slice(0, 1_500),
+                outputLength: action.output.length,
+                outputTail: redactRealCodexDiagnosticText(action.output).slice(-1_500),
+              }
+              : {
+                argumentsValue: action.argumentsValue,
+                kind: action.kind,
+                tool: action.tool,
+              }
+          )
+          : undefined
+        const failedRuntimeIssues =
+          workouts.length !== 1 || hasUnexpectedDelivery
+            ? result.runtimeIssueInputs.map((issue) => ({
+              component: issue.component,
+              details: issue.details,
+              errorCode: issue.errorCode,
+              issueKind: issue.issueKind,
+              operation: issue.operation,
+              phase: issue.phase,
+              summary: issue.summary,
+            }))
+            : undefined
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            exerciseNames: observedExerciseNames,
+            finalMessage: result.finalMessage,
+            providerAuthoredFinalMessage:
+              result.providerAuthoredFinalMessage ?? null,
+            responseCardKind: result.responseCard?.kind ?? null,
+            providerActionCount: result.providerActionCount,
+            runtimeIssueCount: result.runtimeIssueInputs.length,
+            runtimeIssues: failedRuntimeIssues,
+            scenario: 'clear-shared-head',
+            turnActions: failedTurnActions,
+          })}\n`,
+        )
+
+        expect(workouts).toHaveLength(1)
+        const workout = workouts[0]!
+        const normalizedNames = workout.workout.exercises.map((exercise) =>
+          exercise.name.toLowerCase()
+        )
+
+        expect(normalizedNames).toHaveLength(3)
+        expect(normalizedNames[0]).toMatch(/standing.*cable press/u)
+        expect(normalizedNames[1]).toMatch(/seated.*cable press/u)
+        expect(normalizedNames[2]).toMatch(/kneeling.*cable press/u)
+        expect(
+          workout.workout.exercises.map((exercise) => ({
+            memberRepsPerSet: exercise.memberRepsPerSet,
+            setCount: exercise.sets.length,
+            setPlanIsFinite: exercise.setPlanIsFinite,
+          })),
+        ).toEqual(Array.from({ length: 3 }, () => ({
+          memberRepsPerSet: 10,
+          setCount: 2,
+          setPlanIsFinite: true,
+        })))
+        const responseCard = result.responseCard
+        expect(responseCard).not.toBeNull()
+        if (responseCard === null) {
+          throw new Error('Expected the verified workout response card.')
+        }
+        expect(responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: workout.id,
+            kind: 'workout',
+          },
+          workout: {
+            state: 'active',
+          },
+        })
+        if (
+          responseCard.kind !== 'compact_table'
+          || !('workout' in responseCard)
+        ) {
+          throw new Error('Expected a structured workout compact table.')
+        }
+        expect(
+          responseCard.workout.exercises.flatMap((exercise) =>
+            exercise.sets.map((set) => set.target)
+          ),
+        ).toEqual(Array.from({ length: 6 }, () => '10 reps'))
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+        expect(result.finalMessage).toBe(
+          renderAssistantResponseCardText(responseCard),
+        )
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: workout.id,
+          events: result.jsonEvents,
+          state: 'active',
+        })
+        expect(result.runtimeIssueInputs).toEqual([])
+
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands.match(/--exercise /gu)).toHaveLength(3)
+        expect(commands).not.toContain('workout exercise add')
+
+        const commandCountBeforeAmbiguousTurn = commands
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .length
+        const ambiguousResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start another live workout called Allocation question with standing and seated cable presses three sets of 10 reps total',
+        })
+        const afterAmbiguousTurn = await readVaultRawTolerant(workingDirectory)
+        const workoutsAfterAmbiguousTurn = afterAmbiguousTurn.events.filter(
+          (event) =>
+            workoutSessionSchema.safeParse(event.attributes.workout).success,
+        )
+        const ambiguousTurnCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .slice(commandCountBeforeAmbiguousTurn)
+        const ambiguousMutationCommands = ambiguousTurnCommands.filter(
+          (command) =>
+            !command.includes('--help')
+            && /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u.test(
+              command,
+            ),
+        )
+
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            finalMessage: ambiguousResult.finalMessage,
+            mutationCommands: ambiguousMutationCommands,
+            providerAuthoredFinalMessage:
+              ambiguousResult.providerAuthoredFinalMessage ?? null,
+            scenario: 'ambiguous-quantity-allocation',
+            workoutCount: workoutsAfterAmbiguousTurn.length,
+          })}\n`,
+        )
+        expect(workoutsAfterAmbiguousTurn).toHaveLength(1)
+        expect(ambiguousResult.responseCard).toBeNull()
+        expect(ambiguousResult.finalMessage.match(/\?/gu)).toHaveLength(1)
+        expect(ambiguousResult.finalMessage).toMatch(/3|three/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/sets?/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/standing/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/seated/iu)
+        expect(ambiguousResult.finalMessage).toMatch(
+          /split|divide|allocate|how many.*(?:each|per)/iu,
+        )
+        expect(ambiguousResult.finalMessage).not.toMatch(
+          /what (?:is|does).*standing|what (?:is|does).*seated|what.*cable press|which exercise (?:do you mean|is this)/iu,
+        )
+        expect(ambiguousResult.runtimeIssueInputs).toEqual([])
+        expect(ambiguousMutationCommands).toEqual([])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+})
+
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
     'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
@@ -827,7 +1108,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
@@ -901,11 +1190,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -5289,6 +5575,119 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
+describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', () => {
+  it(
+    'keeps a current-day readout on the saved automation task',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-weekly-digest-prompt-only-e2e-'),
+      )
+
+      try {
+        await initializeVault({ vaultRoot: workingDirectory })
+        const savedInstructions = [
+          'Send one concise current-day hydration readout from the supplied evidence.',
+          'Mention the measured intake and whether the current status is on track.',
+          'Do not compare against earlier days.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-05T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-current-day-readout',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-current-day-readout',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '08:00' },
+          slug: 'synthetic-current-day-readout',
+          status: 'active',
+          supportKind: 'weekly_digest',
+          tags: [
+            'system:support-series:experiment:exp_synthetic_hydration',
+          ],
+          title: 'Synthetic current-day readout',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical automation source.')
+        }
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-05T12:00:00.000Z',
+        })
+        const prompt = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        expect(prompt).toContain(savedInstructions)
+        expect(prompt).not.toContain('Accepted support scope (engine-supplied')
+        expect(prompt).not.toContain('agreed weekly summary shape')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            prompt,
+            'Current trusted evidence for this scheduled occurrence:',
+            '- Today\'s measured fluid intake is 1.4 liters.',
+            '- The current status is on track toward the established 2.3-liter target.',
+          ].join('\n\n'),
+          reasoningEffort: 'medium',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/1\.4 liters?/iu)
+          expect(decision.text).toMatch(/on track/iu)
+          expect(decision.text).not.toMatch(
+            /weekly?|recap|earlier days|past seven days/iu,
+          )
+          console.info(
+            `[real-codex weekly-digest prompt-only] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -5338,7 +5737,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
           ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5455,7 +5854,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions:
-          buildIndependentReminderDeveloperInstructions(scope),
+          buildScheduledAutomationDeveloperInstructions(scope),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5503,7 +5902,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildIndependentReminderDeveloperInstructions('group'),
+        buildScheduledAutomationDeveloperInstructions('group'),
       dynamicTools: [],
       env: config.env,
       excludeResumeTurns: true,
@@ -7815,6 +8214,179 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
 })
 
 describeRealCodex('real Codex support escalation e2e', () => {
+  it(
+    'product-feedback schema recovery contract accepts one corrected support call',
+    async () => {
+      const recordedFeedback: Array<{
+        kind: string
+        summary: string
+      }> = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push({
+              kind: feedback.kind,
+              summary: feedback.summary,
+            })
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic validation-recovery probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const firstCall = calls[0]
+      const correctedCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected two product-feedback dynamic tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.kind).toBe('frustration')
+      expect(correctedCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+      expect(correctedCall.argumentsValue.summary).toMatch(
+        /^Support escalation: \S/iu,
+      )
+      expect(readString(correctedCall.argumentsValue.summary)?.length)
+        .toBeLessThanOrEqual(5_000)
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+      expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract stops after a second support rejection',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-terminal-e2e-',
+        probeDeveloperInstructions: [
+          'Synthetic terminal-validation probe contract:',
+          'On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+          'On a second call only, if one occurs, omit supportArea and include an unsupported top-level supportProblem field with the value classification.',
+        ].join(' '),
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic terminal-validation probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-terminal-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'two rejected calls and no third attempt').toHaveLength(2)
+      const firstCall = calls[0]
+      const secondCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || secondCall?.kind !== 'dynamic') {
+        throw new Error('Expected two rejected product-feedback tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(secondCall.argumentsValue.supportArea).toBeUndefined()
+      expect(secondCall.argumentsValue.supportProblem).toBe('classification')
+      expect(recordedFeedback).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).not.toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract keeps ordinary acceptance silent',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-ordinary-feedback-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value dashboard.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic ordinary-feedback probe in a verified private conversation.',
+          'Murph keeps classifying a pinned generic dashboard item as inactive, which is frustrating. Give me the smallest safe workaround.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[ordinary-product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const correctedCall = calls[1]
+      if (correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected one corrected ordinary-feedback call.')
+      }
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.summary).not.toMatch(
+        /^Support escalation:/iu,
+      )
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).not.toMatch(
+        /feedback|recorded|logged|triage|account-linked escalation|direct notification|support@/iu,
+      )
+    },
+    720_000,
+  )
+
   it(
     'sends once from an explicit private request and never from a group',
     async () => {
@@ -10228,17 +10800,13 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const tsxLoaderPath = path.resolve(
-    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
-    '../tsx/dist/loader.mjs',
-  )
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
-      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
@@ -11347,6 +11915,48 @@ function createRealCodexSupportHostedToolContext(
   }
 }
 
+async function executeRealCodexProductFeedbackProbe(input: {
+  directoryPrefix: string
+  probeDeveloperInstructions?: string
+  productFeedbackRecorder: AssistantTurnProductFeedbackRecorder
+  prompt: string
+}) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), input.directoryPrefix),
+  )
+
+  try {
+    return await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: [
+        buildDirectConversationDeveloperInstructions(),
+        input.probeDeveloperInstructions,
+      ].filter((value) => value !== undefined).join('\n\n'),
+      dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+      env: config.env,
+      hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+      model: config.model,
+      modelProvider: config.modelProvider,
+      productFeedbackRecorder: input.productFeedbackRecorder,
+      prompt: input.prompt,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
 function createRealCodexComputerHostedToolContext(): AssistantHostedToolContext {
   return {
     computerToolsAvailable: true,
@@ -11396,12 +12006,22 @@ async function materializeAssistantSkill(input: {
   skillsRoot: string
   slug: AssistantSkillSlug
 }): Promise<void> {
-  const targetDirectory = path.join(input.skillsRoot, input.slug)
-  await mkdir(targetDirectory, { recursive: true })
+  await materializeAssistantSkillAsset({
+    relativePath: path.join(input.slug, 'SKILL.md'),
+    skillsRoot: input.skillsRoot,
+  })
+}
+
+async function materializeAssistantSkillAsset(input: {
+  relativePath: string
+  skillsRoot: string
+}): Promise<void> {
+  const targetPath = path.join(input.skillsRoot, input.relativePath)
+  await mkdir(path.dirname(targetPath), { recursive: true })
   await writeFile(
-    path.join(targetDirectory, 'SKILL.md'),
+    targetPath,
     await readFile(
-      path.join(resolveAssistantSkillsRoot(), input.slug, 'SKILL.md'),
+      path.join(resolveAssistantSkillsRoot(), input.relativePath),
       'utf8',
     ),
     'utf8',
@@ -12030,6 +12650,8 @@ async function materializeHabitatVoiceVaultCli(input: {
 
 async function materializeRealWorkoutVaultCli(input: {
   binDirectory: string
+  commandLogPath: string
+  vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -12037,11 +12659,9 @@ async function materializeRealWorkoutVaultCli(input: {
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_COMMAND_LOG" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
-      '  exit 70',
-      'fi',
-      'printf \'%s\\n\' "$*" >> "$WORKOUT_E2E_COMMAND_LOG"',
-      'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
@@ -12716,7 +13336,7 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(
+function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
 ): string {
   return buildAssistantSystemPrompt({
@@ -13611,6 +14231,16 @@ function readCommandText(value: unknown): string {
   return Array.isArray(value)
     ? value.filter((part): part is string => typeof part === 'string').join(' ')
     : ''
+}
+
+function redactRealCodexDiagnosticText(value: string): string {
+  const redactedPaths = value
+    .replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')
+    .replace(/\/home\/[^/\s]+/gu, '<HOME_DIR>')
+  const localUser = path.basename(homedir()).trim()
+  return localUser.length >= 3
+    ? redactedPaths.replaceAll(localUser, '<REDACTED_USER>')
+    : redactedPaths
 }
 
 function readArgumentsRecord(value: unknown): Record<string, unknown> {

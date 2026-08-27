@@ -209,6 +209,20 @@ test("rejects measuring only the PR head instead of GitHub's merge candidate", a
   assert.ok(issueCodes(source).includes("missing-exact-candidate-ref"));
 });
 
+test("rejects comparing the candidate parent with the event base snapshot", async () => {
+  const source = (await readWorkflow())
+    .replace(
+      "          EXPECTED_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+      "          EXPECTED_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}\n          EXPECTED_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+    )
+    .replace(
+      '            test "$(git -C candidate rev-parse HEAD^2)" = "$EXPECTED_PR_HEAD_SHA"',
+      '            test "$base_sha" = "$EXPECTED_PR_BASE_SHA"\n            test "$(git -C candidate rev-parse HEAD^2)" = "$EXPECTED_PR_HEAD_SHA"',
+    );
+
+  assert.ok(issueCodes(source).includes("stale-event-base-comparison"));
+});
+
 test("rejects a prepared-only bundle substitute", async () => {
   const source = (await readWorkflow()).replace(
     "run: pnpm --dir apps/cloudflare runner:bundle\n",
