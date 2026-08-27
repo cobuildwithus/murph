@@ -598,6 +598,18 @@ export async function readAssistantOutboxIntent(
   return readAssistantOutboxIntentLocal(vault, intentId)
 }
 
+export async function readAssistantOutboxIntentByDeliveryIdempotencyKey(input: {
+  deliveryIdempotencyKey: string
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  return findAssistantOutboxIntentByDedupeIdentity({
+    dedupeKey: null,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    skipLegacyMediaFallback: true,
+    vault: input.vault,
+  })
+}
+
 export async function readAssistantOutboxIntentMirrorState(input: {
   intentId: string
   now?: Date

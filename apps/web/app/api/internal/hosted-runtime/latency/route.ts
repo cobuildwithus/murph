@@ -20,6 +20,15 @@ import {
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { isRecord } from "@/src/lib/primitives";
+
+const LATENCY_EVENT_METADATA = {
+  assistant_input_staged: "hosted_ingress_assistant_input_staged",
+  assistant_milestone: "hosted_ingress_assistant_milestone_set_based",
+  provider_started: "hosted_ingress_provider_started_set_based",
+  runtime_milestone: "hosted_ingress_runtime_milestone",
+  checkpoint_publication_expected_by: "hosted_ingress_checkpoint_publication_expected_by_set_based",
+} as const;
 
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: authenticatedUserId } = await requireHostedCloudflareCallbackJsonRequest(request, {
@@ -32,8 +41,9 @@ export const POST = withJsonError(async (request: Request) => {
   );
   const runtimeAttemptId = writeFence.attemptId;
 
-  const result = traceRequest.event.type === "assistant_input_staged"
-    ? await recordHostedIngressAssistantInputStaged({
+  try {
+    const result = traceRequest.event.type === "assistant_input_staged"
+      ? await recordHostedIngressAssistantInputStaged({
         assistantInputId: traceRequest.event.assistantInputId,
         at: traceRequest.event.at,
         authenticatedUserId,
@@ -71,44 +81,84 @@ export const POST = withJsonError(async (request: Request) => {
           runtimeAttemptId,
           source: traceRequest.event.source,
         })
-      : await recordHostedIngressRuntimeMilestone({
+        : await recordHostedIngressRuntimeMilestone({
           at: traceRequest.event.at,
           authenticatedUserId,
           milestone: traceRequest.event.milestone,
           runtimeAttemptId,
           runtimeLeaseGeneration: writeFence.leaseGeneration,
           source: traceRequest.event.source,
-        });
+          });
 
-  // Assistant inputs the runtime created without an inbound messaging wake never
-  // get an ingress trace row, so reporting them is noise. Warn only when a row
-  // existed and the guarded write still declined it, which is the case an
-  // operator can act on.
-  const untracedCount = result.untracedCount ?? 0;
-  const rejectedCount = result.unmatchedCount - untracedCount;
-  if (rejectedCount > 0) {
-    const eventType = traceRequest.event.type;
-    const source = traceRequest.event.source;
-    console.warn("Hosted runtime latency trace callback had rejected rows.", {
-      eventType,
-      matchedCount: result.matchedCount,
-      rejectedCount,
-      runtimeAttemptId,
-      source,
-      untracedCount,
-    });
-  }
-  if (result.truncated === true) {
-    console.warn("Hosted runtime latency collection milestone reached its write bound.", {
+    // Assistant inputs the runtime created without an inbound messaging wake never
+    // get an ingress trace row, so reporting them is noise. Warn only when a row
+    // existed and the guarded write still declined it, which is the case an
+    // operator can act on.
+    const untracedCount = result.untracedCount ?? 0;
+    const rejectedCount = result.unmatchedCount - untracedCount;
+    if (rejectedCount > 0) {
+      const eventType = traceRequest.event.type;
+      const source = traceRequest.event.source;
+      console.warn("Hosted runtime latency trace callback had rejected rows.", {
+        eventType,
+        matchedCount: result.matchedCount,
+        rejectedCount,
+        source,
+        untracedCount,
+      });
+    }
+    if (result.truncated === true) {
+      console.warn("Hosted runtime latency collection milestone reached its write bound.", {
+        eventType: traceRequest.event.type,
+        matchedCount: result.matchedCount,
+        source: traceRequest.event.source,
+      });
+    }
+
+    return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
+  } catch (error) {
+    const codes = readLatencyPersistenceErrorCodes(error);
+    const eventMetadataKey = traceRequest.event.type === "runtime_milestone"
+      && traceRequest.event.milestone === "checkpoint_publication_expected_by"
+      ? "checkpoint_publication_expected_by"
+      : traceRequest.event.type;
+    console.error("Hosted runtime latency trace persistence failed.", {
       eventType: traceRequest.event.type,
-      matchedCount: result.matchedCount,
-      runtimeAttemptId,
+      inputCardinality: "assistantInputIds" in traceRequest.event
+        ? traceRequest.event.assistantInputIds.length : 1,
+      prismaCode: codes.prismaCode,
+      queryTag: LATENCY_EVENT_METADATA[eventMetadataKey],
       source: traceRequest.event.source,
+      sqlState: codes.sqlState,
+    });
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_LATENCY_TRACE_PERSISTENCE_FAILED",
+      httpStatus: 500,
+      message: "Hosted runtime latency trace persistence failed.",
     });
   }
-
-  return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
 });
+
+function readLatencyPersistenceErrorCodes(error: unknown) {
+  if (!isRecord(error)) return { prismaCode: null, sqlState: null };
+  const cause = isRecord(error.meta)
+    && isRecord(error.meta.driverAdapterError)
+    && isRecord(error.meta.driverAdapterError.cause)
+    ? error.meta.driverAdapterError.cause
+    : null;
+  const postgresCode = typeof cause?.originalCode === "string"
+    ? cause.originalCode
+    : cause?.code;
+
+  return {
+    prismaCode: typeof error.code === "string" && /^P\d{4}$/u.test(error.code)
+      ? error.code
+      : null,
+    sqlState: typeof postgresCode === "string" && /^[0-9A-Z]{5}$/u.test(postgresCode)
+      ? postgresCode
+      : null,
+  };
+}
 
 function requireMatchingRuntimeWriteFence(
   request: Request,

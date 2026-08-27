@@ -119,8 +119,8 @@ import {
 // against a local scripted Responses API stub. Deterministic and free: this is
 // the default-on protocol-contract lane that replaces the deleted
 // MockChildProcess happy-path fakes. Adversarial process behavior (malformed
-// events, stale ids, poisoning) stays in assistant-codex-runtime.test.ts where
-// a scriptable fake child process is the right tool.
+// events, stale ids, poisoning) stays in the assistant-codex-runtime-*.test.ts
+// behavior files where a scriptable fake child process is the right tool.
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 const SCRIPTED_MODEL = 'gpt-5.6-terra'
@@ -161,14 +161,11 @@ const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
   'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
   '',
 ] as const
-// GitHub's restricted Linux runner cannot create the uid map required by
-// Codex's named-permission bubblewrap shell. Exact-profile startup still runs
-// there below; only the shell execution proof uses a capable host.
+// Workspace-installed Codex lives outside the named-permission bubblewrap
+// filesystem on Linux. The production runner image proves native Linux
+// confinement separately; exact-profile startup still runs here below.
 const scriptedPermissionShellIt =
-  process.env.GITHUB_ACTIONS === 'true'
-    && process.env.RUNNER_OS === 'Linux'
-    ? it.skip
-    : it
+  process.platform === 'linux' ? it.skip : it
 
 function buildTestAutomationLocalAtRecoveryKey(request: unknown): string {
   return createHash('sha256')
@@ -2924,7 +2921,7 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
+  cmd: "sed -n '1,/^## Bounded observation runs/p' skills/food-journal/SKILL.md",
 });
 text(result.output);
 `,
@@ -6769,7 +6766,6 @@ if (!tool) {
       tracking: {
         kind: 'workout',
         entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-        snapshotAt: '2026-08-09T19:45:00.000Z',
       },
       workout: {
         version: 1,
@@ -6795,7 +6791,7 @@ if (!tool) {
           })),
         })),
       },
-    } satisfies AssistantResponseCard
+    } as const
     const cards = [
       {
         kind: 'compact_table',
@@ -6864,7 +6860,19 @@ if (!tool) {
         includesResponseCardNutritionV2Shape: true,
       })
       expect(result.runtimeIssueInputs).toEqual([])
-      expect(result.responseCard).toEqual(card)
+      if ('workout' in card) {
+        expect(result.responseCard).toMatchObject({
+          ...card,
+          tracking: {
+            ...card.tracking,
+            snapshotAt: expect.stringMatching(
+              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+            ),
+          },
+        })
+      } else {
+        expect(result.responseCard).toEqual(card)
+      }
     }
 
     const incompleteNutritionCards = [
@@ -7588,8 +7596,7 @@ if (!tool) {
     const deferredDiscoveryOverheadBytes =
       (ordinarySummaries[0]?.providerRequestDiagnostics?.bytes ?? 0)
       - (baselineSummary?.providerRequestDiagnostics?.bytes ?? 0)
-    expect(deferredDiscoveryOverheadBytes).toBeGreaterThan(0)
-    expect(deferredDiscoveryOverheadBytes).toBeLessThan(200)
+    expect(deferredDiscoveryOverheadBytes).toBe(0)
     expect(recoveryRequests).toHaveLength(0)
 
     await stopWarmCodexAppServer()

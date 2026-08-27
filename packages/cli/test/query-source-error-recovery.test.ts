@@ -118,7 +118,7 @@ test("service-backed Query failures preserve terminal unsupported-format recover
   assert.equal(await readFile(metadataPath, "utf8"), unsupportedSource);
 });
 
-test("direct Query imports project malformed Markdown recovery without writing", async () => {
+test("scheduled-log ownership preserves terminal stored-registry recovery without writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-query-source-markdown-direct-",
   );
@@ -159,11 +159,13 @@ Private body.
     throw new Error("Expected malformed canonical Markdown to fail.");
   }
   assert.deepEqual(result.envelope.error, {
-    code: "query_source_invalid",
-    message: `Canonical vault source ${relativePath} could not be read.`,
+    code: "invalid_registry",
+    message:
+      "Stored scheduled-log registry data is invalid. Stop without retrying or writing scheduled logs and report that operator repair is required.",
     retryable: false,
-    hint: `Repair ${relativePath}, then rerun the command. Vault validation can identify additional source issues.`,
-    stage: "query_source",
+    hint:
+      "Stop without retrying or writing scheduled logs and report that operator repair is required.",
+    stage: "read",
   });
   assert.doesNotMatch(JSON.stringify(result.envelope), /private-markdown-source-marker|Private title|Private body/u);
   assert.doesNotMatch(

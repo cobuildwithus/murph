@@ -16,6 +16,7 @@ import {
   scaffoldScheduledLogPayload,
   setScheduledLogStatus,
   showScheduledLog,
+  upsertDailyFoodScheduledLog,
   upsertFood,
   upsertScheduledLog,
   VaultError,
@@ -30,6 +31,20 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, contents:
     recursive: true,
   });
   await fs.writeFile(path.join(vaultRoot, relativePath), contents, "utf8");
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, string>> {
+  const snapshot = new Map<string, string>();
+  const relativePaths = await fs.readdir(vaultRoot, { recursive: true });
+
+  for (const relativePath of relativePaths.sort((left, right) => left.localeCompare(right))) {
+    const absolutePath = path.join(vaultRoot, relativePath);
+    if ((await fs.stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await fs.readFile(absolutePath, "utf8"));
+    }
+  }
+
+  return snapshot;
 }
 
 test("scheduled logs support preview, filters, renames, conflicts, and status changes", async () => {
@@ -304,6 +319,55 @@ test("scheduled log upserts resolve creates and updates under one registry lock"
   const records = await listScheduledLogs({ vaultRoot });
   assert.equal(records.items.length, 1);
   assert.equal(records.items[0]?.slug, "morning-check");
+});
+
+test("daily food scheduled logs enforce the resolved canonical slug boundary before writing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-scheduled-logs-food-slug-boundary");
+  await initializeVault({ vaultRoot });
+
+  const foodAtLimit = await upsertFood({
+    vaultRoot,
+    title: "Boundary food",
+    slug: "f".repeat(151),
+  });
+  const scheduledAtLimit = await upsertDailyFoodScheduledLog({
+    vaultRoot,
+    foodId: foodAtLimit.record.foodId,
+    localTime: "09:00",
+  });
+  assert.equal(scheduledAtLimit.record.slug, `auto-log-${"f".repeat(151)}`);
+  assert.equal(scheduledAtLimit.record.slug.length, 160);
+  assert.equal(
+    (await readScheduledLog({
+      vaultRoot,
+      scheduledLogId: scheduledAtLimit.record.scheduledLogId,
+    })).slug,
+    scheduledAtLimit.record.slug,
+  );
+
+  const foodOverLimit = await upsertFood({
+    vaultRoot,
+    title: "Over-boundary food",
+    slug: "g".repeat(152),
+  });
+  const beforeRejectedSchedule = await snapshotVaultFiles(vaultRoot);
+  assert.equal(
+    [...beforeRejectedSchedule.keys()].some((relativePath) => relativePath.startsWith("audit/")),
+    true,
+  );
+
+  await assert.rejects(
+    () => upsertDailyFoodScheduledLog({
+      vaultRoot,
+      foodId: foodOverLimit.record.foodId,
+      localTime: "09:00",
+    }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "slug exceeds the maximum length.",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSchedule);
 });
 
 test("scheduled log execution inherits food details and is idempotent per occurrence", async () => {
@@ -698,7 +762,7 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     (error: unknown) =>
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
-      error.message === "Scheduled log registry document has an unexpected shape.",
+      error.message === "Scheduled log registry document is invalid.",
   );
 
   const badScheduleVault = await makeTempDirectory("murph-scheduled-logs-bad-schedule");
@@ -729,8 +793,8 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     () => listScheduledLogs({ vaultRoot: badScheduleVault }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_INVALID_INPUT" &&
-      error.message === "schedule.kind must match a supported scheduled-log schedule.",
+      error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+      error.message === "Scheduled log registry document is invalid.",
   );
 
   await fs.rm(path.join(badScheduleVault, "bank/scheduled-logs/bad-schedule.md"), {
@@ -762,7 +826,62 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     () => listScheduledLogs({ vaultRoot: badScheduleVault }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_INVALID_INPUT" &&
-      error.message === "schedule must be an object.",
+      error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+      error.message === "Scheduled log registry document is invalid.",
   );
+
+  await fs.rm(path.join(badScheduleVault, "bank/scheduled-logs/non-object-schedule.md"), {
+    force: true,
+  });
+
+  const canonicalDocument = [
+    "---",
+    "schemaVersion: murph.frontmatter.scheduled-log.v1",
+    "docType: scheduled_log",
+    "scheduledLogId: slog_01JX8VCQY2M5ZBV64ZP4N1DRBC",
+    "slug: canonical-check",
+    "title: Canonical check",
+    "status: active",
+    "schedule:",
+    "  kind: dailyLocal",
+    "  localTime: 07:00",
+    "action:",
+    "  kind: intervention_session.add",
+    "  title: Canonical check",
+    "  interventionType: sauna",
+    "tags:",
+    "  - valid-tag",
+    "createdAt: 2026-04-22T07:00:00.000Z",
+    "updatedAt: 2026-04-22T07:00:00.000Z",
+    "---",
+  ].join("\n");
+
+  for (const [name, document] of [
+    ["uppercase-tag", canonicalDocument.replace("valid-tag", "UppercaseTag")],
+    [
+      "invalid-id",
+      canonicalDocument.replace(
+        "slog_01JX8VCQY2M5ZBV64ZP4N1DRBC",
+        "invalid-scheduled-log-id",
+      ),
+    ],
+    ["malformed-frontmatter", "---\nschemaVersion: [unterminated\n---\n"],
+  ] as const) {
+    const relativePath = `bank/scheduled-logs/${name}.md`;
+    await writeVaultFile(badScheduleVault, relativePath, document);
+
+    await assert.rejects(
+      () => listScheduledLogs({ vaultRoot: badScheduleVault }),
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+        error.message === "Scheduled log registry document is invalid.",
+      name,
+    );
+    assert.equal(
+      await fs.readFile(path.join(badScheduleVault, relativePath), "utf8"),
+      document,
+    );
+    await fs.rm(path.join(badScheduleVault, relativePath), { force: true });
+  }
 });

@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
 } from "@murphai/hosted-execution/orchestration-control";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -381,6 +382,7 @@ describe("hosted orchestration reconciliation facts", () => {
         component: "hosted.orchestration.reconciliation",
         conversationLagPresent: false,
         decisionSource: "workflow",
+        environmentInterviewPending: false,
         mailboxLagLaneCount: 2,
         retryAtPresent: false,
         schema: "murph.hosted-runtime.reconciliation-facts.v1",
@@ -862,7 +864,7 @@ describe("hosted orchestration reconciliation facts", () => {
       revision: 3,
       supportsImages: false,
       verificationProfile:
-        "murph-codex-0.147.0-portable-responses-v1",
+        "murph-codex-0.149.1-portable-responses-v1",
     });
 
     const response = await reconciliationRoute.GET(
@@ -1276,6 +1278,24 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
+  it("retains Environment interview state for read-only status checks", async () => {
+    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
+      id: "mailbox_environment_interview_1",
+    });
+
+    const {
+      readHostedRuntimeReconciliationFacts,
+    } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
+    const facts = await readHostedRuntimeReconciliationFacts({
+      decisionSource: "status",
+      usageGateMode: "read_only",
+      userId: MEMBER_ID,
+    });
+
+    expect(facts.environmentInterviewPending).toBe(true);
+    expect(mocks.readPendingHostedEnvironmentInterviewMailboxItem).toHaveBeenCalledTimes(1);
+  });
+
   it("does not gate future model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:05:00.000Z",
@@ -1641,18 +1661,20 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
-  it("keeps pending Environment interviews off the deployed orchestration wire", async () => {
+  it("projects pending Environment interviews onto the orchestration wire", async () => {
     mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
       id: "mailbox_environment_interview_1",
     });
 
     const response = await reconciliationRoute.GET(
-      requestForFacts(),
+      requestForFacts(HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH),
       routeContext(),
     );
     const facts = await response.json();
 
-    expect(facts).not.toHaveProperty("environmentInterviewPending");
+    expect(facts).toMatchObject({
+      environmentInterviewPending: true,
+    });
   });
 
   it("blocks inactive members while preserving workspace facts", async () => {
@@ -1684,15 +1706,17 @@ describe("hosted orchestration reconciliation facts", () => {
         version: "4",
       },
     });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
   });
 });
 
-function requestForFacts(): Request {
+function requestForFacts(search = ""): Request {
   return new Request(
     `https://join.example.test/api/internal/hosted-orchestration/users/${
       encodeURIComponent(MEMBER_ID)
-    }/reconciliation-facts`,
+    }/reconciliation-facts${search}`,
     { method: "GET" },
   );
 }

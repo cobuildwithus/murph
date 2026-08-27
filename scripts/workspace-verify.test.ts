@@ -1172,6 +1172,83 @@ printf 'interlock-covered\n'
     expect(result.stdout).toBe("interlock-covered\n");
   });
 
+  it("does not overlap the assistant and hosted-local child runtimes", () => {
+    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+      "run_all_package_coverage",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${runAllPackageCoverage}
+
+register_background_pid() { return 0; }
+unregister_background_pid() { return 0; }
+mark_acceptance_cli_coverage_complete() { return 0; }
+verify_log() { return 0; }
+
+run_workspace_package_coverage() {
+  local package_dir="$1"
+  local package_name="\${package_dir#packages/}"
+
+  : >"$case_dir/\${package_name}-started"
+  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
+    while [[ ! -f "$case_dir/release-assistant" ]]; do
+      command sleep 0.01
+    done
+  fi
+}
+
+exercise_profile() {
+  local concurrency="$1"
+  local package_dir
+  local package_name
+  case_dir="$sandbox/concurrency-$concurrency"
+  mkdir -p "$case_dir"
+
+  package_coverage_shard=all
+  package_coverage_concurrency_limit="$concurrency"
+  package_coverage_cli_active_concurrency_limit=2
+
+  run_all_package_coverage 1 &
+  local scheduler_pid="$!"
+
+  for _ in {1..1200}; do
+    if [[ -f "$case_dir/vault-usecases-started" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+
+  while IFS= read -r package_dir; do
+    [[ "$package_dir" == "packages/hosted-local-harness" ]] && continue
+    package_name="\${package_dir#packages/}"
+    [[ -f "$case_dir/\${package_name}-started" ]]
+  done < <(node scripts/release-verification-plan.mjs --package-dirs all)
+  [[ ! -f "$case_dir/hosted-local-harness-started" ]]
+
+  : >"$case_dir/release-assistant"
+  for _ in {1..1200}; do
+    if [[ -f "$case_dir/hosted-local-harness-started" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+
+  [[ -f "$case_dir/hosted-local-harness-started" ]]
+  wait "$scheduler_pid"
+}
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf -- "$sandbox"' EXIT
+exercise_profile 3
+exercise_profile 5
+printf 'pairwise-interlock-covered\n'
+`, 60_000);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("pairwise-interlock-covered\n");
+  });
+
   it("keeps hosted-web parallel cleanup safe after every child is reaped", () => {
     const webVerify = readFileSync(
       path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
@@ -1204,7 +1281,7 @@ printf 'clean\\n'
       .toBeLessThan(runNextBuild!.indexOf('"${next_build_command[@]}"'));
   });
 
-  it("gives only the Assistant Engine root project the repository-owned heap", () => {
+  it("runs every root project together on the caller's Node heap", () => {
     const runRepoVitest = extractWorkspaceVerifyFunction("run_repo_vitest");
     const result = runShellHarness(`#!/usr/bin/env bash
 set -euo pipefail
@@ -1222,8 +1299,7 @@ run_repo_vitest --no-coverage
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "heap=unset command=exec vitest run --config vitest.config.ts --project=!assistant-engine --no-coverage\n" +
-        "heap=--max-old-space-size=6144 command=exec vitest run --config vitest.config.ts --project=assistant-engine --no-coverage\n",
+      "heap=unset command=exec vitest run --config vitest.config.ts --no-coverage\n",
     );
   });
 
@@ -1236,7 +1312,7 @@ run_repo_vitest --no-coverage
     expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
   });
 
-  it("gives only Assistant Engine package coverage the repository-owned heap", () => {
+  it("runs ordinary package coverage on the caller's Node heap", () => {
     const runWorkspacePackageCoverage = extractWorkspaceVerifyFunction(
       "run_workspace_package_coverage",
     );
@@ -1270,7 +1346,7 @@ run_workspace_package_coverage packages/core 'Core coverage'
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "heap=--max-old-space-size=6144 workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
+      "heap=unset workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
         "heap=unset workers=2 command=pnpm --dir packages/core test:coverage\n",
     );
   });
@@ -1528,7 +1604,7 @@ run_test_diff_package_tests ${selectedPackageDirs}
     );
   });
 
-  it("gives affected Assistant Engine tests the proven heap ceiling", () => {
+  it("batches affected Assistant Engine tests with ordinary package owners", () => {
     const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
       "run_test_diff_package_tests",
     );
@@ -1558,10 +1634,7 @@ run_test_diff_package_tests packages/assistant-engine packages/core
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(
-      "Affected package test for packages/assistant-engine | env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=1 pnpm --dir packages/assistant-engine test\n",
-    );
-    expect(result.stdout).toContain(
-      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/core test\n",
+      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/assistant-engine --filter ./packages/core test\n",
     );
   });
 

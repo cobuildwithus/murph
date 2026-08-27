@@ -67,12 +67,14 @@ import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  ensureHostedGroupStructureForThreadContainerTx,
   HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   leaveHostedGroupMemberTx,
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupSharedDataByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
@@ -1188,6 +1190,36 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("retires older active offers only after a replacement binding is created", async () => {
+    const tx = buildTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+
+    await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: "group_1",
+      message: { channel: "linq", messageId: "msg_offer_replacement" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffersAt: postedAt,
+      tx,
+    });
+
+    expect(
+      tx.hostedGroupJoinOffer.create.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      tx.hostedGroupJoinOffer.updateMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: postedAt },
+      where: {
+        groupId: "group_1",
+        messageLookupKey: { not: expect.stringMatching(/^hbidx:linq-message:/u) },
+        revokedAt: null,
+      },
+    });
+  });
+
   it("rejects a provider completion from a replaced offer generation", async () => {
     const tx = buildTx();
     tx.hostedGroup.findUnique.mockResolvedValueOnce({
@@ -1240,6 +1272,35 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       select: { projectionKindsJson: true },
       take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
     });
+  });
+
+  it("prepares an explicit replacement without inspecting or revoking the active offer", async () => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
+        })),
+      },
+      hostedGroupJoinOffer: { findMany, updateMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffer: true,
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_generation_1",
+      kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
+    });
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("revokes a broader active offer before posting a narrower replacement", async () => {
@@ -2142,6 +2203,85 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
   });
 });
 
+describe("organic hosted-group materialization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.grantHostedVaultShareTx.mockResolvedValue({
+      id: "share_profile",
+      requiresProjection: true,
+    });
+  });
+
+  it("creates one unnamed ordinary group with owner membership and replays idempotently", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      ownerMemberId: "member_owner",
+    });
+    const now = new Date("2026-08-25T12:00:00.000Z");
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      now,
+      tx,
+    })).resolves.toMatchObject({
+      created: true,
+    });
+
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        displayName: null,
+        joinPolicyJson: expect.objectContaining({
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
+          requestedVaultShareProjectionScopes: [],
+        }),
+        kind: "custom",
+        ownerMemberId: "member_owner",
+        runtimeMemberId: "member_group_runtime",
+      }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        groupId: expect.any(String),
+        joinedAt: now,
+        memberId: "member_owner",
+        role: "owner",
+      }),
+    }));
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-08-25T12:01:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({
+      created: false,
+    });
+    expect(tx.hostedGroup.create).toHaveBeenCalledTimes(1);
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("repairs owner membership without rewriting an existing group configuration", async () => {
+    const tx = buildGroupLinkTx({
+      existingDisplayName: "Existing Group",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-08-25T12:00:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({
+      created: false,
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).toHaveBeenCalledOnce();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+});
+
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2167,6 +2307,27 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
 
     expect(tx.hostedGroup.create).not.toHaveBeenCalled();
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active-access gate ahead of user-initiated group materialization", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      ownerMemberId: "member_owner",
+    });
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-08-25T12:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_RUNTIME_INACTIVE",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).not.toHaveBeenCalled();
   });
 
   it("does not request or grant health projections without an explicit checkpoint scope", async () => {
@@ -2513,6 +2674,38 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).not.toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ displayName: expect.any(String) }),
     }));
+  });
+});
+
+describe("readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads the exact current policy without changing policy or active offers", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+
+    await expect(readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      tx,
+    })).resolves.toMatchObject({
+      group: {
+        requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+      },
+      joinCode: "join_existing",
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 });
 

@@ -2427,13 +2427,13 @@ describe("murph.group dynamic tool", () => {
   it("parses one bounded context handoff without accepting model authority", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "handoff",
-      context: "  Sunny logged a 405 lb deadlift personal record today.  ",
+      context: "  The member set a personal record today.  ",
       groupLabel: "  Lifting Club  ",
     }))).toMatchObject({
       kind: "group",
       request: {
         action: "handoff",
-        context: "Sunny logged a 405 lb deadlift personal record today.",
+        context: "The member set a personal record today.",
         groupLabel: "Lifting Club",
       },
     });
@@ -2491,7 +2491,7 @@ describe("murph.group dynamic tool", () => {
   it("injects the latest fresh direct input as hidden handoff authority", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "handoff",
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "Lifting Club",
     }));
     if (!request || request.kind !== "group") {
@@ -2532,7 +2532,7 @@ describe("murph.group dynamic tool", () => {
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "handoff",
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "Lifting Club",
       originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
     });
@@ -3658,6 +3658,17 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }))).toMatchObject({
+      kind: "group",
+      request: {
+        action: "offer_access",
+        messageRef: FRESH_ASSISTANT_INPUT_ID,
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
       standaloneLink: true,
     }))).toMatchObject({
       kind: "group",
@@ -3880,6 +3891,99 @@ describe("murph.group dynamic tool", () => {
     );
     expect(standaloneResult.finalActionPatch).toBeUndefined();
     expect(nativeResult.finalActionPatch).toBeUndefined();
+  });
+
+  it("binds an explicit native access repost to the exact current Message ref", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "post_join_offer",
+      result: {
+        group: {
+          displayName: null,
+          id: "private-group-id",
+          kind: "friends",
+          memberCount: 0,
+          members: [],
+          requestedVaultShareProjectionKinds: ["steps-days.v0"],
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "steps-days.v0" },
+          ],
+          status: "active",
+        },
+        joinUrl: "https://example.test/groups/join/native-hidden",
+        offerState: "posted",
+        status: "sent",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected access-offer repost request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      },
+      repostOriginAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
+    });
+    expect(readGroupToolPayload(result)).toMatchObject({
+      action: "offer_access",
+      result: { presentation: "native", status: "ok" },
+    });
+
+    const wrongMessageRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      message_ref: EARLIER_ASSISTANT_INPUT_ID,
+    }));
+    if (!wrongMessageRequest || wrongMessageRequest.kind !== "group") {
+      throw new Error("Expected access-offer repost request.");
+    }
+    const rejected = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request: wrongMessageRequest,
+      vaultRoot: null,
+    });
+    expect(rejected.rpcResult.success).toBe(false);
+    expect(groupRequest).toHaveBeenCalledTimes(1);
   });
 
   it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {

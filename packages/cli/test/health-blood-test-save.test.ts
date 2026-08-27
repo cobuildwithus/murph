@@ -16,6 +16,7 @@ import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
   requireData,
+  runCli,
   runInProcessJsonCli,
 } from "./cli-test-helpers.js";
 
@@ -540,10 +541,22 @@ test("blood-test import-json points valueText typo at textValue", async () => {
 
     assert.equal(imported.exitCode, 1);
     assert.equal(imported.envelope.ok, false);
-    assert.equal(
-      imported.envelope.error.message,
-      "results[0].valueText is not supported. Did you mean results[0].textValue?",
-    );
+    if (!imported.envelope.ok) {
+      assert.equal(imported.envelope.error.code, "invalid_payload");
+      assert.equal(
+        imported.envelope.error.message,
+        "results[0].valueText is not supported. Did you mean results[0].textValue?",
+      );
+      assert.equal(imported.envelope.error.stage, "validation");
+      assert.deepEqual(imported.envelope.error.fieldErrors?.[0], {
+        path: "results.0.valueText",
+        code: "custom",
+        message: "This field is invalid.",
+        expected: "",
+        received: "invalid",
+      });
+      assert.equal(imported.envelope.error.hint, undefined);
+    }
   } finally {
     await rm(parentRoot, {
       force: true,
@@ -1121,13 +1134,14 @@ test("blood-test save rejects JSON objects that are not analyte records without 
     assert.match(result.envelope.error.message ?? "", /analyte payload/u);
     assert.equal(result.envelope.error.stage, "validation");
     assert.deepEqual(result.envelope.error.fieldErrors?.[0], {
-      code: "invalid_union",
+      code: "invalid_type",
       expected: "",
       message: "This field is invalid.",
-      path: "result.0",
+      path: "result.0.analyte",
       received: "invalid",
     });
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
+    assert.equal(JSON.stringify(result.envelope).includes("private marker"), false);
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
       false,
@@ -1222,6 +1236,252 @@ test("blood-test save identifies an invalid link field without writing an event"
   }
 });
 
+test("blood-test save collapses unknown link keys without echoing submitted values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-private-link-",
+  );
+  const privateLinkValue = "private-link-marker";
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Synthetic link validation panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "synthetic_link_validation_panel",
+      "--result",
+      JSON.stringify({ analyte: "Ferritin", value: 45, unit: "ng/mL" }),
+      "--link",
+      `type=related_to;privateField=${privateLinkValue}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "link.0");
+    assert.equal(JSON.stringify(result.envelope).includes(privateLinkValue), false);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("blood-test save reports known duplicate link fields without echoing values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-duplicate-link-",
+  );
+  const cases = [
+    {
+      privateValue: "private-duplicate-type-value",
+      spec: "type=related_to;type=private-duplicate-type-value",
+      path: "link.0.type",
+    },
+    {
+      privateValue: "private-duplicate-target-value",
+      spec: "targetId=goal_01JNY0B2W4VG5C2A0G9S8M7R6S;targetId=private-duplicate-target-value",
+      path: "link.0.targetId",
+    },
+  ];
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    for (const entry of cases) {
+      const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+        "blood-test",
+        "save",
+        "Synthetic duplicate link panel",
+        "--occurred-at",
+        "2026-03-12T13:00:00.000Z",
+        "--test-name",
+        "synthetic_duplicate_link_panel",
+        "--result",
+        JSON.stringify({ analyte: "Ferritin", value: 45, unit: "ng/mL" }),
+        "--link",
+        entry.spec,
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, 1, entry.path);
+      assert.equal(result.envelope.ok, false, entry.path);
+      assert.equal(result.envelope.error.code, "invalid_option", entry.path);
+      assert.equal(result.envelope.error.message, "Duplicate --link field.", entry.path);
+      assert.equal(result.envelope.error.stage, "validation", entry.path);
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, entry.path);
+      assert.equal(
+        JSON.stringify(result.envelope).includes(entry.privateValue),
+        false,
+        entry.path,
+      );
+      assert.equal(
+        await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+        false,
+        entry.path,
+      );
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("built CLI reports finite blood-test fields and alternatives without echoing values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-repair-alternatives-",
+  );
+  const cases = [
+    {
+      privateValue: "private-reference-low",
+      result: {
+        analyte: "Synthetic analyte",
+        value: 45,
+        referenceRange: { low: "private-reference-low" },
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.referenceRange.low",
+      code: "invalid_type",
+    },
+    {
+      privateValue: "private-analyte-marker",
+      result: {
+        analyte: "private-analyte-marker".repeat(12),
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.analyte",
+      code: "too_big",
+    },
+    {
+      privateValue: "private slug marker",
+      result: {
+        analyte: "Synthetic analyte",
+        slug: "private slug marker",
+        value: 45,
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.slug",
+      code: "invalid_format",
+    },
+    {
+      privateValue: "private-unit-marker",
+      result: {
+        analyte: "Synthetic analyte",
+        unit: "private-unit-marker".repeat(5),
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.unit",
+      code: "too_big",
+    },
+    {
+      privateValue: "private-multiple-fields-marker",
+      result: {
+        analyte: "private-multiple-fields-marker".repeat(12),
+        value: 45,
+        unit: "private-multiple-fields-marker".repeat(5),
+      },
+      message: "Invalid --result blood-test analyte payload.",
+      path: "result.1.analyte",
+      code: "too_big",
+      additionalFieldErrors: [
+        { path: "result.1.unit", code: "too_big" },
+      ],
+    },
+    {
+      privateValue: "private-missing-result-marker",
+      result: { analyte: "private-missing-result-marker" },
+      message: "Provide either value or textValue.",
+      path: "result.1",
+      code: "invalid_union",
+    },
+    {
+      privateValue: "private-empty-range-marker",
+      result: {
+        analyte: "private-empty-range-marker",
+        value: 45,
+        referenceRange: {},
+      },
+      message: "Provide at least one of low, high, or text.",
+      path: "result.1.referenceRange",
+      code: "invalid_union",
+    },
+    {
+      privateValue: "private-invalid-flag",
+      result: {
+        analyte: "Synthetic analyte",
+        value: 45,
+        flag: "private-invalid-flag",
+        referenceRange: {},
+      },
+      message: "Set flag to one of: low, normal, high, abnormal, critical, unknown.",
+      path: "result.1.flag",
+      code: "invalid_value",
+    },
+  ];
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+
+    for (const entry of cases) {
+      const result = await runCli([
+        "blood-test",
+        "save",
+        "Synthetic repair panel",
+        "--occurred-at",
+        "2026-03-12T13:00:00.000Z",
+        "--test-name",
+        "synthetic_repair_panel",
+        "--result",
+        JSON.stringify({ analyte: "Glucose", value: 92, unit: "mg/dL" }),
+        "--result",
+        JSON.stringify(entry.result),
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.ok, false, entry.path);
+      assert.equal(result.error?.code, "invalid_option", entry.path);
+      assert.equal(result.error?.stage, "validation", entry.path);
+      assert.equal(result.error?.message, entry.message, entry.path);
+      const expectedFields = [
+        { path: entry.path, code: entry.code },
+        ...("additionalFieldErrors" in entry
+          ? entry.additionalFieldErrors ?? []
+          : []),
+      ];
+      assert.deepEqual(
+        result.error?.fieldErrors,
+        expectedFields.map((field) => ({
+          ...field,
+          message: "This field is invalid.",
+          expected: "",
+          received: "invalid",
+        })),
+      );
+      assert.equal(JSON.stringify(result).includes(entry.privateValue), false, entry.path);
+      assert.equal(
+        await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+        false,
+        entry.path,
+      );
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}, 120_000);
 test("blood-test save rejects JSON result arrays with repeat-result guidance", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-json-result-array-",

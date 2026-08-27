@@ -83,7 +83,7 @@ import { registerWorkoutLiveCommands } from './workout-live.js'
 import {
   buildWorkoutFromParsedOptions,
 } from './workout-typed-options.js'
-
+import { publicValidationIssue } from './public-validation-issue.js'
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const workoutListLimitOptionSchema = z
   .number()
@@ -192,8 +192,30 @@ const workoutImportPayloadExample = {
   ],
 } satisfies Record<string, unknown>
 
-function invalidWorkoutAddOption(message: string): never {
-  throw new VaultCliError('invalid_option', message)
+function invalidWorkoutAddOption(
+  message: string,
+  path: (typeof workoutAddSessionOptionKeys)[number] | 'note',
+): never {
+  throw new VaultCliError(
+    'invalid_option',
+    message,
+    {
+      issues: [publicValidationIssue({ code: 'custom' }, [path])],
+      stage: 'validation',
+    },
+  )
+}
+
+function invalidWorkoutMediaOption(message: string): never {
+  return invalidWorkoutAddOption(message, 'workoutMedia')
+}
+
+function invalidWorkoutExerciseOption(message: string): never {
+  return invalidWorkoutAddOption(message, 'workoutExercise')
+}
+
+function invalidWorkoutSetOption(message: string): never {
+  return invalidWorkoutAddOption(message, 'workoutSet')
 }
 
 function normalizeWorkoutMediaRelativePath(relativePath: string): string {
@@ -211,7 +233,7 @@ function normalizeWorkoutMediaRelativePath(relativePath: string): string {
     /^[A-Za-z]:/u.test(normalized) ||
     !normalized.startsWith('raw/workouts/')
   ) {
-    invalidWorkoutAddOption(
+    invalidWorkoutMediaOption(
       '--workout-media relativePath must be a normalized raw/workouts/** vault-relative path.',
     )
   }
@@ -220,21 +242,21 @@ function normalizeWorkoutMediaRelativePath(relativePath: string): string {
 }
 
 function parseWorkoutAddMediaEntry(entry: string): Record<string, unknown> {
-  const fields = parseCompactFields(entry, 'workout-media', invalidWorkoutAddOption)
+  const fields = parseCompactFields(entry, 'workout-media', invalidWorkoutMediaOption)
   rejectUnsupportedCompactFields(
     fields,
     'workout-media',
     workoutAddMediaFields,
-    invalidWorkoutAddOption,
+    invalidWorkoutMediaOption,
   )
   return {
-    kind: requireCompactString(fields, 'kind', 'workout-media', invalidWorkoutAddOption),
+    kind: requireCompactString(fields, 'kind', 'workout-media', invalidWorkoutMediaOption),
     relativePath: normalizeWorkoutMediaRelativePath(
       requireCompactString(
         fields,
         'relativePath',
         'workout-media',
-        invalidWorkoutAddOption,
+        invalidWorkoutMediaOption,
       ),
     ),
     ...(fields.has('mediaType') ? { mediaType: fields.get('mediaType') } : {}),
@@ -243,20 +265,20 @@ function parseWorkoutAddMediaEntry(entry: string): Record<string, unknown> {
 }
 
 function parseWorkoutAddExerciseEntry(entry: string): WorkoutAddExerciseDraft {
-  const fields = parseCompactFields(entry, 'workout-exercise', invalidWorkoutAddOption)
+  const fields = parseCompactFields(entry, 'workout-exercise', invalidWorkoutExerciseOption)
   rejectUnsupportedCompactFields(
     fields,
     'workout-exercise',
     workoutAddExerciseFields,
-    invalidWorkoutAddOption,
+    invalidWorkoutExerciseOption,
   )
   return {
-    name: requireCompactString(fields, 'name', 'workout-exercise', invalidWorkoutAddOption),
+    name: requireCompactString(fields, 'name', 'workout-exercise', invalidWorkoutExerciseOption),
     order: requireCompactInteger(
       fields,
       'order',
       'workout-exercise',
-      invalidWorkoutAddOption,
+      invalidWorkoutExerciseOption,
     ),
     sets: [],
     ...(fields.has('sourceExerciseId')
@@ -273,21 +295,21 @@ function parseWorkoutAddSetEntry(entry: string): {
   exerciseOrder: number
   set: Record<string, unknown>
 } {
-  const fields = parseCompactFields(entry, 'workout-set', invalidWorkoutAddOption)
+  const fields = parseCompactFields(entry, 'workout-set', invalidWorkoutSetOption)
   rejectUnsupportedCompactFields(
     fields,
     'workout-set',
     workoutAddSetFields,
-    invalidWorkoutAddOption,
+    invalidWorkoutSetOption,
   )
   const exerciseOrder = requireCompactInteger(
     fields,
     'exercise',
     'workout-set',
-    invalidWorkoutAddOption,
+    invalidWorkoutSetOption,
   )
   const set: Record<string, unknown> = {
-    order: requireCompactInteger(fields, 'order', 'workout-set', invalidWorkoutAddOption),
+    order: requireCompactInteger(fields, 'order', 'workout-set', invalidWorkoutSetOption),
   }
 
   for (const key of ['type', 'weightUnit', 'note']) {
@@ -306,7 +328,7 @@ function parseWorkoutAddSetEntry(entry: string): {
     'assistanceKg',
     'addedWeightKg',
   ]) {
-    const value = compactNumber(fields, key, 'workout-set', invalidWorkoutAddOption)
+    const value = compactNumber(fields, key, 'workout-set', invalidWorkoutSetOption)
     if (value !== undefined) {
       set[key] = value
     }
@@ -341,7 +363,8 @@ function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutS
     sets: setEntries?.map(parseWorkoutAddSetEntry),
     publicFields: workoutAddPublicFields,
     validationMessage: 'Invalid workout session fields.',
-    invalidOption: invalidWorkoutAddOption,
+    invalidExerciseOption: invalidWorkoutExerciseOption,
+    invalidSetOption: invalidWorkoutSetOption,
   })
 }
 
@@ -351,7 +374,7 @@ function hasWorkoutExerciseReplacementOptions(options: Pick<WorkoutAddTypedOptio
 
 function resolveWorkoutAddText(argsText: string | undefined, optionNote: string | undefined): string | undefined {
   if (argsText !== undefined && optionNote !== undefined) {
-    invalidWorkoutAddOption('Pass either positional workout text or --note, not both.')
+    invalidWorkoutAddOption('Pass either positional workout text or --note, not both.', 'note')
   }
   return argsText ?? optionNote
 }

@@ -23,6 +23,7 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -91,6 +92,9 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+} from "./group-private-attribution-policy";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   requestHostedGroupAssistantAsk,
@@ -124,6 +128,7 @@ import {
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupMembershipsForMember,
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
@@ -154,12 +159,81 @@ export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
 
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v3:";
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
+const HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX = 7;
+
+type HostedGroupJoinOfferScopeCategory =
+  | "activity"
+  | "connections"
+  | "heart-and-fitness"
+  | "nutrition"
+  | "profile"
+  | "sleep"
+  | "workouts";
+
+const HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_BY_PROJECTION_KIND = {
+  "active-calories-days.v0": "activity",
+  "activity-days.v0": "activity",
+  "activity-distance-days.v1": "activity",
+  "activity-minutes-days.v1": "activity",
+  "activity-score-days.v0": "activity",
+  "activity-session-count-days.v1": "activity",
+  "calories-days.v0": "nutrition",
+  "carbs-days.v0": "nutrition",
+  "day-strain-days.v0": "activity",
+  "deep-sleep-days.v0": "sleep",
+  "deep-sleep-sources-days.v1": "sleep",
+  "device-sync-status.v0": "connections",
+  "distance-days.v0": "activity",
+  "elevation-gain-days.v0": "activity",
+  "fat-days.v0": "nutrition",
+  "fiber-days.v0": "nutrition",
+  "floors-climbed-days.v0": "activity",
+  "group-email.v0": "profile",
+  "heart-rate-zones-days.v0": "heart-and-fitness",
+  "hrv-days.v0": "heart-and-fitness",
+  "max-heart-rate-days.v0": "heart-and-fitness",
+  "profile-name.v0": "profile",
+  "protein-days.v0": "nutrition",
+  "rem-sleep-days.v0": "sleep",
+  "rem-sleep-sources-days.v1": "sleep",
+  "resting-heart-rate-days.v0": "heart-and-fitness",
+  "sleep-duration-days.v0": "sleep",
+  "sleep-times.v0": "sleep",
+  "steps-days.v0": "activity",
+  "time-zone.v0": "profile",
+  "vo2-max-days.v0": "heart-and-fitness",
+  "workout-days.v0": "workouts",
+  "workout-strain-days.v0": "workouts",
+  "workouts.v0": "workouts",
+} as const satisfies Record<HostedVaultShareProjectionKind, HostedGroupJoinOfferScopeCategory>;
+
+const HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_ORDER = [
+  "sleep",
+  "activity",
+  "workouts",
+  "heart-and-fitness",
+  "nutrition",
+  "connections",
+] as const satisfies readonly Exclude<HostedGroupJoinOfferScopeCategory, "profile">[];
+
+const HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_LABEL = {
+  activity: "activity",
+  connections: "health source connections",
+  "heart-and-fitness": "heart and fitness",
+  nutrition: "nutrition",
+  sleep: "sleep",
+  workouts: "workouts",
+} as const satisfies Record<
+  Exclude<HostedGroupJoinOfferScopeCategory, "profile">,
+  string
+>;
 
 export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   groupId: string;
   joinCode: string;
   offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
+  repostOriginAssistantInputId?: string;
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.projectionScopes,
@@ -175,11 +249,26 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
     joinCode: input.joinCode,
     offerGeneration: input.offerGeneration,
     projectionScopeKeys,
+    ...(input.repostOriginAssistantInputId === undefined
+      ? {}
+      : {
+          repostOriginAssistantInputId: input.repostOriginAssistantInputId,
+        }),
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
     0,
     HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH,
   )}`;
+}
+
+function hostedGroupProjectionScopeSetsEqual(
+  left: readonly HostedVaultShareProjectionScope[],
+  right: readonly HostedVaultShareProjectionScope[],
+): boolean {
+  const leftKeys = new Set(left.map(buildHostedVaultShareProjectionScopeKey));
+  const rightKeys = new Set(right.map(buildHostedVaultShareProjectionScopeKey));
+  return leftKeys.size === rightKeys.size
+    && [...leftKeys].every((scopeKey) => rightKeys.has(scopeKey));
 }
 
 export type HostedRuntimeGroupToolAccessClassification =
@@ -397,6 +486,8 @@ export async function handleHostedRuntimeGroupTool(input: {
       joinOffer: input.request.joinOffer ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
+      repostOriginAssistantInputId:
+        input.request.repostOriginAssistantInputId ?? null,
     });
   }
 
@@ -1297,6 +1388,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   joinOffer: HostedRuntimeGroupPostJoinOfferRequest | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
+  repostOriginAssistantInputId: string | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "post_join_offer",
@@ -1317,10 +1409,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
-    input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds,
-  );
+  const requestedProjectionScopes = input.joinOffer?.projectionScopes
+    ?? input.joinOffer?.projectionKinds;
+  const newProjectionScopes = input.repostOriginAssistantInputId === null
+    ? resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes)
+    : null;
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -1329,18 +1422,40 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
-    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-      actorMemberId: ownerAccess.ownerMemberId,
-      containerMemberId: input.memberId,
-      displayName: input.joinOffer?.displayName ?? null,
-      now,
-      requestedVaultShareProjectionScopes: projectionScopes,
-      tx,
-    });
+    const result = input.repostOriginAssistantInputId === null
+      ? await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+          actorMemberId: ownerAccess.ownerMemberId,
+          containerMemberId: input.memberId,
+          displayName: input.joinOffer?.displayName ?? null,
+          now,
+          requestedVaultShareProjectionScopes: newProjectionScopes,
+          tx,
+        })
+      : await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
+          actorMemberId: ownerAccess.ownerMemberId,
+          containerMemberId: input.memberId,
+          tx,
+        });
+    const projectionScopes = newProjectionScopes
+      ?? result.group.requestedVaultShareProjectionScopes;
+    if (
+      input.repostOriginAssistantInputId !== null
+      && requestedProjectionScopes !== undefined
+      && requestedProjectionScopes !== null
+      && !hostedGroupProjectionScopeSetsEqual(
+        resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes),
+        projectionScopes,
+      )
+    ) {
+      return { kind: "repost_scope_change_unavailable" as const };
+    }
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
       now,
       projectionScopes,
+      ...(input.repostOriginAssistantInputId === null
+        ? {}
+        : { replaceActiveOffer: true }),
       tx,
     });
     if (offerPost.kind === "unavailable") {
@@ -1350,6 +1465,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       kind: "ok" as const,
       offerPost,
       ownerMemberId: ownerAccess.ownerMemberId,
+      projectionScopes,
       ...result,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -1379,7 +1495,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
-    projectionScopes,
+    projectionScopes: created.projectionScopes,
   });
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
@@ -1390,7 +1506,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
         offerGeneration,
-        projectionScopes,
+        projectionScopes: created.projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : {
+              repostOriginAssistantInputId:
+                input.repostOriginAssistantInputId,
+            }),
       }),
       message,
     });
@@ -1429,7 +1551,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
-        projectionScopes,
+        projectionScopes: created.projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : { replaceActiveOffersAt: providerSendCompletedAt }),
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -1753,9 +1878,20 @@ async function readHostedLinqExplicitGroupDisplayName(
 function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
-  const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
-    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
-  const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const displays = projectHostedVaultShareProjectionDisplays(projectionScopes);
+  const useCategories = displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
+  const shareScopeLabels = useCategories
+    ? renderHostedGroupJoinOfferScopeCategories(projectionScopes)
+      : [
+          "Murph profile name",
+          ...displays.map((display) =>
+            formatHostedGroupJoinOfferShareScopeLabel(display.label)
+          ),
+        ];
+  const sentence = `your ${formatHumanList(shareScopeLabels)}`;
+  if (useCategories) {
+    return sentence;
+  }
   const disclosures: string[] = [];
   if (projectionScopes.some((scope) =>
     isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
@@ -1808,6 +1944,39 @@ function renderHostedGroupJoinOfferScopeSentence(
   return disclosures.length > 0
     ? `${sentence} (${disclosures.join("; ")})`
     : sentence;
+}
+
+function renderHostedGroupJoinOfferScopeCategories(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): string[] {
+  const categories = new Set(
+    projectionScopes.map(
+      (scope) => HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_BY_PROJECTION_KIND[
+        scope.projectionKind
+      ],
+    ),
+  );
+  const hasEmail = projectionScopes.some(
+    (scope) => scope.projectionKind === "group-email.v0",
+  );
+  const hasTimeZone = projectionScopes.some(
+    (scope) => scope.projectionKind === "time-zone.v0",
+  );
+  const profileDetails = [
+    "name",
+    ...(hasEmail ? ["email"] : []),
+    ...(hasTimeZone ? ["time zone"] : []),
+  ];
+  return [
+    profileDetails.length === 1
+      ? "Murph profile name"
+      : `Murph profile (${formatHumanList(profileDetails)})`,
+    ...HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_ORDER.flatMap((category) =>
+      categories.has(category)
+        ? [HOSTED_GROUP_JOIN_OFFER_SCOPE_CATEGORY_LABEL[category]]
+        : []
+    ),
+  ];
 }
 
 function isHostedGroupMealNutritionProjectionScope(
@@ -2180,6 +2349,15 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         prisma: input.prisma,
       })).filter((participant) => boundedHandleValues.has(participant.handle));
     const now = new Date();
+    const observationExpiresAt = new Date(
+      now.getTime() + HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+    );
+    const observationLookupKeys = [...new Set(participantHandles.flatMap((handle) => {
+      const lookupKey = createHostedThreadContainerParticipantHandleLookupKey(
+        handle.handle,
+      );
+      return lookupKey ? [lookupKey] : [];
+    }))];
     const seenByMemberId = new Map<string, {
       handleLookupKey: string;
       participantMemberId: string;
@@ -2199,6 +2377,16 @@ export async function reconcileHostedThreadContainerParticipants(input: {
     }
 
     const seenParticipants = [...seenByMemberId.values()];
+    const inputObservationRows = observationLookupKeys.length === 0
+      ? Prisma.sql`
+          SELECT NULL::text
+          WHERE FALSE
+        `
+      : Prisma.sql`
+          VALUES ${Prisma.join(observationLookupKeys.map((lookupKey) => Prisma.sql`
+            (${lookupKey}::text)
+          `))}
+        `;
     const inputParticipantRows = seenParticipants.length === 0
       ? Prisma.sql`
           SELECT NULL::text, NULL::text
@@ -2211,7 +2399,38 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         `;
 
     await input.prisma.$executeRaw(Prisma.sql`
-      WITH input_participant(participant_member_id, handle_lookup_key) AS (
+      WITH input_observation(contact_lookup_key) AS (
+        ${inputObservationRows}
+      ),
+      upserted_observation AS (
+        INSERT INTO hosted_group_participant_observation (
+          contact_lookup_key,
+          first_observed_at,
+          expires_at
+        )
+        SELECT
+          input_observation.contact_lookup_key,
+          ${now},
+          ${observationExpiresAt}
+        FROM input_observation
+        ORDER BY input_observation.contact_lookup_key
+        ON CONFLICT (contact_lookup_key)
+        DO UPDATE SET
+          first_observed_at = CASE
+            WHEN hosted_group_participant_observation.expires_at <= EXCLUDED.first_observed_at
+              THEN EXCLUDED.first_observed_at
+            ELSE LEAST(
+              hosted_group_participant_observation.first_observed_at,
+              EXCLUDED.first_observed_at
+            )
+          END,
+          expires_at = GREATEST(
+            hosted_group_participant_observation.expires_at,
+            EXCLUDED.expires_at
+          )
+        RETURNING contact_lookup_key
+      ),
+      input_participant(participant_member_id, handle_lookup_key) AS (
         ${inputParticipantRows}
       ),
       upserted AS (
@@ -2235,6 +2454,7 @@ export async function reconcileHostedThreadContainerParticipants(input: {
           ${now},
           ${now}
         FROM input_participant
+        CROSS JOIN (SELECT COUNT(*) FROM upserted_observation) AS observation_barrier
         ON CONFLICT (container_member_id, participant_member_id)
         DO UPDATE SET
           handle_lookup_key = EXCLUDED.handle_lookup_key,

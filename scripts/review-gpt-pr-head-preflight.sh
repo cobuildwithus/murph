@@ -371,7 +371,7 @@ review_gpt_require_completion_specialists_prompt_budget() {
   done
 
   if (( assembled_bytes > review_gpt_completion_specialists_prompt_max_bytes )); then
-    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical/Frog budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
+    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
     return 1
   fi
 }

@@ -649,7 +649,7 @@ so rollout intentionally rotates native provider threads beyond onboarding. On
 the first post-deploy turn of a pre-existing automation-capable private session
 or eligible non-email group session, the stored contract fingerprint no longer
 matches. The planner must not resume a provider thread under a different tool
-schema: it starts a fresh thread with at most 24 committed messages, 4,000 bytes
+schema: it starts a fresh thread with at most 72 committed messages, 4,000 bytes
 per message, and 12,000 bytes total, then returns to native resume after that
 replacement thread succeeds. Rolling back the schema can cause the same session
 to rotate a second time. Rollout proof uses one pre-existing private session and
@@ -666,7 +666,7 @@ clears native resume; retaining a provider thread across different target
 options would make its contract ambiguous, while persisting high reasoning as
 the member's ordinary preference would change their selected authority. The
 next ordinary turn therefore receives the same bounded committed-history
-fallback—at most 24 messages, 4,000 bytes per message, and 12,000 bytes total—
+fallback—at most 72 messages, 4,000 bytes per message, and 12,000 bytes total—
 and later turns resume the replacement thread. Cancellation or foreground
 preemption before terminal turn persistence does not rotate the session. An
 outbound delivery failure after terminal persistence does not undo the reset.

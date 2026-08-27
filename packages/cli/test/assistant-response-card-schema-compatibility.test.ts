@@ -81,6 +81,14 @@ const WORKOUT_CARD = {
   },
 } as const
 
+const WORKOUT_CARD_AUTHORING_INPUT = {
+  ...WORKOUT_CARD,
+  tracking: {
+    kind: WORKOUT_CARD.tracking.kind,
+    entityId: WORKOUT_CARD.tracking.entityId,
+  },
+} as const
+
 function buildGenericTableAtImageBoundary(lastCellLength: number) {
   return {
     kind: 'compact_table',
@@ -124,7 +132,15 @@ describe('attach_response_card schema compatibility', () => {
     const cases = [
       { value: { card: NUTRITION_CARD }, valid: true },
       { value: { card: GENERIC_TABLE_CARD }, valid: true },
-      { value: { card: WORKOUT_CARD }, valid: true },
+      {
+        value: {
+          card: {
+            ...GENERIC_TABLE_CARD,
+            tracking: WORKOUT_CARD.tracking,
+          },
+        },
+        valid: true,
+      },
       {
         value: {
           card: {
@@ -163,6 +179,22 @@ describe('attach_response_card schema compatibility', () => {
       assert.equal(runtimeAccepted, testCase.valid)
       assert.equal(providerAccepted, runtimeAccepted)
     }
+  })
+
+  it('keeps workout authoring separate from persisted card validation', () => {
+    const authoringValue = { card: WORKOUT_CARD_AUTHORING_INPUT }
+    const persistedValue = { card: WORKOUT_CARD }
+
+    assert.equal(offeredSchemaAccepts(authoringValue), true)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse(authoringValue).success,
+      false,
+    )
+    assert.equal(offeredSchemaAccepts(persistedValue), false)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse(persistedValue).success,
+      true,
+    )
   })
 
   it('keeps cross-array cardinality runtime-owned and repairable', () => {
@@ -289,20 +321,26 @@ describe('attach_response_card schema compatibility', () => {
       true,
     )
 
-    const pendingActual = {
+    const pendingWorkout = {
+      ...WORKOUT_CARD.workout,
+      exercises: [{
+        ...WORKOUT_CARD.workout.exercises[0],
+        sets: [{ status: 'pending', target: '8 reps', actual: '8 reps' }],
+      }],
+    }
+    const pendingAuthoringActual = {
       card: {
-        ...WORKOUT_CARD,
-        workout: {
-          ...WORKOUT_CARD.workout,
-          exercises: [{
-            ...WORKOUT_CARD.workout.exercises[0],
-            sets: [{ status: 'pending', target: '8 reps', actual: '8 reps' }],
-          }],
-        },
+        ...WORKOUT_CARD_AUTHORING_INPUT,
+        workout: pendingWorkout,
       },
     }
-    assert.equal(offeredSchemaAccepts(pendingActual), true)
-    const pendingResult = attachResponseCardRuntimeSchema.safeParse(pendingActual)
+    assert.equal(offeredSchemaAccepts(pendingAuthoringActual), true)
+    const pendingResult = attachResponseCardRuntimeSchema.safeParse({
+      card: {
+        ...WORKOUT_CARD,
+        workout: pendingWorkout,
+      },
+    })
     assert.equal(pendingResult.success, false)
     if (pendingResult.success) {
       throw new TypeError('Expected pending-set relation validation to fail.')
@@ -320,12 +358,6 @@ describe('attach_response_card schema compatibility', () => {
         'actual',
       ])
     ))
-    assert.equal(offeredSchemaAccepts({ card: WORKOUT_CARD }), true)
-    assert.equal(
-      attachResponseCardRuntimeSchema.safeParse({ card: WORKOUT_CARD }).success,
-      true,
-    )
-
     const oversized = { card: buildGenericTableAtImageBoundary(18) }
     assert.equal(offeredSchemaAccepts(oversized), true)
     const oversizedResult = attachResponseCardRuntimeSchema.safeParse(oversized)
