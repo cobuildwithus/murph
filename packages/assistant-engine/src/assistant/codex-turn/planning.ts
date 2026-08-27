@@ -537,6 +537,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const authenticatedGroupProviderTurn =
+    authenticatedGroupChatRuntime &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const ordinaryInboundTurn =
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn' &&
@@ -594,6 +598,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
           currentUserPrompt: input.input.prompt,
+          includeTimestamps:
+            privateInteractiveAudience
+            && input.input.scheduledOccurrenceAt != null,
           sessionId: input.session.sessionId,
           vault: input.input.vault,
         })
@@ -1066,7 +1073,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         analyzeVideoAvailable:
-          privateInteractiveProviderTurn &&
+          (privateInteractiveProviderTurn || authenticatedGroupProviderTurn) &&
           userActionAcceptedInputIds.length > 0 &&
           normalizeNullableString(
             input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
@@ -1245,6 +1252,7 @@ type TranscriptHistoryCandidate = {
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   currentUserPrompt: string
+  includeTimestamps: boolean
   sessionId: string
   vault: string
 }): Promise<readonly AssistantProviderConversationMessage[]> {
@@ -1311,6 +1319,14 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
           contentIncomplete,
           message: {
             content,
+            ...(input.includeTimestamps
+              ? {
+                  occurredAt:
+                    entry.kind === 'user'
+                      ? entry.contentReceivedAt ?? entry.createdAt
+                      : entry.createdAt,
+                }
+              : {}),
             role: entry.kind,
           },
           standaloneAssistantContext:
@@ -1397,8 +1413,8 @@ function limitAssistantConversationHistoryMessages(
     if (typeof candidate.message.content !== 'string') {
       continue
     }
-    const messageBytes = assistantConversationHistoryUtf8Bytes(
-      candidate.message.content,
+    const messageBytes = assistantConversationHistoryMessageBytes(
+      candidate.message,
     )
     if (messageBytes === 0) {
       continue
@@ -1437,13 +1453,23 @@ function limitAssistantConversationHistoryMessages(
     if (!removed || typeof removed.message.content !== 'string') {
       continue
     }
-    retainedBytes -= assistantConversationHistoryUtf8Bytes(
-      removed.message.content,
-    )
+    retainedBytes -= assistantConversationHistoryMessageBytes(removed.message)
   }
   dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
   return [marker, ...retained.map(({ message }) => message)]
+}
+
+function assistantConversationHistoryMessageBytes(
+  message: AssistantProviderConversationMessage,
+): number {
+  if (typeof message.content !== 'string') {
+    return 0
+  }
+  return (
+    assistantConversationHistoryUtf8Bytes(message.content)
+    + assistantConversationHistoryUtf8Bytes(message.occurredAt ?? '')
+  )
 }
 
 function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
@@ -1469,9 +1495,7 @@ function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
     removed = messages.splice(0, firstUserIndex)
   }
   return removed.reduce((total, candidate) => (
-    typeof candidate.message.content === 'string'
-      ? total + assistantConversationHistoryUtf8Bytes(candidate.message.content)
-      : total
+    total + assistantConversationHistoryMessageBytes(candidate.message)
   ), 0)
 }
 

@@ -84,13 +84,16 @@ key configuration is fail-closed and
 omits `murph.analyze_video`. During this update, an old runner continues to emit
 the exact legacy profile while a new runner may emit either current profile;
 the compatible Worker accepts both without permitting arbitrary FPS, thinking,
-or output settings. New requests choose the mode before egress and never retry
-the clip at another rate. The existing private-direct and accepted-input
-authority remains unchanged. A direct turn may
-receive the schema before its accepted input has video authority because the
-provider tool set freezes at turn start; this lets the first live-steered video
-be frozen and authorized before tool execution in that same turn. There is no
-schema, backfill, dual-write, or stored compatibility state.
+or output settings. Both generations expose the tool for private-direct turns
+and authenticated Linq/Telegram group turns with accepted user-action input.
+Any authenticated group participant may request analysis of another
+participant's video in the same accepted group turn; unverified external groups
+continue to omit it. New requests choose the mode before egress and never retry
+the clip at another rate. An eligible turn may receive the schema before its
+accepted input has video authority because the provider tool set freezes at
+turn start; this lets the first live-steered video be frozen and authorized
+before tool execution in that same turn. There is no schema, backfill,
+dual-write, or stored compatibility state.
 
 Do not revert the compatible Worker while a new runner can still emit the new
 request shape. Disable the tool or roll back the runner writer first, drain warm
@@ -99,8 +102,12 @@ branch are safe to leave in place. Post-deploy, use consented short supported
 videos in a private direct conversation to verify one ordinary request selects
 standard 1 FPS and one rapid-movement or exercise-form request selects detailed
 motion 5 FPS. Confirm both finish with one Gemini call and one usage record.
+Then use one consented group video and verify the same single-request result
+when its uploader requests analysis. Have a different authenticated participant
+request analysis of a second consented group video and verify the same result.
 Inspect only bounded status/error aggregates and token counters, never media,
-prompts, paths, request or response bodies, or credential values.
+prompts, paths, request or response bodies, sender handles, or credential
+values.
 
 ### Hosted inbox video transience rollout
 

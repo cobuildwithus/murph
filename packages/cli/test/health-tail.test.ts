@@ -774,6 +774,10 @@ test("goal import-json preserves the nutrition proposal window, sibling targets,
 test("goal import-json validates payloads through the shared goal schema", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");
+  const qualifierPayloadPath = path.join(vaultRoot, "goal-private-qualifier.json");
+  const privateParentGoalId = "private-invalid-goal-id";
+  const privateQualifierKey = "private-qualifier-key";
+  const privateQualifierValue = "private-qualifier-value";
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -781,7 +785,28 @@ test("goal import-json validates payloads through the shared goal schema", async
       payloadPath,
       JSON.stringify({
         title: "Sleep longer",
-        parentGoalId: "not-a-goal-id",
+        parentGoalId: privateParentGoalId,
+      }),
+      "utf8",
+    );
+    await writeFile(
+      qualifierPayloadPath,
+      JSON.stringify({
+        title: "Sleep longer",
+        metricTargets: [{
+          targetId: "sleep-duration",
+          kind: "metric",
+          metricKey: "sleep-duration",
+          comparator: ">=",
+          value: 7,
+          unit: "h",
+          selectionPolicyOverride: {
+            kind: "qualified-latest",
+            requiredQualifiers: {
+              [privateQualifierKey]: [privateQualifierValue],
+            },
+          },
+        }],
       }),
       "utf8",
     );
@@ -794,10 +819,38 @@ test("goal import-json validates payloads through the shared goal schema", async
       "--vault",
       vaultRoot,
     ]);
+    const qualifierResult = await runCli([
+      "goal",
+      "import-json",
+      "--input",
+      `@${qualifierPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const listAfterInvalid = await runCli<{ count: number }>([
+      "goal",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
 
     assert.equal(upsertResult.ok, false);
     assert.equal(upsertResult.error?.code, "invalid_payload");
     assert.match(upsertResult.error?.message ?? "", /goal payload failed validation/i);
+    assert.equal(upsertResult.error?.stage, "validation");
+    assert.equal(upsertResult.error?.fieldErrors?.[0]?.path, "parentGoalId");
+    assert.equal(upsertResult.error?.hint, undefined);
+    assert.equal(JSON.stringify(upsertResult).includes(privateParentGoalId), false);
+    assert.equal(qualifierResult.ok, false);
+    assert.equal(qualifierResult.error?.code, "invalid_payload");
+    assert.equal(
+      qualifierResult.error?.fieldErrors?.[0]?.path,
+      "metricTargets.0.selectionPolicyOverride",
+    );
+    assert.equal(JSON.stringify(qualifierResult).includes(privateQualifierKey), false);
+    assert.equal(JSON.stringify(qualifierResult).includes(privateQualifierValue), false);
+    assert.equal(listAfterInvalid.ok, true);
+    assert.equal(requireData(listAfterInvalid).count, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -942,6 +995,8 @@ test("condition and allergy import-json validate payloads through the shared sch
   const conditionPayloadPath = path.join(vaultRoot, "condition-invalid.json");
   const conditionMissingTitlePath = path.join(vaultRoot, "condition-missing-title.json");
   const allergyPayloadPath = path.join(vaultRoot, "allergy-invalid.json");
+  const privateGoalId = "private-invalid-related-goal";
+  const privateConditionId = "private-invalid-related-condition";
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -949,7 +1004,7 @@ test("condition and allergy import-json validate payloads through the shared sch
       conditionPayloadPath,
       JSON.stringify({
         title: "Migraine",
-        relatedGoalIds: ["not-a-goal-id"],
+        relatedGoalIds: [privateGoalId],
       }),
       "utf8",
     );
@@ -958,7 +1013,7 @@ test("condition and allergy import-json validate payloads through the shared sch
       JSON.stringify({
         title: "Peanut allergy",
         substance: "Peanut",
-        relatedConditionIds: ["not-a-condition-id"],
+        relatedConditionIds: [privateConditionId],
       }),
       "utf8",
     );
@@ -998,12 +1053,18 @@ test("condition and allergy import-json validate payloads through the shared sch
     assert.equal(conditionUpsertResult.ok, false);
     assert.equal(conditionUpsertResult.error?.code, "invalid_payload");
     assert.match(conditionUpsertResult.error?.message ?? "", /condition payload failed validation/i);
+    assert.equal(conditionUpsertResult.error?.stage, "validation");
+    assert.equal(conditionUpsertResult.error?.fieldErrors?.[0]?.path, "relatedGoalIds.0");
+    assert.equal(JSON.stringify(conditionUpsertResult).includes(privateGoalId), false);
     assert.equal(conditionMissingTitleResult.ok, false);
     assert.equal(conditionMissingTitleResult.error?.code, "invalid_payload");
     assert.match(conditionMissingTitleResult.error?.message ?? "", /condition payload failed validation/i);
     assert.equal(allergyUpsertResult.ok, false);
     assert.equal(allergyUpsertResult.error?.code, "invalid_payload");
     assert.match(allergyUpsertResult.error?.message ?? "", /allergy payload failed validation/i);
+    assert.equal(allergyUpsertResult.error?.stage, "validation");
+    assert.equal(allergyUpsertResult.error?.fieldErrors?.[0]?.path, "relatedConditionIds.0");
+    assert.equal(JSON.stringify(allergyUpsertResult).includes(privateConditionId), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1511,6 +1572,7 @@ test("genetics import-json validates payloads through the shared schema and pres
   const createPayloadPath = path.join(vaultRoot, "genetics-create.json");
   const patchPayloadPath = path.join(vaultRoot, "genetics-patch.json");
   const invalidPayloadPath = path.join(vaultRoot, "genetics-invalid.json");
+  const privateFamilyMemberId = "private-invalid-family-member";
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -1549,7 +1611,7 @@ test("genetics import-json validates payloads through the shared schema and pres
       JSON.stringify({
         title: "MTHFR C677T",
         gene: "MTHFR",
-        sourceFamilyMemberIds: ["not-a-family-member-id"],
+        sourceFamilyMemberIds: [privateFamilyMemberId],
       }),
       "utf8",
     );
@@ -1590,6 +1652,9 @@ test("genetics import-json validates payloads through the shared schema and pres
     assert.equal(invalid.ok, false);
     assert.equal(invalid.error?.code, "invalid_payload");
     assert.match(invalid.error?.message ?? "", /genetics payload failed validation/i);
+    assert.equal(invalid.error?.stage, "validation");
+    assert.equal(invalid.error?.fieldErrors?.[0]?.path, "sourceFamilyMemberIds.0");
+    assert.equal(JSON.stringify(invalid).includes(privateFamilyMemberId), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1783,9 +1848,21 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
 test("immunization descriptor wiring exposes a dedicated event-backed noun", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "immunization.json");
+  const invalidPayloadPath = path.join(vaultRoot, "immunization-invalid.json");
+  const privateManufacturer = "private-manufacturer-value";
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      invalidPayloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        title: "Influenza vaccine",
+        vaccineName: "Influenza",
+        manufactuer: privateManufacturer,
+      }),
+      "utf8",
+    );
     await writeFile(
       payloadPath,
       JSON.stringify({
@@ -1804,9 +1881,35 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
           resourceType: "immunization-entry",
           resourceId: "synthetic-row-1",
         },
+        evidence: [
+          {
+            sourceDocumentId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            page: 2,
+          },
+        ],
       }),
       "utf8",
     );
+
+    const payloadSchemaResult = await runCli<{
+      schemaVersion: string;
+      schemaName?: string;
+      schema: Record<string, unknown>;
+    }>(["immunization", "payload-schema"]);
+    const invalidImport = await runCli([
+      "immunization",
+      "import-json",
+      "--input",
+      `@${invalidPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const listAfterInvalid = await runCli<{ count: number }>([
+      "immunization",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
 
     const importJsonResult = await runCli<{
       eventId: string;
@@ -1885,6 +1988,27 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
       vaultRoot,
     ]);
 
+    assert.equal(payloadSchemaResult.ok, true);
+    assert.equal(requireData(payloadSchemaResult).schemaVersion, "murph.payload-schema.v1");
+    assert.equal(requireData(payloadSchemaResult).schemaName, "immunization-import-payload");
+    assert.equal(requireData(payloadSchemaResult).schema.additionalProperties, false);
+    const schemaProperties = requireData(payloadSchemaResult).schema.properties;
+    assert.equal(
+      schemaProperties !== null &&
+        typeof schemaProperties === "object" &&
+        !Array.isArray(schemaProperties) &&
+        "evidence" in schemaProperties,
+      true,
+    );
+    assert.equal(invalidImport.ok, false);
+    assert.equal(invalidImport.error?.code, "invalid_payload");
+    assert.equal(invalidImport.error?.stage, "validation");
+    assert.equal(invalidImport.error?.fieldErrors?.[0]?.path, "$");
+    assert.equal(invalidImport.error?.fieldErrors?.[0]?.code, "unrecognized_keys");
+    assert.equal(invalidImport.error?.hint, undefined);
+    assert.equal(JSON.stringify(invalidImport).includes(privateManufacturer), false);
+    assert.equal(listAfterInvalid.ok, true);
+    assert.equal(requireData(listAfterInvalid).count, 0);
     assert.equal(importJsonResult.ok, true);
     assert.match(eventId, /^evt_/u);
     assert.equal(requireData(importJsonResult).lookupId, eventId);
@@ -1905,6 +2029,12 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
     assert.equal(requireData(nounList).items[0]?.kind, "immunization");
     assert.equal(genericShow.ok, true);
     assert.equal(requireData(genericShow).entity.kind, "immunization");
+    assert.deepEqual(requireData(genericShow).entity.data.evidence, [
+      {
+        sourceDocumentId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        page: 2,
+      },
+    ]);
     const externalRef = requireData(genericShow).entity.data.externalRef;
     assert.equal(
       externalRef !== null &&

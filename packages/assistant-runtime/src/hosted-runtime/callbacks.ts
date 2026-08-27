@@ -6138,6 +6138,46 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   return normalized;
 }
 
+export async function assertHostedAssistantLinqTurnCommitAuthority(input: {
+  effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement">;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const checked = new Set<string>();
+  for (const context of input.linqDeliveryContexts) {
+    const target = context.target?.trim() ?? "";
+    const replyToMessageId = context.replyToMessageId?.trim() ?? "";
+    if (
+      context.threadIsDirect !== true
+      || context.service?.trim().toLowerCase() !== "imessage"
+      || !target
+      || !replyToMessageId
+    ) {
+      continue;
+    }
+    const key = JSON.stringify([target, replyToMessageId]);
+    if (checked.has(key)) {
+      continue;
+    }
+    checked.add(key);
+    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      authorityCheckOnly: true,
+      directRecipientPhoneNumber:
+        normalizeHostedLinqDirectRecipient(context.directRecipientPhoneNumber),
+      effectsPort: input.effectsPort,
+      fromPhoneNumber:
+        normalizeHostedLinqDirectRecipient(context.fromPhoneNumber),
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: null,
+      intentId: null,
+      replyToMessageId,
+      signal: input.signal,
+      target,
+      targetKind: "thread",
+    });
+  }
+}
+
 function isHostedLinqProviderDispatchAlreadyStartedError(error: unknown): boolean {
   return typeof error === "object"
     && error !== null

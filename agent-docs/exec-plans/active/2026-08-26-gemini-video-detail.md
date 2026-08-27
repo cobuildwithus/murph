@@ -21,10 +21,10 @@ Updated: 2026-08-26
   suited to that question.
 - Entry and promise: an explicit request about a supported accepted video
   makes at most one Gemini call. Ordinary attachments never trigger analysis.
-- Affected people: private-direct members; authenticated group uploaders once
-  the separate group-authority change lands; other group participants whose
-  membership alone grants no video authority; and members whose video cannot
-  be analyzed.
+- Affected people: private-direct members; authenticated Linq/Telegram group
+  participants who explicitly request analysis of a current accepted group
+  video; and members whose video cannot be analyzed. Unverified external groups
+  remain outside the capability.
 - Choice: `standard` is the default at 1 FPS. `detailed_motion` is selected for
   rapid movement, exercise phases, quick scene changes, or brief events at
   5 FPS. Members do not choose a raw frame rate.
@@ -48,8 +48,8 @@ Updated: 2026-08-26
   legacy request profile of 1 FPS, low thinking, and a 1,800-token output cap.
 - Out of scope: raw member-controlled FPS, automatic second-pass analysis,
   queues, retries, a Files API lifecycle, durable analysis results, diagnosis,
-  injury prediction, or widening requester/uploader authority beyond the
-  separate group-authority change.
+  injury prediction, or widening the authenticated-group authority already
+  merged on `main`.
 
 ## Constraints
 
@@ -62,8 +62,8 @@ Updated: 2026-08-26
   deployed legacy profile. Mixed legacy/new shapes remain rejected.
 - Deploy the compatible Cloudflare reader before the new runner writer. Remove
   the legacy profile only after warm old runners and the rollback floor advance.
-- Preserve unrelated worktree state and integrate the separate group lane only
-  from a committed, handed-off, or merged head.
+- Preserve unrelated worktree state and integrate group authority only from its
+  merged `main` implementation.
 
 ## Tasks
 
@@ -71,8 +71,8 @@ Updated: 2026-08-26
    uncapped new generation config.
 2. Extend the Cloudflare validator with exact new-profile and legacy-profile
    validation plus skew tests.
-3. After the group lane hands off, integrate the optional sampling mode into
-   the tool schema and assistant request owner without weakening its authority.
+3. Integrate the optional sampling mode into the merged direct/group tool schema
+   and assistant request owner without weakening its authority.
 4. Add deterministic mode, request, provenance, one-call, and failure proof.
 5. Add and run focused real-Codex journeys and review Murph's actual replies.
 6. Update owning docs and changelog, run focused owner checks, then complete
@@ -86,6 +86,10 @@ Updated: 2026-08-26
 - The push-up-form path selects `detailed_motion` before egress, sends one 5 FPS
   request with the same medium thinking and no output cap, and preserves the
   complete form question, including side, repetition range, and comparison.
+- The authenticated-group path preserves the merged same-turn group-video
+  authority while applying the same semantic mode choice and one-provider-call
+  ceiling. A combined real-Codex journey passed when one participant requested
+  another participant's current group video.
 - Negative, unavailable, and failed outcomes remain honest without automatic
   second-pass analysis, diagnosis language, or routine policy recitals.
 - Result: `Ready`. Focused real-Codex journeys selected detailed motion for the
@@ -177,6 +181,12 @@ Updated: 2026-08-26
   remove all-subscription verification fallback was rejected because the user
   explicitly authorized that durable workflow in this task. Exact-head round 4
   remains required for the behavior-bearing correction.
+- Current `main`, including the separately merged authenticated-group video
+  capability, was merged into the candidate. The four bounded conflicts kept
+  both the group authority contract and this PR's complete-question, sampling,
+  one-provider-call, and truthful-result behavior. Focused direct/group tests,
+  typecheck, and real-Codex detailed, standard, failure, and cross-participant
+  group journeys passed on the combined tree.
 - Draft PR #2373 is mergeable. Product UX is `Ready`; the PR remains draft while
   the corrected candidate completes exact-head final ReviewGPT. Broad exact-head
   CI, merge, deployment proof, and guarded retirement have not started.

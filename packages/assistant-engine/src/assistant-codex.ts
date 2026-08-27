@@ -96,6 +96,7 @@ import {
 } from './assistant-codex/ask-grok-tool.js'
 import {
   createAnalyzeVideoTurnState,
+  type AnalyzeVideoTurnState,
   type AnalyzeVideoToolRuntime,
 } from './assistant-codex/analyze-video-tool.js'
 import {
@@ -494,6 +495,7 @@ async function waitForCodexProgressDrain(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
@@ -3340,9 +3342,10 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
-  // Trusted turn-scoped provider-call ceilings: one counter per assistant turn,
-  // owned here and threaded into the dynamic-tool executor.
-  const analyzeVideoTurnState = createAnalyzeVideoTurnState()
+  // The host supplies one counter for every provider request in an assistant
+  // turn. Standalone App Server calls retain a request-local fallback.
+  const analyzeVideoTurnState =
+    input.analyzeVideoTurnState ?? createAnalyzeVideoTurnState()
   const askGrokTurnState = createAskGrokTurnState()
   const groupSharedReadTurnState = {
     currentSenderDecisionByMessageRef: new Map(),

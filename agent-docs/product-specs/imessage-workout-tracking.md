@@ -20,7 +20,8 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
   from canonical state; the sent bubble and offline fallback remain unchanged.
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
-  enrolled by the containing app.
+  pair enrolled once by the containing app, then renew its short action bearer
+  directly without requiring that app to be open.
 - An editor for one exact workout submits a closed, bounded member action
   directly. The existing hosted mailbox delivers it to the canonical workout
   owner with no assistant turn; the immutable card remains presentation, not
@@ -306,11 +307,16 @@ reinterpreted as a new-routine completion.
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V6 workout snapshot and emits only closed `exercise.append`, `set.put`,
-`set.append`, and `set.remove` mutations. `set.put` addresses an original or
-in-batch exercise-placeholder coordinate. `set.append` addresses the contiguous
-final positions after all original-coordinate edits and descending removals,
-so deletion and creation never share one positional identity. A destructive
+V6 workout snapshot and emits only closed `exercise.append`, `exercise.rename`,
+`set.put`, `set.append`, and `set.remove` mutations. `exercise.rename` targets
+one existing presentation position with a bounded replacement name; the
+expected workout and any same-batch set mutations retain the original name.
+`set.put` addresses an original or in-batch exercise-placeholder coordinate.
+`set.append` addresses the contiguous final positions after all
+original-coordinate edits and descending removals, so deletion and creation
+never share one positional identity. The canonical owner applies all set
+mutations before renames in the same write and rejects a rename that would make
+future exercise coordinates ambiguous. A destructive
 batch also carries one opaque SHA-256 binding over the canonical workout id and
 complete ordered exercise/set state. The canonical owner recomputes that binding
 under its existing lock before removing a set, so any concurrent type, note,
@@ -497,7 +503,7 @@ may advance stale progress before it emits a replacement card.
 The extension renders the embedded card immediately, keeps one transient
 selected-message session, and replaces that session only while its entire draft
 equals the card baseline, no admitted request exists, and submission state is
-idle. Network, credential, decode, non-unique-target, structural, or size
+idle. Network, credential-renewal, decode, non-unique-target, structural, or size
 failure leaves the complete embedded card and any local state unchanged. The
 extension performs no background refresh and stores no result. An oversized V4
 result or a V4/read-only returned result cannot continue refreshing because it

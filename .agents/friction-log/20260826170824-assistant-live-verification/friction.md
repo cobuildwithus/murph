@@ -1,6 +1,7 @@
 ---
 title: 'Assistant live verification requires repeated alternate-home authorization'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2381'
 ---
 
 ## Expected Behavior

@@ -42,6 +42,11 @@ import {
   sealHostedUserSecureBoxStrings,
   setHostedSecureBoxStringTestCodecForTests,
 } from "../src/lib/hosted-crypto/secure-box";
+import { encryptHostedMailboxPayloadString } from "../src/lib/hosted-mailbox/encryption";
+import {
+  decodeHostedMailboxStoredPayloads,
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "../src/lib/hosted-mailbox/store";
 import type {
   GcpKmsAsymmetricSignInput,
   GcpKmsDecryptInput,
@@ -1152,6 +1157,87 @@ test("K=32 private-field batches use one envelope query with at most four concur
   expect(openedPlaintexts).toHaveLength(memberIds.length);
   expect(openedPlaintexts.every((plaintext) =>
     new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+});
+
+test("more than fifteen stored mailbox payloads use one envelope query with at most four concurrent KMS unwraps", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const occurredAt = new Date("2026-08-26T12:00:00.000Z").toISOString();
+  const entries = [] as Array<{
+    dedupeKey: string;
+    kind: string;
+    lane: string;
+    laneSeq: bigint;
+    mailboxItemId: string;
+    occurredAt: string;
+    payloadInlineCiphertext: string;
+    payloadSchema: string;
+    userId: string;
+  }>;
+  const expected = [] as Array<{ index: number }>;
+
+  for (let index = 0; index < 16; index += 1) {
+    const userId = `member-mailbox-batch-${index + 1}`;
+    const mailboxItemId = `mailbox-item-batch-${index + 1}`;
+    const dedupeKey = `mailbox-dedupe-batch-${index + 1}`;
+    const laneSeq = BigInt(index + 1);
+    const payload = { index };
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "ingress",
+      prisma: tx.prisma,
+      reason: "test.mailbox-batch-provision",
+      userId,
+    });
+    const payloadInlineCiphertext = await encryptHostedMailboxPayloadString({
+      dedupeKey,
+      itemId: mailboxItemId,
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq,
+      occurredAt,
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      payloadStorage: "inline",
+      prisma: tx.prisma,
+      userId,
+      value: JSON.stringify(payload),
+    });
+    if (!payloadInlineCiphertext) {
+      throw new Error("Expected hosted mailbox payload ciphertext.");
+    }
+    entries.push({
+      dedupeKey,
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq,
+      mailboxItemId,
+      occurredAt,
+      payloadInlineCiphertext,
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      userId,
+    });
+    expected.push(payload);
+  }
+
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+
+  await expect(decodeHostedMailboxStoredPayloads({
+    entries,
+    prisma,
+  })).resolves.toEqual(expected);
+  expect(envelopeFindMany).toHaveBeenCalledOnce();
+  expect(envelopeFindMany.mock.calls[0]?.[0]?.where?.OR).toHaveLength(16);
+  expect(decryptMetrics.calls).toHaveLength(16);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
   )).toBe(true);
 });
 
