@@ -1925,7 +1925,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeAssistantSkillReference({
+          materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
             skillsRoot,
           }),
