@@ -907,6 +907,36 @@ Last verified: 2026-08-27
   failure cannot change the original checkout, webhook, retry, poison, or
   entitlement outcome. There is no new queue, cursor, retry loop, or persisted
   alert state.
+- Positive Stripe payment email is a receipt-completion obligation, not the
+  best-effort failure-alert projection. A positive `invoice.paid` amount or a
+  fulfilled usage-credit Checkout or saved-card PaymentIntent sends once after
+  canonical reconciliation. The existing receipt remains the only retry owner:
+  missing configuration or provider failure leaves it claimable without
+  rolling back billing, entitlement, or usage credit. A receipt-local sent
+  marker is written only after provider success, while an event-derived Resend
+  idempotency key covers response loss before that marker. Receipt replay after
+  the marker must skip send and finish remaining work. When canonical billing
+  succeeds, the notification and all existing post-canonical effects are
+  attempted independently inside the same receipt owner. Both promises start
+  before either is awaited, with concurrency bounded to one payment-email
+  request plus the existing single post-canonical effect chain. Neither side's
+  failure or provider latency suppresses or delays starting the other. While
+  the marker is absent, a direct-paid runtime-recheck failure retains its
+  existing persisted retry code even when notification also fails, because
+  replay consumes that code to reconstruct the wake; the absent marker retries
+  notification on the same receipt. For other simultaneous failures,
+  notification keeps the receipt retryable even if the other effect would
+  otherwise poison it. Once marked, the other effect keeps its existing retry
+  and poison behavior. When canonical billing commits activation mailbox items,
+  their
+  exact pointers are retained on the receipt in that same transaction. Every
+  positive-payment attempt restores
+  retained pointers and best-effort signals them through the existing
+  activation-wake owner before notification work, even when provider success
+  already wrote the sent marker. A rejected first wake can therefore overlap
+  provider, sent-marker, or receipt-completion failure without losing the exact
+  retry target or creating another activation. Zero-dollar invoices and
+  no-charge plan changes complete without notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
@@ -1240,28 +1270,37 @@ Last verified: 2026-08-27
   snapshots refresh only after the canonical write checkpoints and projection
   failures reuse the existing recording retry. There is no new scheduler,
   correction queue, projection watermark, or Web health-value owner.
-- The composed maximum for one projection opportunity is one active-scope read,
-  at most 98 sequential projectable-scope deliveries from the closed registry,
-  and at most 25 sequential share-replacement transactions per delivery under
-  the existing grant cap: 2,450 replacement transactions at maximum admitted
-  cardinality. There is at most one active scope-resolution or delivery request
-  per opportunity. One destination's typed missing-root failure continues to
-  later scopes sequentially and leaves the aggregate attempt failed. An unknown
-  or shared-infrastructure error stops the remaining destinations and scopes,
-  bounding a dependency outage to the current failed replacement attempt.
+- One projection opportunity performs one active-scope read and at most 98
+  sequential projectable-scope deliveries from the closed registry. Each Web
+  delivery request replaces at most 25 destination snapshots. A larger exact
+  scope continues through stable destination-ordered pages; the runtime keeps
+  at most one scope-resolution or delivery request in flight, so destination
+  cardinality increases total sequential work without increasing transaction,
+  crypto, or request concurrency. One destination's typed missing-root failure
+  continues to later scopes sequentially and leaves the aggregate attempt
+  failed. An unknown or shared-infrastructure error stops the remaining
+  destinations and scopes, bounding a dependency outage to the current failed
+  replacement attempt.
   Deadline exhaustion, foreground wake, exact host abort, or shutdown finishes
   only the already-started scope; and the
   existing continuation cannot retry until that request reaches its server-owned
   terminal boundary. Repeated
   wakes may admit conversation work but cannot start another projection. Each
-  replacement adds one source-workspace row lock/check at its final write
-  boundary. The runtime starts no concurrent per-scope or per-share transactions,
-  and publication wakes no destination group runtime. Ordinary load is
-  proportional only to scopes and destinations with active grants. Boundary
-  tests derive the 98-scope and 25-destination composition from the owning
-  registries, prove ordered peak-one delivery/replacement work, and assert the
-  per-replacement encryption, two access checks, source lock, and exact-generation
-  update.
+  successful replacement records the exact source-workspace version on its
+  share row. A retry that restarts without a cursor therefore skips only rows
+  already replaced from that same source version, while a newer checkpoint
+  makes every older marker stale. First materialization independently advances
+  through the existing null-snapshot marker. The full active generation token
+  remains cohort-wide on every page, and revoke or regrant clears the progress
+  marker, so pagination never weakens authority or generation freshness. Each
+  replacement still adds one source-workspace row lock/check at its final write
+  boundary. The runtime starts no concurrent per-scope or per-share
+  transactions, and publication wakes no destination group runtime. Ordinary
+  load is proportional only to scopes and destinations with active grants.
+  Boundary tests derive the 98-scope and 25-replacement page bounds from the
+  owning registries, prove ordered peak-one delivery/replacement work and retry
+  progress, and assert the per-replacement encryption, two access checks,
+  source lock, exact-generation update, and stored source-version marker.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

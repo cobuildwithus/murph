@@ -102,6 +102,9 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
+  acceptHostedGroupOfferAffirmation,
+} from "@/src/lib/hosted-groups/group-offer-affirmation";
+import {
   parseHostedLinqProviderEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
@@ -265,6 +268,55 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+  });
+
+  it.each([
+    ["disclosure", ["disclosure"] as const],
+    ["join", ["join"] as const],
+  ])("revalidates the actor after the %s acceptance owner and before its accepted side effect", async (
+    kind,
+    kinds,
+  ) => {
+    const order: string[] = [];
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockImplementation(
+      async () => {
+        order.push("accept");
+        return { kind: kind === "disclosure" ? "accepted" : "not_found" };
+      },
+    );
+    mocks.acceptHostedGroupJoinOfferTx.mockImplementation(async () => {
+      order.push("accept");
+      return {
+        alreadyMember: false,
+        grantedVaultShareProjectionKinds: [],
+        groupId: "group_1",
+        joinCode: "join_1",
+        messageLookupKey: "message_1",
+        membershipId: "membership_1",
+        revokedVaultShareProjectionKinds: [],
+        selectedVaultShareProjectionKinds: [],
+      };
+    });
+
+    const result = await acceptHostedGroupOfferAffirmation({
+      affirmationEventId: "affirmation_1",
+      assertActorStillBound: async () => {
+        order.push("revalidate");
+      },
+      channel: "telegram",
+      kinds,
+      memberId: "member_reactor",
+      messageLookupKeyReadCandidates: ["message_1"],
+      now: new Date("2026-08-26T12:00:00.000Z"),
+      onAcceptedTx: async () => {
+        order.push("accepted-side-effect");
+      },
+      prisma: createPrismaStub(),
+      threadIdentityLookupKeyReadCandidates: ["thread_1"],
+    });
+
+    expect(result).toEqual({ kind, status: "accepted" });
+    expect(order).toEqual(["accept", "revalidate", "accepted-side-effect"]);
   });
 
   it("grants only the exact permission bound to an exact Like and retains the accepted reaction", async () => {

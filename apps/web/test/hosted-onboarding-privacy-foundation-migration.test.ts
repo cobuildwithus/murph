@@ -971,6 +971,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260812030200_whoop_capacity_index",
       "20260812030300_referral_handoff_indexes",
       "20260812050000_hosted_sensitive_action_transient_retention_index",
+      "20260826190000_hosted_vault_share_delivery_cursor_index",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1177,6 +1178,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260825193000_hosted_group_private_conversion",
       "20260826120000_hosted_group_participant_observation",
       "20260826201500_imessage_mini_app_renewal_credential",
+      "20260826230000_hosted_stripe_payment_notification_email",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

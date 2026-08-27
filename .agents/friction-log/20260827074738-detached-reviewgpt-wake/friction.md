@@ -1,6 +1,7 @@
 ---
 title: 'Detached ReviewGPT wake rejects a captured thread with zero user turns'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2429'
 ---
 
 ## Expected Behavior

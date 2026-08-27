@@ -89,9 +89,15 @@ describe("assistant tool description call contracts", () => {
 
   it("keeps group handoff discovery and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("queued, not sent");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never say told, shared, or posted",
+      "Named group: pass groupLabel; never list first",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("memory show");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Handoff context stays identity-neutral; host supplies attribution",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "After acceptance, say queued",
     );
   });
 
@@ -112,19 +118,19 @@ describe("assistant tool description call contracts", () => {
 
   it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Use ask_current_sender to return a complete private-current-sender answer to the group",
+      "ask_current_sender returns to group",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "message_current_sender only for an explicitly private answer",
+      "message_current_sender only for explicit private answer; pass only message_ref",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Call clarify_current_sender before a needed follow-up",
+      "Use clarify_current_sender before needed follow-up",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "continuation actions are only for the later reply",
+      "continuations only for later reply",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never a fresh request",
+      "never fresh request",
     );
   });
 });

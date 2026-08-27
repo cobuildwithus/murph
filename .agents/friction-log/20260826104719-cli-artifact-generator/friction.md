@@ -1,6 +1,7 @@
 ---
 title: 'CLI artifact generator stays silent for several minutes after build'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2439'
 ---
 
 ## Expected Behavior

@@ -28,6 +28,8 @@ import {
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -1059,6 +1061,20 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         description:
           'Group display name. Required for action="update_display_name"; optional for action="offer_access" only when it is the name the group chose or the exact name from the immediately preceding read_chat_name result.',
       },
+      cursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="list_memberships". Pass the exact opaque nextCursor from the immediately preceding page; never guess, edit, or take it from the user.',
+      },
+      disclosureGrantCursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="read_current" or action="list_memberships". Pass the exact opaque nextDisclosureGrantCursor from the immediately preceding disclosure-grant page; never guess, edit, or take it from the user.',
+      },
       membershipId: {
         type: 'string',
         minLength: 1,
@@ -1205,7 +1221,9 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
     'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
     'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
   ],
-  group_membership: ['membershipId', 'setup'],
+  group_membership: [
+    'cursor', 'disclosureGrantCursor', 'membershipId', 'setup',
+  ],
   group_usage: ['message_ref', 'policyCode', 'policyCodes'],
   group_chat: [
     'alt', 'avatarPrompt', 'avatarSource', 'displayName', 'imageRef',
@@ -1255,7 +1273,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask or hand off; host binds group/member/sender authority. Use ask_current_sender to return a complete private-current-sender answer to the group; use message_current_sender only for an explicitly private answer. Call clarify_current_sender before a needed follow-up; continuation actions are only for the later reply, never a fresh request. After an accepted handoff, say it is queued, not sent or delivered; never say told, shared, or posted.',
+    'Ask or hand off; host binds authority. Named group: pass groupLabel; never list first. Sender: ask_current_sender returns to group; message_current_sender only for explicit private answer; pass only message_ref. Use clarify_current_sender before needed follow-up; continuations only for later reply, never fresh request. Handoff context stays identity-neutral; host supplies attribution. After acceptance, say queued, not sent/delivered/told/shared/posted.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
