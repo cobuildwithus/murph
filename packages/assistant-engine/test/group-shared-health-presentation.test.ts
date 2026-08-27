@@ -25,13 +25,16 @@ describe('group shared metric presentation prompt', () => {
       'Never rebuild a name-to-value mapping from row order, value matching, or conversation',
     )
     expect(prompt).toContain(
+      'For explicit current visibility or attribution of a consented shared metric',
+    )
+    expect(prompt).toContain(
       'If a needed label is absent or ambiguous, do not guess; state only that narrow row-label limitation',
     )
     expect(prompt).toContain(
       'When the relevant rows have usable, unambiguous labels, never ask people to confirm the mapping already supplied by the tool',
     )
     expect(prompt).toContain(
-      'call one fresh exact-scope `read_shared` and answer only from that result',
+      'answer only from that fresh exact-scope result',
     )
     expect(prompt).toContain('This row association is presentation only')
     expect(prompt).toContain(

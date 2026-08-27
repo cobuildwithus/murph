@@ -3806,6 +3806,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
         )
 
+        process.stdout.write(
+          `[group-labeled-summary-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            sharedReads,
+          })}\n`,
+        )
         expect(sharedReads).toHaveLength(1)
         expect(sharedReads[0]).toMatchObject({
           argumentsValue: {
@@ -3912,6 +3918,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             && readString(item?.text)?.trim() === result.finalMessage.trim()
         })
 
+        process.stdout.write(
+          `[group-labeled-attribution-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            sharedReads,
+          })}\n`,
+        )
         expect(sharedReads).toHaveLength(1)
         expect(sharedReads[0]).toMatchObject({
           argumentsValue: {
