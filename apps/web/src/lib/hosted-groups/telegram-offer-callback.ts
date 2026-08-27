@@ -10,7 +10,7 @@ import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../ho
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { resolveHostedMemberRoutingByTelegramUserId } from "../hosted-onboarding/hosted-member-routing-store";
+import { resolveHostedMemberCoreByTelegramUserId } from "../hosted-onboarding/hosted-member-routing-store";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   answerHostedTelegramCallbackQueryBestEffort,
@@ -73,7 +73,7 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
   }
 
   const telegramUserId = String(callbackQuery.from.id);
-  const memberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const memberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId,
   });
@@ -81,7 +81,7 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
     await answer(null);
     return { handled: false, reason: "ambiguous-telegram-binding" };
   }
-  const member = memberLookup.status === "found" ? memberLookup.lookup.core : null;
+  const member = memberLookup.status === "found" ? memberLookup.core : null;
   if (!member) {
     await answer(HOSTED_TELEGRAM_GROUP_OFFER_UNLINKED_TEXT);
     return { handled: false, reason: "unlinked-telegram" };
@@ -103,11 +103,11 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
     // tapper no longer controls.
     assertActorStillBound: async (tx) => {
       await lockHostedMemberRow(tx, member.id);
-      const locked = await resolveHostedMemberRoutingByTelegramUserId({
+      const locked = await resolveHostedMemberCoreByTelegramUserId({
         prisma: tx,
         telegramUserId,
       });
-      if (locked.status !== "found" || locked.lookup.core.id !== member.id) {
+      if (locked.status !== "found" || locked.core.id !== member.id) {
         throw hostedOnboardingError({
           code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
           httpStatus: 409,

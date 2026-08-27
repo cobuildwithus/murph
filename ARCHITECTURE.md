@@ -935,7 +935,10 @@ deletion-member rows, then rejects any target-set change before persisting the
 receipt or deleting local rows. Group-offer acceptance uses that same
 group-before-member order; a Telegram tap revalidates its mutable actor binding
 after those canonical locks and before accepted side effects or commit, so a
-concurrent relink rolls the grant back atomically. A searchable, non-reversible
+concurrent relink rolls the grant back atomically. Both the initial lookup and
+the locked revalidation use the existing blind-index core projection, so they
+do not decrypt private routing state or call KMS while the transaction holds
+group and member locks. A searchable, non-reversible
 Privy lookup key on an incomplete receipt blocks identity re-creation and lets
 retries prove that a newly bound identity cannot be deleted.
 
