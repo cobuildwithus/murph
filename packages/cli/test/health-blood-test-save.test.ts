@@ -1134,10 +1134,10 @@ test("blood-test save rejects JSON objects that are not analyte records without 
     assert.match(result.envelope.error.message ?? "", /analyte payload/u);
     assert.equal(result.envelope.error.stage, "validation");
     assert.deepEqual(result.envelope.error.fieldErrors?.[0], {
-      code: "invalid_union",
+      code: "invalid_type",
       expected: "",
       message: "This field is invalid.",
-      path: "result.0",
+      path: "result.0.analyte",
       received: "invalid",
     });
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
