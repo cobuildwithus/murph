@@ -43,8 +43,11 @@ For appointment work, first read
 `$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md`. That skill owns
 intake completeness, reusable scheduling-memory handling, and the ready-to-act
 gate across every transport. Before readiness, use this skill only for bounded,
-non-mutating inspection of public requirements or availability. Use it for the
-real website action once the appointment brief is ready. Research or an
+non-mutating inspection of public requirements or availability, or of the
+user-authorized official destination when the active browser is already
+authenticated. Do not initiate login, enter credentials, disclose user data, or
+mutate destination state during that inspection. Use this skill for the real
+website action once the appointment brief is ready. Research or an
 information-only lookup does not make a separate booking request ready.
 
 Before browsing, resolve as much as possible from the current message, recent
@@ -54,8 +57,17 @@ bound it (location, date window, timezone, quantity, budget, delivery,
 insurance, seller, dietary needs, acceptable substitutions), any site
 preference, the authorization boundary the user has delegated for this turn,
 and any sensitive step — login, one-time code, payment, identity, insurance,
-prescription, or health information — that will need private handoff or
-specific consent before transmission.
+prescription, or health information — that will need owning-policy authority or
+private handoff before transmission.
+
+An explicit request to complete the browser task authorizes use and necessary
+transmission of reliable current facts relevant to its intended destination and
+purpose. Do not re-ask solely because a fact came from canonical memory. This
+does not authorize a different recipient or purpose, stale or conflicting
+facts, credentials, full payment details, one-time codes, CAPTCHA, new consent,
+or anything a task-specific owner reserves. For appointment check-in and
+intake, `appointment-scheduling` determines which destination-driven identity
+fields are necessary before any are entered.
 
 Do not turn this into an interview. For appointment work, follow the
 appointment-scheduling skill's compact missing-field questions. For other

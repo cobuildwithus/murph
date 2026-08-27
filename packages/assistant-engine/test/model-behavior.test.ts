@@ -1413,6 +1413,10 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain('Prefer a structured integration')
     expect(computerSection).toContain('private untrusted data')
     expect(computerSection).toContain('Use secure user handoff')
+    expect(computerSection).toContain(
+      'credentials, full payment details, and one-time codes',
+    )
+    expect(computerSection).not.toContain('other private input')
     expect(computerSection).toContain('exact final terms or explicit bounds')
     expect(computerSection).toContain('verify the requested result on the site')
     expect(computerSection).not.toContain(

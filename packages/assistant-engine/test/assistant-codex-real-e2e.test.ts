@@ -10682,7 +10682,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   )
 
   it(
-    'reuses saved identity and recovers an ordinary unresponsive check-in control',
+    'inspects an authenticated portal, reuses saved identity, and recovers an ordinary control',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -10699,6 +10699,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
       let checkInCompleted = false
       let dateOfBirthEntered = false
       let insuranceEntered = false
+      let portalInspected = false
       let osControlCount = 0
       let openCount = 0
       let reopenedAfterOsControl = false
@@ -10761,6 +10762,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               === 'http://web-control.worker/api/internal/computer/runs'
             ) {
               openCount += 1
+              portalInspected = true
               if (osControlCount === 1) {
                 reopenedAfterOsControl = true
               }
@@ -10779,7 +10781,8 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                 visibleText: checkInCompleted
                   ? 'Check-in complete. Your appointment is confirmed.'
                   : [
-                      'Appointment check-in.',
+                      'Official appointment check-in portal. Already signed in.',
+                      'The public clinic pages did not state which identity fields this private form requires.',
                       'Full name is already populated.',
                       dateOfBirthEntered
                         ? 'Date of birth is populated.'
@@ -10805,6 +10808,18 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               url
               === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_check_in/act'
             ) {
+              if (!portalInspected) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_INSPECTION_REQUIRED',
+                    message:
+                      'Inspect the already-authenticated portal before acting or disclosing user data.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
               actCount += 1
               const code = String(body.code ?? '')
               if (/1990-04-12|04\/12\/1990/iu.test(code)) {
@@ -11011,6 +11026,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           modelProvider: config.modelProvider,
           prompt: [
             'Complete online check-in for my confirmed eye-care appointment at https://clinic.example.test/check-in.',
+            'The public clinic pages do not list the private form fields. My persistent browser is already signed in; inspect the official portal to determine the required fields before entering or submitting anything.',
             'Use my saved private identity information and finish every authorized ordinary step.',
             'This request authorizes sending my saved date of birth to this clinic for this check-in.',
             'My insurance member ID is SYNTHETIC-MEMBER-2468. Use it only for this check-in, and remember it for next time only if Murph has a proper canonical owner for it.',
@@ -11070,6 +11086,9 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
         expect(pauseCalls).toHaveLength(0)
         expect(finishCalls).toHaveLength(1)
         expect(memoryRead?.eventIndex).toBeLessThan(
+          actCalls[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+        )
+        expect(openCalls[0]?.eventIndex).toBeLessThan(
           actCalls[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
         )
         expect(reopenAfterFailure, 're-open after failed action').toBeDefined()

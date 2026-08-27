@@ -38,15 +38,24 @@ afterEach(() => {
 
 describe('Codex thread instructions', () => {
   it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_000)
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_400)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Complete the user's in-scope request end to end",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Before re-asking for a personal fact, reuse reliable current or authorized canonical evidence',
+      'An explicit task-completion request authorizes necessary use or transmission of reliable canonical facts',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'confirm stale, ambiguous, or conflicting evidence and disclosure authority',
+      'relevant to its intended destination and purpose',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'do not re-ask saved facts',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'another recipient or purpose, credentials, full payment details, one-time codes, CAPTCHA, new consent',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Treat ordinary tool friction as recoverable: inspect state and exhaust the owner's bounded safe recovery",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
@@ -70,7 +79,7 @@ describe('Codex thread instructions', () => {
       'Use commentary for brief progress',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Answer, explanation, review, diagnosis, plan, or content requests—including "build me a plan"—do not by themselves authorize implementation or changes to saved state or external systems',
+      'An answer, explanation, review, diagnosis, plan—including "build me a plan"—or content request does not authorize implementation or external or saved-state changes',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Murph instructions or a selected skill may define a narrow internal canonical write',
@@ -80,6 +89,9 @@ describe('Codex thread instructions', () => {
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Otherwise mutate state only when explicitly asked',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Outside the explicit task authority above',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       'not unrelated mutations',
