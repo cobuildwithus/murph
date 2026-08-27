@@ -502,6 +502,23 @@ test.sequential(
 
     try {
       await initializeVault({ vaultRoot })
+      const auditId = 'aud_01JNW00000000000000000020'
+      await mkdir(path.join(vaultRoot, 'audit', '2026'), { recursive: true })
+      await writeFile(
+        path.join(vaultRoot, 'audit', '2026', '2026-03.jsonl'),
+        `${JSON.stringify({
+          schemaVersion: 'murph.audit.v1',
+          id: auditId,
+          action: 'export',
+          status: 'success',
+          occurredAt: '2026-03-11T12:00:00.000Z',
+          actor: 'cli',
+          commandName: 'vault-cli export pack',
+          summary: 'Created a synthetic export pack.',
+          changes: [],
+        })}\n`,
+        'utf8',
+      )
 
       const readModel = await readVault(vaultRoot)
       const pack = buildExportPack(readModel, {
@@ -512,7 +529,7 @@ test.sequential(
       })
       await materializeExportPack(vaultRoot, pack.files)
 
-      const linkedFile = pack.files.find((file) => file.path.endsWith('.md')) ?? pack.files[0]
+      const linkedFile = pack.files.find((file) => file.path.endsWith('daily-samples.json')) ?? pack.files[0]
       assert.ok(linkedFile)
       const storedPackFile = path.join(vaultRoot, linkedFile.path)
       const outsideFile = path.join(outsideRoot, 'secret.md')
@@ -530,6 +547,31 @@ test.sequential(
       assert.equal(
         await readFile(path.join(outRoot, linkedFile.path), 'utf8'),
         linkedFile.contents,
+      )
+      const rebuiltEntities = JSON.parse(
+        await readFile(
+          path.join(outRoot, 'exports', 'packs', 'focus-pack', 'entities.json'),
+          'utf8',
+        ),
+      ) as Array<{ entityId: string }>
+      const rebuiltManifest = JSON.parse(
+        await readFile(
+          path.join(outRoot, 'exports', 'packs', 'focus-pack', 'manifest.json'),
+          'utf8',
+        ),
+      ) as {
+        files: Array<{ path: string }>
+        manifest: { fileCount: number; recordCount: number }
+      }
+      assert.equal(
+        rebuiltEntities.some((entity) => entity.entityId === auditId),
+        true,
+      )
+      assert.equal(rebuiltManifest.manifest.recordCount, rebuiltEntities.length)
+      assert.equal(rebuiltManifest.manifest.fileCount, rebuiltManifest.files.length)
+      assert.deepEqual(
+        rebuiltManifest.files.map((file) => file.path).sort(),
+        materialized.files.slice().sort(),
       )
 
       await rm(path.join(vaultRoot, 'exports', 'packs'), { recursive: true, force: true })

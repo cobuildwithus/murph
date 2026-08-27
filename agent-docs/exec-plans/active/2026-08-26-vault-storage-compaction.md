@@ -70,6 +70,8 @@ Updated: 2026-08-27
 
 - Keep canonical audits; remove only their rebuildable everyday query/search
   copies.
+- Reject `audit` at the generic projected list/search boundary; dedicated audit
+  commands and canonical-source export remain the explicit owners.
 - Prefer existing integration-ingest compression/atomic-replacement patterns
   over a new archival subsystem.
 - Do not normalize metric payloads or integration receipts: measured savings
@@ -89,4 +91,11 @@ Updated: 2026-08-27
   remain readable and amendable; exact candidate head passes required CI.
 - Completed local proof: full core, contracts, and query test suites; package
   typechecks and builds; workspace boundary, dependency cycle, and dependency
-  policy guards; focused archived-reference retention and query-source tests.
+  policy guards; focused archived-reference retention and query-source tests;
+  archived append resume/rollback/stale-base tests; hosted restore replay; and
+  audit-preserving export-pack fallback.
+- Review disposition: accepted the final-review restore finding by preserving
+  the archived-event amendment flag during receipt parsing. Accepted the
+  specialist coverage gaps. For the specialist UX finding, removed `audit`
+  from the generic projected family enum instead of adding a canonical audit
+  scan to generic search.

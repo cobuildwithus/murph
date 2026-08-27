@@ -734,6 +734,19 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       requireData(descendingListResult).items.map((item) => item.id),
     )
 
+    await assert.rejects(
+      services.query.list({
+        vault: vaultRoot,
+        requestId: 'generic-audit-list',
+        recordType: ['audit'],
+        limit: 10,
+      }),
+      (error: unknown) =>
+        typeof error === 'object'
+        && error !== null
+        && Reflect.get(error, 'code') === 'invalid_option',
+    )
+
     const invalidAuditShow = await runSliceCli([
       'audit',
       'show',

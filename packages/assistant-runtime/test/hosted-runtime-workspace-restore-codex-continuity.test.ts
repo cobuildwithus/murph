@@ -9,6 +9,7 @@ import {
   buildIntegrationIngestRecord,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   initializeVault,
+  readEventLedgerShardRecords,
   readIntegrationIngestEntries,
 } from "@murphai/core";
 import {
@@ -1346,6 +1347,110 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.deepEqual(
         (await readIntegrationIngestEntries(restoredVaultRoot)).map((entry) => entry.record.id),
         [archivedRecord.id, appendedRecord.id, secondAppendedRecord.id],
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("v2 restore replays archived event amendments idempotently", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-archived-event-receipt-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "durable", "vault");
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const logicalPath = "ledger/events/2025/2025-10.jsonl";
+      const archivedRecord = { id: "evt_RestoreArchivedEventReceipt1" };
+      const appendedRecord = { id: "evt_RestoreArchivedEventReceipt2" };
+      const basePayload = `${JSON.stringify(archivedRecord)}\n`;
+      const baseBytes = Buffer.from(basePayload, "utf8");
+      const appendPayload = `${JSON.stringify(appendedRecord)}\n`;
+      const appendBytes = Buffer.from(appendPayload, "utf8");
+      const appendSha256 = sha256HostedBundleHex(appendBytes);
+      const receiptArtifact = createJsonArtifact({
+        actions: [
+          {
+            allowArchivedEventLedgerAmendment: true,
+            appendByteLength: appendBytes.byteLength,
+            appendSha256,
+            baseByteLength: baseBytes.byteLength,
+            baseSha256: sha256HostedBundleHex(baseBytes),
+            contentRef: {
+              byteSize: appendBytes.byteLength,
+              sha256: appendSha256,
+            },
+            kind: "jsonl_append",
+            originalSize: baseBytes.byteLength,
+            targetRelativePath: logicalPath,
+          },
+        ],
+        committedAt: "2026-05-05T00:00:00.000Z",
+        createdAt: "2026-05-05T00:00:00.000Z",
+        occurredAt: "2026-05-05T00:00:00.000Z",
+        operationId: "op_synthetic_archived_event_restore",
+        operationType: "hosted_archived_event_restore_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore an archived event amendment.",
+        updatedAt: "2026-05-05T00:00:00.000Z",
+      });
+      const receiptLogArtifact = createJsonArtifact({
+        entries: [receiptArtifact.ref, receiptArtifact.ref],
+        schema: "murph.hosted-canonical-write-receipt-log.v1",
+      });
+      const artifactBytesByHash = new Map<string, Uint8Array>([
+        [appendSha256, appendBytes],
+        [receiptArtifact.ref.sha256, receiptArtifact.bytes],
+        [receiptLogArtifact.ref.sha256, receiptLogArtifact.bytes],
+      ]);
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash,
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              const vaultRoot = path.join(request.durableRoot, "vault");
+              await initializeVault({
+                createdAt: "2026-05-05T00:00:00.000Z",
+                vaultRoot,
+              });
+              await mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+              await writeFile(path.join(vaultRoot, `${logicalPath}.gz`), gzipSync(basePayload));
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          redactedStatus: {
+            hostedCanonicalWriteReceiptLogByteSize: receiptLogArtifact.ref.byteSize,
+            hostedCanonicalWriteReceiptLogEntryCount: 2,
+            hostedCanonicalWriteReceiptLogSha256: receiptLogArtifact.ref.sha256,
+          },
+          snapshotRef,
+        }),
+      });
+
+      await assert.rejects(readFile(path.join(restoredVaultRoot, logicalPath), "utf8"), {
+        code: "ENOENT",
+      });
+      await readFile(path.join(restoredVaultRoot, `${logicalPath}.gz`));
+      assert.deepEqual(
+        (await readEventLedgerShardRecords({
+          relativePath: logicalPath,
+          vaultRoot: restoredVaultRoot,
+        })).map((record) => record.id),
+        [archivedRecord.id, appendedRecord.id],
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });

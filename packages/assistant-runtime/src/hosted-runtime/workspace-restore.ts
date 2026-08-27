@@ -1228,6 +1228,9 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         baseSha256: raw.baseSha256,
         baseByteLength: raw.baseByteLength,
         originalSize: raw.originalSize,
+        ...(raw.allowArchivedEventLedgerAmendment === true
+          ? { allowArchivedEventLedgerAmendment: true as const }
+          : {}),
         ...(raw.allowArchivedIntegrationIngestAmendment === true
           ? { allowArchivedIntegrationIngestAmendment: true as const }
           : {}),

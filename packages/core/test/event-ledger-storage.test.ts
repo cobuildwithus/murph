@@ -14,6 +14,7 @@ import {
   listEventLedgerShardSources,
   readEvent,
   readEventLedgerShardRecords,
+  readRecoverableStoredWriteOperation,
   readJsonlRecords,
   upsertEvent,
   VaultError,
@@ -21,6 +22,7 @@ import {
 } from "../src/index.ts";
 import type { HostedCanonicalWritePersistenceInput } from "../src/index.ts";
 import { appendArchivedEventLedgerShard } from "../src/event-ledger-storage.ts";
+import { WriteBatch } from "../src/operations/write-batch.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -160,6 +162,143 @@ test("backdated writes and hosted replay amend archived event shards exactly onc
   }
 });
 
+test("archived event append resumes exactly once after finalization failure", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-resume");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const event = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-05T09:00:00.000Z",
+      note: "Stored event body.",
+      title: "Stored event",
+    },
+  });
+  await archiveClosedEventLedgerShards({
+    now: new Date("2026-02-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+
+  const appendedId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1D4";
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "event_archive_resume_test",
+    summary: "Resume an archived event append.",
+  });
+  await batch.stageJsonlAppend(
+    event.ledgerFile,
+    `${JSON.stringify({ id: appendedId, kind: "note" })}\n`,
+  );
+
+  const prototype = Object.getPrototypeOf(batch);
+  const applyJsonlAppend = Reflect.get(prototype, "applyJsonlAppend");
+  const originalPersist = Reflect.get(prototype, "persist");
+  const record = Reflect.get(batch, "record");
+  const actions = typeof record === "object" && record !== null
+    ? Reflect.get(record, "actions")
+    : null;
+  const action = Array.isArray(actions) ? actions[0] : null;
+  if (
+    typeof applyJsonlAppend !== "function"
+    || typeof originalPersist !== "function"
+    || typeof action !== "object"
+    || action === null
+  ) {
+    throw new Error("Expected an archived JSONL append action.");
+  }
+  let injectedFailure = false;
+  Reflect.set(prototype, "persist", async function persistWithFailure(this: object) {
+    if (!injectedFailure && Reflect.get(action, "state") === "applied") {
+      injectedFailure = true;
+      throw new Error("injected archived event finalize failure");
+    }
+    return await Reflect.apply(originalPersist, this, []);
+  });
+
+  try {
+    await assert.rejects(
+      Reflect.apply(applyJsonlAppend, batch, [action]),
+      /injected archived event finalize failure/u,
+    );
+  } finally {
+    Reflect.set(prototype, "persist", originalPersist);
+  }
+
+  assert.equal(injectedFailure, true);
+  assert.equal(
+    (await readEventLedgerShardRecords({
+      relativePath: event.ledgerFile,
+      vaultRoot,
+    })).filter((record) => record.id === appendedId).length,
+    1,
+  );
+  const recoverable = await readRecoverableStoredWriteOperation(
+    vaultRoot,
+    batch.metadataRelativePath,
+  );
+  assert.equal(recoverable?.actions[0]?.state, "staged");
+  const recoverableAction = recoverable?.actions[0];
+  assert.ok(recoverableAction && recoverableAction.kind === "jsonl_append");
+  assert.equal(recoverableAction.allowArchivedEventLedgerAmendment, true);
+
+  Reflect.set(action, "state", "staged");
+  Reflect.set(action, "appliedAt", undefined);
+  await Reflect.apply(applyJsonlAppend, batch, [action]);
+  assert.equal(
+    (await readEventLedgerShardRecords({
+      relativePath: event.ledgerFile,
+      vaultRoot,
+    })).filter((record) => record.id === appendedId).length,
+    1,
+  );
+});
+
+test("archived event append rolls back when a later action fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-rollback");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const event = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-05T09:00:00.000Z",
+      note: "Stored event body.",
+      title: "Stored event",
+    },
+  });
+  await archiveClosedEventLedgerShards({
+    now: new Date("2026-02-01T00:00:00.000Z"),
+    vaultRoot,
+  });
+  const archivePath = path.join(vaultRoot, `${event.ledgerFile}.gz`);
+  const originalArchive = await fs.readFile(archivePath);
+  const appendedId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1D5";
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "event_archive_rollback_test",
+    summary: "Roll back an archived event append.",
+  });
+  await batch.stageJsonlAppend(
+    event.ledgerFile,
+    `${JSON.stringify({ id: appendedId, kind: "note" })}\n`,
+  );
+  await batch.stageTextWrite("CORE.md", "conflicting replacement\n", {
+    overwrite: false,
+  });
+
+  await assert.rejects(
+    batch.commit(),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FILE_EXISTS",
+  );
+  assert.deepEqual(await fs.readFile(archivePath), originalArchive);
+  assert.equal(
+    (await readEventLedgerShardRecords({
+      relativePath: event.ledgerFile,
+      vaultRoot,
+    })).some((record) => record.id === appendedId),
+    false,
+  );
+});
+
 test("event ledger readers reject duplicate representations and failed amendments preserve bytes", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-ledger-ambiguous");
   await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
@@ -183,10 +322,12 @@ test("event ledger readers reject duplicate representations and failed amendment
     appendArchivedEventLedgerShard({
       expectedBaseByteLength: gunzipSync(originalArchive).byteLength,
       expectedBaseSha256: "invalid",
-      payload: "not-json\n",
+      payload: `${JSON.stringify({ id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D6" })}\n`,
       targetRelativePath: event.ledgerFile,
       vaultRoot,
     }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_LEDGER_ARCHIVE_BASE_MISMATCH",
   );
   assert.deepEqual(await fs.readFile(archivePath), originalArchive);
 
