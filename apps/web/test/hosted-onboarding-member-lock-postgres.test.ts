@@ -31,11 +31,14 @@ import {
   updateHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
+  acceptHostedMemberStripeCheckoutCompletionTx,
   assertNoHostedDirectSubscriptionStripeEffectTx,
   HostedMemberStripeMutationLockBusyError,
+  prepareHostedMemberStripeCheckoutCompletion,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/hosted-member-stripe-customer";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberBillingSnapshot,
@@ -573,6 +576,191 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([deletion, observer, writer]);
       }
     });
+
+    it.each(["checkout-first", "claim-first"] as const)(
+      "serializes an issued Checkout completion with Customer creation ($order)",
+      async (order) => {
+        const checkout = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const customer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const fixtureId = randomUUID();
+        const memberId = `hbm_customer_checkout_${order}_${fixtureId}`;
+        const checkoutCustomerId = `cus_checkout_${fixtureId}`;
+        const checkoutSubscriptionId = `sub_checkout_${fixtureId}`;
+        const claimCustomerId = `cus_claim_${fixtureId}`;
+        const checkoutAttemptId = `attempt_checkout_${fixtureId}`;
+        const checkoutIntentHash = `intent_checkout_${fixtureId}`;
+        const checkoutSessionId = `cs_checkout_${fixtureId}`;
+        const checkoutLocked = createDeferred();
+        const providerStarted = createDeferred();
+        const releaseCheckout = createDeferred();
+        const releaseProvider = createDeferred();
+        let checkoutPromise: Promise<unknown> | null = null;
+        let customerPromise: Promise<string> | null = null;
+        installPassthroughHostedSecureBoxTestCodec();
+        stripeProvider.customersCreate.mockClear();
+
+        try {
+          await observer.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.active,
+              id: memberId,
+            },
+          });
+          await observer.hostedMemberBillingRef.create({
+            data: {
+              checkoutAttemptId,
+              checkoutCreatedAt: new Date("2026-08-27T12:00:00.000Z"),
+              checkoutIntentHash,
+              memberId,
+            },
+          });
+          const preparedCompletion =
+            await prepareHostedMemberStripeCheckoutCompletion({
+              memberId,
+              prisma: observer,
+              stripeCustomerId: checkoutCustomerId,
+              stripeSubscriptionId: checkoutSubscriptionId,
+            });
+          const acceptCheckout = (prisma: PrismaClient) =>
+            prisma.$transaction(
+              (tx) => acceptHostedMemberStripeCheckoutCompletionTx({
+                billingIdentityDisposition: "bind",
+                checkoutAttemptId,
+                checkoutIntentHash,
+                checkoutSessionId,
+                currentCheckoutOffer: "standard",
+                eventCreatedAt: new Date("2026-08-27T12:01:00.000Z"),
+                memberId,
+                preparedCompletion,
+                tx,
+              }),
+              { timeout: transactionTimeoutMs },
+            );
+
+          if (order === "checkout-first") {
+            const [customerBackend] = await customer.$queryRaw<
+              Array<{ pid: number }>
+            >(Prisma.sql`SELECT pg_backend_pid()::int AS pid`);
+            if (!customerBackend) {
+              throw new Error("Expected the Customer writer PostgreSQL backend id.");
+            }
+            checkoutPromise = checkout.$transaction(async (tx) => {
+              await lockHostedMemberRow(tx, memberId);
+              checkoutLocked.resolve();
+              await releaseCheckout.promise;
+              return acceptHostedMemberStripeCheckoutCompletionTx({
+                billingIdentityDisposition: "bind",
+                checkoutAttemptId,
+                checkoutIntentHash,
+                checkoutSessionId,
+                currentCheckoutOffer: "standard",
+                eventCreatedAt: new Date("2026-08-27T12:01:00.000Z"),
+                memberId,
+                preparedCompletion,
+                tx,
+              });
+            }, { timeout: transactionTimeoutMs });
+            await checkoutLocked.promise;
+            customerPromise = ensureHostedMemberStripeCustomer({
+              memberId,
+              prisma: customer,
+            });
+            await waitForPostgresLock({
+              observer,
+              pid: customerBackend.pid,
+            });
+            releaseCheckout.resolve();
+
+            await expect(checkoutPromise).resolves.toEqual({ kind: "accepted" });
+            await expect(customerPromise).resolves.toBe(checkoutCustomerId);
+            expect(stripeProvider.customersCreate).not.toHaveBeenCalled();
+          } else {
+            stripeProvider.customersCreate.mockImplementation(async () => {
+              providerStarted.resolve();
+              await releaseProvider.promise;
+              return { id: claimCustomerId };
+            });
+            customerPromise = ensureHostedMemberStripeCustomer({
+              memberId,
+              prisma: customer,
+            });
+            await providerStarted.promise;
+
+            const claimedMember = await requireBillingSnapshot(observer, memberId);
+            await expect(checkout.$transaction(
+              (tx) => writeHostedMemberStripeBillingTx({
+                billingStatus: HostedBillingStatus.active,
+                canonicalBillingStatus: HostedBillingStatus.active,
+                dispatchContext: {
+                  eventCreatedAt: new Date("2026-08-27T12:00:30.000Z"),
+                  occurredAt: "2026-08-27T12:00:30.000Z",
+                  sourceEventId: `evt_checkout_subscription_${fixtureId}`,
+                  sourceType: "stripe.customer.subscription.created",
+                },
+                member: claimedMember,
+                stripeCustomerId: checkoutCustomerId,
+                stripeSubscriptionId: checkoutSubscriptionId,
+                tx,
+              }),
+              { timeout: transactionTimeoutMs },
+            )).rejects.toMatchObject({
+              code: "HOSTED_STRIPE_EFFECT_PENDING",
+              retryable: true,
+            });
+            await expect(acceptCheckout(checkout)).rejects.toMatchObject({
+              code: "HOSTED_STRIPE_EFFECT_PENDING",
+              retryable: true,
+            });
+            await expect(observer.hostedMemberBillingRef.findUnique({
+              select: {
+                stripeCustomerLookupKey: true,
+                stripeEffectClaimId: true,
+              },
+              where: { memberId },
+            })).resolves.toMatchObject({
+              stripeCustomerLookupKey: null,
+              stripeEffectClaimId: expect.any(String),
+            });
+
+            releaseProvider.resolve();
+            await expect(customerPromise).resolves.toBe(claimCustomerId);
+            await expect(acceptCheckout(checkout)).resolves.toEqual({
+              kind: "cleanup_superseded",
+            });
+            expect(stripeProvider.customersCreate).toHaveBeenCalledOnce();
+          }
+
+          await expect(observer.hostedMemberBillingRef.findUnique({
+            select: {
+              stripeCustomerLookupKey: true,
+              stripeEffectClaimId: true,
+              stripeEffectKind: true,
+            },
+            where: { memberId },
+          })).resolves.toEqual({
+            stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(
+              order === "checkout-first"
+                ? checkoutCustomerId
+                : claimCustomerId,
+            ),
+            stripeEffectClaimId: null,
+            stripeEffectKind: null,
+          });
+        } finally {
+          releaseCheckout.resolve();
+          releaseProvider.resolve();
+          await Promise.allSettled([
+            ...(checkoutPromise ? [checkoutPromise] : []),
+            ...(customerPromise ? [customerPromise] : []),
+          ]);
+          setHostedSecureBoxStringTestCodecForTests(null);
+          stripeProvider.customersCreate.mockReset();
+          await observer.hostedMember.deleteMany({ where: { id: memberId } });
+          await disconnectClients([checkout, customer, observer]);
+        }
+      },
+    );
 
     it("blocks direct Checkout when a compatibility claim commits after reservation", async () => {
       const claimant = createPrismaClient({ databaseUrl, poolMax: 1 });

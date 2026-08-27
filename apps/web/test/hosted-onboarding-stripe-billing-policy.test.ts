@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  assertNoHostedMemberStripeEffectTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  assertNoHostedMemberStripeEffectTx: mocks.assertNoHostedMemberStripeEffectTx,
   writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
 }));
 
@@ -50,6 +52,7 @@ describe("hosted onboarding stripe billing policy", () => {
     vi.clearAllMocks();
 
     const member = makeMemberSnapshot();
+    mocks.assertNoHostedMemberStripeEffectTx.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
     mocks.updateHostedMemberCoreState.mockResolvedValue(member.core);
@@ -193,6 +196,36 @@ describe("hosted onboarding stripe billing policy", () => {
       stripeSubscriptionId: "sub_456",
       tx,
     });
+  });
+
+  it("keeps webhook billing writes behind an active Customer claim", async () => {
+    mocks.assertNoHostedMemberStripeEffectTx.mockRejectedValueOnce(
+      Object.assign(new Error("Billing is already changing."), {
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        retryable: true,
+      }),
+    );
+
+    await expect(writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_claimed",
+        sourceType: "stripe.customer.subscription.created",
+      },
+      member: makeMemberSnapshot(),
+      stripeCustomerId: "cus_checkout",
+      stripeSubscriptionId: "sub_checkout",
+      tx: {} as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   });
 
   it("clears a pending schedule once Stripe reports its target as current", async () => {

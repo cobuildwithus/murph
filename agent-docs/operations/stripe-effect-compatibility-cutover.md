@@ -63,6 +63,17 @@ above are complete:
   claim, and atomically binds the encrypted Customer identity and lookup key
   while clearing every claim field. An already-bound Customer remains the
   terminal replay result.
+- A direct Checkout Session issued before claim preparation can still complete
+  while Customer creation is outside the transaction. Its completion owner and
+  the shared signed-event billing writer both read the claim under the same
+  member lock and fail retryably before binding Customer or Subscription state.
+  Subscription, invoice, refund, and dispute projections therefore cannot
+  become a competing initial Customer owner while the claim is live.
+- After the claim candidate binds, a retried competing Checkout completion uses
+  the existing superseded-checkout path: its exact Subscription is canceled and
+  an ordinary payment is refunded, while its Customer remains unbound locally.
+  Customer deletion is not inferred because the completed Session does not
+  durably prove whether Checkout created or reused that Customer.
 - Account deletion already locks the same member owner and rejects any active
   member claim before suspension or local deletion. It therefore cannot commit
   between claim persistence and Customer binding.
@@ -105,4 +116,9 @@ The member Customer owner case pauses the provider after observing the
 committed claim, races the production account-deletion service through an
 independent PostgreSQL client, and proves deletion is rejected without partial
 suspension. It then completes Customer binding, verifies the exact claim is
-cleared, and replays the operation without another provider call.
+cleared, and replays the operation without another provider call. The direct
+Checkout race proof also runs both writer orders. Checkout-first causes Customer
+preparation to reuse the Checkout identity without calling Stripe. Claim-first
+proves `customer.subscription.created` projection and direct completion both
+remain retryable until the candidate binds, then proves completion classifies
+the competing Checkout for its existing superseded cleanup.

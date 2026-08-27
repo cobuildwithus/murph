@@ -834,10 +834,12 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
       lastStripeEventCreatedAt: true,
       stripeCheckoutSessionLookupKey: true,
       stripeCustomerLookupKey: true,
+      stripeEffectClaimId: true,
       stripeSubscriptionLookupKey: true,
     },
     where: { memberId: input.memberId },
   });
+  assertHostedStripeEffectClaimAbsent(currentRecord?.stripeEffectClaimId);
   if (
     !input.allowBillingIdentityReplacement
     && currentRecord?.stripeSubscriptionLookupKey
