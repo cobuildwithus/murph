@@ -1,6 +1,7 @@
 ---
 title: 'Ready-only merge-candidate proof can retain a stale pull-request base SHA'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2422'
 ---
 
 ## Expected Behavior
