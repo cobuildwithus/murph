@@ -1302,6 +1302,12 @@ describe("prisma module", () => {
 
       releaseCallback.resolve();
       await expect(pending).resolves.toBe("committed");
+      expect(slowTransactionLogs(warn, "callback")).toEqual([{
+        callbackOutcome: "completed",
+        durationMs: 5_000,
+        operation: "transaction.interactive",
+        timeoutMs: 20_000,
+      }]);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
