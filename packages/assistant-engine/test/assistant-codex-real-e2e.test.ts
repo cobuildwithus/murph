@@ -7940,6 +7940,179 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
 
 describeRealCodex('real Codex support escalation e2e', () => {
   it(
+    'product-feedback schema recovery contract accepts one corrected support call',
+    async () => {
+      const recordedFeedback: Array<{
+        kind: string
+        summary: string
+      }> = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push({
+              kind: feedback.kind,
+              summary: feedback.summary,
+            })
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic validation-recovery probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const firstCall = calls[0]
+      const correctedCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected two product-feedback dynamic tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.kind).toBe('frustration')
+      expect(correctedCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+      expect(correctedCall.argumentsValue.summary).toMatch(
+        /^Support escalation: \S/iu,
+      )
+      expect(readString(correctedCall.argumentsValue.summary)?.length)
+        .toBeLessThanOrEqual(5_000)
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+      expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract stops after a second support rejection',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-terminal-e2e-',
+        probeDeveloperInstructions: [
+          'Synthetic terminal-validation probe contract:',
+          'On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+          'On a second call only, if one occurs, omit supportArea and include an unsupported top-level supportProblem field with the value classification.',
+        ].join(' '),
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic terminal-validation probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-terminal-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'two rejected calls and no third attempt').toHaveLength(2)
+      const firstCall = calls[0]
+      const secondCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || secondCall?.kind !== 'dynamic') {
+        throw new Error('Expected two rejected product-feedback tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(secondCall.argumentsValue.supportArea).toBeUndefined()
+      expect(secondCall.argumentsValue.supportProblem).toBe('classification')
+      expect(recordedFeedback).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).not.toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract keeps ordinary acceptance silent',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-ordinary-feedback-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value dashboard.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic ordinary-feedback probe in a verified private conversation.',
+          'Murph keeps classifying a pinned generic dashboard item as inactive, which is frustrating. Give me the smallest safe workaround.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[ordinary-product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const correctedCall = calls[1]
+      if (correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected one corrected ordinary-feedback call.')
+      }
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.summary).not.toMatch(
+        /^Support escalation:/iu,
+      )
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).not.toMatch(
+        /feedback|recorded|logged|triage|account-linked escalation|direct notification|support@/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
     'sends once from an explicit private request and never from a group',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -11468,6 +11641,48 @@ function createRealCodexSupportHostedToolContext(
       status: 'denied',
     }),
     vaultFileSendAvailable: false,
+  }
+}
+
+async function executeRealCodexProductFeedbackProbe(input: {
+  directoryPrefix: string
+  probeDeveloperInstructions?: string
+  productFeedbackRecorder: AssistantTurnProductFeedbackRecorder
+  prompt: string
+}) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), input.directoryPrefix),
+  )
+
+  try {
+    return await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: [
+        buildDirectConversationDeveloperInstructions(),
+        input.probeDeveloperInstructions,
+      ].filter((value) => value !== undefined).join('\n\n'),
+      dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+      env: config.env,
+      hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+      model: config.model,
+      modelProvider: config.modelProvider,
+      productFeedbackRecorder: input.productFeedbackRecorder,
+      prompt: input.prompt,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
   }
 }
 
