@@ -2615,27 +2615,34 @@ disconnectable Junction `whoop_v2` source row.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
-uses a verified Privy identity token to mint a random 24-hour, member-scoped
-derived bearer. Enrollment fully validates its bounded body before identity or
-authority reads, then takes the existing hosted-member and active-sponsorship
-locks and re-checks active access plus launch consent before atomically rotating
-one deterministic Messages-owned session row for that member in the same
-transaction. Repeated enrollment mints a fresh bearer, invalidates the prior
-bearer, clears revocation state, and remains bounded without touching ordinary
-device-agent rows. Explicit revocation and expiry cleanup compare the exact
-Messages lookup hash as well as the stable row id, so an already-authenticated
-stale generation cannot revoke its replacement. Account deletion takes the
-same member lock:
+uses a verified Privy identity token to mint a random renewable lifecycle
+bearer and one deterministically related 24-hour action bearer. Enrollment fully
+validates its bounded body before identity or authority reads, then takes the
+existing hosted-member and active-sponsorship locks and re-checks active access
+plus launch consent before atomically rotating both domain-separated hashes in
+one deterministic Messages-owned session row for that member. Repeated
+enrollment invalidates the prior lifecycle, clears revocation state, and remains
+bounded without touching ordinary device-agent rows. The extension can later
+call the closed renewal route directly, without Privy or the containing app
+running. Renewal resolves the lifecycle hash, locks the same member and
+sponsorship rows, proves that lifecycle still owns the stored action generation,
+re-checks active access plus historical launch consent, and rotates an expired
+action in the same database-only transaction. Concurrent renewal converges on
+one deterministic replacement. Expiry lookup leaves a renewable row active;
+explicit revocation accepts either exact current bearer and compare-and-sets the
+stable row plus current generation, so stale, replaced, and rollback-written
+generations cannot revoke their replacement. Account deletion takes the same
+member lock:
 deletion-first enrollment fails closed, while enrollment-first deletion removes
-the committed session. Only the credential's Messages-domain-separated lookup
-hash enters the existing short-lived session store, so a rollback to the
+the committed session. Only the credentials' Messages-domain-separated lookup
+hashes enter the existing short-lived session store, so a rollback to the
 historical unscoped device-agent hash reader cannot resolve it; current
-device-agent authority also rejects its `hbds_imessage_` prefix. Every member
-action re-checks active access plus historical launch consent. Authenticated self-revocation
-remains available after access or consent is lost. The containing app may share
-only this derived credential through an explicitly addressed Keychain group;
-Privy tokens remain host-private and never enter the extension or capability-less
-message URL.
+device-agent authority also rejects their `hbds_imessage_` prefixes. Every
+member action and renewal re-checks active access plus historical launch
+consent. Exact self-revocation remains available after access or consent is
+lost. The containing app may share only this derived credential pair through an
+explicitly addressed Keychain group; Privy tokens remain host-private and never
+enter the extension or capability-less message URL.
 
 The Messages bridge submits one generic, versioned `MemberActionRequestV1`
 envelope whose `action` is a closed discriminated union. The first action family,
@@ -3064,6 +3071,18 @@ removal, move `lastSeenAt` backward, or use a provider timestamp later than
 server time. Owner-derived authority remains independent. Partial oversized
 rosters therefore cannot turn an omitted or departed participant into an
 unbounded subscription capability.
+
+Group-to-private growth attribution is a separate, non-authoritative analytics
+projection. The existing capped roster reconciliation also upserts one global,
+versioned contact lookup key per current non-self handle with only its first
+observation and a 14-day expiry; it stores no raw handle, group, route, or
+member identifier and adds no provider read or database round trip. The daily
+growth snapshot joins still-live observations to verified member contact
+indexes and first private activation, then sets the existing one-time member
+conversion marker. Retained group-message sender evidence remains a fallback,
+and the hourly retention owner deletes expired observations in bounded serial
+batches. This evidence never grants identity, membership, access, or product
+authority.
 
 Direct and authenticated group conversations share the same provider-response
 lifecycle. Every completed text or media segment is retained and delivered;
@@ -3628,12 +3647,13 @@ semantic text without truncating or rewriting the canonical workout. Nutrition
 V1 and V2 cards use the same bounded fragment and image-path family without a
 tracking field. The card remains offline, read-only presentation. For an active
 V6 workout only, the
-Messages extension may use the separately enrolled Messages-scoped credential
-to submit a bounded member action derived from the visible snapshot. That
-closed action may rename an existing exercise while retaining its original name
-as the optimistic coordinate for same-batch set edits; the canonical workout
-owner applies the rename last in the same write and rejects ambiguous resulting
-coordinates. The URL
+Messages extension may use the separately enrolled Messages-scoped credential,
+renewing its 24-hour action bearer directly when needed, to submit a bounded
+member action derived from the visible snapshot without the containing app
+running. That closed action may rename an existing exercise while retaining its
+original name as the optimistic coordinate for same-batch set edits; the
+canonical workout owner applies the rename last in the same write and rejects
+ambiguous resulting coordinates. The URL
 still carries no identity, canonical id, credential, or authority, and all other
 card kinds remain local presentation. This adds no mutable card state, card
 database, background synchronization owner, queue, or model turn. V4 workout

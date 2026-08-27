@@ -37,6 +37,22 @@ function validRequest() {
   };
 }
 
+function validPresentation() {
+  return {
+    title: "Strength",
+    subtitle: null,
+    footer: "Log each set.",
+    workout: {
+      version: 1 as const,
+      state: "active" as const,
+      exercises: [{
+        name: "Leg press",
+        sets: [{ status: "pending" as const, target: "8 reps", actual: null }],
+      }],
+    },
+  };
+}
+
 describe("member action contract", () => {
   it("parses a closed, versioned workout action", () => {
     const request = validRequest();
@@ -83,6 +99,83 @@ describe("member action contract", () => {
           kind: "exercise.rename",
           name: "Machine leg press",
         }],
+      },
+    }).success).toBe(false);
+  });
+
+  it("accepts one bounded apply presentation and an apply-only success result", () => {
+    const request = validRequest();
+    const presentedRequest = {
+      ...request,
+      action: {
+        ...request.action,
+        presentation: validPresentation(),
+      },
+    };
+    expect(parseMemberActionRequestV1(presentedRequest)).toEqual(
+      presentedRequest,
+    );
+
+    const result = {
+      cardUrl: "https://www.withmurph.ai/#murph-card=abc_123",
+      kind: "workout.live.apply" as const,
+      version: 1 as const,
+    };
+    for (const status of ["applied", "unchanged"] as const) {
+      const outcome = {
+        actionId: request.actionId,
+        completedAt: "2026-08-12T15:00:01.000Z",
+        reason: null,
+        result,
+        schemaVersion: 1 as const,
+        status,
+      };
+      expect(memberActionOutcomeV1Schema.parse(outcome)).toEqual(outcome);
+    }
+    expect(memberActionOutcomeV1Schema.safeParse({
+      actionId: request.actionId,
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: "workout_changed",
+      result,
+      schemaVersion: 1,
+      status: "rejected",
+    }).success).toBe(false);
+    expect(memberActionOutcomeV1Schema.safeParse({
+      actionId: request.actionId,
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: null,
+      result: { ...result, kind: "workout.live.snapshot" },
+      schemaVersion: 1,
+      status: "applied",
+    }).success).toBe(false);
+  });
+
+  it("rejects malformed or unbounded optional apply presentation", () => {
+    const request = validRequest();
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        presentation: {
+          ...validPresentation(),
+          canonicalWorkoutId: "evt_private",
+        },
+      },
+    }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        presentation: {
+          ...validPresentation(),
+          workout: {
+            ...validPresentation().workout,
+            exercises: Array.from({ length: 17 }, (_, index) => ({
+              name: `Exercise ${index + 1}`,
+              sets: [{ status: "pending", target: null, actual: null }],
+            })),
+          },
+        },
       },
     }).success).toBe(false);
   });

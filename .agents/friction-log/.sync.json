@@ -523,6 +523,14 @@
     {
       "issue": "cobuildwithus/murph#2284",
       "path": ".agents/friction-log/20260825162524-private-runner-composition/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2328",
+      "path": ".agents/friction-log/20260825213023-hosted-local-minio/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2354",
+      "path": ".agents/friction-log/20260826131502-graft-rebuilds-a/friction.md"
     }
   ],
   "version": 1

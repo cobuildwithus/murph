@@ -266,17 +266,18 @@ model DeviceSyncCompanionCaptureReceipt {
 }
 
 model DeviceAgentSession {
-  id                  String    @id
-  userId              String    @map("user_id")
-  label               String?
-  tokenHash           String    @unique @map("token_hash")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-  expiresAt           DateTime  @map("expires_at")
-  lastSeenAt          DateTime? @map("last_seen_at")
-  revokedAt           DateTime? @map("revoked_at")
-  revokeReason        String?   @map("revoke_reason")
-  replacedBySessionId String?   @map("replaced_by_session_id")
+  id                       String    @id
+  userId                   String    @map("user_id")
+  label                    String?
+  tokenHash                String    @unique @map("token_hash")
+  imessageRenewalTokenHash String?   @unique @map("imessage_renewal_token_hash")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  expiresAt                DateTime  @map("expires_at")
+  lastSeenAt               DateTime? @map("last_seen_at")
+  revokedAt                DateTime? @map("revoked_at")
+  revokeReason             String?   @map("revoke_reason")
+  replacedBySessionId      String?   @map("replaced_by_session_id")
 
   @@index([userId])
   @@index([expiresAt])
@@ -2058,6 +2059,15 @@ model HostedThreadContainerParticipant {
   @@id([containerMemberId, participantMemberId])
   @@index([containerMemberId])
   @@map("hosted_thread_container_participant")
+}
+
+model HostedGroupParticipantObservation {
+  contactLookupKey String   @id @map("contact_lookup_key")
+  firstObservedAt  DateTime @map("first_observed_at")
+  expiresAt        DateTime @map("expires_at")
+
+  @@index([expiresAt, contactLookupKey], map: "hosted_group_participant_observation_expiry_idx")
+  @@map("hosted_group_participant_observation")
 }
 
 model HostedThreadRoute {

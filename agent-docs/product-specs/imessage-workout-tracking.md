@@ -20,7 +20,8 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
   from canonical state; the sent bubble and offline fallback remain unchanged.
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
-  enrolled by the containing app.
+  pair enrolled once by the containing app, then renew its short action bearer
+  directly without requiring that app to be open.
 - An editor for one exact workout submits a closed, bounded member action
   directly. The existing hosted mailbox delivers it to the canonical workout
   owner with no assistant turn; the immutable card remains presentation, not
@@ -502,7 +503,7 @@ may advance stale progress before it emits a replacement card.
 The extension renders the embedded card immediately, keeps one transient
 selected-message session, and replaces that session only while its entire draft
 equals the card baseline, no admitted request exists, and submission state is
-idle. Network, credential, decode, non-unique-target, structural, or size
+idle. Network, credential-renewal, decode, non-unique-target, structural, or size
 failure leaves the complete embedded card and any local state unchanged. The
 extension performs no background refresh and stores no result. An oversized V4
 result or a V4/read-only returned result cannot continue refreshing because it

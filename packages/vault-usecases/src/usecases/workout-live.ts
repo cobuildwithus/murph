@@ -8,6 +8,7 @@ import {
   type WorkoutMemberActionSetResultV1,
   type WorkoutSession,
   type WorkoutSessionDetailV1,
+  type WorkoutSessionPresentationV1,
   type WorkoutSet,
   memberActionIdV1Schema,
   workoutLiveApplyMemberActionV1Schema,
@@ -107,31 +108,59 @@ export async function readLiveWorkoutCardSnapshot(input: {
   if (targets.length !== 1) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  try {
-    const shown = targets[0]!
-    const snapshot = buildLiveWorkoutCardSnapshot({
-      presentation: input.action.presentation.workout,
-      workout: parseShownWorkout(shown),
-      workoutId: shown.entity.id,
-    })
-    if (snapshot === null) {
-      return { reason: 'workout_changed', status: 'rejected' }
-    }
-    return {
-      result: {
-        cardUrl: encodeWorkoutSessionSnapshotAppCardUrl({
-          ...input.action.presentation,
-          ...(snapshot.editor === null ? {} : { editor: snapshot.editor }),
-          workout: snapshot.workout,
-        }),
-        kind: 'workout.live.snapshot',
-        version: 1,
-      },
-      status: 'unchanged',
-    }
-  } catch {
+  const cardUrl = buildLiveWorkoutMemberActionCardUrl({
+    presentation: input.action.presentation,
+    shown: targets[0]!,
+  })
+  if (cardUrl === null) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
+  return {
+    result: { cardUrl, kind: 'workout.live.snapshot', version: 1 },
+    status: 'unchanged',
+  }
+}
+
+function buildLiveWorkoutMemberActionCardUrl(input: {
+  presentation: WorkoutSessionPresentationV1
+  shown: WorkoutShowResult
+}): string | null {
+  try {
+    const snapshot = buildLiveWorkoutCardSnapshot({
+      presentation: input.presentation.workout,
+      workout: parseShownWorkout(input.shown),
+      workoutId: input.shown.entity.id,
+    })
+    if (snapshot === null) return null
+
+    return encodeWorkoutSessionSnapshotAppCardUrl({
+      ...input.presentation,
+      ...(snapshot.editor === null ? {} : { editor: snapshot.editor }),
+      workout: snapshot.workout,
+    })
+  } catch {
+    return null
+  }
+}
+
+function buildLiveWorkoutApplySuccess(input: {
+  action: WorkoutLiveApplyMemberActionV1
+  shown: WorkoutShowResult
+  status: 'applied' | 'unchanged'
+}): ApplyLiveWorkoutMemberActionResult {
+  if (input.action.presentation === undefined) {
+    return { status: input.status }
+  }
+  const cardUrl = buildLiveWorkoutMemberActionCardUrl({
+    presentation: input.action.presentation,
+    shown: input.shown,
+  })
+  return cardUrl === null
+    ? { status: input.status }
+    : {
+        result: { cardUrl, kind: 'workout.live.apply', version: 1 },
+        status: input.status,
+      }
 }
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100
@@ -153,9 +182,14 @@ export async function applyLiveWorkoutMemberAction(
     input.action.expectedWorkout.actionBinding,
   )
   if (targets.exactReplays.length > 0) {
-    return targets.exactReplays.length === 1
-      ? { status: 'unchanged' }
-      : { reason: 'workout_changed', status: 'rejected' }
+    if (targets.exactReplays.length !== 1) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    return buildLiveWorkoutApplySuccess({
+      action: input.action,
+      shown: targets.exactReplays[0]!,
+      status: 'unchanged',
+    })
   }
   if (targets.bindingMatches.length !== 1) {
     return { reason: 'workout_changed', status: 'rejected' }
@@ -181,7 +215,11 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     })
     workout = parseShownWorkout(shown)
     if (workout.lastMemberActionId === input.actionId) {
-      return { status: 'unchanged' }
+      return buildLiveWorkoutApplySuccess({
+        action: input.action,
+        shown,
+        status: 'unchanged',
+      })
     }
     if (!isOpenLiveWorkout(workout)) {
       return { reason: 'workout_changed', status: 'rejected' }
@@ -347,12 +385,21 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
       !== JSON.stringify(workout.exercises)
     || endedAt !== undefined
 
-  await updateLiveWorkoutExercises(shown, workout, parsed.data.exercises, {
-    ...(endedAt === undefined ? {} : { endedAt }),
-    lastMemberActionId: input.actionId,
-    observedAt: acceptedAt,
+  const updated = await updateLiveWorkoutExercises(
+    shown,
+    workout,
+    parsed.data.exercises,
+    {
+      ...(endedAt === undefined ? {} : { endedAt }),
+      lastMemberActionId: input.actionId,
+      observedAt: acceptedAt,
+    },
+  )
+  return buildLiveWorkoutApplySuccess({
+    action: input.action,
+    shown: updated,
+    status: changed ? 'applied' : 'unchanged',
   })
-  return { status: changed ? 'applied' : 'unchanged' }
 }
 
 function memberActionCompletesPendingSet(
