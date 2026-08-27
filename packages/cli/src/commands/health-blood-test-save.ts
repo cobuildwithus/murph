@@ -277,6 +277,15 @@ function selectBloodTestIssues(
   );
   if (bestBranches.length === 1) return bestBranches[0];
 
+  const commonConcreteSelections = bestBranches[0].filter((selection) =>
+    selection.issue.code !== "invalid_union" &&
+    bestBranches.every((branch) =>
+      branch.some((candidate) =>
+        candidate.issue.code !== "invalid_union" &&
+        bloodTestPathsMatch(candidate.paths, selection.paths)))
+  );
+  if (commonConcreteSelections.length > 0) return commonConcreteSelections;
+
   const paths = bestBranches
     .flatMap((branch) => branch)
     .flatMap((selection) => selection.paths)

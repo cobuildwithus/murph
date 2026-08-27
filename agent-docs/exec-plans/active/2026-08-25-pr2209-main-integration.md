@@ -81,6 +81,28 @@ generic projector, validation framework, or recovery state owner.
   was changed. The focused bundle owner is green, and the prior exact reviewed
   production head passed all eight assembly parity probes; required CI remains
   the next broad proof for the corrected candidate.
+- ReviewGPT round six found one remaining review-induced tied-union case. When
+  an oversized fixed field such as `analyte` or `unit` appeared in every
+  minimum-error result branch while both `value` and `textValue` were absent,
+  the tie path discarded the shared concrete field and returned only the
+  `result.<index>` union root.
+- The accepted correction reuses the existing recursive selector and path
+  matcher. It first returns concrete selections whose path occurs in every tied
+  minimum-error branch, then retains the existing common-parent collapse only
+  for genuinely branch-specific alternatives. The change is eight production
+  lines and adds no parser, reflection layer, mapper, projector, service,
+  retry owner, state, or compatibility path.
+- The pre-fix built CLI reproduction returned `result.1` with `invalid_union`
+  for an oversized analyte without either result alternative. After the
+  correction, the same built command returns `result.1.analyte` with `too_big`.
+  The maintained built-CLI table now covers both oversized analyte and unit in
+  that tied condition while retaining full-envelope non-echo and no-write
+  assertions. CLI build and typecheck pass. The focused table reached its
+  unchanged 120-second test ceiling twice under shared-host contention without
+  an assertion failure; required exact-head CI owns that maintained suite.
+- Product UX remains a Patch. An assistant can correct the independently
+  invalid fixed field first instead of guessing from the whole result object or
+  spending an extra retry merely to expose it.
 
 ## Round-four retrospective
 

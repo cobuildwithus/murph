@@ -1357,7 +1357,6 @@ test("built CLI reports finite blood-test fields and alternatives without echoin
       privateValue: "private-analyte-marker",
       result: {
         analyte: "private-analyte-marker".repeat(12),
-        value: 45,
       },
       message: "Invalid --result blood-test analyte payload.",
       path: "result.1.analyte",
@@ -1378,7 +1377,6 @@ test("built CLI reports finite blood-test fields and alternatives without echoin
       privateValue: "private-unit-marker",
       result: {
         analyte: "Synthetic analyte",
-        value: 45,
         unit: "private-unit-marker".repeat(5),
       },
       message: "Invalid --result blood-test analyte payload.",
