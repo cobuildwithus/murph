@@ -87,6 +87,14 @@ asks Murph to add, correct, or remove an entry. Voice capture can later reuse
 the planned web voice composer. Calendar follow-ups and email travel capture
 are later features.
 
+Those later capture paths must write the same canonical records that Journal
+already reads. Calendar and email need one approved owner for normalized event
+writes and consent. Generic voice capture needs a private Journal note command;
+the Environment recorder continues to own Environment state. Environment
+history also needs a canonical change event instead of a second Journal-only
+copy. Do not infer these records from page state or store them in the Journal
+projection.
+
 ## Ownership
 
 Canonical event and metric stores own the data. `@murphai/query` owns the

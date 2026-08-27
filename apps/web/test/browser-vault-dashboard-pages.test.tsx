@@ -173,7 +173,7 @@ test("PatternsPage renders personal comparisons on their own route", () => {
 
   assert.match(markup, />Patterns</);
   assert.doesNotMatch(markup, /What tends to move together/);
-  assert.match(markup, /See what helps you feel and recover better/);
+  assert.match(markup, /Find what changes your sleep and recovery/);
   assert.doesNotMatch(markup, /Weekly changes/);
 });
 
@@ -366,7 +366,7 @@ test("JournalPage renders its empty state after Browser Vault finishes without d
 
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /See the story behind your health data/u);
+  assert.match(markup, /Build your health timeline/u);
   assert.doesNotMatch(markup, /Preparing your Journal/u);
 });
 
@@ -405,7 +405,7 @@ test("JournalPage renders its empty state while an empty vault refreshes", () =>
 
   const markup = renderToStaticMarkup(createElement(JournalPageClient));
 
-  assert.match(markup, /See the story behind your health data/u);
+  assert.match(markup, /Build your health timeline/u);
   assert.doesNotMatch(markup, /Preparing your Journal/u);
 });
 

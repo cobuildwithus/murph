@@ -632,17 +632,22 @@ function addWhoopJournalExamples(
     journalNote({
       date: date(1),
       id: "whoop_calendar_tennis",
-      note: "Tennis is planned for 18:30 today.",
+      note: "Planned for 18:30.",
       noteType: "journal-plan",
+      occurredAt: `${date(1)}T16:30:00.000Z`,
       source: "calendar",
       tags: ["key-tennis", "planned"],
-      title: "Tennis planned",
+      title: "Tennis",
     }),
     eventEntity({
       attributes: {
         activityType: "strength-training",
+        activeCalories: 318,
+        averageHeartRate: 126,
         durationMinutes: 52,
+        maxHeartRate: 164,
         source: "whoop",
+        strain: 11.8,
         summary: "Completed the Lower Body A session from Strength Base.",
         workout: {
           exercises: [
@@ -664,7 +669,7 @@ function addWhoopJournalExamples(
     journalNote({
       date: date(3),
       id: "whoop_multi_day_trip",
-      note: "Three-day work trip. Staying away from home, day 2 of 3.",
+      note: "Day 2 of 3 · Staying away from home.",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "episode-work-trip"],
@@ -694,7 +699,7 @@ function addWhoopJournalExamples(
       attributes: {
         source: "murph",
         status: "active",
-        summary: "Day 6 of a 14-day magnesium sleep experiment.",
+        summary: "Day 6 of 14",
       },
       date: date(6),
       id: "whoop_experiment_active",
@@ -705,23 +710,24 @@ function addWhoopJournalExamples(
     journalNote({
       date: date(7),
       id: "whoop_environment_change",
-      note: "Bedroom temperature changed from 21 C to 18 C.",
+      note: "Changed from 21 C to 18 C.",
       occurredAt: null,
       source: "environment",
       tags: ["key-bedroom-temperature"],
-      title: "Bedroom temperature changed",
+      title: "Bedroom temperature",
     }),
     eventEntity({
       attributes: {
+        resultSummary: "Sleep timing became more consistent.",
         source: "murph",
         status: "completed",
-        summary: "The 14-day consistent wake time experiment finished.",
+        summary: "Completed",
       },
       date: date(8),
       id: "whoop_experiment_completed",
       kind: "experiment_context",
       occurredAt: `${date(8)}T08:00:00.000Z`,
-      title: "Consistent Wake Time completed",
+      title: "Consistent Wake Time",
     }),
     journalNote({
       date: date(9),
@@ -736,13 +742,13 @@ function addWhoopJournalExamples(
       attributes: {
         source: "murph",
         status: "planned",
-        summary: "A seven-day no-late-caffeine experiment was added.",
+        summary: "Started · Day 1 of 7",
       },
       date: date(10),
       id: "whoop_experiment_new",
       kind: "experiment_context",
       occurredAt: `${date(10)}T08:00:00.000Z`,
-      title: "No Late Caffeine added",
+      title: "No Late Caffeine",
     }),
     journalNote({
       date: date(11),

@@ -13,7 +13,6 @@ import {
   Dumbbell,
   Footprints,
   MessageCircle,
-  Mic,
   Moon,
   NotebookPen,
   RefreshCw,
@@ -300,7 +299,7 @@ function JournalPageHeader({
     <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
       <h1
         id={headingId}
-        className="font-serif text-[2.625rem] font-semibold leading-[2.875rem] tracking-[-0.025em] text-foreground"
+        className="font-serif text-3xl font-semibold tracking-tight text-foreground"
       >
         Journal
       </h1>
@@ -406,13 +405,17 @@ function JournalEmptyState() {
       <div className="p-7 sm:p-10">
         <Moon className="size-8 text-primary" aria-hidden="true" />
         <h2 className="mt-5 max-w-md font-serif text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-          See the story behind your health data
+          Build your health timeline
         </h2>
         <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
           Journal brings together sleep, activity, and the details you share
           with Murph.
         </p>
-        <Button className="mt-6 rounded-full" render={<Link href="/connect" />}>
+        <Button
+          className="mt-6 rounded-full"
+          nativeButton={false}
+          render={<Link href="/connect" />}
+        >
           Connect a device
           <ArrowRight aria-hidden="true" />
         </Button>
@@ -517,7 +520,6 @@ function JournalDaySection({
   todayGreeting: string;
 }) {
   const headingId = `journal-day-${date}`;
-  const dayContext = describeDayContext(events);
   return (
     <section
       aria-labelledby={headingId}
@@ -543,9 +545,7 @@ function JournalDaySection({
           {Number(date.slice(8, 10))}
         </span>
         <span className="font-mono text-[10px] uppercase leading-[15px] tracking-[0.1em] text-muted-foreground">
-          {isToday
-            ? ["Today", dayContext].filter(Boolean).join(" · ")
-            : dayContext}
+          {isToday ? "Today" : null}
         </span>
       </div>
 
@@ -593,17 +593,21 @@ function JournalEventRow({
         .filter((source): source is string => source !== null),
     ),
   ];
+  const visibleSources = normalizeEventSources(sources);
   const summary =
     event.summary && normalizeText(event.summary) !== normalizeText(event.title)
       ? event.summary
       : null;
-  const isConcern = event.kind === "symptom";
+  const sleepScore =
+    event.kind === "sleep" ? readSleepScore(event.summary) : null;
+  const isConcern =
+    event.kind === "symptom" || (sleepScore !== null && sleepScore < 70);
   const details = event.details.filter(
     (detail) =>
       !summary || !normalizeText(summary).includes(normalizeText(detail)),
   );
-  const inlineDetails = event.kind === "sleep" ? [] : details;
-  const hasDetails = details.length > 0 || sources.length > 0;
+  const inlineDetails: string[] = [];
+  const hasDetails = details.length > 0 || visibleSources.length > 0;
   const content = (
     <span className="block min-w-0">
       <span className="flex min-h-[30px] flex-wrap items-center gap-x-2.5 gap-y-0.5">
@@ -626,8 +630,8 @@ function JournalEventRow({
           {inlineDetails.join(" · ")}
         </span>
       ) : null}
-      {sources.length > 0 ? (
-        <span className="sr-only">Source: {sources.join(", ")}</span>
+      {visibleSources.length > 0 ? (
+        <span className="sr-only">From {visibleSources.join(", ")}</span>
       ) : null}
     </span>
   );
@@ -635,7 +639,10 @@ function JournalEventRow({
   return (
     <article className="group grid grid-cols-[3.375rem_1.875rem_minmax(0,1fr)] items-start gap-x-3.5">
       <time
-        className="text-right font-mono text-[10px] uppercase leading-[30px] text-muted-foreground"
+        className={cn(
+          "text-right font-mono text-[10px] uppercase leading-[30px] text-muted-foreground",
+          event.timing === "all_day" && "text-amber-700 dark:text-amber-300",
+        )}
         dateTime={event.occurredAt}
       >
         {formatEventTime(event)}
@@ -643,6 +650,9 @@ function JournalEventRow({
       <span
         className={cn(
           "flex size-[30px] items-center justify-center rounded-full bg-primary/10 text-primary",
+          event.timing === "all_day" &&
+            !isConcern &&
+            "bg-amber-500/10 text-amber-700 dark:text-amber-300",
           isConcern && "bg-destructive/10 text-destructive",
         )}
       >
@@ -671,7 +681,7 @@ function JournalEventRow({
             details={details}
             event={event}
             sleepBaselines={sleepBaselines}
-            sources={sources}
+            sources={visibleSources}
           />
         </Popover>
       ) : (
@@ -717,9 +727,7 @@ function JournalEventPopoverContent({
       {sources.length > 0 ? (
         <>
           <Separator />
-          <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-            Source: {sources.join(", ")}
-          </p>
+          <p className="text-xs text-muted-foreground">{sources.join(", ")}</p>
         </>
       ) : null}
     </PopoverContent>
@@ -839,10 +847,8 @@ function SleepMetricValue({
       <SleepMetricLabel description={description} label={label} />
       <dd
         className={cn(
-          "-ml-2 mt-1 inline-flex rounded-lg px-2 py-1 font-serif font-semibold tracking-[-0.02em] text-foreground",
-          variant === "primary"
-            ? "text-[1.75rem] leading-8"
-            : "text-xl leading-6",
+          "mt-1 inline-flex font-serif font-semibold tracking-[-0.02em] text-foreground",
+          variant === "primary" ? "text-2xl leading-7" : "text-lg leading-6",
           sleepMetricToneClass(context),
         )}
       >
@@ -853,10 +859,9 @@ function SleepMetricValue({
 }
 
 function sleepMetricToneClass(context: SleepMetricContext | null): string {
-  if (!context || context.tone === "neutral") return "bg-muted/40";
-  if (context.tone === "favorable")
-    return "bg-primary/10 text-primary dark:bg-primary/15";
-  return "bg-red-700/10 text-red-700 dark:bg-red-500/15 dark:text-red-300";
+  if (!context || context.tone === "neutral") return "text-foreground";
+  if (context.tone === "favorable") return "text-primary";
+  return "text-red-700 dark:text-red-300";
 }
 
 function SleepMetricLabel({
@@ -872,7 +877,7 @@ function SleepMetricLabel({
         <TooltipTrigger
           render={
             <button
-              className="rounded-sm text-left underline decoration-border underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               type="button"
             >
               {label}
@@ -894,26 +899,49 @@ function GenericJournalPopoverPresentation({
   details: string[];
   event: JournalEvent;
 }) {
+  const structuredDetails = details
+    .map(parseJournalDetail)
+    .filter(
+      (detail): detail is { label: string; value: string } => detail !== null,
+    );
+  const textDetails = details.filter(
+    (detail) => parseJournalDetail(detail) === null,
+  );
+
   return (
     <>
       <PopoverHeader className="gap-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-          {event.timing === "night" ? "Night sleep" : "Journal entry"}
-        </p>
+        {event.timing === "night" ? (
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+            Night sleep
+          </p>
+        ) : null}
         <PopoverTitle className="font-serif text-xl font-semibold leading-6">
           {event.title}
         </PopoverTitle>
-        {event.summary ? (
-          <PopoverDescription className="text-sm leading-5">
-            {event.summary}
-          </PopoverDescription>
-        ) : null}
       </PopoverHeader>
-      {details.length > 0 ? (
+      {structuredDetails.length > 0 ? (
+        <>
+          <Separator />
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
+            {structuredDetails.map((detail) => (
+              <div key={`${detail.label}:${detail.value}`}>
+                <dt className="text-xs leading-4 text-muted-foreground">
+                  {detail.label}
+                </dt>
+                <dd className="mt-1 text-sm font-medium leading-5 text-foreground">
+                  {detail.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      ) : null}
+      {textDetails.length > 0 ? (
         <>
           <Separator />
           <div className="flex flex-col gap-2">
-            {details.map((detail) => (
+            {textDetails.map((detail) => (
               <p className="text-[13px] leading-5 text-foreground" key={detail}>
                 {capitalizeDetail(detail)}
               </p>
@@ -1059,7 +1087,6 @@ function JournalEntryActions({
 }: {
   contactOptions: readonly MurphContactOption[];
 }) {
-  const primaryOption = contactOptions[0] ?? null;
   const helper = (
     <span className="flex items-start gap-[11px] px-1 text-left">
       <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
@@ -1108,17 +1135,6 @@ function JournalEntryActions({
               </a>
             );
           })}
-          {primaryOption ? (
-            <a
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              href={primaryOption.href}
-              rel={primaryOption.rel}
-              target={primaryOption.target}
-            >
-              <Mic className="size-4 text-primary" aria-hidden="true" />
-              Send a voice message
-            </a>
-          ) : null}
         </div>
       </PopoverContent>
     </Popover>
@@ -1315,13 +1331,6 @@ function resolveEventIcon(event: JournalEvent): LucideIcon {
   return NotebookPen;
 }
 
-function describeDayContext(events: JournalEvent[]): string {
-  const context = events.find((event) => event.kind === "experiment_context");
-  if (!context) return "";
-  const label = context.summary?.split("·").at(0)?.trim();
-  return label || context.title;
-}
-
 function formatEventTime(event: JournalEvent): string {
   if (event.timing === "night") return "Night";
   if (event.timing === "all_day") return "All day";
@@ -1375,7 +1384,26 @@ function formatSource(value: string | null): string | null {
   if (normalized === "oura") return "Oura";
   if (normalized === "manual" || normalized === "you") return "You";
   if (normalized === "apple-health") return "Apple Health";
-  return value;
+  if (normalized === "whoop") return "Whoop";
+  if (normalized === "garmin") return "Garmin";
+  if (normalized === "murph") return "Murph";
+  return value
+    .split(/[-_]/u)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function normalizeEventSources(sources: readonly string[]): string[] {
+  const specificSources = sources.filter(
+    (source) => source.toLowerCase() !== "device",
+  );
+  return [...new Set(specificSources.length > 0 ? specificSources : sources)];
+}
+
+function readSleepScore(summary: string | null): number | null {
+  const match = summary?.match(/sleep score\s+(\d+(?:\.\d+)?)/iu);
+  return match?.[1] ? Number(match[1]) : null;
 }
 
 function normalizeText(value: string): string {
@@ -1389,6 +1417,17 @@ function capitalizeDetail(value: string): string {
   return value.length === 0
     ? value
     : `${value.charAt(0).toLocaleUpperCase()}${value.slice(1)}`;
+}
+
+function parseJournalDetail(
+  value: string,
+): { label: string; value: string } | null {
+  const separator = value.indexOf(":");
+  if (separator <= 0 || separator === value.length - 1) return null;
+  return {
+    label: value.slice(0, separator).trim(),
+    value: value.slice(separator + 1).trim(),
+  };
 }
 
 function parseSleepPopoverDetails(

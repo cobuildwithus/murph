@@ -316,6 +316,52 @@ test("Journal turns dense wearable records into main sleep, naps, and grouped ac
   ]);
 });
 
+test("Journal keeps useful workout detail in the activity popover", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "workout",
+          "activity_session",
+          "2026-08-25T17:30:00.000Z",
+          {
+            activityType: "cycling",
+            durationMinutes: 72,
+            source: "whoop",
+            workout: {
+              exercises: [{ name: "Front squat" }, { name: "Deadlift" }],
+              metrics: {
+                activeCalories: 640,
+                averageHeartRateBpm: 142,
+                maxHeartRateBpm: 176,
+                totalElevationGainMeters: 310,
+                workoutStrain: 14.2,
+              },
+              routineName: "Strength Base",
+            },
+            distanceKm: 32.4,
+          },
+          "Cycling",
+        ),
+      ],
+      vaultRoot: "test://journal-workout-detail",
+    }),
+    [],
+    { asOf: "2026-08-25T22:00:00.000Z" },
+  );
+
+  assert.deepEqual(view.days[0]?.events[0]?.details, [
+    "Strength Base",
+    "Distance: 32.4 km",
+    "Average heart rate: 142 bpm",
+    "Maximum heart rate: 176 bpm",
+    "Strain: 14.2",
+    "Active energy: 640 kcal",
+    "Elevation gain: 310 m",
+    "Exercises: Front squat, Deadlift",
+  ]);
+});
+
 test("Journal uses the longest unknown sleep as the night and keeps shorter sleep separate", () => {
   const view = buildJournalView(
     createVaultReadModel({

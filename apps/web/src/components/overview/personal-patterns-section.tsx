@@ -89,7 +89,7 @@ export function PersonalPatternsSection({
     <section aria-labelledby={headingId} className="flex flex-col gap-8">
       <h1
         id={headingId}
-        className="font-serif text-[2.625rem] font-semibold leading-[2.875rem] tracking-[-0.025em] text-foreground"
+        className="font-serif text-3xl font-semibold tracking-tight text-foreground"
       >
         Patterns
       </h1>
@@ -152,7 +152,7 @@ function PatternsEmptyState({
             ? "Your first patterns are taking shape"
             : needsContext
             ? "Give your health data some context"
-            : "See what helps you feel and recover better"}
+            : "Find what changes your sleep and recovery"}
         </h2>
         <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
           {isLearning
@@ -163,6 +163,7 @@ function PatternsEmptyState({
         </p>
         <Button
           className="mt-6 rounded-full"
+          nativeButton={false}
           render={<Link href={hasHealthData ? "/journal" : "/connect"} />}
         >
           {hasHealthData ? "Open Journal" : "Connect health data"}

@@ -173,16 +173,16 @@ test("Whoop persona covers the Journal connections used across the product", asy
   const titles = new Set(events.map((event) => event.title));
 
   for (const expected of [
-    "Tennis planned",
+    "Tennis",
     "Strength training",
     "Work trip",
     "Time zone change",
     "Blood test results",
     "Magnesium for Sleep",
-    "Bedroom temperature changed",
-    "Consistent Wake Time completed",
+    "Bedroom temperature",
+    "Consistent Wake Time",
     "Day trip",
-    "No Late Caffeine added",
+    "No Late Caffeine",
     "Joined Strength Crew",
   ]) {
     assert.ok(titles.has(expected), `${expected}: ${[...titles].join(", ")}`);

@@ -82,6 +82,7 @@ export function emptyJournalView(
 interface JournalCandidate extends JournalRecord {
   activityKey: string | null;
   date: string;
+  detailItems: string[];
   durationMinutes: number | null;
   groupHint: string | null;
   metricKey: string | null;
@@ -177,6 +178,7 @@ function journalCandidateFromEvent(
     {
       activityKey,
       date,
+      detailItems: journalEventDetailItems(event),
       durationMinutes,
       groupHint,
       id: event.entityId,
@@ -221,6 +223,7 @@ function journalMetricCandidates(
         {
           activityKey: null,
           date: row.date,
+          detailItems: [],
           durationMinutes: null,
           groupHint: `${metric.group}:${row.date}`,
           id: `journal_metric_${metric.key}_${row.date}`,
@@ -414,6 +417,7 @@ function groupJournalCandidates(
         ({
           activityKey: _activityKey,
           date: _date,
+          detailItems: _detailItems,
           durationMinutes: _durationMinutes,
           groupHint: _hint,
           metricKey: _metricKey,
@@ -529,6 +533,102 @@ function mealSummary(attributes: Record<string, unknown>): string | null {
   return parts.length > 0 ? parts.join(" · ") : "Meal recorded";
 }
 
+function journalEventDetailItems(event: CanonicalEntity): string[] {
+  if (event.kind === "activity_session") {
+    return activityDetailItems(event.attributes);
+  }
+
+  if (event.kind === "experiment_context") {
+    const status = readString(event.attributes.status) ?? event.status;
+    const result =
+      readString(event.attributes.resultSummary) ??
+      readString(event.attributes.result);
+    return uniqueStrings([status ? humanize(status) : null, result]);
+  }
+
+  if (event.kind === "meal") {
+    const nutrition = readRecord(event.attributes.nutrition);
+    const totals = readRecord(nutrition?.totals);
+    return uniqueStrings([
+      formatOptionalMetric(readNumber(totals?.calories), "kcal"),
+      formatOptionalMetric(readNumber(totals?.proteinGrams), "g protein"),
+      formatOptionalMetric(readNumber(totals?.carbohydrateGrams), "g carbs"),
+    ]);
+  }
+
+  return [];
+}
+
+function activityDetailItems(attributes: Record<string, unknown>): string[] {
+  const workout = readRecord(attributes.workout);
+  const metrics = readRecord(workout?.metrics);
+  const distanceKm =
+    readNumber(attributes.distanceKm) ?? readNumber(workout?.distanceKm);
+  const averageHeartRate =
+    readNumber(metrics?.averageHeartRate) ??
+    readNumber(metrics?.averageHeartRateBpm);
+  const maxHeartRate =
+    readNumber(metrics?.maxHeartRate) ?? readNumber(metrics?.maxHeartRateBpm);
+  const strain =
+    readNumber(metrics?.workoutStrain) ?? readNumber(attributes.workoutStrain);
+  const activeCalories =
+    readNumber(metrics?.activeCalories) ??
+    readNumber(attributes.activeCalories);
+  const totalCalories =
+    readNumber(metrics?.totalCalories) ?? readNumber(attributes.totalCalories);
+  const elevationGain =
+    readNumber(metrics?.totalElevationGainMeters) ??
+    readNumber(attributes.totalElevationGainMeters);
+  const averagePower = readNumber(metrics?.averagePowerWatts);
+  const exercises = Array.isArray(workout?.exercises)
+    ? workout.exercises
+        .map((exercise) =>
+          typeof exercise === "string"
+            ? exercise.trim()
+            : readString(readRecord(exercise)?.name),
+        )
+        .filter((exercise): exercise is string => Boolean(exercise))
+        .slice(0, 6)
+    : [];
+
+  return uniqueStrings([
+    readString(workout?.routineName),
+    readString(workout?.sportName),
+    formatJournalDetail("Distance", distanceKm, "km"),
+    formatJournalDetail("Average heart rate", averageHeartRate, "bpm"),
+    formatJournalDetail("Maximum heart rate", maxHeartRate, "bpm"),
+    formatJournalDetail("Strain", strain),
+    formatJournalDetail(
+      activeCalories === null ? "Energy" : "Active energy",
+      activeCalories ?? totalCalories,
+      "kcal",
+    ),
+    formatJournalDetail("Elevation gain", elevationGain, "m"),
+    formatJournalDetail("Average power", averagePower, "W"),
+    exercises.length > 0 ? `Exercises: ${exercises.join(", ")}` : null,
+  ]);
+}
+
+function formatJournalDetail(
+  label: string,
+  value: number | null,
+  unit?: string,
+): string | null {
+  if (value === null) return null;
+  return `${label}: ${formatDetailNumber(value)}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatDetailNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatOptionalMetric(
+  value: number | null,
+  unit: string,
+): string | null {
+  return value === null ? null : `${formatNumber(value)} ${unit}`;
+}
+
 function readEventSource(event: CanonicalEntity): string | null {
   const dataOrigin = readRecord(event.attributes.dataOrigin);
   return (
@@ -597,9 +697,10 @@ function buildEventPresentation(
     return {
       activityMinutes,
       details: uniqueStrings(
-        records
-          .filter((record) => record.kind === "note")
-          .map((record) => record.summary),
+        records.flatMap((record) => [
+          ...record.detailItems,
+          ...(record.kind === "note" ? [record.summary] : []),
+        ]),
       ),
       sleepMinutes: null,
       sleepScore: null,
@@ -695,9 +796,10 @@ function buildEventPresentation(
   return {
     activityMinutes: 0,
     details: uniqueStrings(
-      records
-        .filter((record) => record !== lead)
-        .map((record) => record.summary),
+      records.flatMap((record) => [
+        ...record.detailItems,
+        ...(record !== lead ? [record.summary] : []),
+      ]),
     ),
     sleepMinutes: null,
     sleepScore: null,
