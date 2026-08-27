@@ -5889,51 +5889,209 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
     }
   }, 360_000)
 
-  it('skips a same-window cue after the member already completed it', async () => {
+  it('skips only the exact completed reminder occurrence from production history', async () => {
     const config = await resolveRealCodexE2eConfig()
-    const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-reminder-completion-skip-e2e-'),
-    )
+    const temporaryPaths: string[] = []
+    const occurrenceAt = '2026-08-27T13:00:00.000Z'
+    const scenarios = [
+      {
+        acknowledgment: 'You completed the short balance routine.',
+        expectedKind: 'skip' as const,
+        id: 'current-daily',
+        instructions: 'Remind the member to do the short balance routine.',
+        messageAt: '2026-08-27T12:30:00.000Z',
+        schedule: { kind: 'dailyLocal' as const, localTime: '09:00' },
+      },
+      {
+        acknowledgment: 'You completed the short balance routine.',
+        expectedKind: 'send_message' as const,
+        id: 'prior-daily',
+        instructions: 'Remind the member to do the short balance routine.',
+        messageAt: '2026-08-26T12:30:00.000Z',
+        schedule: { kind: 'dailyLocal' as const, localTime: '09:00' },
+      },
+      {
+        acknowledgment: 'You completed the prescribed morning dose.',
+        expectedKind: 'send_message' as const,
+        id: 'earlier-clinical-dose',
+        instructions: 'Remind the member to take the prescribed evening dose.',
+        messageAt: '2026-08-27T12:15:00.000Z',
+        occurrenceAt: '2026-08-28T00:00:00.000Z',
+        schedule: { expression: '0 8,20 * * *', kind: 'cron' as const },
+      },
+      {
+        acknowledgment: 'You completed the prescribed evening dose.',
+        expectedKind: 'skip' as const,
+        id: 'current-clinical-dose',
+        instructions: 'Remind the member to take the prescribed evening dose.',
+        messageAt: '2026-08-27T23:30:00.000Z',
+        occurrenceAt: '2026-08-28T00:00:00.000Z',
+        schedule: { expression: '0 8,20 * * *', kind: 'cron' as const },
+      },
+    ]
 
     try {
-      const result = await executeRealCodexAppServerTurn({
-        approvalPolicy: 'never',
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand:
-          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-          ?? undefined,
-        codexHome: config.codexHome,
-        developerInstructions:
-          buildScheduledAutomationDeveloperInstructions('direct'),
-        dynamicTools: [],
-        env: config.env,
-        excludeResumeTurns: true,
-        model: config.model,
-        modelProvider: config.modelProvider,
-        prompt: [
-          'Recent conversation history for context only; do not answer these prior messages:',
-          'User:\nI already finished today\'s short balance routine.',
-          'Assistant:\nGreat—you already got it done today.',
-          'User message:',
-          'Remind the member to do today\'s short balance routine.',
-          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
-          'Current trusted delivery and conversation evidence:',
-          'The immediately prior reminder from this automation, "Time for your short balance routine.", was provider-accepted and sent yesterday.',
-          'The human current-day completion and assistant acknowledgment shown above followed that output.',
-        ].join('\n\n'),
-        reasoningEffort: 'high',
-        sandbox: 'read-only',
-        workingDirectory,
-      })
+      for (const scenario of scenarios) {
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), `murph-reminder-completion-${scenario.id}-e2e-`),
+        )
+        temporaryPaths.push(workingDirectory)
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const scenarioOccurrenceAt = scenario.occurrenceAt ?? occurrenceAt
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'preserve',
+          instructions: scenario.instructions,
+          now: new Date('2026-08-27T11:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: `synthetic-${scenario.id}`,
+            identityId: null,
+            participantId: null,
+            threadId: `synthetic-${scenario.id}`,
+            threadIsDirect: true,
+          },
+          schedule: scenario.schedule,
+          slug: `synthetic-${scenario.id}`,
+          status: 'active',
+          supportKind: 'reminder',
+          tags: [],
+          title: `Synthetic ${scenario.id} reminder`,
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical reminder automation source.')
+        }
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-27T11:00:00.000Z',
+        })
+        const prompt = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        const sessionId = `session-reminder-${scenario.id}`
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'linq',
+            conversationKey: `linq:direct:${scenario.id}`,
+            delivery: null,
+            identityId: null,
+            threadId: `synthetic-${scenario.id}`,
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-27T11:00:00.000Z',
+          lastTurnAt: scenario.messageAt,
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId,
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'high',
+            sandbox: 'read-only',
+          },
+          turnCount: 1,
+          updatedAt: scenario.messageAt,
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          sessionId,
+          [
+            {
+              contentReceivedAt: scenario.messageAt,
+              createdAt: scenario.messageAt,
+              kind: 'user',
+              text: 'Done.',
+            },
+            {
+              createdAt: new Date(
+                Date.parse(scenario.messageAt) + 60_000,
+              ).toISOString(),
+              kind: 'assistant',
+              text: scenario.acknowledgment,
+            },
+          ],
+        )
 
-      const decision = parseAssistantNotificationDecision(result.finalMessage)
-      process.stdout.write(
-        `[reminder-completion-skip-e2e] ${JSON.stringify({ decision })}\n`,
-      )
-      expect(decision.kind).toBe('skip')
+        const result = await sendAssistantMessageLocal({
+          channel: 'linq',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          persistUserPromptOnFailure: false,
+          prompt,
+          promptTimeContext: {
+            canonicalTimeZoneAvailable: true,
+            currentLocalDate: '2026-08-27',
+            currentTimeZone: 'America/New_York',
+          },
+          provider: 'codex-cli',
+          reasoningEffort: 'high',
+          sandbox: 'read-only',
+          scheduledInvocationAuthority: {
+            automationId: createdAutomation.record.automationId,
+            occurrenceAt: scenarioOccurrenceAt,
+          },
+          scheduledOccurrenceAt: scenarioOccurrenceAt,
+          sessionId,
+          threadId: `synthetic-${scenario.id}`,
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          turnTrigger: 'automation-cron',
+          vault: workingDirectory,
+          workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.response)
+        process.stdout.write(
+          `[reminder-completion-e2e] ${JSON.stringify({
+            decision: decision.kind,
+            scenario: scenario.id,
+            text: decision.kind === 'send_message' ? decision.text : null,
+          })}\n`,
+        )
+        expect.soft(decision.kind, scenario.id).toBe(scenario.expectedKind)
+        if (decision.kind === 'send_message') {
+          expect.soft(decision.text, scenario.id).toMatch(/routine|dose/iu)
+          expect.soft(decision.text, scenario.id).not.toMatch(
+            /already|complete|failed|ignored/iu,
+          )
+        }
+      }
     } finally {
       await removeRealCodexTemporaryPaths([
-        workingDirectory,
+        ...temporaryPaths,
         ...config.temporaryPaths,
       ])
     }

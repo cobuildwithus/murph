@@ -3220,6 +3220,36 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
+  it('serializes trusted occurrence times with committed conversation history', () => {
+    expect(
+      resolveAssistantProviderPrompt({
+        conversationHistoryMessages: [
+          {
+            content: 'Earlier completion.',
+            occurredAt: '2026-08-05T12:30:00.000Z',
+            role: 'user',
+          },
+          {
+            content: 'You completed the morning routine.',
+            occurredAt: '2026-08-05T12:31:00.000Z',
+            role: 'assistant',
+          },
+        ],
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        userPrompt: 'Run the scheduled occurrence.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toContain([
+      'User at 2026-08-05T12:30:00.000Z:',
+      'Earlier completion.',
+      '',
+      'Assistant at 2026-08-05T12:31:00.000Z:',
+      'You completed the morning routine.',
+    ].join('\n'))
+  })
+
   it('keeps raw Linq delivery targets out of Codex prompt context', () => {
     const prompt = resolveAssistantProviderPrompt({
       providerConfig: normalizeAssistantProviderConfig({

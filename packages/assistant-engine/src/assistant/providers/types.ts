@@ -87,6 +87,8 @@ export interface AssistantProviderCapabilities {
 
 export interface AssistantProviderConversationMessage {
   content: string | AssistantUserMessageContentPart[]
+  /** Trusted occurrence instant, supplied when a turn needs temporal evidence. */
+  occurredAt?: string
   role: 'assistant' | 'user'
 }
 

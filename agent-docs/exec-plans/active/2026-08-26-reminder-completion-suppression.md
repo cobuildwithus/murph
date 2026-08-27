@@ -12,9 +12,10 @@ Updated: 2026-08-27
 
 ## Success criteria
 
-- A scheduled reminder skips when a later relevant human message says the
-  current action is already complete, even when this automation has no prior
-  confirmed output in its own retained history.
+- A scheduled reminder skips when a timestamped user report or explicit
+  assistant acknowledgment establishes that the current action is already
+  complete, even when this automation has no prior confirmed output in its own
+  retained history.
 - A different-day completion, an unrelated message, or completion of only a
   broader plan does not silence an independently authorized reminder.
 - Deterministic scheduled-runtime coverage and one focused real-Codex journey
@@ -34,8 +35,8 @@ Updated: 2026-08-27
 ## Constraints
 
 - Technical constraints: reuse the existing recent-conversation projection and
-  ordinary scheduled-turn decision; add no schema, counter, or second state
-  owner.
+  ordinary scheduled-turn decision; add no persisted schema, counter, or second
+  state owner.
 - Product/process constraints: keep each automation independently authorized,
   but let current occurrence evidence suppress redundant delivery. Preserve
   conservative sending when the conversation is ambiguous.
@@ -48,24 +49,27 @@ Updated: 2026-08-27
 - Reaches: Existing private recurring-reminder conversations where a member
   reports completion before the scheduled decision runs.
 - Proof: The production-matched synthetic Luna journey reproduces the
-  redundant send before the fix and returns `skip` after it.
+  redundant send before the fix, then proves current-day skip versus prior-day
+  send and current-dose skip versus earlier-dose send after the fix.
 - Affected person/state: a member in a private thread with an active ordinary
   recurring reminder who reports the requested action complete before the
   reminder fires again that day.
 - Visible outcome: Murph acknowledges the completion and the later occurrence
   stays quiet; the recurring reminder remains active for future days.
-- Proof artifact: a deterministic scheduled-turn regression plus a focused
-  real-Codex journey that ends in `skip` and produces no provider-send effect.
+- Proof artifact: deterministic scheduled-turn regressions plus a focused
+  real-Codex journey that exercises four opposite-decision cases without a
+  provider-send effect.
 
 ### Product UX walkthrough
 
 - Person and path: a private-chat member completes the exact requested action,
   says so in the same local occurrence window, receives the ordinary foreground
   acknowledgment, and then reaches the scheduled reminder decision.
-- Evidence: the production-matched live journey supplies the human completion
-  and acknowledgment in recent conversation. Before the prompt change, Luna
-  returned `send_message` with another cadence question; after the change, the
-  same journey returned `skip`.
+- Evidence: the production-matched live journey persists raw timestamped
+  transcript records and builds the real automation instructions. Before the
+  prompt change, Luna returned `send_message` with another cadence question;
+  after the change, current completion skips while otherwise identical prior
+  completion sends.
 - Boundaries: the skip consumes only the current occurrence. Future recurrence
   stays active; stale, ambiguous, unrelated, or broader-plan completion does
   not count. Silence-only behavior for prescribed-treatment and safety-critical
@@ -79,9 +83,11 @@ Updated: 2026-08-27
    exact reminder action.
    Mitigation: require relevant current-occurrence conversation evidence and
    retain the independent-automation boundary.
-2. Risk: vague or stale completion language could silence a future cue.
-   Mitigation: constrain the rule to the current occurrence window expressed by
-   the saved reminder and recent conversation; ambiguous evidence sends.
+2. Risk: vague, stale, or earlier same-day completion could silence a future
+   cue.
+   Mitigation: preserve receipt times in private scheduled history; ambiguous
+   evidence sends, and schedules with multiple daily times require the current
+   time, dose, or sequence.
 3. Risk: a prompt-only fixture could miss real model interpretation.
    Mitigation: add the deterministic contract first, then run the same synthetic
    journey through the real Codex App Server before and after the fix.
@@ -106,6 +112,14 @@ Updated: 2026-08-27
   silence-policy decision and therefore does not require prior output from the
   same automation.
 - Keep future occurrences and independent automation authority unchanged.
+- Preserve existing transcript receipt time through the private scheduled
+  provider projection instead of creating completion state. For a user entry,
+  prefer `contentReceivedAt` and fall back to `createdAt`; assistant entries use
+  their existing creation time.
+- Treat a schedule with one configured local time per eligible day differently
+  from a potentially multi-fire schedule. Clinical and safety-critical cues
+  always require current time, dose, or sequence evidence before completion can
+  suppress an occurrence.
 
 ## Verification
 
@@ -134,13 +148,31 @@ Updated: 2026-08-27
   earlier automation's purpose without placing private content in this plan.
 - Before the fix, the production-matched synthetic Luna journey explicitly
   recognized that the action was complete but returned `send_message` with a
-  cadence question. The unchanged journey returns `skip` after the prompt
-  precedence correction.
+  cadence question.
+- The first timestamp-aware four-case Luna run passed. A shorter prompt sample
+  then exposed one stochastic current-day send, so the completion-precedence
+  wording was strengthened rather than accepting a flaky regression. Two
+  consecutive runs of the strengthened production-composed journey passed all
+  four cases: current daily completion skipped, identical prior-day evidence
+  sent, an earlier clinical dose did not suppress a later dose, and explicit
+  completion of the current clinical dose skipped.
+- ReviewGPT's timestamp and production-composition findings were accepted. The
+  fix keeps timestamps inside the existing bounded history budget and adds no
+  persisted state or lifecycle owner.
 - `pnpm --dir packages/assistant-engine exec vitest run
-  test/assistant-cron-runtime.test.ts`: 211 passed.
+  test/assistant-cron-schedule-store.test.ts test/codex-runtime-helpers.test.ts
+  test/assistant-codex-turn-planning.test.ts test/assistant-cron-runtime.test.ts`:
+  412 passed.
 - `pnpm --dir packages/assistant-engine typecheck`: passed.
 - `pnpm --dir apps/web test -- changelog-page.test.tsx`: 9 passed.
 - `pnpm --dir apps/web typecheck`: passed.
-- The recurring scheduled instruction fragment grows from 500 to 641
-  `o200k_harmony` tokens and from 2,801 to 3,648 UTF-8 bytes. No tool schema or
-  foreground-turn prompt changes.
+- Against the immutable first-reviewed capture, the final recurring-reminder
+  block is 6 `o200k_harmony` tokens and 80 UTF-8 bytes smaller. Complete
+  no-history requests therefore measure 25,744 tokens / 117,769 bytes direct
+  and 22,268 / 102,187 group, versus base 25,606 / 116,999 and 22,130 /
+  101,417. The total initial delta is +138 tokens / +770 bytes in each route.
+- Trusted timestamps are conditional on cold private scheduled history and use
+  the existing count/12 KB bound; ordinary foreground and group history do not
+  change. A representative retained user report plus explicit assistant
+  acknowledgment adds 34 tokens / 56 bytes over the same two-message history
+  without timestamp labels. No tool schema changes.

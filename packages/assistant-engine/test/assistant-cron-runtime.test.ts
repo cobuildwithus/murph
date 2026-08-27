@@ -4335,16 +4335,50 @@ describe('assistant cron runtime orchestration', () => {
       | { instructions?: string }
       | undefined
     expect(providerInput?.instructions).toContain(
-      'In a direct conversation, before applying any cadence or silence policy below, if a relevant human message clearly proves the exact requested action already happened in the current occurrence window, return `skip` even when this automation has no prior confirmed output.',
+      'Direct-message completion takes precedence: return `skip` for only this occurrence',
     )
     expect(providerInput?.instructions).toContain(
-      'before applying any cadence or silence policy below',
+      'a user report or assistant acknowledgment that explicitly confirms this exact action was completed in its window',
     )
     expect(providerInput?.instructions).toContain(
-      'This completion skip consumes only the current occurrence. Future recurrence remains unchanged',
+      'future recurrences remain active',
     )
     expect(providerInput?.instructions).toContain(
-      'an assistant acknowledgment alone is not proof',
+      'this schedule has one configured local time per eligible day, so matching completion on the occurrence local date is in-window',
+    )
+  })
+
+  it('requires occurrence-specific completion evidence for multi-fire treatment reminders', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-multi-fire-completion-proof-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'treatment reminder',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the recurring reminder automation to exist.')
+    }
+    automation.instructions = 'Remind the member to take the prescribed treatment dose.'
+    automation.schedule = {
+      expression: '0 8,20 * * *',
+      kind: 'cron',
+    }
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'do not assume this schedule fires only once per local day',
+    )
+    expect(providerInput?.instructions).toContain(
+      'Local-date coincidence alone is insufficient; require the evidence to identify the current time, dose, or sequence.',
     )
   })
 
@@ -4482,6 +4516,13 @@ describe('assistant cron runtime orchestration', () => {
     }
 
     expect(occurrenceIndex).toBe(3)
+    const scheduledNextOccurrence = (await listAssistantCronJobs(vaultRoot))
+      .find((job) => job.jobId === canonicalJob.jobId)
+      ?.state.nextRunAt
+    expect(scheduledNextOccurrence).toBeTruthy()
+    expect(Date.parse(scheduledNextOccurrence ?? '')).toBeGreaterThan(
+      Date.parse(occurrenceTimes.at(-1) ?? ''),
+    )
     await expect(listAssistantCronRuns({
       job: canonicalJob.jobId,
       vault: vaultRoot,
