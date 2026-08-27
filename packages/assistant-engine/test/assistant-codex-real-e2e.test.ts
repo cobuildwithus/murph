@@ -17,6 +17,7 @@ import {
   initializeVault,
   readHabitatAspect,
   removeAutomaticMealPhoto,
+  upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
 } from '@murphai/core'
@@ -125,7 +126,17 @@ import {
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+  buildAssistantCronExecutionInstructions,
 } from '../src/assistant/cron/execution.ts'
+import {
+  findCanonicalAssistantCronRecordInList,
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  resolveCanonicalAssistantCronJobId,
+} from '../src/assistant/cron/canonical-jobs.ts'
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+} from '../src/assistant/cron/runtime-state.ts'
 import {
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
@@ -5289,6 +5300,119 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
+describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', () => {
+  it(
+    'keeps a current-day readout on the saved automation task',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-weekly-digest-prompt-only-e2e-'),
+      )
+
+      try {
+        await initializeVault({ vaultRoot: workingDirectory })
+        const savedInstructions = [
+          'Send one concise current-day hydration readout from the supplied evidence.',
+          'Mention the measured intake and whether the current status is on track.',
+          'Do not compare against earlier days.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-05T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-current-day-readout',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-current-day-readout',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '08:00' },
+          slug: 'synthetic-current-day-readout',
+          status: 'active',
+          supportKind: 'weekly_digest',
+          tags: [
+            'system:support-series:experiment:exp_synthetic_hydration',
+          ],
+          title: 'Synthetic current-day readout',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical automation source.')
+        }
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-05T12:00:00.000Z',
+        })
+        const prompt = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        expect(prompt).toContain(savedInstructions)
+        expect(prompt).not.toContain('Accepted support scope (engine-supplied')
+        expect(prompt).not.toContain('agreed weekly summary shape')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            prompt,
+            'Current trusted evidence for this scheduled occurrence:',
+            '- Today\'s measured fluid intake is 1.4 liters.',
+            '- The current status is on track toward the established 2.3-liter target.',
+          ].join('\n\n'),
+          reasoningEffort: 'medium',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/1\.4 liters?/iu)
+          expect(decision.text).toMatch(/on track/iu)
+          expect(decision.text).not.toMatch(
+            /weekly?|recap|earlier days|past seven days/iu,
+          )
+          console.info(
+            `[real-codex weekly-digest prompt-only] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -5338,7 +5462,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
           ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5455,7 +5579,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions:
-          buildIndependentReminderDeveloperInstructions(scope),
+          buildScheduledAutomationDeveloperInstructions(scope),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5503,7 +5627,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildIndependentReminderDeveloperInstructions('group'),
+        buildScheduledAutomationDeveloperInstructions('group'),
       dynamicTools: [],
       env: config.env,
       excludeResumeTurns: true,
@@ -12716,7 +12840,7 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(
+function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
 ): string {
   return buildAssistantSystemPrompt({
