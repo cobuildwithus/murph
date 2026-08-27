@@ -9384,6 +9384,125 @@ describeRealCodex('real Codex support escalation e2e', () => {
 
 describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   it(
+    'includes approved name and saved date of birth in a booking call when public instructions omit identity fields',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-appointment-booking-call-identity-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLog = path.join(workingDirectory, 'vault-commands.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'appointment-scheduling',
+          }),
+          materializeAssistantSkill({ skillsRoot, slug: 'phone-calls' }),
+          writeFile(commandLog, '', 'utf8'),
+        ])
+        await materializeAppointmentMemoryVaultCli({
+          binDirectory,
+          commandLog,
+        })
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_CREATE_PHONE_CALL_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+            VAULT: workingDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Book my established-patient annual eye exam by phone at +12025550123 now.',
+            'The official public instructions list the service and scheduling line but do not list identity fields.',
+            'Use patient and caller name Jordan Lee and my saved date of birth. I approve sharing both with this clinic for this booking.',
+            'Request an in-person appointment at the Midtown office on August 5, 2026 at 10:00 a.m. America/New_York time; accept no other time, any clinician is fine, and do not accept a deposit or charge.',
+            'Do not transfer the call to me. Success means the office confirms that exact appointment; otherwise end without booking. This is the complete bounded request.',
+          ].join(' '),
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const appointmentSkillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('appointment-scheduling/SKILL.md')
+          && action.output.includes('# Appointment scheduling')
+        )
+        const phoneSkillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('phone-calls/SKILL.md')
+          && action.output.includes('# Phone Calls')
+        )
+        const toolCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_CREATE_PHONE_CALL_TOOL.name
+        )
+
+        expect(appointmentSkillRead, 'appointment skill read').toBeDefined()
+        expect(phoneSkillRead, 'phone-calls skill read').toBeDefined()
+        expect(toolCalls).toHaveLength(1)
+        const toolCall = toolCalls[0]
+        if (toolCall?.kind !== 'dynamic') {
+          throw new Error('Expected one appointment booking phone-call tool call.')
+        }
+        expect(toolCall.argumentsValue).toMatchObject({
+          allowTransferToUser: false,
+          callerName: 'Jordan Lee',
+          shareableFacts: {
+            date_of_birth: '1990-04-12',
+            patient_name: 'Jordan Lee',
+          },
+          timeZone: 'America/New_York',
+          to: {
+            phoneNumber: '+12025550123',
+          },
+        })
+        expect(
+          appointmentSkillRead !== undefined
+          && toolCall.eventIndex > appointmentSkillRead.eventIndex,
+          'appointment skill read before the real call',
+        ).toBe(true)
+        expect(
+          phoneSkillRead !== undefined
+          && toolCall.eventIndex > phoneSkillRead.eventIndex,
+          'phone-calls skill read before the real call',
+        ).toBe(true)
+        process.stdout.write(
+          `[appointment-booking-call-identity-e2e] ${JSON.stringify({
+            identityKeys: Object.keys(
+              readRecord(toolCall.argumentsValue.shareableFacts) ?? {},
+            ).sort(),
+            toolCalls: toolCalls.length,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
     'reuses saved identity and recovers an ordinary unresponsive check-in control',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -9399,6 +9518,8 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
       }> = []
       let actCount = 0
       let checkInCompleted = false
+      let dateOfBirthEntered = false
+      let insuranceEntered = false
       let osControlCount = 0
       let openCount = 0
       let safeAlternateAttempted = false
@@ -9477,13 +9598,19 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   : [
                       'Appointment check-in.',
                       'Full name is already populated.',
-                      'Date of birth is required and blank.',
-                      'Insurance member ID is required and blank.',
+                      dateOfBirthEntered
+                        ? 'Date of birth is populated.'
+                        : 'Date of birth is required and blank.',
+                      insuranceEntered
+                        ? 'Insurance member ID is populated.'
+                        : 'Insurance member ID is required and blank.',
                       controlChecked
                         ? 'Required review checkbox is checked. Continue is enabled.'
                         : 'Required review checkbox is visible, enabled, and unchecked at x=420 y=620.',
                       openCount > 1
-                        ? 'The prior interaction had no effect.'
+                        ? controlChecked
+                          ? 'The verified fallback changed the checkbox state; the form has not been submitted.'
+                          : 'The prior interaction had no effect.'
                         : 'Complete all required ordinary fields and continue.',
                     ].join('\n'),
               }), {
@@ -9496,6 +9623,13 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_check_in/act'
             ) {
               actCount += 1
+              const code = String(body.code ?? '')
+              if (/1990-04-12|04\/12\/1990/iu.test(code)) {
+                dateOfBirthEntered = true
+              }
+              if (/SYNTHETIC-MEMBER-2468/iu.test(code)) {
+                insuranceEntered = true
+              }
               if (actCount === 1) {
                 return new Response(JSON.stringify({
                   error: {
@@ -9507,8 +9641,32 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   status: 502,
                 })
               }
-              const code = String(body.code ?? '')
               if (actCount === 2) {
+                const targetsReviewCheckbox = /checkbox|review/iu.test(code)
+                const usesSafePlaywrightControl =
+                  /(?:getBy(?:Role|Label|Text|TestId)|locator|keyboard\.press|\.(?:check|press)\s*\()/u.test(
+                    code,
+                  )
+                const bypassesPlaywrightControl =
+                  /(?:page\.)?mouse\.|evaluate|dispatchEvent|\bforce\s*:\s*true/iu.test(
+                    code,
+                  )
+                if (
+                  !targetsReviewCheckbox
+                  || !usesSafePlaywrightControl
+                  || bypassesPlaywrightControl
+                ) {
+                  return new Response(JSON.stringify({
+                    error: {
+                      code: 'HOSTED_COMPUTER_RECOVERY_SEQUENCE_INVALID',
+                      message:
+                        'Use one safe locator or keyboard alternate on the review checkbox.',
+                    },
+                  }), {
+                    headers: { 'content-type': 'application/json' },
+                    status: 409,
+                  })
+                }
                 safeAlternateAttempted = true
                 return new Response(JSON.stringify({
                   result: {
@@ -9520,7 +9678,12 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   visibleText: [
                     'The safe Playwright alternate also had no effect.',
                     'Required review checkbox remains unchecked.',
-                    'Date of birth and insurance member ID are still required.',
+                    dateOfBirthEntered
+                      ? 'Date of birth remains populated.'
+                      : 'Date of birth is still required.',
+                    insuranceEntered
+                      ? 'Insurance member ID remains populated.'
+                      : 'Insurance member ID is still required.',
                   ].join('\n'),
                 }), {
                   headers: { 'content-type': 'application/json' },
@@ -9528,10 +9691,10 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                 })
               }
               const missingFields: string[] = []
-              if (!/1990-04-12|04\/12\/1990/iu.test(code)) {
+              if (!dateOfBirthEntered) {
                 missingFields.push('date of birth')
               }
-              if (!/SYNTHETIC-MEMBER-2468/iu.test(code)) {
+              if (!insuranceEntered) {
                 missingFields.push('insurance member ID')
               }
               if (osControlCount < 1) {
@@ -9577,11 +9740,35 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   status: 409,
                 })
               }
+              const keys = Array.isArray(body.keys) ? body.keys : []
+              const targetsCheckboxWithMouse =
+                body.action === 'clickMouse'
+                && body.button === 'left'
+                && body.clickType === 'click'
+                && body.numClicks === 1
+                && body.x === 420
+                && body.y === 620
+              const targetsCheckboxWithKeyboard =
+                body.action === 'pressKey'
+                && keys.length === 1
+                && keys[0] === 'space'
+              if (!targetsCheckboxWithMouse && !targetsCheckboxWithKeyboard) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_RECOVERY_SEQUENCE_INVALID',
+                    message: 'OS fallback must target the verified review checkbox once.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
               osControlCount += 1
               return new Response(JSON.stringify({
-                result: { checked: true },
-                title: 'Appointment check-in',
-                url: 'https://clinic.example.test/check-in',
+                action: body.action,
+                ok: true,
+                runId: 'run_synthetic_check_in',
+                status: 'running',
               }), {
                 headers: { 'content-type': 'application/json' },
                 status: 200,
@@ -9755,7 +9942,9 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
       expect(callsFor(MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name)).toHaveLength(0)
       expect(callsFor(MURPH_COMPUTER_FINISH_RUN_TOOL.name)).toHaveLength(1)
       expect(memoryWrites).toHaveLength(0)
-      expect(submittedCodes.join('\n')).not.toContain('1990-04-12')
+      expect(submittedCodes.join('\n')).not.toMatch(
+        /1990-04-12|04\/12\/1990/iu,
+      )
       expect(result.reply).toMatch(
         /check(?:ed)?[ -]?in|check-in (?:is )?complete/iu,
       )
@@ -14996,7 +15185,7 @@ async function runAppointmentIdentityRequirementProbe(
     await materializeAppointmentMemoryVaultCli({
       binDirectory,
       commandLog,
-      dateOfBirth: null,
+      dateOfBirth: requiresDob ? null : '1990-04-12',
     })
     const inheritedPath = normalizeEnvString(config.env.PATH)
     const result = await executeRealCodexAppServerTurn({

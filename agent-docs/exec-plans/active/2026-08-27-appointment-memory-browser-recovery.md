@@ -87,3 +87,24 @@ Updated: 2026-08-27
 - Final direct/group first-request measurement against the base candidate: +132
   provider-visible tokens and +711 bytes in each representative initial
   request, with no tool-schema delta.
+- Second ReviewGPT on the exact follow-up head confirmed the original global
+  evidence and durable-DOB findings were resolved. It returned three medium
+  findings plus a SHA-identified coverage patch: split booking-call identity
+  from destination-driven check-in identity, reject fake browser recovery
+  actions, and seed saved DOB in the no-DOB disclosure probe.
+- Applied and verified the ReviewGPT coverage patch, split the call rule, and
+  added a focused GPT-5.6 TERRA booking-call journey. The generated brief read
+  both owning skills and included exactly the approved patient name and
+  normalized DOB even when public instructions omitted identity fields.
+- Tightened the browser contract so a safe alternate leads to one targeted OS
+  fallback and a refreshed success state forbids repeating it. Clarified that
+  specifically authorized DOB and insurance fields may be entered through
+  `computer_act` without takeover, while credentials, OTPs, payment, CAPTCHA,
+  and unprovided sensitive facts remain handoff boundaries.
+- Strengthened the synthetic recovery form to preserve entered fields and
+  return the real sanitized OS-control response shape. The resulting TERRA
+  journey passed with four act calls, five state inspections, one OS click,
+  zero handoffs, verified completion, and no generic insurance-memory write.
+- Focused prompt and skill contracts after the second review: 33 passed and 7
+  skipped. The saved-DOB/no-DOB live journey also passed with no DOB disclosure
+  and zero memory writes.

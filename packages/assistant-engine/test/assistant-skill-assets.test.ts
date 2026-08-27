@@ -1008,6 +1008,12 @@ describe('assistant skill assets', () => {
       /For every fallback click, set `numClicks: 1`/iu,
     )
     expect(raw).toMatch(
+      /failure of the safe Playwright alternate is\s+the gate to one targeted OS fallback, not by itself a reason to hand the task\s+back to the user/iu,
+    )
+    expect(raw).toMatch(
+      /If the refreshed state proves the\s+control changed as intended, do not repeat OS-control/iu,
+    )
+    expect(raw).toMatch(
       /Amazon's flaky\s+"Place your order" control is one example/iu,
     )
     expect(raw).toMatch(

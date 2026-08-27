@@ -41,7 +41,13 @@ describe('action-first browser prompt contract', () => {
       'An ordinary failed or unresponsive control is not yet a blocker',
     )
     expect(prompt).toContain(
-      're-inspect current state, complete one safe alternate interaction, and only then use `computer-use` OS fallback when allowed; refresh only when no side effect is unknown and entered state is safe',
+      're-inspect current state, complete one safe alternate interaction, and only then use `computer-use` OS fallback when allowed',
+    )
+    expect(prompt).toContain(
+      'After one OS action, re-inspect; when the target state changed, never repeat that action',
+    )
+    expect(prompt).toContain(
+      'Refresh only when no side effect is unknown and entered state is safe',
     )
     expect(prompt).toContain(
       'do not imply you opened or can drive checkout unless an actual runtime action happened',

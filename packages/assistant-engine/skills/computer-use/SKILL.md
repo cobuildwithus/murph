@@ -187,6 +187,12 @@ move, drag, scroll, type text, or press keys. Do not use it for passwords,
 payment details, one-time codes, raw tokens, or other sensitive private input;
 pause for handoff instead.
 
+For a verified ordinary control, failure of the safe Playwright alternate is
+the gate to one targeted OS fallback, not by itself a reason to hand the task
+back to the user. Perform one fresh click or key action, then call
+`computer_open` before any other action. If the refreshed state proves the
+control changed as intended, do not repeat OS-control; continue from that state.
+
 Never use OS-control as a blind second click when the Playwright attempt may
 already have caused a side effect. Inspect the current page first and proceed
 only when it clearly shows that the effect did not happen. Amazon's flaky

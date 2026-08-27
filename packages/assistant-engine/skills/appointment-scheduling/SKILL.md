@@ -289,13 +289,24 @@ When intake is complete:
    a call.
 2. Before acting, summarize in one line what Murph will request, what choices it
    may accept, and what personal facts it will share.
-3. Put only approved, call-relevant facts in `shareableFacts`. For an appointment
-   call, include approved identity fields only when the destination requires
-   them; normalize an approved `date_of_birth` as `YYYY-MM-DD`. If a live choice
-   exceeds the brief, consult or transfer to the user when available; otherwise
-   collect options or end without committing.
+3. Put only approved, call-relevant facts in `shareableFacts`. For a booking,
+   rescheduling, cancellation, or waitlist call, include the approved
+   `patient_name` and normalized `date_of_birth` even when public destination
+   instructions do not list identity fields. For a check-in or intake call,
+   include only approved identity fields proven necessary by the official
+   destination. Normalize an approved `date_of_birth` as `YYYY-MM-DD`. If a live
+   choice exceeds the brief, consult or transfer to the user when available;
+   otherwise collect options or end without committing.
 4. For browser execution, follow `computer-use` for final-term authorization,
    private handoff, submission, and verification.
+
+For browser check-in or intake, a current request that specifically authorizes
+disclosing an approved date of birth, insurance identifier, or other identity
+field to that destination permits `computer_act` to enter it; the field's
+sensitivity alone does not require user takeover. Never type those values with
+OS-control. Handoff remains required for credentials, one-time codes, payment
+details, CAPTCHA, an unprovided sensitive fact, or another private step the
+browser contract reserves to the user.
 
 For check-in or intake, continue across every authorized ordinary form and
 recoverable field until the site verifies completion. A request to complete the

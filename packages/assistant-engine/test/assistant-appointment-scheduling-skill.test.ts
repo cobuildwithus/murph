@@ -162,13 +162,26 @@ describe('appointment scheduling skill', () => {
       /an explicitly authorized current-task value satisfies\s+the gate; durable storage is not required/iu,
     )
     expect(raw).toMatch(
-      /include approved identity fields only when the destination requires\s+them; normalize an approved `date_of_birth`/iu,
+      /For a booking,\s+rescheduling, cancellation, or waitlist call, include the approved\s+`patient_name` and normalized `date_of_birth` even when public destination\s+instructions do not list identity fields/iu,
+    )
+    expect(raw).toMatch(
+      /For a check-in or intake call,\s+include only approved identity fields proven necessary by the official\s+destination/iu,
     )
     expect(raw).toMatch(
       /resume intake on the\s+next ordinary conversational turn/iu,
     )
     expect(raw).toContain(
       'continue across every authorized ordinary form and\nrecoverable field until the site verifies completion',
+    )
+    expect(raw).toMatch(
+      /specifically authorizes\s+disclosing an approved date of birth, insurance identifier, or other identity\s+field to that destination permits `computer_act` to enter it/iu,
+    )
+    expect(raw).toMatch(
+      /the field's\s+sensitivity alone does not require user takeover/iu,
+    )
+    expect(raw).toContain('Never type those values with\nOS-control')
+    expect(raw).toMatch(
+      /Handoff remains required for credentials, one-time codes, payment\s+details, CAPTCHA, an unprovided sensitive fact/iu,
     )
     expect(raw).toMatch(
       /not an unprovided consent,\s+optional data-sharing choice, inaccurate attestation, CAPTCHA bypass/iu,
