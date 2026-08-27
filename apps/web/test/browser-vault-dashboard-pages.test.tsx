@@ -476,18 +476,26 @@ test("Personal Patterns comparison controls name their factor and next-day outco
     markup,
     /data-pattern-outcome-column="sleep-(?:score|efficiency)"/u,
   );
-  assert.match(markup, />Sleep quality</u);
-  assert.match(markup, />Score<\/span>/u);
-  assert.match(markup, />Efficiency<\/span>/u);
+  assert.match(markup, />Sleep</u);
+  assert.doesNotMatch(markup, />Score<\/span>/u);
+  assert.doesNotMatch(markup, />Efficiency<\/span>/u);
   assert.match(markup, /sleep efficiency/u);
   assert.doesNotMatch(markup, /Unsupported outcome/u);
   assert.doesNotMatch(markup, /Sparse factor/u);
-  assert.match(markup, /aria-label="Seen on 14 days"/u);
+  assert.match(
+    markup,
+    /aria-label="Data coverage: based on 14 recorded cases"/u,
+  );
   assert.match(markup, /data-observed-days="14"/u);
   assert.match(markup, /Early signal, grade D/u);
   assert.match(markup, /Pattern, grade A/u);
   assert.match(markup, /Next-day HRV was 12% higher after running\./u);
   assert.match(markup, /9 days with running averaged 48 ms\./u);
+  assert.match(markup, /similar comparison days averaged/u);
+  assert.equal(
+    (markup.match(/associations, not proof of cause/gu) ?? []).length,
+    1,
+  );
   assert.match(markup, /Custom tag/u);
   assert.match(
     markup,

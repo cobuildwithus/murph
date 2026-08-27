@@ -146,8 +146,8 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
         <DesktopPatternMatrix report={report} />
 
         <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
-          Marker color and size show evidence strength. Select a result for
-          details.
+          Marker size and color show evidence strength. Results show
+          associations, not proof of cause.
         </div>
       </div>
     </TooltipProvider>
@@ -384,15 +384,9 @@ function PatternOutcomeColumnCell({
   }
 
   return (
-    <div className="flex flex-col items-start gap-1.5">
+    <div className="flex flex-col items-center gap-1.5">
       {effects.map(({ cell, outcome }) => (
-        <div
-          key={outcome.id}
-          className="grid grid-cols-[3.75rem_auto] items-center gap-1.5"
-        >
-          <span className="text-[10px] leading-none text-muted-foreground">
-            {shortOutcomeLabel(outcome)}
-          </span>
+        <div key={outcome.id}>
           <PatternBubble
             cell={cell}
             compact={compact}
@@ -581,10 +575,12 @@ function PatternPopoverContent({
   outcomeUnit: string;
 }) {
   const factor = factorLabel.toLocaleLowerCase();
+  const exposedLabel =
+    outcomeLagDays === 0 ? `With ${factor}` : `After ${factor}`;
   const comparisonLabel =
     cell.comparisonBasis === "confirmed_absence"
       ? `Without ${factor}`
-      : "Nearby days";
+      : "On similar days";
 
   return (
     <PopoverContent
@@ -597,7 +593,7 @@ function PatternPopoverContent({
     >
       <PopoverHeader className="gap-1.5">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-          {isFlat ? "Checked" : formatEvidenceLabel(cell)}
+          {isFlat ? "Checked" : formatClassificationLabel(cell)}
         </p>
         <PopoverTitle className="font-serif text-lg font-semibold leading-6">
           {isFlat
@@ -627,14 +623,11 @@ function PatternPopoverContent({
           <dl className="grid grid-cols-2 gap-4">
             <div className="min-w-0">
               <dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
-                With {factor}
+                {exposedLabel}
               </dt>
               <dd className="mt-1 font-serif text-xl font-semibold tabular-nums text-foreground">
                 {formatMean(cell.exposedMean, outcomeUnit)}
               </dd>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {formatDayCount(cell.exposedDays)}
-              </p>
             </div>
             <div className="min-w-0 border-l border-border pl-4">
               <dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
@@ -643,9 +636,6 @@ function PatternPopoverContent({
               <dd className="mt-1 font-serif text-xl font-semibold tabular-nums text-foreground">
                 {formatMean(cell.comparisonMean, outcomeUnit)}
               </dd>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {formatDayCount(cell.comparisonDays)}
-              </p>
             </div>
           </dl>
         </>
@@ -653,8 +643,7 @@ function PatternPopoverContent({
 
       <Separator />
       <p className="text-xs leading-5 text-muted-foreground">
-        Data from {formatEvidencePeriod(cell)}. This is an association, not
-        proof of cause.
+        Data from {formatEvidencePeriod(cell)}.
       </p>
     </PopoverContent>
   );
@@ -682,7 +671,7 @@ function buildOutcomeColumns(
     return [
       {
         id: "sleep-quality",
-        label: "Sleep quality",
+        label: "Sleep",
         outcomes: sleepQualityOutcomes,
       },
     ];
@@ -698,10 +687,6 @@ function chunkOutcomeColumns(
     groups.push(outcomes.slice(index, index + size));
   }
   return groups;
-}
-
-function shortOutcomeLabel(outcome: PersonalPatternOutcome): string {
-  return outcome.id === "sleep-efficiency" ? "Efficiency" : "Score";
 }
 
 function findPatternCell(
@@ -726,7 +711,7 @@ function ObservedDaysMeter({
   days: number;
 }) {
   const level = getObservedDaysLevel(days);
-  const label = `Seen on ${formatDayCount(days)}`;
+  const label = `Data coverage: based on ${formatCaseCount(days)}`;
 
   return (
     <Tooltip>
@@ -742,7 +727,7 @@ function ObservedDaysMeter({
           {Array.from({ length: 5 }, (_, index) => (
             <span
               className={cn(
-                "h-2.5 w-px rounded-full",
+                "h-3 w-0.5 rounded-full",
                 index < level ? "bg-primary" : "bg-border",
               )}
               key={index}
@@ -750,7 +735,12 @@ function ObservedDaysMeter({
           ))}
         </span>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent className="max-w-52">
+        <p className="font-medium">Data coverage</p>
+        <p className="mt-0.5 text-xs opacity-80">
+          Based on {formatCaseCount(days)}.
+        </p>
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -835,7 +825,7 @@ function describeComparison(
         )} without ${factor} averaged ${formatMean(cell.comparisonMean, unit)}`
       : `${formatDayCount(
           cell.comparisonDays,
-        )} nearby comparison days averaged ${formatMean(
+        )} similar comparison days averaged ${formatMean(
           cell.comparisonMean,
           unit,
         )}`;
@@ -843,10 +833,14 @@ function describeComparison(
 }
 
 function formatEvidenceLabel(cell: PersonalPatternCell): string {
-  const classification = cell.classification
+  const classification = formatClassificationLabel(cell);
+  return cell.grade ? `${classification}, grade ${cell.grade}` : classification;
+}
+
+function formatClassificationLabel(cell: PersonalPatternCell): string {
+  return cell.classification
     ? CLASSIFICATION_LABELS[cell.classification]
     : STAGE_LABELS[cell.stage];
-  return cell.grade ? `${classification}, grade ${cell.grade}` : classification;
 }
 
 function formatEvidencePeriod(cell: PersonalPatternCell): string {
@@ -864,6 +858,10 @@ function formatEvidencePeriod(cell: PersonalPatternCell): string {
 
 function formatDayCount(days: number): string {
   return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+function formatCaseCount(cases: number): string {
+  return `${cases} recorded ${cases === 1 ? "case" : "cases"}`;
 }
 
 function formatMean(value: number, unit: string): string {

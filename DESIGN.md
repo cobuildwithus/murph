@@ -717,10 +717,12 @@ Use one flat paper surface for repeated action-to-outcome comparisons. Put Quive
 Keep the matrix focused on usable comparisons. Hide a factor row or outcome
 column when every cell still needs more data. Use distinct compact icons for
 `No clear pattern` and `Not enough data`, with details on hover or focus. Show
-factor coverage as a five-tick meter and reveal the exact observed-day count in
-its tooltip.
+factor coverage as a five-tick meter. Its tooltip uses `Data coverage` as the
+title and gives the exact recorded-case count below it. Group sleep score and
+sleep efficiency under one `Sleep` column. Keep their calculations separate
+and identify the metric in each result popover.
 
-Keep the copy observational. Use “lined up with” or “was associated with.” Never use “caused,” “proved,” or a moral label. Show matched-day counts and comparison means in the cell detail. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
+Keep the copy observational. Use “lined up with” or “was associated with.” Never use “caused,” “proved,” or a moral label. Show comparison means in the cell detail. Keep matched-day counts in accessible copy instead of repeating them under both means. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 
 ## 6. Do's and Don'ts
 
