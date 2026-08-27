@@ -45,6 +45,18 @@ describe('Codex thread instructions', () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'return the full command result—not `r.output`',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'use any `session_id` with `write_stdin` until terminal',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'give effects 30s initial yield',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Never continue, retry, or replace an effect with unknown outcome',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'search deferred tools via `tool_search`',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
