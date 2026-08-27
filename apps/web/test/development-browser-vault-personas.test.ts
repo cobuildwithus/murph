@@ -24,7 +24,7 @@ test("each development persona exercises the real Journal and Patterns projectio
       assert.ok(replica.journal.eventCount > 0, persona.id);
       assert.ok(replica.personalPatterns.factors.length > 0, persona.id);
     }
-    if (persona.id === "family" || persona.id === "new") {
+    if (persona.id === "active" || persona.id === "new") {
       assert.equal(replica.personalPatterns.outcomes.length, 0);
     } else {
       assert.ok(replica.personalPatterns.outcomes.length > 2, persona.id);
@@ -32,7 +32,7 @@ test("each development persona exercises the real Journal and Patterns projectio
   }
 });
 
-test("Family persona covers a member without a connected wearable", async () => {
+test("Family persona covers private group context alongside wearable data", async () => {
   const replica = await buildDevelopmentPersonaReplica(
     "family",
     new Date("2026-08-26T20:00:00.000Z"),
@@ -42,9 +42,9 @@ test("Family persona covers a member without a connected wearable", async () => 
     replica.journal?.days.some((day) =>
       day.events.some((event) => event.kind === "sleep"),
     ),
-    false,
+    true,
   );
-  assert.deepEqual(replica.personalPatterns?.outcomes, []);
+  assert.ok((replica.personalPatterns?.outcomes.length ?? 0) > 2);
   assert.equal(
     replica.personalPatterns?.factors.some(
       (factor) => factor.id === "football",
@@ -72,6 +72,11 @@ test("Oura persona covers a varied activity history", async () => {
   ]) {
     assert.ok(factorIds.has(expected), expected);
   }
+  assert.equal(
+    replica.personalPatterns?.factors.find((factor) => factor.id === "strength")
+      ?.label,
+    "Strength training",
+  );
 
   const detectedCells =
     replica.personalPatterns?.cells.filter(
@@ -172,9 +177,9 @@ test("New member exercises the empty Journal and Patterns states", async () => {
   assert.equal(replica.metricRows.length, 0);
 });
 
-test("context-rich persona joins meals and context into one private timeline", async () => {
+test("Oura persona joins meals, travel, and environment context into one private timeline", async () => {
   const replica = await buildDevelopmentPersonaReplica(
-    "context",
+    "oura",
     new Date("2026-08-26T20:00:00.000Z"),
   );
   const events = replica.journal?.days.flatMap((day) => day.events) ?? [];
@@ -199,7 +204,22 @@ test("context-rich persona joins meals and context into one private timeline", a
     createBrowserVaultQueryClient(replica),
   );
   assert.equal(environment["sleep-environment"]?.night_temp_c, 18);
-  assert.equal(environment["home-location"]?.location, "New York");
+  assert.equal(environment["home-location"]?.location, "Warsaw");
+});
+
+test("Active persona has varied recent context without wearable outcomes", async () => {
+  const replica = await buildDevelopmentPersonaReplica(
+    "active",
+    new Date("2026-08-26T20:00:00.000Z"),
+  );
+  const events = replica.journal?.days.flatMap((day) => day.events) ?? [];
+  const recentKinds = new Set(events.slice(0, 20).map((event) => event.kind));
+
+  assert.ok(events.length >= 8);
+  assert.ok(recentKinds.has("activity"));
+  assert.ok(recentKinds.has("meal"));
+  assert.deepEqual(replica.personalPatterns?.outcomes, []);
+  assert.equal(replica.metricRows.length, 0);
 });
 
 test("training and group personas show completed actions and private context", async () => {
@@ -237,6 +257,16 @@ test("training and group personas show completed actions and private context", a
         entity.attributes.source === "murph-live",
     ).length >= 12,
   );
+  assert.equal(
+    training.personalPatterns?.cells.some(
+      (cell) =>
+        cell.factorId === "strength" &&
+        cell.outcomeId === "deep-sleep" &&
+        cell.stage !== "insufficient" &&
+        cell.stage !== "no_clear_pattern",
+    ),
+    true,
+  );
 
   const familyEvents = family.journal?.days.flatMap((day) => day.events) ?? [];
   assert.equal(
@@ -245,6 +275,10 @@ test("training and group personas show completed actions and private context", a
   );
   assert.equal(
     familyEvents.some((event) => event.title === "Muscle soreness"),
+    true,
+  );
+  assert.equal(
+    familyEvents.some((event) => event.title === "Mobility"),
     true,
   );
   assert.equal(

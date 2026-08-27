@@ -13,8 +13,8 @@ import {
 } from "./development-personas";
 
 const PERSONA_HASH_CHAR: Record<DevelopmentPersonaId, string> = {
+  active: "d",
   coach: "c",
-  context: "d",
   family: "e",
   new: "f",
   oura: "a",
@@ -51,7 +51,7 @@ interface PersonaFixture {
   timeZone: string;
 }
 
-interface OuraPersonaActivityDates {
+interface PatternedActivityDates {
   cycling: Set<string>;
   hiking: Set<string>;
   running: Set<string>;
@@ -63,8 +63,7 @@ function buildPersonaFixture(
   personaId: DevelopmentPersonaId,
   asOfDate: string,
 ): PersonaFixture {
-  const timeZone =
-    personaId === "context" ? "America/New_York" : "Europe/Warsaw";
+  const timeZone = "Europe/Warsaw";
   const source = personaId === "whoop" ? "whoop" : "oura";
   const entities: CanonicalEntity[] = [];
   const metricPoints: MetricPoint[] = [];
@@ -73,18 +72,25 @@ function buildPersonaFixture(
       addDays(asOfDate, -(index * 14 + 8)),
     ),
   );
-  const ouraActivityDates =
-    personaId === "oura" ? buildOuraPersonaActivityDates(asOfDate) : null;
+  const patternedActivityDates =
+    personaId === "oura"
+      ? buildOuraPersonaActivityDates(asOfDate)
+      : personaId === "coach"
+      ? buildTrainingPersonaActivityDates(asOfDate)
+      : null;
 
   for (let offset = 83; offset >= 0; offset -= 1) {
-    if (personaId === "family" || personaId === "new") continue;
+    if (personaId === "active" || personaId === "new") continue;
     const date = addDays(asOfDate, -offset);
     const priorDate = addDays(date, -1);
     const followsFactor = factorDates.has(priorDate);
-    const followsCycling = ouraActivityDates?.cycling.has(priorDate) ?? false;
-    const followsRunning = ouraActivityDates?.running.has(priorDate) ?? false;
-    const followsStrength = ouraActivityDates?.strength.has(priorDate) ?? false;
-    const followsTennis = ouraActivityDates?.tennis.has(priorDate) ?? false;
+    const followsCycling =
+      patternedActivityDates?.cycling.has(priorDate) ?? false;
+    const followsRunning =
+      patternedActivityDates?.running.has(priorDate) ?? false;
+    const followsStrength =
+      patternedActivityDates?.strength.has(priorDate) ?? false;
+    const followsTennis = patternedActivityDates?.tennis.has(priorDate) ?? false;
     const wave = offset % 5;
     const totalSleep =
       430 +
@@ -239,7 +245,7 @@ function buildPersonaFixture(
     }
   }
 
-  for (const date of personaId === "family" || personaId === "new"
+  for (const date of personaId === "active" || personaId === "new"
     ? []
     : factorDates) {
     entities.push(
@@ -270,7 +276,7 @@ function buildPersonaFixture(
     asOfDate,
     entities,
     metricPoints,
-    ouraActivityDates,
+    patternedActivityDates,
   );
 
   return {
@@ -288,26 +294,27 @@ function addPersonaSpecificEvents(
   asOfDate: string,
   entities: CanonicalEntity[],
   metricPoints: MetricPoint[],
-  ouraActivityDates: OuraPersonaActivityDates | null,
+  patternedActivityDates: PatternedActivityDates | null,
 ) {
-  if (personaId === "oura" && ouraActivityDates) {
-    for (const date of ouraActivityDates.tennis) {
+  if (personaId === "oura" && patternedActivityDates) {
+    for (const date of patternedActivityDates.tennis) {
       entities.push(activityEntity(personaId, date, "tennis", 62, "oura"));
     }
-    for (const date of ouraActivityDates.cycling) {
+    for (const date of patternedActivityDates.cycling) {
       entities.push(activityEntity(personaId, date, "cycling", 50, "oura"));
     }
-    for (const date of ouraActivityDates.running) {
+    for (const date of patternedActivityDates.running) {
       entities.push(activityEntity(personaId, date, "running", 39, "oura"));
     }
-    for (const date of ouraActivityDates.hiking) {
+    for (const date of patternedActivityDates.hiking) {
       entities.push(activityEntity(personaId, date, "hiking", 120, "oura"));
     }
-    for (const date of ouraActivityDates.strength) {
+    for (const date of patternedActivityDates.strength) {
       entities.push(
         activityEntity(personaId, date, "strength-training", 50, "oura"),
       );
     }
+    addContextRichEvents(asOfDate, entities);
     return;
   }
 
@@ -423,6 +430,22 @@ function addPersonaSpecificEvents(
         }),
       );
     }
+    for (const [offset, activityType, durationMinutes] of [
+      [1, "mobility", 18],
+      [5, "running", 32],
+      [8, "walking", 58],
+      [11, "cycling", 44],
+    ] as const) {
+      entities.push(
+        activityEntity(
+          personaId,
+          addDays(asOfDate, -offset),
+          activityType,
+          durationMinutes,
+          "murph-live",
+        ),
+      );
+    }
     return;
   }
 
@@ -445,6 +468,88 @@ function addPersonaSpecificEvents(
         tags: ["key-muscle-soreness"],
         title: "Muscle soreness",
       }),
+      journalNote({
+        date: addDays(asOfDate, -8),
+        id: "family_group_walk",
+        note: "Went for a long walk with the family.",
+        source: "private-group-capture",
+        tags: ["key-walking"],
+        title: "Family walk",
+      }),
+      journalNote({
+        date: addDays(asOfDate, -12),
+        id: "family_coach_group",
+        note: "The coach group recorded a completed mobility session.",
+        source: "private-group-capture",
+        tags: ["key-mobility"],
+        title: "Mobility",
+      }),
+      activityEntity(
+        personaId,
+        addDays(asOfDate, -5),
+        "walking",
+        52,
+        "apple-health",
+      ),
+      activityEntity(
+        personaId,
+        addDays(asOfDate, -10),
+        "strength-training",
+        38,
+        "apple-health",
+      ),
+    );
+    return;
+  }
+
+  if (personaId === "active") {
+    const recentActivities = [
+      [1, "walking", 42],
+      [2, "strength-training", 46],
+      [4, "cycling", 64],
+      [6, "running", 31],
+      [8, "football", 55],
+      [10, "walking", 36],
+      [12, "mobility", 20],
+    ] as const;
+    for (const [offset, activityType, durationMinutes] of recentActivities) {
+      entities.push(
+        activityEntity(
+          personaId,
+          addDays(asOfDate, -offset),
+          activityType,
+          durationMinutes,
+          "manual",
+        ),
+      );
+    }
+    entities.push(
+      journalNote({
+        date: addDays(asOfDate, -3),
+        id: "active_sleep_outcome",
+        note: "Slept poorly and woke up tired.",
+        noteType: "journal-outcome",
+        tags: ["key-sleep-quality"],
+        title: "Poor sleep",
+      }),
+      journalNote({
+        date: addDays(asOfDate, -7),
+        id: "active_sauna",
+        note: "Spent 18 minutes in a Finnish sauna at 82 C.",
+        tags: ["key-sauna", "temperature-82-c"],
+        title: "Sauna",
+      }),
+      eventEntity({
+        attributes: {
+          ingredients: ["Eggs", "Toast", "Avocado"],
+          source: "meal-photo",
+        },
+        date: addDays(asOfDate, -2),
+        id: "active_meal",
+        kind: "meal",
+        occurredAt: `${addDays(asOfDate, -2)}T08:20:00.000Z`,
+        title: "Breakfast",
+      }),
     );
     return;
   }
@@ -453,20 +558,27 @@ function addPersonaSpecificEvents(
     return;
   }
 
+  addContextRichEvents(asOfDate, entities);
+}
+
+function addContextRichEvents(
+  asOfDate: string,
+  entities: CanonicalEntity[],
+) {
   const tripStart = addDays(asOfDate, -5);
   entities.push(
     habitatEntity({
       aspect: "home-location",
-      id: "context_home_location",
+      id: "oura_home_location",
       indicators: {
         area_type: "urban_center",
-        location: "New York",
+        location: "Warsaw",
       },
       title: "Location and climate",
     }),
     habitatEntity({
       aspect: "sleep-environment",
-      id: "context_sleep_environment",
+      id: "oura_sleep_environment",
       indicators: {
         co2_meter: "aranet",
         darkness: "blackout",
@@ -480,7 +592,7 @@ function addPersonaSpecificEvents(
     }),
     journalNote({
       date: tripStart,
-      id: "context_trip",
+      id: "oura_trip",
       note: "Four-night work trip. Staying away from home.",
       occurredAt: null,
       source: "calendar",
@@ -489,7 +601,7 @@ function addPersonaSpecificEvents(
     }),
     journalNote({
       date: addDays(asOfDate, -12),
-      id: "context_environment",
+      id: "oura_environment",
       note: "Bedroom temperature changed to 18 C.",
       occurredAt: null,
       source: "environment",
@@ -503,7 +615,7 @@ function addPersonaSpecificEvents(
         source: "meal-photo",
       },
       date: addDays(asOfDate, -1),
-      id: "context_meal",
+      id: "oura_meal",
       kind: "meal",
       occurredAt: `${addDays(asOfDate, -1)}T19:10:00.000Z`,
       title: "Meal",
@@ -513,13 +625,25 @@ function addPersonaSpecificEvents(
 
 function buildOuraPersonaActivityDates(
   asOfDate: string,
-): OuraPersonaActivityDates {
+): PatternedActivityDates {
   return {
     cycling: scheduledDates(asOfDate, 4, 80, 12),
     hiking: scheduledDates(asOfDate, 12, 75, 21),
     running: scheduledDates(asOfDate, 9, 79, 14),
     strength: scheduledDates(asOfDate, 3, 80, 10),
     tennis: scheduledDates(asOfDate, 6, 76, 14),
+  };
+}
+
+function buildTrainingPersonaActivityDates(
+  asOfDate: string,
+): PatternedActivityDates {
+  return {
+    cycling: new Set(),
+    hiking: new Set(),
+    running: new Set(),
+    strength: scheduledDates(asOfDate, 2, 44, 3),
+    tennis: new Set(),
   };
 }
 

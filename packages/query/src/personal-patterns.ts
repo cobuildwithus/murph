@@ -1356,6 +1356,8 @@ function humanizeToken(value: string): string {
       ? "yard-work"
       : value === "housework"
       ? "house-work"
+      : value === "strength"
+      ? "strength-training"
       : value;
   const words = readableValue.replace(/--/gu, " · ").replace(/[-_]+/gu, " ");
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;

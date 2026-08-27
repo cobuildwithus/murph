@@ -5,7 +5,7 @@ export const DEVELOPMENT_PERSONAS = [
   { id: "whoop", label: "Whoop member" },
   { id: "coach", label: "Training member" },
   { id: "family", label: "Family and groups" },
-  { id: "context", label: "Context-rich member" },
+  { id: "active", label: "Active without a device" },
   { id: "new", label: "New member" },
 ] as const;
 

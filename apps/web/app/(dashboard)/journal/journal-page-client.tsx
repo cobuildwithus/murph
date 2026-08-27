@@ -18,6 +18,7 @@ import {
   type JournalInsight,
 } from "@/src/components/journal/journal-view";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const EMPTY_JOURNAL: JournalView = {
   days: [],
@@ -44,7 +45,11 @@ const PATTERN_LABELS: Record<
   pattern: "Pattern",
 };
 
-export default function JournalPageClient() {
+export default function JournalPageClient({
+  contactOptions = [],
+}: {
+  contactOptions?: readonly MurphContactOption[];
+}) {
   const {
     client,
     deviceSyncImportPending,
@@ -85,6 +90,7 @@ export default function JournalPageClient() {
   return (
     <JournalViewContent
       asOfDate={client?.replica.generatedAt.slice(0, 10)}
+      contactOptions={contactOptions}
       insights={insights}
       isRefreshing={refreshPending}
       isStale={freshness === "stale"}

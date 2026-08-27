@@ -480,7 +480,7 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.doesNotMatch(markup, /Sparse factor/u);
   assert.match(
     markup,
-    /aria-label="Data coverage: based on 14 recorded cases"/u,
+    /aria-label="Good coverage: based on 14 recorded cases"/u,
   );
   assert.match(markup, /data-observed-days="14"/u);
   assert.match(markup, /Early signal, grade D/u);

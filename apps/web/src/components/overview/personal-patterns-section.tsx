@@ -157,7 +157,6 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
           <DesktopPatternMatrix report={report} />
 
           <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
-            Green marks favorable changes. Red marks unfavorable changes.
             Results show associations, not proof of cause.
           </div>
         </div>
@@ -187,11 +186,7 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
               className="grid items-stretch bg-muted/20"
               style={{ gridTemplateColumns: columns }}
             >
-              <div className="flex items-end border-r border-border px-2.5 py-3">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
-                  Action
-                </span>
-              </div>
+              <div className="border-r border-border" aria-hidden="true" />
               {outcomes.map((outcome) => (
                 <div
                   key={outcome.id}
@@ -254,11 +249,11 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
 
 function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
   const outcomeColumns = buildOutcomeColumns(report.outcomes);
-  const columns = `17rem repeat(${outcomeColumns.length}, minmax(8.5rem, 1fr))`;
+  const columns = `13.5rem repeat(${outcomeColumns.length}, minmax(7.5rem, 1fr))`;
 
   return (
     <div
-      className="hidden overflow-x-auto sm:block"
+      className="hidden overflow-x-auto shadow-[inset_-18px_0_14px_-18px_rgba(45,52,54,0.32)] sm:block"
       data-patterns-layout="desktop"
     >
       <div className="min-w-max">
@@ -266,11 +261,10 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
           className="grid items-end bg-muted/20"
           style={{ gridTemplateColumns: columns }}
         >
-          <div className="sticky left-0 z-20 border-r border-border bg-[#fffcf6] px-6 py-4 dark:bg-card">
-            <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-              Action
-            </span>
-          </div>
+          <div
+            className="sticky left-0 z-20 border-r border-border bg-[#fffcf6] dark:bg-card"
+            aria-hidden="true"
+          />
           {outcomeColumns.map((outcome) => (
             <div
               key={outcome.id}
@@ -288,13 +282,13 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
             className="grid min-h-[4.75rem] items-center border-t border-border"
             style={{ gridTemplateColumns: columns }}
           >
-            <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-border bg-[#fffcf6] px-6 py-3 dark:bg-card">
+            <div className="sticky left-0 z-10 flex items-center gap-2.5 border-r border-border bg-[#fffcf6] px-4 py-3 dark:bg-card">
               <Image
                 src={resolvePatternFactorIcon(factor)}
                 alt=""
                 width={40}
                 height={40}
-                className="size-10 shrink-0 object-contain"
+                className="size-9 shrink-0 object-contain"
               />
               <div className="flex min-w-0 flex-col gap-1">
                 <p className="text-sm font-medium text-foreground">
@@ -329,6 +323,11 @@ interface PatternOutcomeColumn {
   id: string;
   label: string;
   outcomes: PersonalPatternOutcome[];
+}
+
+interface PatternEffectEntry {
+  cell: PersonalPatternCell;
+  outcome: PersonalPatternOutcome;
 }
 
 function PatternOutcomeHeader({
@@ -401,13 +400,7 @@ function PatternOutcomeColumnCell({
     cell: findPatternCell(report, factorId, outcome.id),
     outcome,
   }));
-  const effects = entries.filter(
-    ({ cell }) =>
-      cell !== undefined &&
-      cell.stage !== "insufficient" &&
-      cell.stage !== "no_clear_pattern" &&
-      cell.direction !== "flat",
-  );
+  const effects = entries.filter(isPatternEffectEntry);
 
   if (effects.length === 0) {
     const checked = entries.find(
@@ -429,7 +422,7 @@ function PatternOutcomeColumnCell({
     );
   }
 
-  if (effects.length === 1 && outcomes.length === 1) {
+  if (effects.length === 1) {
     const [{ cell, outcome }] = effects;
     return (
       <PatternBubble
@@ -446,22 +439,148 @@ function PatternOutcomeColumnCell({
   }
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      {effects.map(({ cell, outcome }) => (
-        <div key={outcome.id}>
-          <PatternBubble
-            cell={cell}
-            compact={compact}
-            factorLabel={factorLabel}
-            factorObservedDays={factorObservedDays}
-            outcomeId={outcome.id}
-            outcomeLagDays={outcome.lagDays}
-            outcomeLabel={outcome.label}
-            outcomeUnit={outcome.unit}
-          />
+    <PatternCompositeBubble
+      compact={compact}
+      entries={effects}
+      factorLabel={factorLabel}
+    />
+  );
+}
+
+function isPatternEffectEntry(entry: {
+  cell: PersonalPatternCell | undefined;
+  outcome: PersonalPatternOutcome;
+}): entry is PatternEffectEntry {
+  return (
+    entry.cell !== undefined &&
+    entry.cell.stage !== "insufficient" &&
+    entry.cell.stage !== "no_clear_pattern" &&
+    entry.cell.direction !== "flat"
+  );
+}
+
+function PatternCompositeBubble({
+  compact = false,
+  entries,
+  factorLabel,
+}: {
+  compact?: boolean;
+  entries: PatternEffectEntry[];
+  factorLabel: string;
+}) {
+  const pointerAnchor = usePointerPopoverAnchor();
+  const popover = useExclusivePatternPopover();
+  const deltaPercent =
+    entries.reduce((sum, entry) => sum + (entry.cell.deltaPercent ?? 0), 0) /
+    entries.length;
+  const classification = entries
+    .map(
+      (entry): PersonalPatternClassification =>
+        entry.cell.classification ?? "observation",
+    )
+    .reduce<PersonalPatternClassification>(
+      (current, candidate) =>
+        classificationRank(candidate) < classificationRank(current)
+          ? candidate
+          : current,
+      "pattern",
+    );
+  const tone: PatternEffectTone = deltaPercent >= 0 ? "positive" : "negative";
+  const DirectionIcon = deltaPercent >= 0 ? ArrowUp : ArrowDown;
+  const factor = factorLabel.toLocaleLowerCase();
+  const label = formatPercent(Math.abs(deltaPercent));
+  const period = formatCombinedEvidencePeriod(entries);
+
+  return (
+    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
+      <PopoverTrigger
+        closeDelay={200}
+        delay={150}
+        openOnHover
+        render={
+          <button
+            type="button"
+            aria-label={`You slept ${
+              deltaPercent >= 0 ? "better" : "worse"
+            } after ${factor}. ${label} average change across sleep score and sleep efficiency.`}
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              compact ? "text-[10px]" : "text-sm",
+            )}
+            data-pattern-state="effect"
+            onKeyDown={pointerAnchor.onKeyDown}
+            onPointerMove={pointerAnchor.onPointerMove}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "inline-flex shrink-0 items-center justify-center rounded-full",
+                tone === "positive" &&
+                  classification === "pattern" &&
+                  "bg-primary text-primary-foreground",
+                tone === "positive" &&
+                  classification !== "pattern" &&
+                  "bg-primary/15 text-primary",
+                tone === "negative" &&
+                  classification === "pattern" &&
+                  "bg-red-600 text-white dark:bg-red-500",
+                tone === "negative" &&
+                  classification !== "pattern" &&
+                  "bg-red-600/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+                compact ? "size-4" : "size-[18px]",
+              )}
+            >
+              <DirectionIcon aria-hidden="true" className="size-3" />
+            </span>
+            <span>{label}</span>
+          </button>
+        }
+      />
+      <PopoverContent
+        align="center"
+        anchor={pointerAnchor.anchor}
+        className="w-[min(24rem,calc(100vw-2rem))]"
+        positionMethod="fixed"
+        side="right"
+        sideOffset={10}
+      >
+        <PopoverHeader className="gap-1.5">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+            Sleep quality
+          </p>
+          <PopoverTitle className="font-serif text-lg font-semibold leading-6">
+            You slept {deltaPercent >= 0 ? "better" : "worse"} after {factor}.
+          </PopoverTitle>
+          <PopoverDescription className="sr-only">
+            Sleep score and sleep efficiency comparisons.
+          </PopoverDescription>
+        </PopoverHeader>
+        <Separator />
+        <div className="space-y-4">
+          {entries.map(({ cell, outcome }) => (
+            <section aria-label={outcome.label} key={outcome.id}>
+              <p className="mb-2 text-xs font-medium text-foreground">
+                {outcome.label}
+              </p>
+              {cell.exposedMean !== null && cell.comparisonMean !== null ? (
+                <PatternComparisonBars
+                  comparisonLabel="Other days"
+                  comparisonMean={cell.comparisonMean}
+                  exposedLabel={`After ${factor}`}
+                  exposedMean={cell.exposedMean}
+                  tone={getPatternEffectTone(outcome.id, cell.deltaPercent)}
+                  unit={outcome.unit}
+                />
+              ) : null}
+            </section>
+          ))}
         </div>
-      ))}
-    </div>
+        <Separator />
+        <p className="text-xs leading-5 text-muted-foreground">
+          Data from {period}.
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -909,6 +1028,39 @@ function formatPercent(value: number): string {
   return `${Math.abs(value) < 10 ? value.toFixed(1) : Math.round(value)}%`;
 }
 
+function classificationRank(
+  classification: PersonalPatternClassification,
+): number {
+  switch (classification) {
+    case "observation":
+      return 0;
+    case "early_signal":
+      return 1;
+    case "pattern":
+      return 2;
+  }
+}
+
+function formatCombinedEvidencePeriod(entries: PatternEffectEntry[]): string {
+  const starts = entries
+    .map((entry) => entry.cell.firstExposedDate)
+    .filter((date): date is string => date !== null)
+    .sort();
+  const ends = entries
+    .map((entry) => entry.cell.lastExposedDate)
+    .filter((date): date is string => date !== null)
+    .sort();
+  const first = starts[0];
+  const last = ends.at(-1);
+  if (!first || !last) return "the available period";
+  if (first === last) return formatEvidenceDate(first, true);
+  const sameYear = first.slice(0, 4) === last.slice(0, 4);
+  return `${formatEvidenceDate(first, !sameYear)} to ${formatEvidenceDate(
+    last,
+    true,
+  )}`;
+}
+
 function ObservedDaysMeter({
   className,
   days,
@@ -917,7 +1069,8 @@ function ObservedDaysMeter({
   days: number;
 }) {
   const level = getObservedDaysLevel(days);
-  const label = `Data coverage: based on ${formatCaseCount(days)}`;
+  const coverageLabel = getObservedDaysLabel(level);
+  const label = `${coverageLabel}: based on ${formatCaseCount(days)}`;
 
   return (
     <Tooltip>
@@ -943,7 +1096,7 @@ function ObservedDaysMeter({
       </TooltipTrigger>
       <TooltipContent className="max-w-52 flex-col items-start gap-0.5">
         <div className="flex flex-col gap-0.5">
-          <p className="font-medium">Data coverage</p>
+          <p className="font-medium">{coverageLabel}</p>
           <p className="text-xs opacity-80">
             Based on {formatCaseCount(days)}.
           </p>
@@ -951,6 +1104,21 @@ function ObservedDaysMeter({
       </TooltipContent>
     </Tooltip>
   );
+}
+
+function getObservedDaysLabel(level: number): string {
+  switch (level) {
+    case 1:
+      return "Limited data";
+    case 2:
+      return "Early coverage";
+    case 3:
+      return "Growing coverage";
+    case 4:
+      return "Good coverage";
+    default:
+      return "Strong coverage";
+  }
 }
 
 function getObservedDaysLevel(days: number): number {

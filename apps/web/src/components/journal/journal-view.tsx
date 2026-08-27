@@ -12,6 +12,8 @@ import {
   CircleAlert,
   Dumbbell,
   Footprints,
+  MessageCircle,
+  Mic,
   Moon,
   NotebookPen,
   RefreshCw,
@@ -25,6 +27,7 @@ import type {
   JournalEvent,
   JournalView,
 } from "@murphai/query/browser-overview";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { DashboardPageStatus } from "@/src/components/dashboard/dashboard-page-status";
 import { Button } from "@/src/components/ui/button";
@@ -59,6 +62,7 @@ export interface JournalInsight {
 
 export function JournalViewContent({
   asOfDate,
+  contactOptions = [],
   insights = [],
   isRefreshing = false,
   isStale = false,
@@ -66,6 +70,7 @@ export function JournalViewContent({
   onRefresh,
 }: {
   asOfDate?: string;
+  contactOptions?: readonly MurphContactOption[];
   insights?: JournalInsight[];
   isRefreshing?: boolean;
   isStale?: boolean;
@@ -84,6 +89,10 @@ export function JournalViewContent({
   );
   const daysByDate = useMemo(
     () => new Map(journal.days.map((day) => [day.date, day])),
+    [journal.days],
+  );
+  const sleepBaselines = useMemo(
+    () => buildSleepMetricBaselines(journal.days),
     [journal.days],
   );
   const selectedDates = useMemo(
@@ -170,6 +179,7 @@ export function JournalViewContent({
                       events={daysByDate.get(date)?.events ?? []}
                       isToday={date === today}
                       key={date}
+                      sleepBaselines={sleepBaselines}
                       todayGreeting={todayGreeting}
                     />
                   ))
@@ -185,19 +195,15 @@ export function JournalViewContent({
                 selectedWeekStart={selectedWeekStart}
                 today={today}
               />
-              <WeekStats week={week} />
+              <WeekStats
+                dates={visibleDates}
+                daysByDate={daysByDate}
+                week={week}
+              />
               {insights.length > 0 ? (
                 <WeeklyInsights insights={insights} />
               ) : null}
-              <div className="flex items-start gap-[11px] px-1">
-                <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
-                  <NotebookPen className="size-3" aria-hidden="true" />
-                </span>
-                <p className="text-xs leading-[19px] text-muted-foreground">
-                  To add, correct, or remove an entry, tell Murph in your
-                  private chat.
-                </p>
-              </div>
+              <JournalEntryActions contactOptions={contactOptions} />
             </aside>
           </div>
         </>
@@ -476,11 +482,13 @@ function JournalDaySection({
   date,
   events,
   isToday,
+  sleepBaselines,
   todayGreeting,
 }: {
   date: string;
   events: JournalEvent[];
   isToday: boolean;
+  sleepBaselines: SleepMetricBaselines;
   todayGreeting: string;
 }) {
   const headingId = `journal-day-${date}`;
@@ -532,7 +540,10 @@ function JournalDaySection({
           <ol className="flex flex-col gap-[15px]">
             {events.map((event) => (
               <li key={event.id}>
-                <JournalEventRow event={event} />
+                <JournalEventRow
+                  event={event}
+                  sleepBaselines={sleepBaselines}
+                />
               </li>
             ))}
           </ol>
@@ -542,7 +553,13 @@ function JournalDaySection({
   );
 }
 
-function JournalEventRow({ event }: { event: JournalEvent }) {
+function JournalEventRow({
+  event,
+  sleepBaselines,
+}: {
+  event: JournalEvent;
+  sleepBaselines: SleepMetricBaselines;
+}) {
   const pointerAnchor = usePointerPopoverAnchor();
   const sources = [
     ...new Set(
@@ -628,6 +645,7 @@ function JournalEventRow({ event }: { event: JournalEvent }) {
             anchor={pointerAnchor.anchor}
             details={details}
             event={event}
+            sleepBaselines={sleepBaselines}
             sources={sources}
           />
         </Popover>
@@ -642,11 +660,13 @@ function JournalEventPopoverContent({
   anchor,
   details,
   event,
+  sleepBaselines,
   sources,
 }: {
   anchor: () => { getBoundingClientRect: () => DOMRect } | null;
   details: string[];
   event: JournalEvent;
+  sleepBaselines: SleepMetricBaselines;
   sources: string[];
 }) {
   const sleepDetails =
@@ -662,7 +682,10 @@ function JournalEventPopoverContent({
       sideOffset={12}
     >
       {sleepDetails ? (
-        <SleepPopoverPresentation details={sleepDetails} />
+        <SleepPopoverPresentation
+          details={sleepDetails}
+          sleepBaselines={sleepBaselines}
+        />
       ) : (
         <GenericJournalPopoverPresentation details={details} event={event} />
       )}
@@ -691,10 +714,21 @@ interface SleepPopoverDetails {
   score: string | null;
 }
 
+type SleepMetricBaselines = Map<string, number[]>;
+
+type SleepMetricDirection = "higher" | "lower" | "neutral";
+
+interface SleepMetricContext {
+  label: string;
+  tone: "favorable" | "neutral" | "unfavorable";
+}
+
 function SleepPopoverPresentation({
   details,
+  sleepBaselines,
 }: {
   details: SleepPopoverDetails;
+  sleepBaselines: SleepMetricBaselines;
 }) {
   const primaryMetrics = [
     details.duration ? { label: "Total sleep", value: details.duration } : null,
@@ -726,6 +760,13 @@ function SleepPopoverPresentation({
               <dd className="mt-1 font-serif text-[1.75rem] font-semibold leading-8 tracking-[-0.02em] text-foreground">
                 {metric.value}
               </dd>
+              <SleepMetricContextLabel
+                context={getSleepMetricContext(
+                  metric.label,
+                  metric.value,
+                  sleepBaselines,
+                )}
+              />
             </div>
           ))}
         </dl>
@@ -743,6 +784,13 @@ function SleepPopoverPresentation({
                 <dd className="mt-1 font-serif text-xl font-semibold leading-6 text-foreground">
                   {metric.value}
                 </dd>
+                <SleepMetricContextLabel
+                  context={getSleepMetricContext(
+                    metric.label,
+                    metric.value,
+                    sleepBaselines,
+                  )}
+                />
               </div>
             ))}
           </dl>
@@ -761,6 +809,26 @@ function SleepPopoverPresentation({
         </>
       ) : null}
     </TooltipProvider>
+  );
+}
+
+function SleepMetricContextLabel({
+  context,
+}: {
+  context: SleepMetricContext | null;
+}) {
+  if (!context) return null;
+  return (
+    <p
+      className={cn(
+        "mt-1 text-[11px] leading-4",
+        context.tone === "favorable" && "text-primary",
+        context.tone === "unfavorable" && "text-red-600 dark:text-red-400",
+        context.tone === "neutral" && "text-muted-foreground",
+      )}
+    >
+      {context.label}
+    </p>
   );
 }
 
@@ -902,14 +970,29 @@ function MiniCalendar({
   );
 }
 
-function WeekStats({ week }: { week: JournalView["weeks"][number] | null }) {
-  const stats: Array<{ label: string; value: string }> = [];
+interface WeekStat {
+  label: string;
+  points: Array<{ date: string; value: number }>;
+  value: string;
+}
+
+function WeekStats({
+  dates,
+  daysByDate,
+  week,
+}: {
+  dates: string[];
+  daysByDate: Map<string, JournalView["days"][number]>;
+  week: JournalView["weeks"][number] | null;
+}) {
+  const stats: WeekStat[] = [];
   if (
     week?.averageSleepMinutes !== null &&
     week?.averageSleepMinutes !== undefined
   ) {
     stats.push({
       label: "Average sleep",
+      points: buildWeekMetricPoints(dates, daysByDate, "sleep-duration"),
       value: formatDuration(week.averageSleepMinutes),
     });
   }
@@ -919,12 +1002,14 @@ function WeekStats({ week }: { week: JournalView["weeks"][number] | null }) {
   ) {
     stats.push({
       label: "Sleep score",
+      points: buildWeekMetricPoints(dates, daysByDate, "sleep-score"),
       value: String(Math.round(week.averageSleepScore)),
     });
   }
   if (week && week.activityMinutes > 0) {
     stats.push({
       label: "Activity",
+      points: buildWeekMetricPoints(dates, daysByDate, "activity"),
       value: formatDuration(week.activityMinutes),
     });
   }
@@ -933,19 +1018,249 @@ function WeekStats({ week }: { week: JournalView["weeks"][number] | null }) {
 
   return (
     <section aria-label="Week at a glance">
-      <dl className="grid grid-cols-3 gap-4 px-1">
+      <div className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
-          <div className="flex min-w-0 flex-col" key={stat.label}>
-            <dt className="order-2 mt-[3px] text-xs leading-[17px] text-muted-foreground">
-              {stat.label}
-            </dt>
-            <dd className="order-1 font-serif text-2xl font-semibold leading-7 tabular-nums text-foreground">
-              {stat.value}
-            </dd>
-          </div>
+          <WeekStatPopover key={stat.label} stat={stat} />
         ))}
-      </dl>
+      </div>
     </section>
+  );
+}
+
+function JournalEntryActions({
+  contactOptions,
+}: {
+  contactOptions: readonly MurphContactOption[];
+}) {
+  const primaryOption = contactOptions[0] ?? null;
+  const helper = (
+    <span className="flex items-start gap-[11px] px-1 text-left">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
+        <NotebookPen className="size-3" aria-hidden="true" />
+      </span>
+      <span className="text-xs leading-[19px] text-muted-foreground">
+        To add, correct, or remove an entry, tell Murph in your private chat.
+      </span>
+    </span>
+  );
+
+  if (contactOptions.length === 0) return <div>{helper}</div>;
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            className="rounded-md transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            type="button"
+          >
+            {helper}
+          </button>
+        }
+      />
+      <PopoverContent
+        align="end"
+        className="w-[min(19rem,calc(100vw-2rem))] p-2"
+        side="top"
+        sideOffset={8}
+      >
+        <div className="flex flex-col gap-1">
+          {contactOptions.map((option) => {
+            const Icon = option.kind === "telegram" ? MessageCircle : NotebookPen;
+            return (
+              <a
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                href={option.href}
+                key={option.kind}
+                rel={option.rel}
+                target={option.target}
+              >
+                <Icon className="size-4 text-primary" aria-hidden="true" />
+                Message in {option.label}
+              </a>
+            );
+          })}
+          {primaryOption ? (
+            <a
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              href={primaryOption.href}
+              rel={primaryOption.rel}
+              target={primaryOption.target}
+            >
+              <Mic className="size-4 text-primary" aria-hidden="true" />
+              Send a voice message
+            </a>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function WeekStatPopover({ stat }: { stat: WeekStat }) {
+  const pointerAnchor = usePointerPopoverAnchor();
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        closeDelay={200}
+        delay={120}
+        openOnHover
+        render={
+          <button
+            className="flex min-w-0 flex-col rounded-md text-left transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            onKeyDown={pointerAnchor.onKeyDown}
+            onPointerMove={pointerAnchor.onPointerMove}
+            type="button"
+          >
+            <span className="order-2 mt-[3px] text-xs leading-[17px] text-muted-foreground">
+              {stat.label}
+            </span>
+            <span className="order-1 font-serif text-2xl font-semibold leading-7 tabular-nums text-foreground">
+              {stat.value}
+            </span>
+          </button>
+        }
+      />
+      <PopoverContent
+        align="center"
+        anchor={pointerAnchor.anchor}
+        className="w-[min(19rem,calc(100vw-2rem))]"
+        positionMethod="fixed"
+        side="left"
+        sideOffset={10}
+      >
+        <PopoverHeader className="gap-1">
+          <PopoverTitle className="font-serif text-base font-semibold">
+            {stat.label}
+          </PopoverTitle>
+          <PopoverDescription className="text-xs text-muted-foreground">
+            Daily values for this week
+          </PopoverDescription>
+        </PopoverHeader>
+        <WeekMetricLineChart label={stat.label} points={stat.points} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function WeekMetricLineChart({
+  label,
+  points,
+}: {
+  label: string;
+  points: WeekStat["points"];
+}) {
+  if (points.length < 2) {
+    return (
+      <p className="text-xs leading-5 text-muted-foreground">
+        More days are needed to draw a weekly trend.
+      </p>
+    );
+  }
+
+  const width = 260;
+  const height = 64;
+  const values = points.map((point) => point.value);
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const range = Math.max(maximum - minimum, 1);
+  const coordinates = points.map((point, index) => ({
+    ...point,
+    x: (index / Math.max(points.length - 1, 1)) * width,
+    y: height - ((point.value - minimum) / range) * (height - 12) - 6,
+  }));
+  const polyline = coordinates.map((point) => `${point.x},${point.y}`).join(" ");
+
+  return (
+    <div className="pt-2">
+      <svg
+        aria-label={`${label} trend for this week`}
+        className="h-16 w-full overflow-visible"
+        role="img"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        <line
+          className="stroke-border"
+          strokeDasharray="3 3"
+          x1="0"
+          x2={width}
+          y1={height / 2}
+          y2={height / 2}
+        />
+        <polyline
+          className="fill-none stroke-primary"
+          points={polyline}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        {coordinates.map((point) => (
+          <circle
+            className="fill-primary"
+            cx={point.x}
+            cy={point.y}
+            key={point.date}
+            r="2.25"
+          />
+        ))}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+        <span>{formatShortDay(points[0]?.date ?? "")}</span>
+        <span>{formatShortDay(points.at(-1)?.date ?? "")}</span>
+      </div>
+    </div>
+  );
+}
+
+function buildWeekMetricPoints(
+  dates: string[],
+  daysByDate: Map<string, JournalView["days"][number]>,
+  metric: "activity" | "sleep-duration" | "sleep-score",
+): WeekStat["points"] {
+  return dates.flatMap((date) => {
+    const events = daysByDate.get(date)?.events ?? [];
+    const value = readJournalDayMetric(events, metric);
+    return value === null ? [] : [{ date, value }];
+  });
+}
+
+function readJournalDayMetric(
+  events: JournalEvent[],
+  metric: "activity" | "sleep-duration" | "sleep-score",
+): number | null {
+  if (metric === "activity") {
+    const durations = events
+      .filter((event) => event.kind === "activity")
+      .map((event) => parseDurationMinutes(event.summary))
+      .filter((value): value is number => value !== null);
+    return durations.length > 0
+      ? durations.reduce((sum, value) => sum + value, 0)
+      : null;
+  }
+
+  const sleep = events.find((event) => event.kind === "sleep");
+  if (!sleep) return null;
+  if (metric === "sleep-score") {
+    const match = sleep.summary?.match(/sleep score\s+(\d+(?:\.\d+)?)/iu);
+    return match?.[1] ? Number(match[1]) : null;
+  }
+  return parseDurationMinutes(sleep.summary);
+}
+
+function parseDurationMinutes(value: string | null): number | null {
+  if (!value) return null;
+  const hours = value.match(/(\d+)\s*h(?:\s*(\d+)(?:\s*min)?)?/iu);
+  if (hours?.[1]) {
+    return Number(hours[1]) * 60 + Number(hours[2] ?? 0);
+  }
+  const minutes = value.match(/(\d+)\s*min/iu);
+  return minutes?.[1] ? Number(minutes[1]) : null;
+}
+
+function formatShortDay(date: string): string {
+  return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(
+    new Date(`${date}T12:00:00Z`),
   );
 }
 
@@ -1160,6 +1475,77 @@ function parseSleepPopoverDetails(
   }
 
   return { duration, extraDetails, metrics, score };
+}
+
+function buildSleepMetricBaselines(
+  days: JournalView["days"],
+): SleepMetricBaselines {
+  const baselines: SleepMetricBaselines = new Map();
+  for (const day of days) {
+    for (const event of day.events) {
+      if (event.kind !== "sleep") continue;
+      const details = parseSleepPopoverDetails(event, event.details);
+      const metrics = [
+        details.duration
+          ? { label: "Total sleep", value: details.duration }
+          : null,
+        details.score ? { label: "Sleep score", value: details.score } : null,
+        ...details.metrics,
+      ].filter(
+        (metric): metric is { label: string; value: string } => metric !== null,
+      );
+      for (const metric of metrics) {
+        const value = parseSleepMetricValue(metric.label, metric.value);
+        if (value === null) continue;
+        const values = baselines.get(metric.label) ?? [];
+        values.push(value);
+        baselines.set(metric.label, values);
+      }
+    }
+  }
+  return baselines;
+}
+
+function getSleepMetricContext(
+  label: string,
+  formattedValue: string,
+  baselines: SleepMetricBaselines,
+): SleepMetricContext | null {
+  const values = baselines.get(label) ?? [];
+  if (values.length < 7) return null;
+  const current = parseSleepMetricValue(label, formattedValue);
+  if (current === null) return null;
+  const baseline = values.reduce((sum, value) => sum + value, 0) / values.length;
+  if (baseline === 0) return null;
+  const difference = (current - baseline) / Math.abs(baseline);
+  if (Math.abs(difference) < 0.05) {
+    return { label: "Near your usual", tone: "neutral" };
+  }
+
+  const direction = sleepMetricDirection(label);
+  if (direction === "neutral") {
+    return {
+      label: difference > 0 ? "Above your usual" : "Below your usual",
+      tone: "neutral",
+    };
+  }
+  const favorable = direction === "higher" ? difference > 0 : difference < 0;
+  return {
+    label: favorable ? "Better than your usual" : "Worse than your usual",
+    tone: favorable ? "favorable" : "unfavorable",
+  };
+}
+
+function parseSleepMetricValue(label: string, value: string): number | null {
+  if (label === "Total sleep") return parseDurationMinutes(value);
+  const match = value.match(/[\d.]+/u);
+  return match ? Number(match[0]) : null;
+}
+
+function sleepMetricDirection(label: string): SleepMetricDirection {
+  if (label === "Resting heart rate") return "lower";
+  if (label === "Total sleep" || label === "Respiratory rate") return "neutral";
+  return "higher";
 }
 
 function greetingForHour(hour: number): string {
