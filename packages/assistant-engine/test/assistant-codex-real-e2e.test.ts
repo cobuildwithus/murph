@@ -4470,6 +4470,35 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'does not guess when shared-row labels are missing',
+    async () => {
+      const journey = await runGroupSharedStepsReadJourney({
+        fixture: {
+          averyValue: 12_345,
+          date: '2026-08-04',
+          displayNames: [null, null],
+          jordanValue: 4_321,
+        },
+        prompt: [
+          'Current group message:',
+          '"Who has which shared step total now?"',
+        ],
+        temporaryLabel: 'missing-labels',
+      })
+
+      expectOneSharedStepsRead(journey)
+      expect(journey.finalMessage).not.toMatch(
+        /(?:member|participant)_(?:avery|jordan)/iu,
+      )
+      expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
+      expect(journey.finalMessage).toMatch(
+        /(?:(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:absent|missing|unavailable|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
+      )
+    },
+    360_000,
+  )
+
+  it(
     'keeps a requested group shared update anonymous',
     async () => {
       const journey = await runGroupSharedStepsReadJourney({

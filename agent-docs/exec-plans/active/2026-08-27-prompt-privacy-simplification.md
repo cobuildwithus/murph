@@ -121,8 +121,9 @@ Updated: 2026-08-27
 - Expected outcomes: all selected positive and negative behaviors pass; no
   required authority or disclosure boundary disappears; composed prompt size
   is reduced or any retained text has a demonstrated behavioral purpose.
-- Deterministic result: 12 focused files passed, covering 492 tests with 114
-  intentional provider/live skips. Assistant Engine typecheck and direct
+- Deterministic result after specialist remediation: 12 focused files passed,
+  covering 493 tests with 115 intentional provider/live skips. Assistant Engine
+  typecheck and direct
   package build passed. `git diff --check` passed.
 - Product walkthrough: unique row labels are used without reconfirmation;
   duplicate or missing labels produce only a narrow limitation; anonymization
@@ -135,8 +136,16 @@ Updated: 2026-08-27
   provider action. Per the live-test contract, the journey is on hold rather
   than retried through additional profiles; deterministic boundary proof is
   authoritative for this candidate.
+- Preliminary ReviewGPT completed on the exact pushed candidate with four
+  findings. Accepted remediation narrowed the participant-record sentence so
+  visible messages remain ordinary conversation context, added exact no-tool
+  group-email proof, and restored a separate missing-name real-model journey.
+  The request to mark the live reply Ready was rejected as a code finding: the
+  repository contract requires `Hold` after the one allowed alternate profile
+  is usage-limited and forbids cycling more profiles. The limitation remains
+  explicit in PR evidence.
 - Complete first-provider-request impact, measured with identical base/head
   fixtures and `o200k_harmony`: ordinary direct decreases by 181 tokens and 927
-  serialized bytes (0.62% and 0.69%); group decreases by 564 tokens and 3,042
-  bytes (2.17% and 2.54%). Scheduled speaker-label serialization saves a
+  serialized bytes (0.62% and 0.69%); group decreases by 560 tokens and 3,014
+  bytes (2.15% and 2.51%). Scheduled speaker-label serialization saves a
   further 3 tokens and 15 bytes per rendered profile or address-book label.

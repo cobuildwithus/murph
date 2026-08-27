@@ -469,6 +469,27 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('share a contact card')
   })
 
+  it('keeps group-email transport restrictions without hosted group tools', () => {
+    const prompt = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'none',
+        channel: 'email',
+        conversationScope: 'group',
+      }),
+    ).stableRouteCapabilityPrompt
+
+    expect(prompt).toContain(HOSTED_GROUPS_HEADER)
+    expect(prompt).toContain('Email replies can converse about this group')
+    expect(prompt).toContain('not authenticated strongly enough')
+    expect(prompt).toContain('Do not offer or attempt a phone call from group email.')
+    expect(prompt).not.toContain('action="read_shared"')
+    expect(prompt).not.toContain('`murph.group_data')
+    expect(prompt).not.toContain('`murph.group_membership')
+    expect(prompt).not.toContain('`murph.group_email')
+    expect(prompt).not.toContain('`action="read_chat_participants"`')
+    expect(prompt).not.toContain('`action="share_contact_card"`')
+  })
+
   it('delegates capability mechanics and stays compact', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
