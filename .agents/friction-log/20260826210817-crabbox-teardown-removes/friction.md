@@ -1,6 +1,7 @@
 ---
 title: 'Crabbox teardown removes delegated failure evidence needed for release triage'
 severity: 'major'
+issue: 'cobuildwithus/murph#2401'
 ---
 
 ## Friction

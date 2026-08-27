@@ -504,7 +504,14 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   assert.equal(result.supplements.count, 2)
   assert.equal(result.supplements.items.length, 1)
   assert.equal(result.supplements.truncated, true)
-  assert.equal(result.conditions.status, 'error')
+  assert.deepEqual(result.conditions, {
+    status: 'error',
+    code: 'read_failed',
+    message: 'This onboarding context surface could not be read.',
+    retryable: true,
+    hint: 'Retry the context read; use the individual vault command if it continues to fail.',
+  })
+  assert.equal(JSON.stringify(result).includes('boom'), false)
   assert.equal(result.deviceAccounts.status, 'ok')
   assert.equal(result.deviceAccounts.count, 1)
   assert.deepEqual(readMemoryDocument.mock.calls[0]?.[0], {
@@ -518,6 +525,39 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   })
   assert.deepEqual(listAccounts.mock.calls[0]?.[0], {
     vault: '/tmp/vault',
+  })
+})
+
+test('assistant onboarding resume-context marks missing service surfaces unavailable', async () => {
+  const services = createUnwiredVaultServices()
+  const commands = createAssistantCli(services)
+  const assistant = readCommandGroup(commands, 'assistant')
+  const onboarding = readCommandGroup(assistant.commands, 'onboarding')
+  const resumeContext = readCommand(onboarding.commands, 'resume-context')
+
+  commandMocks.readAssistantOnboardingState.mockResolvedValueOnce({
+    ...TEST_ONBOARDING_STATE,
+    status: 'open',
+    completedAt: null,
+    completedReason: null,
+  })
+
+  const result = assistantOnboardingResumeContextResultSchema.parse(
+    await resumeContext.run({
+      args: {},
+      options: {
+        limit: 1,
+        vault: '/tmp/vault',
+      },
+    }),
+  )
+
+  assert.deepEqual(result.deviceAccounts, {
+    status: 'unavailable',
+    code: 'service_unavailable',
+    message: 'This onboarding context surface is not available in the current runtime.',
+    retryable: false,
+    hint: 'Use a runtime with the matching service enabled to inspect this surface.',
   })
 })
 

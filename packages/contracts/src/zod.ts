@@ -671,10 +671,48 @@ export const workoutExerciseSchema = z
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
     memberRepsPerSet: integerSchema(1, 999).optional(),
+    targetWeightPerSet: numberSchema(0.01, 9999).multipleOf(0.01).optional(),
+    targetWeightUnit: workoutLoadUnitSchema.optional(),
     setPlanIsFinite: z.boolean().optional(),
     sets: z.array(workoutSetSchema).min(1).max(150),
   })
-  .strict();
+  .strict()
+  .superRefine((exercise, context) => {
+    if (
+      (exercise.targetWeightPerSet === undefined)
+      !== (exercise.targetWeightUnit === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight requires its unit.",
+        path: exercise.targetWeightPerSet === undefined
+          ? ["targetWeightPerSet"]
+          : ["targetWeightUnit"],
+      });
+    }
+    if (
+      exercise.targetWeightPerSet !== undefined
+      && exercise.mode !== undefined
+      && exercise.mode !== "weight_reps"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight requires weight/reps exercise mode.",
+        path: ["mode"],
+      });
+    }
+    if (
+      exercise.targetWeightUnit !== undefined
+      && exercise.unitOverride !== undefined
+      && exercise.targetWeightUnit !== exercise.unitOverride
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight must use the exercise weight unit.",
+        path: ["targetWeightUnit"],
+      });
+    }
+  });
 
 export const workoutSessionMetricsSchema = z
   .object({
@@ -1062,6 +1100,29 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
     .strict(),
   "@murphai/contracts/blood-test-import-payload.schema.json",
   "Murph Blood Test Import Payload",
+);
+
+export const immunizationImportPayloadSchema = withContractMetadata(
+  z
+    .object({
+      ...writableEventCommonPayloadShape,
+      evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+      vaccineName: boundedString(1, 160),
+      manufacturer: optionalWritableTextSchema(160),
+      lotNumber: optionalWritableTextSchema(120),
+      route: optionalWritableTextSchema(80),
+      site: optionalWritableTextSchema(80),
+      series: optionalWritableTextSchema(120),
+      targetDiseases: z
+        .union([
+          z.array(boundedString(1, 120)).max(25),
+          z.null(),
+        ])
+        .optional(),
+    })
+    .strict(),
+  "@murphai/contracts/immunization-import-payload.schema.json",
+  "Murph Immunization Import Payload",
 );
 
 const workoutImportPayloadBaseShape = {
@@ -3616,6 +3677,7 @@ export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
 export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
 export type BloodTestImportPayload = z.infer<typeof bloodTestImportPayloadSchema>;
+export type ImmunizationImportPayload = z.infer<typeof immunizationImportPayloadSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;

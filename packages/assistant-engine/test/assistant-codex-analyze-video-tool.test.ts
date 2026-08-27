@@ -117,7 +117,7 @@ describe('murph.analyze_video arguments and availability', () => {
       .toEqual([authorities[1]])
   })
 
-  it('parses only a message ref, optional attachment ordinal, and question', () => {
+  it('parses only a video message ref, optional attachment ordinal, and question', () => {
     expect(readAnalyzeVideoCall({
       attachment_ordinal: 2,
       message_ref: 'ain_11111111111111111111111111111111',
@@ -137,6 +137,7 @@ describe('murph.analyze_video arguments and availability', () => {
       { fps: 5 },
       { model: 'gemini-other' },
       { path: 'raw/inbox/video.mp4' },
+      { request_message_ref: 'ain_22222222222222222222222222222222' },
       { url: 'https://example.test/video.mp4' },
     ]) {
       expect(readAnalyzeVideoCall({
@@ -647,13 +648,11 @@ describe('executeAnalyzeVideoTool', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects group dispatch before reading or sending video bytes', async () => {
+  it('allows an authenticated group participant to analyze a current group video', async () => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
-    const fetchImpl = vi.fn<typeof fetch>()
-    const materializeWorkspaceArtifacts = vi.fn(async () => ({
-      materializedArtifactPaths: new Set<string>(),
-      missingArtifactPaths: new Set<string>(),
-    }))
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerResponse('One person completes eight push-ups.'),
+    )
     const hostedToolContext = createAssistantHostedToolContext({
       getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
       getConversationScope: () => 'group',
@@ -662,6 +661,109 @@ describe('executeAnalyzeVideoTool', () => {
       session: {
         binding: { channel: 'telegram' },
         sessionId: 'session_analyze_video_group_dispatch',
+      } as never,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      analyzeVideoTurnState: createAnalyzeVideoTurnState(),
+      env: {},
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'What happens?',
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('eight push-ups'),
+        type: 'inputText',
+      }],
+      success: true,
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows one authenticated participant to request another participant\'s group video', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const requestInputId = `ain_${'2'.repeat(32)}`
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerResponse('The group video shows a controlled set of squats.'),
+    )
+    const authorizeAcceptedMessageTarget = vi.fn(async (input: {
+      action: 'native-reply' | 'participant-effect' | 'reaction'
+      deliveryContextOrdinal: number
+      messageRef: string
+    }) => ({
+      participant: {
+        assistantInputId: input.messageRef,
+        senderHandle:
+          input.messageRef === fixture.inputId
+            ? 'video-owner-sentinel'
+            : 'requester-sentinel',
+        source: 'telegram' as const,
+      },
+      targetInputId: input.messageRef,
+    }))
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
+      getConversationScope: () => 'group',
+      getUserActionAcceptedInputIds: () => [fixture.inputId, requestInputId],
+      messageInput: { channel: 'telegram' } as never,
+      session: {
+        binding: { channel: 'telegram' },
+        sessionId: 'session_analyze_video_group_cross_participant',
+      } as never,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      analyzeVideoTurnState: createAnalyzeVideoTurnState(),
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'What happens?',
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('controlled set of squats'),
+        type: 'inputText',
+      }],
+      success: true,
+    })
+    expect(authorizeAcceptedMessageTarget).not.toHaveBeenCalled()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an unverified external group before reading video bytes', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const fetchImpl = vi.fn<typeof fetch>()
+    const materializeWorkspaceArtifacts = vi.fn(async () => ({
+      materializedArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Set<string>(),
+    }))
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
+      getConversationScope: () => 'unverified-external',
+      getUserActionAcceptedInputIds: () => [fixture.inputId],
+      messageInput: { channel: 'telegram' } as never,
+      session: {
+        binding: { channel: 'telegram' },
+        sessionId: 'session_analyze_video_unverified_group',
       } as never,
     })
 
@@ -683,7 +785,7 @@ describe('executeAnalyzeVideoTool', () => {
 
     expect(result.rpcResult).toMatchObject({
       contentItems: [{
-        text: expect.stringContaining('private direct conversation'),
+        text: expect.stringContaining('verified direct or authenticated group'),
         type: 'inputText',
       }],
       success: false,

@@ -20,8 +20,10 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
@@ -273,6 +275,10 @@ describe("murph.group dynamic tool", () => {
       .toContain("actual scope snapshot");
     expect(GROUP_TOOL_INPUT_PROPERTIES.membershipId.description)
       .toContain("immediately preceding list_memberships result");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.cursor.description)
+      .toContain("exact opaque nextCursor");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.disclosureGrantCursor.description)
+      .toContain("exact opaque nextDisclosureGrantCursor");
     expect(GROUP_TOOL_INPUT_PROPERTIES.avatarSource.description)
       .toBe(
         'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
@@ -292,7 +298,9 @@ describe("murph.group dynamic tool", () => {
         "action", "audience", "date", "displayName", "grantId", "message_ref",
         "metric", "permissionText", "projectionScopes", "standaloneLink", "unit", "value",
       ],
-      group_membership: ["action", "membershipId", "setup"],
+      group_membership: [
+        "action", "cursor", "disclosureGrantCursor", "membershipId", "setup",
+      ],
       group_usage: ["action", "message_ref", "policyCode", "policyCodes"],
       group_chat: [
         "action", "alt", "avatarPrompt", "avatarSource", "displayName", "imageRef",
@@ -1221,6 +1229,16 @@ describe("murph.group dynamic tool", () => {
     expect(request).toMatchObject({
       kind: "group",
       request: { action: "read_current" },
+    });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
+    }))).toMatchObject({
+      kind: "group",
+      request: {
+        action: "read_current",
+        disclosureGrantCursor: "disclosure_page_2",
+      },
     });
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_current",
@@ -3495,10 +3513,37 @@ describe("murph.group dynamic tool", () => {
     }
     expect(request.request).toEqual({ action: "list_memberships" });
 
+    const continuedRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    }));
+    expect(continuedRequest).toMatchObject({
+      kind: "group",
+      request: {
+        action: "list_memberships",
+        cursor: "membership_page_64",
+        disclosureGrantCursor: "disclosure_page_2",
+      },
+    });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "list_memberships",
+      cursor: "x".repeat(
+        HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS + 1,
+      ),
+    }))?.kind).toBe("invalid-group-arguments");
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "list_memberships",
+      disclosureGrantCursor: "x".repeat(
+        HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS + 1,
+      ),
+    }))?.kind).toBe("invalid-group-arguments");
+
     const response = {
       action: "list_memberships" as const,
       result: {
         disclosureGrants: [],
+        disclosureGrantsTruncated: false,
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" as const }],
@@ -3510,6 +3555,8 @@ describe("murph.group dynamic tool", () => {
           role: "member",
           sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
+        nextCursor: null,
+        nextDisclosureGrantCursor: null,
         status: "ok" as const,
         truncated: false,
       },
@@ -3654,6 +3701,17 @@ describe("murph.group dynamic tool", () => {
     }))).toMatchObject({
       kind: "group",
       request: { action: "offer_access" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }))).toMatchObject({
+      kind: "group",
+      request: {
+        action: "offer_access",
+        messageRef: FRESH_ASSISTANT_INPUT_ID,
+      },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -3880,6 +3938,99 @@ describe("murph.group dynamic tool", () => {
     );
     expect(standaloneResult.finalActionPatch).toBeUndefined();
     expect(nativeResult.finalActionPatch).toBeUndefined();
+  });
+
+  it("binds an explicit native access repost to the exact current Message ref", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "post_join_offer",
+      result: {
+        group: {
+          displayName: null,
+          id: "private-group-id",
+          kind: "friends",
+          memberCount: 0,
+          members: [],
+          requestedVaultShareProjectionKinds: ["steps-days.v0"],
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "steps-days.v0" },
+          ],
+          status: "active",
+        },
+        joinUrl: "https://example.test/groups/join/native-hidden",
+        offerState: "posted",
+        status: "sent",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected access-offer repost request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      },
+      repostOriginAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
+    });
+    expect(readGroupToolPayload(result)).toMatchObject({
+      action: "offer_access",
+      result: { presentation: "native", status: "ok" },
+    });
+
+    const wrongMessageRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      message_ref: EARLIER_ASSISTANT_INPUT_ID,
+    }));
+    if (!wrongMessageRequest || wrongMessageRequest.kind !== "group") {
+      throw new Error("Expected access-offer repost request.");
+    }
+    const rejected = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request: wrongMessageRequest,
+      vaultRoot: null,
+    });
+    expect(rejected.rpcResult.success).toBe(false);
+    expect(groupRequest).toHaveBeenCalledTimes(1);
   });
 
   it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {

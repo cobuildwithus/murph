@@ -84,6 +84,8 @@ import {
   requireHostedStripeApiMode,
 } from "./runtime";
 import {
+  describeHostedStripeError,
+  isHostedStripeProviderError,
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
@@ -181,6 +183,7 @@ const STRIPE_EVENT_RETRY_DELAYS_MS = [
 ] as const;
 const HOSTED_STRIPE_RUNTIME_RECHECK_PENDING_CODE =
   "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING";
+const STRIPE_EVENT_ERROR_NAME_MAX_LENGTH = 120;
 const STRIPE_EVENT_LOG_STRING_MAX_LENGTH = 500;
 const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
   "column",
@@ -200,6 +203,12 @@ const STRIPE_EVENT_RETRYABLE_PRISMA_CODES = new Set([
   "P2037",
 ]);
 const HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY = "hosted_family_legacy_invoice_id";
+
+type HostedStripeEventReconciliationStage =
+  | "event_retrieval"
+  | "event_application"
+  | "post_commit"
+  | "receipt_finalization";
 
 class HostedLegacyFamilyCleanupPendingError extends Error {
   readonly code = "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING";
@@ -1011,10 +1020,12 @@ async function processClaimedHostedStripeEvent(
     attemptCount: claimed.attemptCount,
     eventType: claimed.type,
   });
+  let reconciliationStage: HostedStripeEventReconciliationStage = "event_retrieval";
   let usageCreditEventHandled = false;
 
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
+    reconciliationStage = "event_application";
     const usageCreditReconciliation = await reconcileHostedUsageCreditStripeEvent({
       event: stripeEvent,
       prisma,
@@ -1060,6 +1071,7 @@ async function processClaimedHostedStripeEvent(
           claimed,
           preflightProcessingContext,
         );
+    reconciliationStage = "post_commit";
     const { memberId: processingMemberId } = processing;
     const {
       activationResultJson,
@@ -1254,6 +1266,7 @@ async function processClaimedHostedStripeEvent(
     if (postCanonicalResult.status === "rejected") {
       throw postCanonicalResult.reason;
     }
+    reconciliationStage = "receipt_finalization";
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
         attemptCount: claimed.attemptCount,
@@ -1328,6 +1341,7 @@ async function processClaimedHostedStripeEvent(
       eventId: claimed.eventId,
       eventType: claimed.type,
       poisoned,
+      stage: reconciliationStage,
     });
     if (claimed.attemptCount === 1) {
       scheduleHostedStripeReconciliationFailureAlert({
@@ -1752,29 +1766,54 @@ async function markHostedStripePaymentNotificationEmailSent(input: {
   });
 }
 
+type HostedStripeEventReconciliationErrorLogDetails = {
+  errorCode?: string;
+  errorMessage?: string;
+  prismaClientVersion?: string;
+  prismaCode?: string;
+  prismaMessage?: string;
+  prismaMeta?: Record<string, unknown>;
+  stripeCode?: string;
+  stripeDeclineCode?: string;
+  stripeParam?: string;
+  stripeRawType?: string;
+  stripeRequestId?: string;
+  stripeStatusCode?: number;
+  stripeType?: string;
+};
+
 function logHostedStripeEventReconciliationFailure(input: {
   attemptCount: number;
   error: unknown;
   eventId: string;
   eventType: string;
   poisoned: boolean;
+  stage: HostedStripeEventReconciliationStage;
 }): void {
   console.error("Hosted Stripe event reconciliation failed.", {
     attemptCount: input.attemptCount,
-    errorName: deriveHostedOnboardingTimingErrorName(input.error),
+    errorName:
+      sanitizeHostedOnboardingLogString(
+        deriveHostedOnboardingTimingErrorName(input.error),
+        STRIPE_EVENT_ERROR_NAME_MAX_LENGTH,
+      ) ?? "UnknownError",
     eventIdSuffix: input.eventId.slice(-6),
     eventType: sanitizeHostedOnboardingLogString(
       input.eventType,
       STRIPE_EVENT_LOG_STRING_MAX_LENGTH,
     ) ?? "unknown",
     poisoned: input.poisoned,
+    stage: input.stage,
     ...describeHostedStripeEventReconciliationErrorForLog(input.error),
   });
 }
 
 function describeHostedStripeEventReconciliationErrorForLog(
   error: unknown,
-): Record<string, unknown> {
+): HostedStripeEventReconciliationErrorLogDetails {
+  const classification =
+    describeHostedStripeEventReconciliationErrorClassificationForLog(error);
+
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     const prismaMessage = sanitizeHostedOnboardingLogString(
       error.message,
@@ -1783,6 +1822,7 @@ function describeHostedStripeEventReconciliationErrorForLog(
     const prismaMeta = sanitizeHostedStripeEventPrismaMeta(error.meta);
 
     return {
+      ...classification,
       errorCode: error.code,
       prismaClientVersion: error.clientVersion,
       prismaCode: error.code,
@@ -1798,6 +1838,7 @@ function describeHostedStripeEventReconciliationErrorForLog(
     );
 
     return {
+      ...classification,
       ...(typeof error.errorCode === "string" && error.errorCode
         ? { errorCode: error.errorCode, prismaCode: error.errorCode }
         : {}),
@@ -1812,7 +1853,58 @@ function describeHostedStripeEventReconciliationErrorForLog(
     ? sanitizeHostedOnboardingLogString(error.message, STRIPE_EVENT_LOG_STRING_MAX_LENGTH)
     : sanitizeHostedOnboardingLogString(String(error), STRIPE_EVENT_LOG_STRING_MAX_LENGTH);
 
-  return errorMessage ? { errorMessage } : {};
+  return {
+    ...classification,
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+function describeHostedStripeEventReconciliationErrorClassificationForLog(
+  error: unknown,
+): HostedStripeEventReconciliationErrorLogDetails {
+  const directFields = describeHostedStripeError(error);
+  const providerError = findHostedStripeEventProviderError(error);
+  const providerFields = providerError === null
+    ? null
+    : describeHostedStripeError(providerError);
+
+  return {
+    ...(directFields.code ? { errorCode: directFields.code } : {}),
+    ...(providerFields?.type ? { stripeType: providerFields.type } : {}),
+    ...(providerFields?.rawType ? { stripeRawType: providerFields.rawType } : {}),
+    ...(providerFields?.code ? { stripeCode: providerFields.code } : {}),
+    ...(providerFields?.declineCode
+      ? { stripeDeclineCode: providerFields.declineCode }
+      : {}),
+    ...(providerFields?.param ? { stripeParam: providerFields.param } : {}),
+    ...(providerFields && providerFields.statusCode !== null
+      ? { stripeStatusCode: providerFields.statusCode }
+      : {}),
+    ...(providerFields?.requestId
+      ? { stripeRequestId: providerFields.requestId }
+      : {}),
+  };
+}
+
+function findHostedStripeEventProviderError(error: unknown): unknown | null {
+  if (isHostedStripeProviderError(error)) {
+    return error;
+  }
+
+  const cause = readHostedStripeEventDirectCause(error);
+  return isHostedStripeProviderError(cause) ? cause : null;
+}
+
+function readHostedStripeEventDirectCause(error: unknown): unknown {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  try {
+    return Reflect.get(error, "cause");
+  } catch {
+    return null;
+  }
 }
 
 function sanitizeHostedStripeEventPrismaMeta(meta: unknown): Record<string, unknown> | null {

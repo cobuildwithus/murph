@@ -633,6 +633,7 @@ model HostedMember {
   accountGroupInvitesAccepted    HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteAcceptor")
   aiUsage                        HostedAiUsage[]
   linqDailyStates                HostedLinqDailyState[]
+  linqDeliveryPayloads           HostedLinqDelivery[] @relation("HostedLinqDeliveryPayloadOwner")
   linqContactCardShares          HostedLinqContactCardShare[]
   identity                       HostedMemberIdentity?
   routing                        HostedMemberRouting?
@@ -2001,6 +2002,7 @@ model HostedVaultShare {
   projectionScopeJson          Json?        @map("projection_scope_json")
   destinationMemberId          String       @map("destination_member_id")
   projectionSnapshotCiphertext String?      @map("projection_snapshot_ciphertext")
+  projectionSourceWorkspaceVersion BigInt?  @map("projection_source_workspace_version")
   status                       String       @default("granted")
   grantedAt                    DateTime     @map("granted_at")
   revokedAt                    DateTime?    @map("revoked_at")
@@ -2253,10 +2255,14 @@ model HostedLinqDelivery {
   failureCode              String?  @map("failure_code")
   failureReason            String?  @map("failure_reason")
   skipReason               String?  @map("skip_reason")
+  payloadOwnerMemberId     String?  @map("payload_owner_member_id")
+  payloadCiphertext        String?  @map("payload_ciphertext")
+  payloadSchema            String?  @map("payload_schema")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
   groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
   line                     HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  payloadOwner             HostedMember? @relation("HostedLinqDeliveryPayloadOwner", fields: [payloadOwnerMemberId], references: [id], onDelete: Cascade)
   alerts                   HostedLinqAlert[]
   ingressLatencyTraces     HostedIngressLatencyTrace[]
   messages                 HostedLinqDeliveryMessage[]
@@ -2266,6 +2272,7 @@ model HostedLinqDelivery {
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
+  @@index([payloadOwnerMemberId])
   @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
   @@map("hosted_linq_delivery")
 }

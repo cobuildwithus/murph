@@ -174,6 +174,7 @@ const allowedPublicCredentialAssignments = new Set(
     ['WHOOP_TOKEN_PATH', '/oauth/oauth2/token'],
     ['XAI_API_KEY', 'XAI_X_SEARCH_MODEL'],
     ['access_token_expires_at', 'null'],
+    ['authorization', 'authorization'],
     [
       'apiKey',
       'is a provider-owned API secret and is not supported in serialized runtime config.',

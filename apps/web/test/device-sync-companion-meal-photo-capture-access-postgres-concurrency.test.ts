@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activateMealPhotoCaptureEnrollmentForScopedToken,
+  revokeMealPhotoCaptureEnrollmentForMember,
 } from "@/src/lib/device-sync/meal-photo-capture";
 import {
   removeHostedFamilyMemberTx,
@@ -72,6 +73,102 @@ describe.skipIf(!runPostgresProof)(
         }
       },
     );
+
+    it("advances the schema-v1 revocation generation after the member lock", async () => {
+      const fixture = await createFixture();
+      const memberLocked = createDeferred();
+      const releaseMember = createDeferred();
+      let holderTransaction: Promise<void> | null = null;
+      let revocation: Promise<{ revoked: boolean }> | null = null;
+
+      try {
+        await fixture.observer.hostedMealPhotoCaptureEnrollment.update({
+          data: { authorityRevision: 0 },
+          where: { id: fixture.enrollmentId },
+        });
+
+        holderTransaction = fixture.holder.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.beneficiaryMemberId);
+          memberLocked.resolve();
+          await releaseMember.promise;
+        }, transactionOptions);
+        await Promise.race([memberLocked.promise, holderTransaction]);
+
+        const revocationPid = await readBackendPid(fixture.loss);
+        revocation = revokeMealPhotoCaptureEnrollmentForMember({
+          memberId: fixture.beneficiaryMemberId,
+          prisma: fixture.loss,
+          request: {
+            appInstallationId: fixture.installationId,
+            schemaVersion: 1,
+          },
+        });
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: revocationPid,
+        });
+        await expect(fixture.observer.hostedMealPhotoCaptureEnrollment
+          .findUniqueOrThrow({
+            select: { id: true, revokedAt: true },
+            where: { id: fixture.enrollmentId },
+          })).resolves.toEqual({ id: fixture.enrollmentId, revokedAt: null });
+
+        releaseMember.resolve();
+        await holderTransaction;
+        await expect(revocation).resolves.toEqual({ revoked: true });
+        const firstTombstone = await fixture.observer
+          .hostedMealPhotoCaptureEnrollment.findUniqueOrThrow({
+            select: {
+              id: true,
+              idempotencySecretEncrypted: true,
+              revokedAt: true,
+              uploadTokenHash: true,
+            },
+            where: {
+              memberId_installationIdHash: {
+                installationIdHash: hash(fixture.installationId),
+                memberId: fixture.beneficiaryMemberId,
+              },
+            },
+          });
+        expect(firstTombstone).toMatchObject({
+          idempotencySecretEncrypted: null,
+          revokedAt: expect.any(Date),
+          uploadTokenHash: null,
+        });
+        expect(firstTombstone.id).not.toBe(fixture.enrollmentId);
+
+        await expect(revokeMealPhotoCaptureEnrollmentForMember({
+          memberId: fixture.beneficiaryMemberId,
+          prisma: fixture.loss,
+          request: {
+            appInstallationId: fixture.installationId,
+            schemaVersion: 1,
+          },
+        })).resolves.toEqual({ revoked: true });
+        const secondTombstone = await fixture.observer
+          .hostedMealPhotoCaptureEnrollment.findUniqueOrThrow({
+            select: { id: true },
+            where: {
+              memberId_installationIdHash: {
+                installationIdHash: hash(fixture.installationId),
+                memberId: fixture.beneficiaryMemberId,
+              },
+            },
+          });
+        expect(secondTombstone.id).not.toBe(firstTombstone.id);
+        await expect(fixture.observer.hostedMealPhotoCaptureEnrollment.count({
+          where: { memberId: fixture.beneficiaryMemberId },
+        })).resolves.toBe(1);
+      } finally {
+        releaseMember.resolve();
+        await Promise.allSettled([
+          ...(holderTransaction ? [holderTransaction] : []),
+          ...(revocation ? [revocation] : []),
+        ]);
+        await cleanupFixture(fixture);
+      }
+    });
 
     it.each([
       "consent_withdrawal",
@@ -152,6 +249,7 @@ type Fixture = {
   enrollmentId: string;
   groupId: string;
   holder: PrismaClient;
+  installationId: string;
   loss: PrismaClient;
   membershipId: string;
   observer: PrismaClient;
@@ -170,6 +268,7 @@ async function createFixture(): Promise<Fixture> {
   const groupId = `hbag_meal_access_${suffix}`;
   const membershipId = `hbagm_meal_access_${suffix}`;
   const enrollmentId = `hmp_meal_access_${suffix}`;
+  const installationId = randomUUID();
   const token = `murph_meal_photo_${createHash("sha256")
     .update(`meal-access-token:${suffix}`)
     .digest("base64url")}`;
@@ -224,9 +323,7 @@ async function createFixture(): Promise<Fixture> {
       expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000),
       id: enrollmentId,
       idempotencySecretEncrypted: "test-encrypted-secret",
-      installationIdHash: createHash("sha256")
-        .update(`meal-access-installation:${suffix}`)
-        .digest("hex"),
+      installationIdHash: hash(installationId),
       memberId: beneficiaryMemberId,
       updatedAt: now,
       uploadTokenHash: createHash("sha256").update(token).digest("hex"),
@@ -239,12 +336,17 @@ async function createFixture(): Promise<Fixture> {
     enrollmentId,
     groupId,
     holder,
+    installationId,
     loss,
     membershipId,
     observer,
     ownerMemberId,
     token,
   };
+}
+
+function hash(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 async function proveAccessLossFirst(input: {
