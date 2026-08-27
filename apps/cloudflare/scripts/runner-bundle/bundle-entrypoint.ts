@@ -302,7 +302,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Ratchet bytes and chunk count together so a future eager import cannot hide
 // behind code-splitting jitter. Keep a small entry allowance and the
 // established cross-platform static-closure allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_433_493;
+// Poisoning failed hydration and bounding shutdown while hydration is unsettled
+// add 1,186B to the entry/static closure and total while leaving the static
+// chunk count unchanged; existing startup tolerances cover that bounded growth.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_434_679;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;

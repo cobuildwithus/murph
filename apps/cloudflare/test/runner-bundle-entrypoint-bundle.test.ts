@@ -647,7 +647,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       entryBytes: 64_257 + 12_000,
       staticClosureBytes: 1_950_662 + 96_000,
       staticChunkCount: 24,
-      totalBytes: 11_433_493,
+      totalBytes: 11_434_679,
     });
   });
 
