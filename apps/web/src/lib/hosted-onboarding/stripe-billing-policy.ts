@@ -1,7 +1,6 @@
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 
 import {
-  assertNoHostedMemberStripeEffectTx,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
 } from "./hosted-member-billing-store";
@@ -96,11 +95,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
   if (!currentMember) {
     return null;
   }
-  await assertNoHostedMemberStripeEffectTx({
-    memberId: currentMember.core.id,
-    tx: input.tx,
-  });
-
   const intentionalSuspension = input.suspendedAtOverride;
   const billingOwnsCurrentSuspension =
     isHostedStripeBillingOwnedSuspension(currentMember);

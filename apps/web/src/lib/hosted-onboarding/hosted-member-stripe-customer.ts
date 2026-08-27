@@ -10,7 +10,11 @@ import type {
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
-import { hostedOnboardingError } from "./errors";
+import {
+  hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+} from "./errors";
 import {
   assertHostedStripeEffectClaimAbsent,
   bindHostedMemberStripeCustomerIdIfMissingTx,
@@ -103,6 +107,15 @@ async function prepareHostedMemberStripeCustomer(input: {
           stripeCustomerId: current.stripeCustomerId,
         } as const;
       }
+    }
+
+    if (billingRef?.stripeCheckoutSessionLookupKey) {
+      throw hostedOnboardingError({
+        code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+        httpStatus: 409,
+        message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+        retryable: true,
+      });
     }
 
     if (billingRef?.stripeEffectClaimId) {

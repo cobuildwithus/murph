@@ -182,6 +182,25 @@ describe("ensureHostedMemberStripeCustomer", () => {
     expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).not.toHaveBeenCalled();
   });
 
+  it("does not claim Customer creation while direct Checkout owns a Session", async () => {
+    const prisma = createPrisma({
+      billingRefStates: [createBillingRef({
+        stripeCheckoutSessionLookupKey: "lookup:cs_open",
+      })],
+    });
+
+    await expect(ensureHostedMemberStripeCustomer({
+      memberId: "member_payer",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(prisma.tx.hostedMemberBillingRef.upsert).not.toHaveBeenCalled();
+    expect(mocks.createStripeCustomer).not.toHaveBeenCalled();
+  });
+
   it("does not bind when a Stripe effect claims the member during provider work", async () => {
     const prisma = createPrisma({
       billingRefStates: [
@@ -356,6 +375,7 @@ function activeMemberState(
 
 function createBillingRef(input: {
   currentBillingPhase?: string | null;
+  stripeCheckoutSessionLookupKey?: string | null;
   stripeCustomerId?: string | null;
   stripeEffectClaimId?: string | null;
   stripeEffectKind?: string | null;
@@ -366,6 +386,8 @@ function createBillingRef(input: {
     createdAt: new Date("2026-07-20T11:00:00.000Z"),
     currentBillingPhase: input.currentBillingPhase ?? null,
     memberId: "member_payer",
+    stripeCheckoutSessionLookupKey:
+      input.stripeCheckoutSessionLookupKey ?? null,
     stripeCustomerIdEncrypted: stripeCustomerId
       ? `encrypted:${stripeCustomerId}`
       : null,

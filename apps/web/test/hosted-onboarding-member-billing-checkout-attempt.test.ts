@@ -55,7 +55,6 @@ describe("hosted member Checkout completion ownership", () => {
         lastStripeEventCreatedAt: true,
         stripeCheckoutSessionLookupKey: true,
         stripeCustomerLookupKey: true,
-        stripeEffectClaimId: true,
         stripeSubscriptionLookupKey: true,
       },
       where: {
@@ -83,32 +82,6 @@ describe("hosted member Checkout completion ownership", () => {
     })).resolves.toMatchObject({
       kind: "accepted",
     });
-  });
-
-  it("leaves an issued Checkout retryable while Customer creation owns the member", async () => {
-    const harness = await createBillingRefHarness({
-      stripeEffectClaimId: "member-customer-create:active",
-    });
-
-    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
-      billingIdentityDisposition: "bind",
-      checkoutAttemptId: "attempt_123",
-      checkoutIntentHash: "intent_123",
-      checkoutSessionId: "cs_winner",
-      currentCheckoutOffer: "standard",
-      eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
-      memberId: "member_123",
-      preparedCompletion: buildPreparedCompletion(
-        "cus_checkout",
-        "sub_checkout",
-      ),
-      tx: harness.tx as never,
-    })).rejects.toMatchObject({
-      code: "HOSTED_STRIPE_EFFECT_PENDING",
-      retryable: true,
-    });
-
-    expect(harness.update).not.toHaveBeenCalled();
   });
 
   it("treats a repeated completion for the accepted subscription as idempotent", async () => {
@@ -361,7 +334,6 @@ async function createBillingRefHarness(input: {
   currentStripeCustomerId?: string;
   currentStripeSubscriptionId?: string;
   openAttempt?: boolean;
-  stripeEffectClaimId?: string;
 } = {}) {
   const openAttempt = input.openAttempt ?? true;
   const privateColumns = await buildHostedMemberBillingPrivateColumns({
@@ -401,7 +373,6 @@ async function createBillingRefHarness(input: {
     stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(
       input.currentStripeCustomerId ?? null,
     ),
-    stripeEffectClaimId: input.stripeEffectClaimId ?? null,
     stripeSubscriptionLookupKey:
       createHostedStripeSubscriptionLookupKey(
         input.currentStripeSubscriptionId ?? null,

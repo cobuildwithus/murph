@@ -63,17 +63,15 @@ above are complete:
   claim, and atomically binds the encrypted Customer identity and lookup key
   while clearing every claim field. An already-bound Customer remains the
   terminal replay result.
-- A direct Checkout Session issued before claim preparation can still complete
-  while Customer creation is outside the transaction. Its completion owner and
-  the shared signed-event billing writer both read the claim under the same
-  member lock and fail retryably before binding Customer or Subscription state.
-  Subscription, invoice, refund, and dispute projections therefore cannot
-  become a competing initial Customer owner while the claim is live.
-- After the claim candidate binds, a retried competing Checkout completion uses
-  the existing superseded-checkout path: its exact Subscription is canceled and
-  an ordinary payment is refunded, while its Customer remains unbound locally.
-  Customer deletion is not inferred because the completed Session does not
-  durably prove whether Checkout created or reused that Customer.
+- Preparation rejects retryably when the billing row already owns a bound direct
+  Checkout Session. It therefore cannot start a competing Customer provider call
+  after Checkout may create its Customer. The reverse ordering is enforced by
+  direct Checkout's existing claim-aware admission under the same member lock.
+- An attempt that has not yet bound its Session does not block preparation. If
+  Stripe creates that Session after a claim wins, Checkout's existing
+  post-create revalidation retains its exact pre-create Customer state and
+  safely deletes the unbound Session Customer. No provider-Customer ownership
+  is inferred from a completed Session.
 - Account deletion already locks the same member owner and rejects any active
   member claim before suspension or local deletion. It therefore cannot commit
   between claim persistence and Customer binding.
@@ -116,9 +114,10 @@ The member Customer owner case pauses the provider after observing the
 committed claim, races the production account-deletion service through an
 independent PostgreSQL client, and proves deletion is rejected without partial
 suspension. It then completes Customer binding, verifies the exact claim is
-cleared, and replays the operation without another provider call. The direct
-Checkout race proof also runs both writer orders. Checkout-first causes Customer
-preparation to reuse the Checkout identity without calling Stripe. Claim-first
-proves `customer.subscription.created` projection and direct completion both
-remain retryable until the candidate binds, then proves completion classifies
-the competing Checkout for its existing superseded cleanup.
+cleared, and replays the operation without another provider call. The bound
+direct Checkout race proof also runs both owner orders. Completion-first causes
+Customer preparation to wait on the member lock and reuse the accepted Checkout
+identity. Customer-admission-first rejects before provider egress because the
+bound Session already owns the member, after which completion binds the sole
+Customer normally. The existing attempt-only race separately proves a claim
+that commits before Session creation triggers exact unbound-Session cleanup.
