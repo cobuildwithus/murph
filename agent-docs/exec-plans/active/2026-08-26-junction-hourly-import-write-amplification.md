@@ -73,7 +73,10 @@ Updated: 2026-08-26
 7. [x] Prove that a positive restored-input handoff requests an immediate owner
    recheck even when the durable assistant wake is unchanged, without forcing an
    otherwise unnecessary checkpoint or making inherited wakes self-repeating.
-8. [ ] Commit, push, run final review with required CI, deploy, and prove live
+8. [x] Prove a conversation accepted while the fresh pre-assistant system fetch
+   is in flight cannot sit behind exact Ask preparation; install and drain the
+   existing watcher before starting that Ask, while preserving post-start abort.
+9. [ ] Commit, push, run final review with required CI, deploy, and prove live
    mailbox and device-sync convergence.
 
 ## Decisions
@@ -105,6 +108,13 @@ Updated: 2026-08-26
   horizon. Emit the existing transient immediate-recheck edge for every positive
   handoff, including same-key checkpoints, while leaving inherited assistant
   wakes without positive input evidence edge-free.
+- Accepted final-review finding: the exact Ask could begin while the foreground
+  runner was still awaiting its fresh system-only fetch, before the conversation
+  watcher existed. Start the exact attempt from the existing barrier only after
+  installing the watcher and draining any pending wake; if that drain observes
+  foreground work, leave the Ask and later device item pending for the ordinary
+  assistant owner. Arrivals after exact admission retain the existing synchronous
+  abort-and-requeue path.
 - Rejected: increasing hosted timeouts, changing resource admission, deleting
   queued work, or locally expiring the Ask without its Web-owned terminal result.
 
@@ -128,6 +138,9 @@ Updated: 2026-08-26
 - A foreground message still preempts background device maintenance under the
   existing rules, aborting and durably requeuing an in-flight exact Ask before
   the conversation proceeds.
+- A message accepted during foreground-runner startup is drained before the
+  exact Ask can prepare, so the startup system fetch cannot put detached provider
+  work ahead of the reply.
 - A reply already present at restore schedules and runs through the ordinary
   assistant owner before the durable-head Ask or later device maintenance;
   the immediate owner edge avoids waiting for periodic recovery, and the next

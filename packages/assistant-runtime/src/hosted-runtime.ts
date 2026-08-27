@@ -1378,6 +1378,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
   let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
+  let startExactDetachedAssistantAsk: (() => Promise<void>) | null = null;
   let imageGenerationController: HostedImageGenerationController | null = null;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
@@ -1941,8 +1942,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
-      awaitBackgroundMaintenanceBarrier: async () => {
-        await exactDetachedAssistantAskCompletion;
+      awaitBackgroundMaintenanceBarrier: async (barrier) => {
+        if (!startExactDetachedAssistantAsk) {
+          return;
+        }
+        await barrier.drainPendingForegroundWake();
+        if (barrier.foregroundConversationWorkObserved()) {
+          return;
+        }
+        await startExactDetachedAssistantAsk();
       },
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
@@ -4002,11 +4010,17 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         selectedSystemMailboxOwnerItem,
       )
     ) {
-      exactDetachedAssistantAskCompletion =
-        detachedAssistantAskController.kickExact(
-          selectedSystemMailboxOwnerItem.itemId,
-        );
-      void exactDetachedAssistantAskCompletion.catch(() => undefined);
+      const exactController = detachedAssistantAskController;
+      const exactItemId = selectedSystemMailboxOwnerItem.itemId;
+      startExactDetachedAssistantAsk = () => {
+        if (exactDetachedAssistantAskCompletion) {
+          return exactDetachedAssistantAskCompletion;
+        }
+        const completion = exactController.kickExact(exactItemId);
+        exactDetachedAssistantAskCompletion = completion;
+        void completion.catch(() => undefined);
+        return completion;
+      };
     } else {
       // Approved continuations retain their foreground-priority drain behavior.
       detachedAssistantAskController.kick();

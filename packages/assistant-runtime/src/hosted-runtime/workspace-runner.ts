@@ -378,7 +378,10 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
-  awaitBackgroundMaintenanceBarrier?: (() => Promise<void>) | null;
+  awaitBackgroundMaintenanceBarrier?: ((input: {
+    drainPendingForegroundWake(): Promise<void>;
+    foregroundConversationWorkObserved(): boolean;
+  }) => Promise<void>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -978,12 +981,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
   let foregroundMailboxImportLoop:
     ReturnType<typeof startHostedForegroundConversationMailboxImportLoop> | null = null;
-  const startForegroundMailboxImportLoop = async (): Promise<void> => {
+  const startForegroundMailboxImportLoop = async (): Promise<
+    ReturnType<typeof startHostedForegroundConversationMailboxImportLoop>
+  > => {
     if (foregroundMailboxImportLoop) {
-      return;
+      return foregroundMailboxImportLoop;
     }
     foregroundRuntimeWakeObservedAfterStop = false;
-    foregroundMailboxImportLoop = await withHostedCanonicalWritePort(
+    const startedLoop = await withHostedCanonicalWritePort(
       hostedCanonicalMailboxWritePort,
       async () => startHostedForegroundConversationMailboxImportLoop({
         checkpointRequestBuilder: checkpointRequestSession,
@@ -1001,12 +1006,19 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         checkpointCanonicalMailboxImportProgress,
       }),
     );
-    input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
+    foregroundMailboxImportLoop = startedLoop;
+    input.trackLocalWorkspaceMutationCompletion?.(startedLoop.completion);
+    return startedLoop;
   };
   const mailboxImportBeforeForegroundLoop =
     checkpointRequestSession.latestMailboxImport();
-  await startForegroundMailboxImportLoop();
-  await input.awaitBackgroundMaintenanceBarrier?.();
+  const foregroundMailboxImportLoopAtBarrier =
+    await startForegroundMailboxImportLoop();
+  await input.awaitBackgroundMaintenanceBarrier?.({
+    drainPendingForegroundWake: async () =>
+      await foregroundMailboxImportLoopAtBarrier.drainPendingWake(),
+    foregroundConversationWorkObserved: () => foregroundConversationWorkObserved,
+  });
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;
     if (!activeLoop) {

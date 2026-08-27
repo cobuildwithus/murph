@@ -4402,6 +4402,223 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test("drains a conversation wake before starting the exact durable-head ask", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const remoteItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const preAssistantSystemFetchStarted = createDeferred<void>();
+    const preAssistantSystemFetchRelease = createDeferred<void>();
+    const assistantAskPrepareStarted = createDeferred<void>();
+    const assistantPhaseStarted = createDeferred<void>();
+    const assistantPhaseRelease = createDeferred<void>();
+    const runtimeAbortController = new AbortController();
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const firstAsk = createMailboxItem({
+      dedupeKey: "assistant.ask.requested:pre-watcher-foreground",
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      id: "mailbox_item_pre_watcher_ask",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:pre-watcher-foreground",
+      id: "mailbox_item_pre_watcher_device",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_pre_watcher_conversation",
+      lane: "conversation",
+      laneSeq: "1",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+    let assistantAskPrepareCalls = 0;
+    let importedAssistantInputId: string | null = null;
+    let assistantPhaseInputIds: readonly string[] = [];
+    let heldPreAssistantSystemFetch = false;
+    let runtimePromise:
+      | ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess>
+      | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedAssistantAskSystemMailboxItem(firstAsk),
+        vaultRoot,
+        wake: createConsentedMemberAssistantAskRequestedWake({
+          eventId: firstAsk.dedupeKey,
+        }),
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/pre-watcher-foreground-before.bundle.json",
+        vaultRoot,
+      });
+      const mailboxPort = createMailboxPort({
+        events,
+        items: remoteItems,
+      });
+      const fetchMailbox = mailboxPort.fetch.bind(mailboxPort);
+      mailboxPort.fetch = async (request) => {
+        events.push(`mailbox.request:${request.requestId}`);
+        if (
+          !heldPreAssistantSystemFetch
+          && request.lanes.length === 1
+          && request.lanes[0]?.lane === "system"
+          && request.requestId.includes(":pre-assistant-system:")
+        ) {
+          heldPreAssistantSystemFetch = true;
+          events.push("pre-assistant-system-fetch.started");
+          preAssistantSystemFetchStarted.resolve();
+          await preAssistantSystemFetchRelease.promise;
+          events.push("pre-assistant-system-fetch.released");
+        }
+        return await fetchMailbox(request);
+      };
+
+      runtimePromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_pre_watcher_foreground",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/pre-watcher-foreground-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            assert.equal(item.item.id, conversationItem.id);
+            context?.onConversationInputStaged?.("linq");
+            importedAssistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            events.push("conversation.imported");
+            return {
+              assistantInputId: importedAssistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            assistantAskPort: {
+              async request(request) {
+                if (request.action === "complete") {
+                  throw new Error("A preempted startup-window ask must not complete.");
+                }
+                assistantAskPrepareCalls += 1;
+                events.push("ask.prepare");
+                assistantAskPrepareStarted.resolve();
+                return {
+                  action: "prepare",
+                  status: "terminal",
+                  terminalReason: "unavailable",
+                };
+              },
+            },
+            deviceSyncPort,
+            events,
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseInputIds =
+              input.latestAssistantInputBatch?.()?.assistantInputIds ?? [];
+            events.push("assistant.phase");
+            assistantPhaseStarted.resolve();
+            await assistantPhaseRelease.promise;
+            return { progressed: false };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        preAssistantSystemFetchStarted.promise,
+        30_000,
+        () => events.join(","),
+      );
+      const preWatcherAskOwner = await Promise.race([
+        assistantAskPrepareStarted.promise.then(() => "ask" as const),
+        new Promise<"blocked">((resolve) => {
+          setTimeout(() => resolve("blocked"), 1_000);
+        }),
+      ]);
+      assert.equal(preWatcherAskOwner, "blocked");
+      assert.equal(assistantAskPrepareCalls, 0);
+
+      remoteItems.push(conversationItem);
+      runtimeWakeSignal.notify();
+      preAssistantSystemFetchRelease.resolve();
+      await withRealTimeout(
+        assistantPhaseStarted.promise,
+        30_000,
+        () => events.join(","),
+      );
+
+      assert.ok(importedAssistantInputId);
+      assert.deepEqual(assistantPhaseInputIds, [importedAssistantInputId]);
+      assert.equal(assistantAskPrepareCalls, 0);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+        ]),
+        [
+          [firstAsk.id, "pending"],
+          [deviceItem.id, "pending"],
+        ],
+      );
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic startup-window proof complete.", "AbortError"),
+      );
+      preAssistantSystemFetchRelease.resolve();
+      assistantPhaseRelease.resolve();
+      if (runtimePromise) {
+        await withRealTimeout(
+          runtimePromise.catch(() => undefined),
+          30_000,
+          () => `cleanup:${events.join(",")}`,
+        );
+      }
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
   test("holds later device maintenance behind the exact durable-head consented ask", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
