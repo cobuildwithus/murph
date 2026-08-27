@@ -1,6 +1,6 @@
 # Stripe payment notification email
 
-Status: active
+Status: completed
 Updated: 2026-08-27
 
 ## Goal
@@ -178,5 +178,11 @@ and no visual surface or screenshot proof applies.
   one sent marker. Other simultaneous failures retain notification priority,
   preserving the existing terminal-cleanup protection without new state or an
   error-aggregation abstraction.
-- [ ] Push the exact candidate, run CI and ReviewGPT, resolve findings, and
-  close the plan.
+- [x] Push the exact candidate, run CI and ReviewGPT, resolve findings, and
+  close the plan. ReviewGPT round 7 passed the full sensitive snapshot with
+  ancestry verified and no remaining veto-level issue. The bounded final base
+  reconciliation retained both the reviewed payment flow and main's
+  stage-aware reconciliation telemetry; 146 tests across the six owner files,
+  focused lint, prepared Web typecheck, diff checks, and every required
+  exact-head GitHub check passed.
+Completed: 2026-08-27
