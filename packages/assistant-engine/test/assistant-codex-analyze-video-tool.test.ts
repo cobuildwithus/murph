@@ -575,9 +575,61 @@ describe('executeAnalyzeVideoTool', () => {
 
     expect(firstResult.rpcSuccess).toBe(expectedSuccess)
     expect(secondResult).toEqual(firstResult)
-    expect(turnState.completedProviderResult).toEqual(firstResult)
+    expect(turnState.completedProviderAttempt?.result).toEqual(firstResult)
     expect(turnState.providerCallCount).toBe(1)
     expect(fetchImpl).toHaveBeenCalledTimes(ANALYZE_VIDEO_MAX_PROVIDER_CALLS_PER_TURN)
+  })
+
+  it.each([
+    {
+      expectedFallback:
+        'Visible motion.\n\nI did not analyze the later video request.',
+      name: 'successful observation',
+      response: answerResponse('Visible motion.'),
+    },
+    {
+      expectedFallback:
+        'Video analysis returned no usable answer. Please try again later.\n\nThe later video request was not analyzed.',
+      name: 'no-usable-answer failure',
+      response: Response.json({
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      }),
+    },
+  ])('keeps a completed $name attributed to its request when a later question differs', async ({
+    expectedFallback,
+    response,
+  }) => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const fetchImpl = vi.fn<typeof fetch>(async () => response)
+    const turnState = createAnalyzeVideoTurnState()
+    const baseInput = {
+      acceptedInputIds: [fixture.inputId],
+      attachmentAuthorities: fixture.attachmentAuthorities,
+      runtime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      turnState,
+      vaultRoot: fixture.vaultRoot,
+    }
+
+    const firstResult = await executeAnalyzeVideoTool({
+      ...baseInput,
+      args: { messageRef: fixture.inputId, question: 'Count the push-ups.' },
+    })
+    const laterResult = await executeAnalyzeVideoTool({
+      ...baseInput,
+      args: { messageRef: fixture.inputId, question: 'Is there a rabbit?' },
+    })
+
+    expect(laterResult).toMatchObject({
+      finalResponseFallback: expectedFallback,
+      rpcSuccess: false,
+      rpcText: expect.stringContaining(
+        'belongs only to the earlier request',
+      ),
+    })
+    expect(laterResult.rpcText).toContain(firstResult.rpcText)
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(turnState.providerCallCount).toBe(1)
   })
 
   it('rejects unsupported and oversized videos before provider egress', async () => {

@@ -89,9 +89,10 @@ Updated: 2026-08-27
 - The authenticated-group path preserves the merged same-turn group-video
   authority while applying the same semantic mode choice and one-provider-call
   ceiling. Its held-draft reconsideration reuses the first completed provider
-  result instead of replacing it with a duplicate-call status. A combined
-  real-Codex journey passed when one participant requested another
-  participant's current group video.
+  result only for an exact repeat. A distinct later video request remains
+  unanalyzed and receives no evidence from the earlier video. A combined
+  real-Codex journey passed when one participant requested another participant's
+  current group video.
 - Negative, unavailable, and failed outcomes remain honest without automatic
   second-pass analysis, diagnosis language, or routine policy recitals.
 - Result: `Ready`. Focused real-Codex journeys selected detailed motion for the
@@ -189,7 +190,22 @@ Updated: 2026-08-27
   attempts without a second Gemini call, durable state, or retry. Focused unit,
   scripted-runtime, and held-draft request-0/request-1 tests cover both a
   successful observation and an HTTP-200 response with no usable candidate.
-  Exact-head round 5 remains required for this behavior-bearing correction.
+  Exact-head round 5 required a current anomaly retrospective before another
+  tactical correction.
+- The round-5 retrospective compared the immutable first-reviewed 108/44 source
+  shape with round 5's 193/76 shape and attributed the added result field,
+  completion helper, early replay, and provider-result wrappers to the existing
+  in-memory host turn. It found that unconditional replay could wrongly attach
+  video A's evidence to a distinct request for video B. The requirement-level
+  decision keeps one provider attempt owned by its accepted message ref,
+  attachment ordinal, complete question, and sampling mode. Exact repeats reuse
+  its result; distinct later requests keep the first result attributed only to
+  the first request and plainly say the later request was not analyzed. This
+  continues the same PR without retry, durable state, queue, state machine, or
+  changed group-turn lifecycle. Production-shaped held-draft proof uses two
+  distinct accepted video identities for first-call success and first-call
+  failure, asserts one Gemini call, and checks the combined truthful reply.
+  Exact-head round 6 remains required.
 - Current `main`, including the separately merged authenticated-group video
   capability, was merged into the candidate. The four bounded conflicts kept
   both the group authority contract and this PR's complete-question, sampling,
@@ -197,6 +213,6 @@ Updated: 2026-08-27
   typecheck, and real-Codex detailed, standard, failure, and cross-participant
   group journeys passed on the combined tree.
 - Draft PR #2373 is mergeable. Product UX is `Ready`; the PR remains draft while
-  the corrected candidate completes exact-head final ReviewGPT round 5. Broad
+  the corrected candidate completes exact-head final ReviewGPT round 6. Broad
   exact-head CI, merge, deployment proof, and guarded retirement have not
   started.

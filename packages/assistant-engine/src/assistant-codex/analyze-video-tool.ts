@@ -59,9 +59,19 @@ export interface AnalyzeVideoAttachmentAuthority {
   sha256: string | null
 }
 
+interface AnalyzeVideoProviderRequest {
+  attachmentOrdinal: number | null
+  messageRef: string
+  question: string
+  samplingMode: HostedGeminiVideoAnalysisSamplingMode
+}
+
 /** Trusted turn-scoped provider-call ceiling and completed result. */
 export interface AnalyzeVideoTurnState {
-  completedProviderResult: AnalyzeVideoToolResult | null
+  completedProviderAttempt: {
+    request: AnalyzeVideoProviderRequest
+    result: AnalyzeVideoToolResult
+  } | null
   providerCallCount: number
 }
 
@@ -94,7 +104,7 @@ const videoExtensionMimeTypes = new Map<string, string>([
 
 export function createAnalyzeVideoTurnState(): AnalyzeVideoTurnState {
   return {
-    completedProviderResult: null,
+    completedProviderAttempt: null,
     providerCallCount: 0,
   }
 }
@@ -181,11 +191,32 @@ export async function executeAnalyzeVideoTool(input: {
   vaultRoot?: string | null
 }): Promise<AnalyzeVideoToolResult> {
   const turnState = input.turnState ?? createAnalyzeVideoTurnState()
-  if (turnState.completedProviderResult) {
-    return turnState.completedProviderResult
+  const providerRequest = analyzeVideoProviderRequest(input.args)
+  if (
+    turnState.completedProviderAttempt
+    && sameAnalyzeVideoProviderRequest(
+      turnState.completedProviderAttempt.request,
+      providerRequest,
+    )
+  ) {
+    return turnState.completedProviderAttempt.result
   }
   if (turnState.providerCallCount >= ANALYZE_VIDEO_MAX_PROVIDER_CALLS_PER_TURN) {
-    return failure('Video analysis is already in progress for this turn')
+    if (!input.acceptedInputIds.includes(input.args.messageRef)) {
+      return failure('The selected video message is not available for this action')
+    }
+    const selection = selectVideoAttachment({
+      attachmentOrdinal: input.args.attachmentOrdinal,
+      attachments: (input.attachmentAuthorities ?? []).filter(
+        (attachment) => attachment.messageRef === input.args.messageRef,
+      ),
+    })
+    if ('message' in selection) {
+      return failure(selection.message)
+    }
+    return turnState.completedProviderAttempt
+      ? distinctAnalyzeVideoRequestResult(turnState.completedProviderAttempt)
+      : failure('Video analysis is already in progress for this turn')
   }
 
   const runtime = input.runtime ?? null
@@ -270,6 +301,7 @@ export async function executeAnalyzeVideoTool(input: {
     if (response.status === 429) {
       return completeAnalyzeVideoProviderAttempt(
         turnState,
+        providerRequest,
         failure(
           'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
         ),
@@ -278,6 +310,7 @@ export async function executeAnalyzeVideoTool(input: {
     if (!response.ok) {
       return completeAnalyzeVideoProviderAttempt(
         turnState,
+        providerRequest,
         failure(
           'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
         ),
@@ -290,6 +323,7 @@ export async function executeAnalyzeVideoTool(input: {
     }
     return completeAnalyzeVideoProviderAttempt(
       turnState,
+      providerRequest,
       failure(
         'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
       ),
@@ -302,6 +336,7 @@ export async function executeAnalyzeVideoTool(input: {
   if (!answer.text) {
     return completeAnalyzeVideoProviderAttempt(
       turnState,
+      providerRequest,
       failure(
         'Video analysis returned no usable answer. Please try again later.',
       ),
@@ -310,7 +345,7 @@ export async function executeAnalyzeVideoTool(input: {
   const framing = answer.truncated
     ? `${ANALYZE_VIDEO_PARTIAL_STATUS}\n\n${analyzeVideoProvenance(fps)}`
     : analyzeVideoProvenance(fps)
-  return completeAnalyzeVideoProviderAttempt(turnState, {
+  return completeAnalyzeVideoProviderAttempt(turnState, providerRequest, {
     finalResponseFallback: answer.truncated
       ? `Partial video observation: ${answer.text}`
       : answer.text,
@@ -321,10 +356,51 @@ export async function executeAnalyzeVideoTool(input: {
 
 function completeAnalyzeVideoProviderAttempt(
   turnState: AnalyzeVideoTurnState,
+  request: AnalyzeVideoProviderRequest,
   result: AnalyzeVideoToolResult,
 ): AnalyzeVideoToolResult {
-  turnState.completedProviderResult = result
+  turnState.completedProviderAttempt = { request, result }
   return result
+}
+
+function analyzeVideoProviderRequest(
+  args: AnalyzeVideoToolArgs,
+): AnalyzeVideoProviderRequest {
+  return {
+    attachmentOrdinal: args.attachmentOrdinal ?? null,
+    messageRef: args.messageRef,
+    question: args.question,
+    samplingMode: args.samplingMode ?? 'standard',
+  }
+}
+
+function sameAnalyzeVideoProviderRequest(
+  left: AnalyzeVideoProviderRequest,
+  right: AnalyzeVideoProviderRequest,
+): boolean {
+  return left.attachmentOrdinal === right.attachmentOrdinal
+    && left.messageRef === right.messageRef
+    && left.question === right.question
+    && left.samplingMode === right.samplingMode
+}
+
+function distinctAnalyzeVideoRequestResult(
+  completed: NonNullable<AnalyzeVideoTurnState['completedProviderAttempt']>,
+): AnalyzeVideoToolResult {
+  const earlierFallback =
+    completed.result.finalResponseFallback ?? completed.result.rpcText
+  const laterStatus = completed.result.rpcSuccess
+    ? 'I did not analyze the later video request.'
+    : 'The later video request was not analyzed.'
+  return {
+    finalResponseFallback: `${earlierFallback}\n\n${laterStatus}`,
+    rpcSuccess: false,
+    rpcText:
+      'The completed video-analysis result below belongs only to the earlier '
+      + 'request. Do not use it to answer this later request. The later video '
+      + 'request was not analyzed because this turn already used its one video-analysis attempt.\n\n'
+      + `Earlier request result:\n${completed.result.rpcText}`,
+  }
 }
 
 function analyzeVideoProvenance(fps: number): string {

@@ -390,10 +390,14 @@ Last verified: 2026-08-27
   usable idempotency key. Treat this as a bounded v1 at-least-once residual,
   not permission to retry within a turn. Do not add durable video/result state
   without a separate retention and recovery design.
-  The existing in-memory turn state retains the first completed provider result
-  across group-draft reconsideration. A later tool attempt returns that same
-  success or exact failure without provider egress; it must not replace the
-  completed result with an internal duplicate-call status.
+  The existing in-memory turn state binds the first completed provider result
+  to its accepted message ref, attachment ordinal, complete question, and
+  sampling mode across group-draft reconsideration. An exact repeat returns
+  that result without provider egress. A distinct later request receives no
+  provider call and must keep the earlier result attributed only to its earlier
+  request while saying the later request was not analyzed. It must neither
+  replace the completed result with an internal duplicate-call status nor use
+  earlier-video evidence to answer the later request.
   Completed turns use the exact trusted failure status instead of model
   wording, so a failed result does not become a guess about provider
   processing. A successful observation fills blank output and replaces only a

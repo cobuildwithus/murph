@@ -3734,10 +3734,14 @@ instead of persisting provider prose or adding an analysis-effect state
 machine; exact-once recovery would require a durable pre-egress receipt plus
 cached-result or explicit recovery semantics and a separate retention review.
 Within one host turn, including the in-memory group-draft reconsideration,
-Murph keeps the first completed Gemini tool result in the existing turn state.
-A later tool attempt receives that same success or failure result without new
-egress, so it cannot replace a paid successful analysis with an internal
-duplicate-call status. This adds no durable result owner or retry.
+Murph binds the first completed Gemini tool result to its accepted message,
+attachment ordinal, complete question, and sampling mode in the existing turn
+state. An exact later repeat receives that result without new egress. A later
+distinct request receives no Gemini call: its tool result keeps the earlier
+result explicitly attributed to the earlier request and says the later request
+was not analyzed. This prevents either a duplicate-call status from replacing
+the first result or the first video's evidence from being presented as the
+second video's answer. This adds no durable result owner or retry.
 For completed turns, the exact trusted tool-failure status replaces model
 wording so Murph cannot infer whether Gemini processed the clip. A successful
 observation fills blank output and also replaces a narrow false-unavailable

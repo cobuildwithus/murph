@@ -4347,8 +4347,9 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
 
 test.each([
   {
-    expectedResponse:
+    expectedFirstResponse:
       'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+    firstSucceeded: true,
     geminiPayload: {
       candidates: [{
         content: {
@@ -4364,16 +4365,18 @@ test.each([
     name: 'successful video result',
   },
   {
-    expectedResponse:
+    expectedFirstResponse:
       'Video analysis returned no usable answer. Please try again later.',
+    firstSucceeded: false,
     geminiPayload: {
       candidates: [],
       usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
     },
     name: 'no-usable-answer video result',
   },
-])('sendAssistantMessageLocal reuses a $name during group reconsideration', async ({
-  expectedResponse,
+])('sendAssistantMessageLocal keeps a $name attributed during distinct group reconsideration', async ({
+  expectedFirstResponse,
+  firstSucceeded,
   geminiPayload,
 }) => {
   vi.useFakeTimers()
@@ -4383,7 +4386,10 @@ test.each([
     )
     tempRoots.push(context.parentRoot)
     const inputId = `ain_${'7'.repeat(32)}`
+    const laterInputId = `ain_${'8'.repeat(32)}`
     const rawPath = 'raw/inbox/group-video/attachments/01__video.mp4'
+    const laterRawPath =
+      'raw/inbox/group-video-later/attachments/01__video.mp4'
     const videoBytes = Buffer.from([
       0x00, 0x00, 0x00, 0x18,
       0x66, 0x74, 0x79, 0x70,
@@ -4396,14 +4402,35 @@ test.each([
       recursive: true,
     })
     await writeFile(path.join(context.vaultRoot, rawPath), videoBytes)
-    const attachmentAuthorities = [{
-      byteSize: videoBytes.byteLength,
-      messageRef: inputId,
-      mimeType: 'video/mp4',
-      ordinal: 1,
-      rawPath,
-      sha256: createHash('sha256').update(videoBytes).digest('hex'),
-    }]
+    const laterVideoBytes = Buffer.from(videoBytes)
+    laterVideoBytes[23] = 0x31
+    await mkdir(path.dirname(path.join(context.vaultRoot, laterRawPath)), {
+      recursive: true,
+    })
+    await writeFile(path.join(context.vaultRoot, laterRawPath), laterVideoBytes)
+    const attachmentAuthorities = [
+      {
+        byteSize: videoBytes.byteLength,
+        messageRef: inputId,
+        mimeType: 'video/mp4',
+        ordinal: 1,
+        rawPath,
+        sha256: createHash('sha256').update(videoBytes).digest('hex'),
+      },
+      {
+        byteSize: laterVideoBytes.byteLength,
+        messageRef: laterInputId,
+        mimeType: 'video/mp4',
+        ordinal: 1,
+        rawPath: laterRawPath,
+        sha256: createHash('sha256').update(laterVideoBytes).digest('hex'),
+      },
+    ]
+    const expectedResponse = `${expectedFirstResponse}\n\n${
+      firstSucceeded
+        ? 'I did not analyze the later video request.'
+        : 'The later video request was not analyzed.'
+    }`
     const geminiFetch = vi.fn<typeof fetch>(async () =>
       Response.json(geminiPayload),
     )
@@ -4504,17 +4531,26 @@ test.each([
         const analyzeVideoTurnState = providerInput.analyzeVideoTurnState
         assert.ok(analyzeVideoTurnState)
         const repeatedVideoResult = await executeAnalyzeVideoTool({
-          acceptedInputIds: [inputId],
+          acceptedInputIds: [inputId, laterInputId],
           attachmentAuthorities,
           args: {
-            messageRef: inputId,
-            question: 'Count the visible push-ups and describe the form.',
+            messageRef: laterInputId,
+            question: 'Is there a rabbit in this second video?',
           },
           runtime: analyzeVideoRuntime,
           turnState: analyzeVideoTurnState,
           vaultRoot: context.vaultRoot,
         })
-        expect(repeatedVideoResult).toEqual(requestZeroVideoResult)
+        expect(repeatedVideoResult).toMatchObject({
+          finalResponseFallback: expectedResponse,
+          rpcSuccess: false,
+          rpcText: expect.stringContaining(
+            'belongs only to the earlier request',
+          ),
+        })
+        expect(repeatedVideoResult.rpcText).toContain(
+          requestZeroVideoResult?.rpcText,
+        )
         expect(geminiFetch).toHaveBeenCalledOnce()
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-1',
@@ -4566,7 +4602,7 @@ test.each([
         threadId: 'thread-1',
       },
       deliverResponse: true,
-      prompt: 'First group request',
+      prompt: 'Count the push-ups in the first video',
       turnTrigger: 'automation-auto-reply',
       vault: '/vaults/test',
     })
@@ -4582,12 +4618,14 @@ test.each([
         threadId: 'thread-1',
       },
       expectedActiveTurnId: 'turn-1',
-      prompt: 'Second group request',
+      prompt: 'Please also check the second video for a rabbit',
       vault: '/vaults/test',
     })
     assert.equal(followUp.kind, 'queued')
     await vi.waitFor(() => {
-      expect(liveSteeredPrompts).toEqual(['Second group request'])
+      expect(liveSteeredPrompts).toEqual([
+        'Please also check the second video for a rabbit',
+      ])
     })
     providerRelease.resolve()
     await vi.waitFor(() => {
@@ -4603,14 +4641,14 @@ test.each([
         threadId: 'thread-1',
       },
       expectedActiveTurnId: 'turn-1',
-      prompt: 'Third group request',
+      prompt: 'Please answer both video questions',
       vault: '/vaults/test',
     })
     assert.equal(reconsiderationFollowUp.kind, 'queued')
     await vi.waitFor(() => {
       expect(liveSteeredPrompts).toEqual([
-        'Second group request',
-        'Third group request',
+        'Please also check the second video for a rabbit',
+        'Please answer both video questions',
       ])
     })
     reconsiderationRelease.resolve()
@@ -4639,7 +4677,10 @@ test.each([
       reconsiderationFollowUpOutcome,
     ]) {
       expect(outcome).toMatchObject({
-        prompt: 'First group request\n\nSecond group request\n\nThird group request',
+        prompt:
+          'Count the push-ups in the first video\n\n'
+          + 'Please also check the second video for a rabbit\n\n'
+          + 'Please answer both video questions',
         response: expectedResponse,
       })
     }
@@ -4651,7 +4692,9 @@ test.each([
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
     ).toMatchObject({
-      prompt: 'First group request\n\nSecond group request',
+      prompt:
+        'Count the push-ups in the first video\n\n'
+        + 'Please also check the second video for a rabbit',
       turnContext: expect.stringContaining(
         'The unsent draft neither answers a request nor keeps Murph\'s floor',
       ),
