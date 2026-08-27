@@ -253,6 +253,9 @@ const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
 const VERCEL_AI_GATEWAY_MODEL_PROVIDER = 'vercel-ai-gateway'
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1'
 const VERCEL_AI_GATEWAY_API_KEY_ENV = 'VERCEL_AI_API_KEY'
+const REAL_CODEX_E2E_TSX_TSCONFIG_PATH = fileURLToPath(
+  new URL('../../../tsconfig.base.json', import.meta.url),
+)
 const REAL_CODEX_E2E_ENV_ALLOWLIST = [
   'PATH',
   'TMPDIR',
@@ -264,6 +267,7 @@ const REAL_CODEX_E2E_ENV_ALLOWLIST = [
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
+  'TSX_TSCONFIG_PATH',
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 ] as const
 const REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST = [
@@ -786,6 +790,7 @@ describe('onboarding policy read detection', () => {
       command: "for f in ./skills/murph-onboarding/references/*; do sed -n '20,30p' \"$f\"; done",
       eventIndex: 0,
       kind: 'command',
+      ok: true,
       output: broadOutput,
     }], skillsRoot)).toEqual([
       'aspiration-foundation-delegation.md',
@@ -796,6 +801,7 @@ describe('onboarding policy read detection', () => {
       command: 'cat ./skills/murph-onboarding/references/return-launch-completion.md',
       eventIndex: 0,
       kind: 'command',
+      ok: false,
       output: 'cat: file unavailable',
     }], skillsRoot)).toEqual([])
   })
@@ -808,30 +814,35 @@ describe('onboarding policy read detection', () => {
           command: `cat ${path.join(skillsRoot, 'behavior-followthrough', 'SKILL.md')}`,
           eventIndex: 2,
           kind: 'command',
+          ok: true,
           output: 'unrelated policy content',
         },
         {
           command: 'jq . ./skills/physical-therapy/schemas/exercise.schema.json',
           eventIndex: 3,
           kind: 'command',
+          ok: true,
           output: 'unrelated schema content',
         },
         {
           command: `for f in ${skillsRoot}/*/SKILL.md; do sed -n '1,20p' "$f"; done`,
           eventIndex: 4,
           kind: 'command',
+          ok: true,
           output: 'broad policy content',
         },
         {
           command: 'find skills -type f -exec cat {} +',
           eventIndex: 6,
           kind: 'command',
+          ok: true,
           output: 'recursive skill content',
         },
         {
           command: 'rg . ./skills',
           eventIndex: 8,
           kind: 'command',
+          ok: true,
           output: 'recursive relative skill content',
         },
       ],
@@ -897,6 +908,27 @@ describe('real Codex live fixture contracts', () => {
       expect(healthCommonsWrapper).not.toContain('HEALTH_COMMONS_E2E_TSX_BIN')
       expect(habitatWrapper).not.toMatch(/node_modules\/\.bin\/tsx\b/u)
       expect(healthCommonsWrapper).not.toMatch(/node_modules\/\.bin\/tsx\b/u)
+      await expect(execFileAsync(
+        path.join(healthCommonsBin, 'vault-cli'),
+        [
+          'commons',
+          'knowledge',
+          'search',
+          'Finnish dry sauna safety',
+          '--format',
+          'json',
+        ],
+        {
+          env: {
+            ...process.env,
+            HEALTH_COMMONS_E2E_CLI_ENTRYPOINT:
+              HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
+          },
+        },
+      )).resolves.toMatchObject({
+        stdout: expect.stringContaining('"query"'),
+      })
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
     }
@@ -933,9 +965,24 @@ describe('real Codex live fixture contracts', () => {
                 outputChars: 3,
                 stdout: '{}\n',
               },
+              {
+                argv: [
+                  'commons',
+                  'knowledge',
+                  'search',
+                  'unavailable evidence',
+                ],
+                durationMs: 1,
+                error: { message: 'knowledge provider unavailable' },
+                index: 2,
+                ok: false,
+                outputBytes: 0,
+                outputChars: 0,
+                stdout: '',
+              },
             ],
-            count: 2,
-            failed: 0,
+            count: 3,
+            failed: 1,
             schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
             vault: '/synthetic/vault',
           }),
@@ -951,6 +998,7 @@ describe('real Codex live fixture contracts', () => {
           'vault-cli commons knowledge search "Finnish dry sauna safety"',
         eventIndex: 0,
         kind: 'command',
+        ok: true,
         output: '{"matches":[]}',
       },
       {
@@ -958,9 +1006,23 @@ describe('real Codex live fixture contracts', () => {
           `vault-cli commons protocol show ${EXPERIMENT_START_EXACT_KEY}`,
         eventIndex: 0,
         kind: 'command',
+        ok: true,
         output: '{}\n',
       },
+      {
+        command:
+          'vault-cli commons knowledge search "unavailable evidence"',
+        eventIndex: 0,
+        kind: 'command',
+        ok: false,
+        output: 'knowledge provider unavailable',
+      },
     ])
+    expect(actions.filter((action) =>
+      action.kind === 'command'
+      && action.ok
+      && action.command.includes('commons knowledge search')
+    )).toHaveLength(1)
   })
 
   it('keeps the experiment-start fixture aligned with the protocol-backed CLI contract', async () => {
@@ -1054,6 +1116,8 @@ describe('real Codex live fixture contracts', () => {
       'What was it? How much? When did you have it?',
       'Which restaurant was this from and why did you choose it?',
       'I saved the meal without needing clarification.',
+      'I saved the meal and amount.',
+      'No need to tell me what food or how much.',
     ]) {
       expect(hasOneBoundedMealClarificationMeaning(message), message)
         .toBe(false)
@@ -1090,7 +1154,7 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
-  it('keeps routine rejection probes invalid and gives the model an exact repair path', () => {
+  it('keeps routine rejection probes invalid and lets validation feedback own repair', () => {
     const tool = buildRoutineValidationProbeTool(2)
     const properties = readRecord(readRecord(tool.inputSchema)?.properties)
     const firstDescription = readString(
@@ -1100,10 +1164,11 @@ describe('real Codex live fixture contracts', () => {
       readRecord(properties?.validation_probe_two)?.description,
     )
 
-    expect(firstDescription).toMatch(/host will reject/iu)
-    expect(firstDescription).toMatch(/remove only this field/iu)
-    expect(secondDescription).toMatch(/second rejection/iu)
-    expect(secondDescription).toMatch(/generic Telegram rich-content card/iu)
+    expect(firstDescription).toMatch(/first routine-card call only/iu)
+    expect(secondDescription).toMatch(/second routine-card call only/iu)
+    expect(`${firstDescription}\n${secondDescription}`).not.toMatch(
+      /reject|repair|fallback|generic Telegram/iu,
+    )
 
     const card = {
       exercises: [{
@@ -1176,6 +1241,7 @@ describe('real Codex live fixture contracts', () => {
       'There isn’t one configured yet.',
       'I don’t see a hosted group for this chat.',
       'This room isn’t connected to a hosted group yet.',
+      'This chat does not currently have a Murph hosted group set up.',
     ]) {
       expect(hasNoCurrentHostedGroupMeaning(text), text).toBe(true)
     }
@@ -1183,6 +1249,7 @@ describe('real Codex live fixture contracts', () => {
       'The hosted group is active.',
       'I could not determine the current group status.',
       'The hosted group has already been set up.',
+      'There is no issue with the current hosted group.',
     ]) {
       expect(hasNoCurrentHostedGroupMeaning(text), text).toBe(false)
     }
@@ -1194,12 +1261,14 @@ describe('real Codex live fixture contracts', () => {
       'I can book it as soon as you send the date.',
       'Once you give me the day, I can reserve it.',
       'Nothing has been booked yet.',
+      'What date should I book?',
     ]) {
       expect(hasPendingBookingMeaning(text), text).toBe(true)
     }
     for (const text of [
       'Northside is booked and confirmed.',
       'The reservation remains confirmed.',
+      'I haven’t just booked it; I’ve already confirmed it. What date works best?',
     ]) {
       expect(hasPendingBookingMeaning(text), text).toBe(false)
     }
@@ -3193,12 +3262,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               prompt,
               ...(scenario.probeCount >= 1
                 ? [
-                    'For the first routine-card call, include the top-level test field validation_probe_one with value "first". The host will reject that field as unrecognized; on the retry remove only validation_probe_one and preserve every valid routine field.',
+                    'For the first routine-card call, include the top-level test field validation_probe_one with value "first".',
                   ]
                 : []),
               ...(scenario.probeCount === 2
                 ? [
-                    'After the first rejection, include validation_probe_two with value "second" on the second routine-card call. The host will reject that field too; after this second rejection, stop retrying the routine-card tool and attach one generic Telegram rich-content card.',
+                    'If a second routine-card call is needed, include validation_probe_two with value "second" on that second call.',
                   ]
                 : []),
             ].join(' '),
@@ -7077,12 +7146,14 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
       })
       const startCommands = result.actions.filter((action) =>
         action.kind === 'command'
+        && action.ok
         && action.command.includes('vault-cli experiment start')
       )
 
       expect(
         result.actions.some((action) =>
           action.kind === 'command'
+          && action.ok
           && action.command.includes('vault-cli commons protocol show')
           && action.command.includes(EXPERIMENT_START_EXACT_KEY)
         ),
@@ -7131,6 +7202,7 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
       expect(
         result.actions.some((action) =>
           action.kind === 'command'
+          && action.ok
           && (
             action.command.includes('vault-cli commons protocol explore')
             || action.command.includes('vault-cli commons protocol list')
@@ -7321,6 +7393,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
+        && action.ok
         && action.command.includes('vault-cli commons knowledge search')
           ? [action.command]
           : []
@@ -7346,6 +7419,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
+        && action.ok
         && action.command.includes('vault-cli commons knowledge search')
           ? [action.command]
           : []
@@ -7376,12 +7450,13 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
+        && action.ok
         && action.command.includes('vault-cli commons knowledge search')
           ? [action.command]
           : []
       )
 
-      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands, JSON.stringify(result.actions)).toHaveLength(1)
       expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
       expect(knowledgeCommands[0] ?? '').toMatch(/fentanyl/iu)
       expect(result.actions.some((action) =>
@@ -7401,6 +7476,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
+        && action.ok
         && action.command.includes('vault-cli commons knowledge search')
           ? [action.command]
           : []
@@ -7426,6 +7502,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       )
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
+        && action.ok
         && action.command.includes('vault-cli commons knowledge search')
           ? [action.command]
           : []
@@ -10656,6 +10733,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       PATH: '/usr/bin:/bin',
       PROVIDER_KEY: 'provider-value',
       TMPDIR: '/tmp',
+      TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
     })
   })
 
@@ -10696,6 +10774,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       env: {
         HOME: '/synthetic-home',
         PATH: '/usr/bin:/bin',
+        TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
         XDG_CONFIG_HOME: '/synthetic-config',
       },
       model: DEFAULT_REAL_CODEX_MODEL,
@@ -10725,6 +10804,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       env: {
         HOME: '/synthetic-home',
         PATH: '/usr/bin:/bin',
+        TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
       },
       model: DEFAULT_REAL_CODEX_MODEL,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
@@ -13927,9 +14007,18 @@ function hasOneBoundedMealClarificationMeaning(message: string): boolean {
   const asksUnrelatedDetail = /\b(?:when|where|why|restaurant|recipe)\b/iu
     .test(message)
   const questionMarkCount = message.match(/\?/gu)?.length ?? 0
+  const contradictsClarification = [
+    /\b(?:already )?(?:saved|logged|recorded|completed|finished)\b[^.!?\n]{0,48}\b(?:meal|food|drink|amount|portion)\b/iu,
+    /\b(?:no need|need not|do not need|don[’']t need|does not need|doesn[’']t need)\b[^.!?\n]{0,64}\b(?:tell|clarif|food|drink|meal|amount|how much|portion)\b/iu,
+  ].some((pattern) => pattern.test(message))
+  const requestsClarification = questionMarkCount === 1
+    || /\b(?:please (?:tell|share)|tell me|need (?:the|to know)|could you|can you)\b/iu
+      .test(message)
   return asksWhat
     && asksAmount
     && !asksUnrelatedDetail
+    && !contradictsClarification
+    && requestsClarification
     && questionMarkCount <= 1
 }
 
@@ -16651,6 +16740,7 @@ function hasNoCurrentHostedGroupMeaning(text: string): boolean {
   const reportsPresentGroup = [
     /\b(?:hosted )?group\b[^.!?\n]{0,40}\b(?:is|remains) (?:active|available|configured|existing|set up)\b/iu,
     /\b(?:hosted )?group\b[^.!?\n]{0,40}\b(?:exists|has (?:already )?been (?:configured|created|set up))\b/iu,
+    /\bno (?:issue|problem|concern)\b[^.!?\n]{0,48}\b(?:with )?(?:the )?(?:current |active |existing )?(?:hosted )?group\b/iu,
   ].some((pattern) => pattern.test(normalized))
   if (reportsPresentGroup) {
     return false
@@ -16661,7 +16751,7 @@ function hasNoCurrentHostedGroupMeaning(text: string): boolean {
     /\bthere (?:is not|isn[’']t)\b[^.!?\n]{0,32}\b(?:a|an|any|one)?\s*(?:active |current |hosted )?group\b/iu,
     /\bthere (?:is not|isn[’']t)\b[^.!?\n]{0,24}\b(?:any|one)\b[^.!?\n]{0,24}\b(?:active|available|configured|created|existing|set up)\b/iu,
     /\bno\b[^.!?\n]{0,32}\b(?:current|active|hosted|existing)?\s*(?:group|one)\b/iu,
-    /\b(?:do not|don[’']t|does not|doesn[’']t) have\b[^.!?\n]{0,40}\b(?:hosted )?group\b/iu,
+    /\b(?:do not|don[’']t|does not|doesn[’']t)\b[^.!?\n]{0,20}\bhave\b[^.!?\n]{0,40}\b(?:a |an |any )?(?:Murph )?(?:hosted )?group\b/iu,
     /\b(?:I|we) (?:do not|don[’']t|could not|couldn[’']t|cannot|can[’']t) (?:find|see)\b[^.!?\n]{0,40}\b(?:hosted )?(?:group|one)\b/iu,
     /\b(?:chat|room)\b[^.!?\n]{0,40}\b(?:is not|isn[’']t) (?:connected|linked)\b[^.!?\n]{0,32}\b(?:hosted )?group\b/iu,
     /\b(?:hosted )?group\b[^.!?\n]{0,48}\b(?:is not|isn[’']t|has not|hasn[’']t|does not|doesn[’']t)\b[^.!?\n]{0,32}\b(?:active|available|configured|created|set up|exist(?:ing)?)\b/iu,
@@ -16671,6 +16761,15 @@ function hasNoCurrentHostedGroupMeaning(text: string): boolean {
 
 function hasPendingBookingMeaning(text: string): boolean {
   const normalized = text.replaceAll(/\s+/gu, ' ').trim()
+  const reportsCompletedBooking = [
+    /\b(?:already|now|fully) (?:booked|confirmed|reserved)\b/iu,
+    /\b(?:booking|reservation|it)\b[^.!?\n]{0,32}\b(?:is|was|remains|has been)\b[^.!?\n]{0,16}\b(?:booked|confirmed|reserved|complete|done)\b/iu,
+    /\b(?!nothing\b|no\b)\w+\b[^.!?\n]{0,20}\bis (?:booked|confirmed|reserved)\b/iu,
+  ].some((pattern) => pattern.test(normalized))
+  if (reportsCompletedBooking) {
+    return false
+  }
+
   return [
     /\b(?:have not|haven[’']t|not yet|still haven[’']t)\b[^.!?\n]{0,24}\b(?:booked|reserved)\b/iu,
     /\b(?:have not|haven[’']t|not yet|still haven[’']t)\b[^.!?\n]{0,32}\bmade (?:the )?reservation\b/iu,
@@ -16682,6 +16781,7 @@ function hasPendingBookingMeaning(text: string): boolean {
     /\b(?:book|booking|reserve|reservation)\b[^.!?\n]{0,64}\b(?:after|once|when|as soon as)\b[^.!?\n]{0,48}\b(?:date|day)\b/iu,
     /\b(?:after|once|when|as soon as)\b[^.!?\n]{0,48}\b(?:date|day)\b[^.!?\n]{0,64}\b(?:book|booking|reserve|reservation)\b/iu,
     /\b(?:need|missing|waiting for)\b[^.!?\n]{0,48}\b(?:date|day)\b[^.!?\n]{0,64}\b(?:before|to|so)\b[^.!?\n]{0,32}\b(?:book|booking|reserve|reservation)\b/iu,
+    /\b(?:what|which) (?:date|day)\b[^?\n]{0,48}\b(?:book|reserve)\b[^?\n]{0,24}\?/iu,
   ].some((pattern) => pattern.test(normalized))
 }
 
@@ -16730,14 +16830,14 @@ function buildRoutineValidationProbeTool(
         validation_probe_one: {
           type: 'string',
           description:
-            'Test-only invalid-payload probe. Set it to "first" on the first routine-card call only. The host will reject it as an unrecognized field. On the corrected retry, remove only this field and preserve every valid routine field.',
+            'Test-only conformance probe. Set it to "first" on the first routine-card call only.',
         },
         ...(probeCount === 2
           ? {
               validation_probe_two: {
                 type: 'string',
                 description:
-                  'Test-only second-rejection probe. Do not include it on the first call. After the first rejection, set it to "second" on the second routine-card call only. The host will reject it as an unrecognized field. After that second rejection, do not retry the routine-card tool; attach one generic Telegram rich-content card.',
+                  'Test-only conformance probe. Do not include it on the first call. If there is a second routine-card call, set it to "second" on that second routine-card call only.',
               },
             }
           : {}),
@@ -16818,6 +16918,7 @@ type CapabilityRoutingAction =
       command: string
       eventIndex: number
       kind: 'command'
+      ok: boolean
       output: string
     }
   | {
@@ -16924,10 +17025,13 @@ function readCapabilityRoutingActions(
         eventIndex,
         output,
       })
+      const exitCode = readNonNegativeInteger(item?.exitCode)
+        ?? readNonNegativeInteger(item?.exit_code)
       return batchActions ?? [{
         command,
         eventIndex,
         kind: 'command' as const,
+        ok: exitCode === null || exitCode === 0,
         output,
       }]
     }
@@ -16978,6 +17082,7 @@ function readBatchCapabilityRoutingActions(input: {
     ].join(' '),
     eventIndex: input.eventIndex,
     kind: 'command' as const,
+    ok: command.ok,
     output: command.stdout !== ''
       ? command.stdout
       : command.data !== undefined
@@ -17432,6 +17537,7 @@ function buildRealCodexSubscriptionE2eEnv(
       env[key] = value
     }
   }
+  env.TSX_TSCONFIG_PATH = REAL_CODEX_E2E_TSX_TSCONFIG_PATH
   return env
 }
 
@@ -17501,6 +17607,7 @@ function buildRealCodexE2eEnv(input: {
       env[key] = value
     }
   }
+  env.TSX_TSCONFIG_PATH = REAL_CODEX_E2E_TSX_TSCONFIG_PATH
 
   const apiKey = normalizeEnvString(sourceEnv[input.apiKeyEnv])
   if (apiKey) {
