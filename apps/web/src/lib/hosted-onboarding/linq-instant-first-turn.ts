@@ -697,7 +697,8 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
     }],
     instructions: HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS,
     model: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
-    reasoning: { effort: "high" },
+    reasoning: { effort: "medium" },
+    service_tier: "priority",
     store: false,
     text: {
       format: {

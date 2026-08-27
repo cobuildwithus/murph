@@ -112,6 +112,22 @@ function setAction(
   };
 }
 
+function preferenceOnlyAction() {
+  return {
+    expectedWorkout: {
+      actionBinding: ACTION_BINDING,
+      exercises: [{
+        name: "Leg press",
+        sets: [{ logged: false }],
+      }],
+    },
+    kind: "workout.live.apply" as const,
+    mutations: [],
+    version: 1 as const,
+    weightUnitPreference: "kg" as const,
+  };
+}
+
 function appendAction(setCount = 1) {
   return {
     expectedWorkout: {
@@ -336,6 +352,29 @@ describe("live workout member action", () => {
       lastMemberActionId: ACTION_ID,
       observedAt: ACCEPTED_AT,
     });
+  });
+
+  it("validates and records a preference-only action through the canonical write", async () => {
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: preferenceOnlyAction(),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+
+    expect(mocks.withLiveWorkoutMutationLock).toHaveBeenCalledWith(
+      "/vault",
+      "evt_test_workout",
+      expect.any(Function),
+    );
+    expect(mocks.updateLiveWorkoutExercises).toHaveBeenCalledWith(
+      shownWorkout(),
+      BASE_WORKOUT,
+      BASE_WORKOUT.exercises,
+      {
+        lastMemberActionId: ACTION_ID,
+        observedAt: ACCEPTED_AT,
+      },
+    );
   });
 
   it("renames an exercise in one canonical write", async () => {
