@@ -26,6 +26,7 @@ const privyProvider = vi.hoisted(() => ({
   initialReads: vi.fn(),
   missingUserIds: new Set<string>(),
   usersByEmail: new Map<string, PrivyProviderUser>(),
+  usersByPhone: new Map<string, PrivyProviderUser>(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -63,6 +64,14 @@ vi.mock("@privy-io/node", async (importOriginal) => {
             }
             if (privyProvider.deleteAfterInitialRead) {
               privyProvider.missingUserIds.add(user.id);
+            }
+            return user;
+          },
+          getByPhoneNumber: async ({ number }: { number: string }) => {
+            privyProvider.initialReads(number);
+            const user = privyProvider.usersByPhone.get(number);
+            if (!user) {
+              throw new Error("Privy test phone is not configured.");
             }
             return user;
           },
@@ -220,6 +229,7 @@ beforeEach(() => {
   privyProvider.exactUsersById.clear();
   privyProvider.missingUserIds.clear();
   privyProvider.usersByEmail.clear();
+  privyProvider.usersByPhone.clear();
   setHostedSecureBoxStringTestCodecForTests(null);
 });
 
@@ -424,6 +434,156 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toBe(controlRootCount);
       } finally {
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("rejects when exact Privy authority replaces the asserted email", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const discoveryEmail = `app-review-email-before-${fixtureId}@example.test`;
+      const replacementEmail = `app-review-email-after-${fixtureId}@example.test`;
+      const userId = `did:privy:app-review-email-replaced-${fixtureId}`;
+      const privyUserLookupKey = createHostedPrivyUserLookupKey(userId);
+      privyProvider.usersByEmail.set(
+        discoveryEmail,
+        buildPrivyUser({ email: discoveryEmail, userId }),
+      );
+      privyProvider.exactUsersById.set(
+        userId,
+        buildPrivyUser({ email: replacementEmail, userId }),
+      );
+      const [memberCount, envelopeCount, consentCount] = await Promise.all([
+        prisma.hostedMember.count(),
+        prisma.hostedUserCryptoEnvelope.count(),
+        prisma.hostedConsentGrant.count(),
+      ]);
+
+      try {
+        await expect(prepareHostedOpsAppReviewMember({
+          mode: "apply",
+          principal: { kind: "email", value: discoveryEmail },
+          prisma,
+        })).rejects.toMatchObject({
+          code: "PRIVY_EMAIL_MISMATCH",
+        });
+
+        expect(privyProvider.initialReads).toHaveBeenCalledOnce();
+        expect(privyProvider.exactReads).toHaveBeenCalledOnce();
+        expect(vi.mocked(activateHostedMemberForPositiveSourceTx)).not.toHaveBeenCalled();
+        expect(
+          vi.mocked(materializePendingHostedGroupJoinConfirmationsBestEffort),
+        ).not.toHaveBeenCalled();
+        expect(vi.mocked(recordHostedLaunchRequiredConsent)).not.toHaveBeenCalled();
+        await expect(prisma.hostedMemberIdentity.count({
+          where: { privyUserLookupKey },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedMember.count()).resolves.toBe(memberCount);
+        await expect(prisma.hostedUserCryptoEnvelope.count()).resolves.toBe(envelopeCount);
+        await expect(prisma.hostedConsentGrant.count()).resolves.toBe(consentCount);
+      } finally {
+        const unexpectedMembers = await prisma.hostedMemberIdentity.findMany({
+          select: { memberId: true },
+          where: { privyUserLookupKey },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: unexpectedMembers.map(({ memberId }) => memberId) } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("rejects when exact Privy authority replaces the asserted phone", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const discoveryPhone = "+14155550101";
+      const replacementPhone = "+14155550102";
+      const userId = `did:privy:app-review-phone-replaced-${fixtureId}`;
+      const privyUserLookupKey = createHostedPrivyUserLookupKey(userId);
+      privyProvider.usersByPhone.set(
+        discoveryPhone,
+        buildPrivyPhoneUser({ phoneNumber: discoveryPhone, userId }),
+      );
+      privyProvider.exactUsersById.set(
+        userId,
+        buildPrivyPhoneUser({ phoneNumber: replacementPhone, userId }),
+      );
+      const [memberCount, envelopeCount, consentCount] = await Promise.all([
+        prisma.hostedMember.count(),
+        prisma.hostedUserCryptoEnvelope.count(),
+        prisma.hostedConsentGrant.count(),
+      ]);
+
+      try {
+        await expect(prepareHostedOpsAppReviewMember({
+          mode: "apply",
+          principal: { kind: "phone", value: discoveryPhone },
+          prisma,
+        })).rejects.toMatchObject({
+          code: "PRIVY_PHONE_MISMATCH",
+        });
+
+        expect(privyProvider.initialReads).toHaveBeenCalledOnce();
+        expect(privyProvider.exactReads).toHaveBeenCalledOnce();
+        expect(vi.mocked(activateHostedMemberForPositiveSourceTx)).not.toHaveBeenCalled();
+        expect(
+          vi.mocked(materializePendingHostedGroupJoinConfirmationsBestEffort),
+        ).not.toHaveBeenCalled();
+        expect(vi.mocked(recordHostedLaunchRequiredConsent)).not.toHaveBeenCalled();
+        await expect(prisma.hostedMemberIdentity.count({
+          where: { privyUserLookupKey },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedMember.count()).resolves.toBe(memberCount);
+        await expect(prisma.hostedUserCryptoEnvelope.count()).resolves.toBe(envelopeCount);
+        await expect(prisma.hostedConsentGrant.count()).resolves.toBe(consentCount);
+      } finally {
+        const unexpectedMembers = await prisma.hostedMemberIdentity.findMany({
+          select: { memberId: true },
+          where: { privyUserLookupKey },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: unexpectedMembers.map(({ memberId }) => memberId) } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("accepts the asserted email when the exact projection differs only by normalization", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const assertedEmail = `App-Review-Normalized-${fixtureId}@Example.Test`;
+      const exactEmail = assertedEmail.toLowerCase();
+      const userId = `did:privy:app-review-normalized-${fixtureId}`;
+      const privyUserLookupKey = createHostedPrivyUserLookupKey(userId);
+      privyProvider.usersByEmail.set(
+        assertedEmail,
+        buildPrivyUser({ email: assertedEmail, userId }),
+      );
+      privyProvider.exactUsersById.set(
+        userId,
+        buildPrivyUser({ email: exactEmail, userId }),
+      );
+
+      try {
+        await expect(prepareHostedOpsAppReviewMember({
+          mode: "apply",
+          principal: { kind: "email", value: assertedEmail },
+          prisma,
+        })).resolves.toMatchObject({ action: "applied" });
+
+        expect(privyProvider.initialReads).toHaveBeenCalledOnce();
+        expect(privyProvider.exactReads).toHaveBeenCalledOnce();
+        await expect(prisma.hostedMemberIdentity.count({
+          where: { privyUserLookupKey },
+        })).resolves.toBe(1);
+      } finally {
+        const members = await prisma.hostedMemberIdentity.findMany({
+          select: { memberId: true },
+          where: { privyUserLookupKey },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: members.map(({ memberId }) => memberId) } },
+        });
         await prisma.$disconnect();
       }
     });

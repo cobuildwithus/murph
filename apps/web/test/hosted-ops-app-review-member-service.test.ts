@@ -92,6 +92,11 @@ vi.mock("@privy-io/node", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/env", () => ({
+  readHostedContactPrivacyKeyring: () => ({
+    currentVersion: "v1",
+    keysByVersion: { v1: Buffer.alloc(32, 7) },
+    readVersions: ["v1"],
+  }),
   readHostedOnboardingEnvironment: () => ({
     privyAppId: "cm_app_review",
     privyAppSecret: "privy-app-secret",
