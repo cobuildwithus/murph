@@ -111,7 +111,6 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
 
   assert.deepEqual(relativePaths, [
     VAULT_LAYOUT.coreDocument,
-    path.posix.join(VAULT_LAYOUT.auditDirectory, "2026", "2026-04.jsonl"),
     path.posix.join(VAULT_LAYOUT.experimentsDirectory, "test-experiment.md"),
     path.posix.join(VAULT_LAYOUT.goalsDirectory, "test-goal.md"),
     path.posix.join(VAULT_LAYOUT.journalDirectory, "2026", "2026-04-08.md"),
@@ -189,6 +188,7 @@ test("hashCanonicalQuerySources is stable across mtimes and ignores non-query fi
   const vaultRoot = await createTempVaultRoot();
   const experimentPath = path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md");
   const automationPath = path.posix.join(VAULT_LAYOUT.automationsDirectory, "daily.md");
+  const auditPath = path.posix.join(VAULT_LAYOUT.auditDirectory, "2026", "2026-04.jsonl");
   await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, `{"formatVersion":${CURRENT_VAULT_FORMAT_VERSION}}\n`);
   await writeVaultFile(vaultRoot, experimentPath, "---\ntitle: Trial\n---\n# Trial\n");
 
@@ -199,6 +199,7 @@ test("hashCanonicalQuerySources is stable across mtimes and ignores non-query fi
     new Date("2026-05-01T00:00:00.000Z"),
   );
   await writeVaultFile(vaultRoot, automationPath, "---\ntitle: Daily\n---\nPrompt\n");
+  await writeVaultFile(vaultRoot, auditPath, '{"id":"aud_1"}\n');
   const touched = await hashCanonicalQuerySources(vaultRoot);
 
   assert.deepEqual(touched, initial);
@@ -251,6 +252,10 @@ test("isCanonicalQuerySourcePath matches the shared source families", () => {
   assert.equal(
     isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "events.jsonl")),
     true,
+  );
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.auditDirectory, "2026", "audit.jsonl")),
+    false,
   );
   assert.equal(
     isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.integrationIngestLedgerDirectory, "2026", "ingests.jsonl")),

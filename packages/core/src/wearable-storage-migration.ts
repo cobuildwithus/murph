@@ -11,6 +11,10 @@ import {
 
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
+import {
+  listEventLedgerShardPathsInterruptible,
+  visitEventLedgerShardRecordsInterruptible,
+} from "./event-ledger-storage.ts";
 import { walkVaultFiles, walkVaultFilesInterruptible } from "./fs.ts";
 import {
   isRawManifestFileName,
@@ -991,7 +995,16 @@ async function collectLedgerRawReferences(
   options: { shouldContinue?: () => boolean } = {},
 ): Promise<LedgerRawReferenceScan> {
   const rawPaths = new Set<string>();
-  for (const directory of ["ledger/events", "ledger/samples", "ledger/metric-samples"]) {
+  const eventOutcome = await collectEventLedgerRawReferences({
+    rawPaths,
+    shouldContinue: options.shouldContinue,
+    vaultRoot,
+  });
+  if (eventOutcome !== "ok") {
+    return { kind: eventOutcome };
+  }
+
+  for (const directory of ["ledger/samples", "ledger/metric-samples"]) {
     if (options.shouldContinue?.() === false) {
       return { kind: "interrupted" };
     }
@@ -1019,6 +1032,36 @@ async function collectLedgerRawReferences(
     }
   }
   return { kind: "ok", rawPaths };
+}
+
+async function collectEventLedgerRawReferences(input: {
+  rawPaths: Set<string>;
+  shouldContinue?: () => boolean;
+  vaultRoot: string;
+}): Promise<"interrupted" | "ok" | "unsafe"> {
+  try {
+    const listed = await listEventLedgerShardPathsInterruptible({
+      shouldContinue: input.shouldContinue,
+      vaultRoot: input.vaultRoot,
+    });
+    if (listed.interrupted) {
+      return "interrupted";
+    }
+    for (const relativePath of listed.relativePaths) {
+      const visited = await visitEventLedgerShardRecordsInterruptible({
+        relativePath,
+        shouldContinue: input.shouldContinue,
+        vaultRoot: input.vaultRoot,
+        visit: (record) => collectRawPathStrings(record, input.rawPaths),
+      });
+      if (visited.interrupted) {
+        return "interrupted";
+      }
+    }
+    return "ok";
+  } catch {
+    return input.shouldContinue?.() === false ? "interrupted" : "unsafe";
+  }
 }
 
 async function collectLedgerRawReferencesFromFile(input: {

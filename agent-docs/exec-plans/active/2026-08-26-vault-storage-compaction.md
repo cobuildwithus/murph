@@ -60,9 +60,9 @@ Updated: 2026-08-27
 2. [done] Inspect and reconcile the delivered audit/index patches, then
    reconstruct the completed ledger design after its attachment and source
    workspace were lost during ReviewGPT artifact capture.
-3. [in progress] Run focused query and ledger tests, typecheck, direct archive
+3. [done] Run focused query and ledger tests, typecheck, direct archive
    amendment/replay proof, and before/after storage measurements.
-4. [pending] Push the review candidate, open the PR, add its source-linked
+4. [in progress] Push the review candidate, open the PR, add its source-linked
    changelog entry, and complete the required preliminary specialist, final
    ReviewGPT, and exact-head CI gates before closing the plan.
 
@@ -87,3 +87,6 @@ Updated: 2026-08-27
 - Expected outcomes: no loss of canonical rows or explicit audit behavior;
   rebuild excludes audit search/index copies; compressed closed event shards
   remain readable and amendable; exact candidate head passes required CI.
+- Completed local proof: full core, contracts, and query test suites; package
+  typechecks and builds; workspace boundary, dependency cycle, and dependency
+  policy guards; focused archived-reference retention and query-source tests.
