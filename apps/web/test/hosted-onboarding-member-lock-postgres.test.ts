@@ -134,6 +134,7 @@ const stripeProvider = vi.hoisted(() => ({
   chargesRetrieve: vi.fn(),
   checkoutSessionsCreate: vi.fn(),
   customersCreate: vi.fn(),
+  customersDelete: vi.fn(),
   eventsRetrieve: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
@@ -272,6 +273,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
     },
     customers: {
       create: stripeProvider.customersCreate,
+      del: stripeProvider.customersDelete,
     },
     events: {
       retrieve: stripeProvider.eventsRetrieve,
@@ -283,6 +285,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
   return {
     ...actual,
+    getHostedOnboardingStripe: () => stripe,
     requireHostedStripeApi: () => stripe,
     requireHostedStripeApiMode: () => ({
       stripe,
@@ -489,32 +492,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("keeps account deletion behind a committed Customer claim and replays one provider identity", async () => {
+    it("lets account deletion reconcile an abandoned Customer claim before cleanup", async () => {
       const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const fixtureId = randomUUID();
       const memberId = `hbm_customer_deletion_${fixtureId}`;
       const customerId = `cus_customer_deletion_${fixtureId}`;
-      const providerStarted = createDeferred<{
-        stripeEffectClaimId: string | null;
-        stripeEffectKind: string | null;
-      } | null>();
-      const releaseProvider = createDeferred();
-      let customerPromise: Promise<string> | null = null;
       installPassthroughHostedSecureBoxTestCodec();
       stripeProvider.customersCreate.mockClear();
-      stripeProvider.customersCreate.mockImplementation(async () => {
-        providerStarted.resolve(await observer.hostedMemberBillingRef.findUnique({
-          select: {
-            stripeEffectClaimId: true,
-            stripeEffectKind: true,
-          },
-          where: { memberId },
-        }));
-        await releaseProvider.promise;
-        return { id: customerId };
-      });
+      stripeProvider.customersDelete.mockClear();
+      stripeProvider.customersDelete.mockResolvedValue({ deleted: true, id: customerId });
 
       try {
         await observer.hostedMember.create({
@@ -524,55 +512,88 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
 
-        customerPromise = ensureHostedMemberStripeCustomer({
+        stripeProvider.customersCreate.mockRejectedValueOnce(
+          Object.assign(new Error("connection closed after provider commit"), {
+            code: "ECONNRESET",
+          }),
+        );
+        await expect(ensureHostedMemberStripeCustomer({
           memberId,
           prisma: writer,
-        });
-        await expect(providerStarted.promise).resolves.toMatchObject({
+        })).rejects.toMatchObject({ code: "ECONNRESET" });
+        await expect(observer.hostedMemberBillingRef.findUnique({
+          select: {
+            stripeCustomerLookupKey: true,
+            stripeEffectClaimId: true,
+            stripeEffectKind: true,
+          },
+          where: { memberId },
+        })).resolves.toMatchObject({
+          stripeCustomerLookupKey: null,
           stripeEffectClaimId: expect.any(String),
           stripeEffectKind: "member.customer-create",
         });
 
+        stripeProvider.customersCreate.mockRejectedValueOnce(
+          Object.assign(new Error("stripe unavailable"), { code: "ETIMEDOUT" }),
+        );
         await expect(deleteHostedAccountData({
           memberId,
           prisma: deletion,
           request: new Request("https://app.example.test/settings"),
         })).rejects.toMatchObject({
-          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_RECOVERY_PENDING",
           retryable: true,
         });
         await expect(observer.hostedMember.findUnique({
           select: { suspendedAt: true },
           where: { id: memberId },
         })).resolves.toEqual({ suspendedAt: null });
-
-        releaseProvider.resolve();
-        await expect(customerPromise).resolves.toBe(customerId);
         await expect(observer.hostedMemberBillingRef.findUnique({
           select: {
             stripeCustomerLookupKey: true,
             stripeEffectClaimId: true,
-            stripeEffectClaimedAt: true,
             stripeEffectKind: true,
           },
           where: { memberId },
-        })).resolves.toEqual({
-          stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(customerId),
-          stripeEffectClaimId: null,
-          stripeEffectClaimedAt: null,
-          stripeEffectKind: null,
+        })).resolves.toMatchObject({
+          stripeCustomerLookupKey: null,
+          stripeEffectClaimId: expect.any(String),
+          stripeEffectKind: "member.customer-create",
         });
 
-        await expect(ensureHostedMemberStripeCustomer({
+        stripeProvider.customersCreate.mockResolvedValueOnce({ id: customerId });
+        await expect(deleteHostedAccountData({
           memberId,
-          prisma: writer,
-        })).resolves.toBe(customerId);
-        expect(stripeProvider.customersCreate).toHaveBeenCalledOnce();
+          prisma: deletion,
+          request: new Request("https://app.example.test/settings"),
+        })).resolves.toMatchObject({
+          cleanupPending: false,
+          memberId,
+        });
+        await expect(observer.hostedMember.findUnique({
+          where: { id: memberId },
+        })).resolves.toBeNull();
+        expect(stripeProvider.customersDelete).toHaveBeenCalledWith(
+          customerId,
+          {},
+          expect.objectContaining({
+            maxNetworkRetries: 0,
+          }),
+        );
+
+        expect(stripeProvider.customersCreate).toHaveBeenCalledTimes(3);
+        expect(stripeProvider.customersCreate.mock.calls.map(
+          (call: readonly unknown[]) => call[1],
+        )).toEqual(Array.from({ length: 3 }, () => ({
+          idempotencyKey: `hosted-auto-pulse-trial-customer:${memberId}`,
+          maxNetworkRetries: 0,
+          timeout: 5_000,
+        })));
       } finally {
-        releaseProvider.resolve();
-        await Promise.allSettled(customerPromise ? [customerPromise] : []);
         setHostedSecureBoxStringTestCodecForTests(null);
         stripeProvider.customersCreate.mockReset();
+        stripeProvider.customersDelete.mockReset();
         await observer.hostedMember.deleteMany({ where: { id: memberId } });
         await disconnectClients([deletion, observer, writer]);
       }

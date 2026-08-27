@@ -67,23 +67,40 @@ export async function ensureHostedMemberStripeCustomer(input: {
     return prepared.stripeCustomerId;
   }
 
-  // Keep the committed claim on any provider error. A later call reuses both
-  // the claim and Stripe idempotency key, so an ambiguous success is reconciled
-  // without admitting account deletion or a second Customer identity.
-  const candidateStripeCustomerId = await createOrReconcileHostedMemberStripeCustomer({
-    memberId: input.memberId,
-    requestOptions: {
-      maxNetworkRetries: 0,
-      timeout: 5_000,
-    },
-    stripe,
-  });
-
-  return finalizeHostedMemberStripeCustomer({
-    candidateStripeCustomerId,
+  return completeHostedMemberStripeCustomerClaim({
     claimId: prepared.claimId,
     memberId: input.memberId,
     prisma,
+    stripe,
+  });
+}
+
+/**
+ * Reconciles only a Customer creation claim already owned by this member.
+ * Account deletion uses this before suspension so it can finish an ambiguous
+ * provider result without admitting a new Customer effect.
+ */
+export async function resumeHostedMemberStripeCustomerClaimForAccountDeletion(
+  input: {
+    memberId: string;
+    prisma?: PrismaClient;
+  },
+): Promise<string | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const claimId = await prepareHostedMemberStripeCustomerClaimResume({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (!claimId) {
+    return null;
+  }
+  const { stripe } = requireHostedStripeApiMode();
+
+  return completeHostedMemberStripeCustomerClaim({
+    claimId,
+    memberId: input.memberId,
+    prisma,
+    stripe,
   });
 }
 
@@ -151,6 +168,52 @@ async function prepareHostedMemberStripeCustomer(input: {
       kind: "create",
     } as const;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function prepareHostedMemberStripeCustomerClaimResume(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<string | null> {
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const billingRef = await tx.hostedMemberBillingRef.findUnique({
+      where: { memberId: input.memberId },
+    });
+    if (!billingRef?.stripeEffectClaimId) {
+      return null;
+    }
+    if (!isExactHostedMemberStripeCustomerClaim(billingRef)) {
+      assertHostedStripeEffectClaimAbsent(billingRef.stripeEffectClaimId);
+      return null;
+    }
+    return billingRef.stripeEffectClaimId;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function completeHostedMemberStripeCustomerClaim(input: {
+  claimId: string;
+  memberId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+}): Promise<string> {
+  // Keep the committed claim on any provider error. A later call reuses both
+  // the claim and Stripe idempotency key, so an ambiguous success is reconciled
+  // without admitting account deletion or a second Customer identity.
+  const candidateStripeCustomerId = await createOrReconcileHostedMemberStripeCustomer({
+    memberId: input.memberId,
+    requestOptions: {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
+    },
+    stripe: input.stripe,
+  });
+
+  return finalizeHostedMemberStripeCustomer({
+    candidateStripeCustomerId,
+    claimId: input.claimId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 }
 
 async function finalizeHostedMemberStripeCustomer(input: {

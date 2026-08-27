@@ -72,9 +72,12 @@ above are complete:
   post-create revalidation retains its exact pre-create Customer state and
   safely deletes the unbound Session Customer. No provider-Customer ownership
   is inferred from a completed Session.
-- Account deletion already locks the same member owner and rejects any active
-  member claim before suspension or local deletion. It therefore cannot commit
-  between claim persistence and Customer binding.
+- Before suspension, account deletion asks this owner to resume only an exact
+  existing `member.customer-create` claim. The owner repeats the established
+  idempotent Stripe request, then binds the Customer and clears the claim before
+  ordinary deletion captures and cleans up that Customer. No claim admits no
+  provider call, an unrelated claim remains a retryable conflict, and provider
+  failure preserves the claim without partial suspension.
 
 The claim is short-lived on an ordinary success path and intentionally durable
 after an ambiguous provider outcome. The first persisted member Customer claim
@@ -110,14 +113,15 @@ claim-only owner group remains failed/retryable beyond the ordinary poison cap;
 after claim removal, the same receipt applies the canonical `past_due`
 projection and completes.
 
-The member Customer owner case pauses the provider after observing the
-committed claim, races the production account-deletion service through an
-independent PostgreSQL client, and proves deletion is rejected without partial
-suspension. It then completes Customer binding, verifies the exact claim is
-cleared, and replays the operation without another provider call. The bound
-direct Checkout race proof also runs both owner orders. Completion-first causes
-Customer preparation to wait on the member lock and reuse the accepted Checkout
-identity. Customer-admission-first rejects before provider egress because the
-bound Session already owns the member, after which completion binds the sole
-Customer normally. The existing attempt-only race separately proves a claim
-that commits before Session creation triggers exact unbound-Session cleanup.
+The member Customer owner case leaves a committed claim after an ambiguous
+provider response and removes the initiating request. It then proves one
+account-deletion retry during provider unavailability preserves the claim and
+does not suspend the member. A later retry repeats the identical Stripe
+idempotency key, binds and clears the claim, captures the Customer in ordinary
+deletion, and completes provider cleanup. The bound direct Checkout race proof
+also runs both owner orders. Completion-first causes Customer preparation to
+wait on the member lock and reuse the accepted Checkout identity.
+Customer-admission-first rejects before provider egress because the bound
+Session already owns the member, after which completion binds the sole Customer
+normally. The existing attempt-only race separately proves a claim that commits
+before Session creation triggers exact unbound-Session cleanup.

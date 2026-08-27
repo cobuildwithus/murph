@@ -29,10 +29,14 @@ import {
 } from "../device-sync/provider-label";
 import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import {
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import { assertHostedStripeEffectClaimAbsent } from "../hosted-onboarding/hosted-member-billing-store";
+import {
+  resumeHostedMemberStripeCustomerClaimForAccountDeletion,
+} from "../hosted-onboarding/hosted-member-stripe-customer";
 import {
   commitPreparedHostedMemberChannelsUpdatedTx,
   prepareHostedMemberChannelsUpdatedForSnapshot,
@@ -990,6 +994,26 @@ async function deleteHostedAccountDataInternal(input: {
     prisma: input.prisma,
     request: input.request,
   });
+  try {
+    await resumeHostedMemberStripeCustomerClaimForAccountDeletion({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE
+    ) {
+      throw error;
+    }
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_RECOVERY_PENDING",
+      details: { cause: safeErrorCode(error) },
+      httpStatus: 503,
+      message: "Stripe billing recovery is still finishing. Retry account deletion.",
+      retryable: true,
+    });
+  }
   const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
     now: deletionStartedAt,
     ownerMemberId: input.memberId,

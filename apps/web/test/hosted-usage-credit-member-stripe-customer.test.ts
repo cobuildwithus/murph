@@ -42,7 +42,10 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/hosted-member-stripe-customer";
+import {
+  ensureHostedMemberStripeCustomer,
+  resumeHostedMemberStripeCustomerClaimForAccountDeletion,
+} from "@/src/lib/hosted-onboarding/hosted-member-stripe-customer";
 
 describe("ensureHostedMemberStripeCustomer", () => {
   beforeEach(() => {
@@ -284,7 +287,7 @@ describe("ensureHostedMemberStripeCustomer", () => {
       prisma: prisma as never,
     })).rejects.toMatchObject({ code: "ECONNRESET" });
 
-    await expect(ensureHostedMemberStripeCustomer({
+    await expect(resumeHostedMemberStripeCustomerClaimForAccountDeletion({
       memberId: "member_payer",
       prisma: prisma as never,
     })).resolves.toBe("cus_reconciled");
@@ -312,6 +315,68 @@ describe("ensureHostedMemberStripeCustomer", () => {
       stripeCustomerId: "cus_reconciled",
       tx: prisma.tx,
     });
+  });
+
+  it("does not admit Customer creation when account deletion has no claim", async () => {
+    const prisma = createPrisma();
+
+    await expect(
+      resumeHostedMemberStripeCustomerClaimForAccountDeletion({
+        memberId: "member_payer",
+        prisma: prisma as never,
+      }),
+    ).resolves.toBeNull();
+
+    expect(prisma.tx.hostedMemberBillingRef.upsert).not.toHaveBeenCalled();
+    expect(mocks.requireHostedStripeApiMode).not.toHaveBeenCalled();
+    expect(mocks.createStripeCustomer).not.toHaveBeenCalled();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unrelated claim without calling Stripe for account deletion", async () => {
+    const prisma = createPrisma({
+      billingRefStates: [createBillingRef({
+        stripeEffectClaimId: "future-effect:active-claim",
+        stripeEffectKind: "future.effect",
+      })],
+    });
+
+    await expect(
+      resumeHostedMemberStripeCustomerClaimForAccountDeletion({
+        memberId: "member_payer",
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(prisma.tx.hostedMemberBillingRef.upsert).not.toHaveBeenCalled();
+    expect(mocks.requireHostedStripeApiMode).not.toHaveBeenCalled();
+    expect(mocks.createStripeCustomer).not.toHaveBeenCalled();
+  });
+
+  it("keeps the exact claim when Stripe is unavailable during deletion recovery", async () => {
+    const exactClaim = createBillingRef({
+      stripeEffectClaimId: "member-customer-create:active-claim",
+      stripeEffectKind: "member.customer-create",
+    });
+    const prisma = createPrisma({ billingRefStates: [exactClaim] });
+    mocks.createStripeCustomer.mockRejectedValue(
+      Object.assign(new Error("stripe unavailable"), { code: "ETIMEDOUT" }),
+    );
+
+    await expect(
+      resumeHostedMemberStripeCustomerClaimForAccountDeletion({
+        memberId: "member_payer",
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({ code: "ETIMEDOUT" });
+
+    expect(prisma.tx.hostedMemberBillingRef.upsert).not.toHaveBeenCalled();
+    expect(mocks.createStripeCustomer).toHaveBeenCalledOnce();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).not.toHaveBeenCalled();
+    expect(prisma.tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
   it("does not bind when member authority changes while Stripe is in flight", async () => {
