@@ -110,6 +110,7 @@ import {
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
@@ -170,6 +171,7 @@ export {
 export {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
@@ -1066,6 +1068,8 @@ const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-su
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 const JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION = "junction-sleep-unspecified-total.v1";
 const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
+const JUNCTION_STABLE_PROFILE_CREATED_AT_NORMALIZER_VERSION =
+  "junction-stable-profile-created-at.v1";
 
 type JunctionSleepStage = Exclude<JunctionSleepStageValue, "asleep_unspecified">;
 
@@ -7882,7 +7886,7 @@ function pushProfileSummary(
   });
   const profileNormalizerVersion = firstStringFromPaths(entry, ["stableResourceId"])
       || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
-    ? undefined
+    ? JUNCTION_STABLE_PROFILE_CREATED_AT_NORMALIZER_VERSION
     : JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION;
 
   pushObservationMetrics(

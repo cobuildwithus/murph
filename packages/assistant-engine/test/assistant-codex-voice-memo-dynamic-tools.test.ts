@@ -63,7 +63,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     )
   })
 
-  it('returns value-free item-kind hints without executing unsupported media', async () => {
+  it('returns allowed item kinds without executing unsupported media', async () => {
     const privateFilename = 'synthetic-private-memo.mp3'
     const privateAttachmentId = 'synthetic-private-attachment-ref'
     const request = readTestMurphDynamicToolRequest({
@@ -105,12 +105,16 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
     expect(result.rpcResult.success).toBe(false)
-    expect(feedback).toContain(
-      '"field":"media[].kind","code":"invalid_union"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_response_media_arguments',
+      validationIssues: [expect.objectContaining({
+        code: 'invalid_union',
+        path: ['media', 0, 'kind'],
+      })],
+    })
     expect(feedback).not.toContain('voice_memo')
     expect(feedback).not.toContain('image/jpeg')
-    expect(feedback).not.toContain('vault_image')
+    expect(feedback).toContain('vault_image')
     expect(feedback).not.toContain(privateFilename)
     expect(feedback).not.toContain(privateAttachmentId)
     expect(feedback).not.toContain('filename')
@@ -122,7 +126,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(generateAndUpload).not.toHaveBeenCalled()
   })
 
-  it('returns value-free URL hints without executing invalid public media', async () => {
+  it('returns the full URL validation reason without executing invalid public media', async () => {
     const privateUrl =
       'http://synthetic-private.example.test/catalog/private-file.png?token=private'
     const request = readTestMurphDynamicToolRequest({
@@ -155,9 +159,14 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
     expect(result.rpcResult.success).toBe(false)
-    expect(feedback).toContain(
-      '"field":"media[].url","code":"custom","expected":"public_https_image_url"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_response_media_arguments',
+      validationIssues: [expect.objectContaining({
+        code: 'custom',
+        params: { murphExpectedShape: 'public_https_image_url' },
+        path: ['media', 0, 'url'],
+      })],
+    })
     expect(feedback).not.toContain(privateUrl)
     expect(feedback).not.toContain('synthetic-private.example.test')
     expect(feedback).not.toContain('private-file.png')
@@ -202,19 +211,30 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
     expect(result.rpcResult.success).toBe(false)
-    expect(feedback).toContain(
-      '"field":"text","code":"invalid_type","expected":"string"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_generate_voice_memo_arguments',
+      validationIssues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'invalid_type',
+          expected: 'string',
+          path: ['text'],
+        }),
+        expect.objectContaining({
+          code: 'unrecognized_keys',
+          keys: ['modelId'],
+        }),
+      ]),
+    })
     expect(feedback).not.toContain(privateMarker)
     expect(feedback).not.toContain('privateMarker')
-    expect(feedback).not.toContain('modelId')
+    expect(feedback).toContain('modelId')
     expect(feedback).not.toContain('"received"')
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
     expect(generateAndUpload).not.toHaveBeenCalled()
   })
 
-  it('returns value-free response-media hints without attaching media', async () => {
+  it('returns the full response-media reason without attaching media', async () => {
     const privateMarker = 'synthetic-private-media-marker'
     const request = readTestMurphDynamicToolRequest({
       id: 14,
@@ -241,9 +261,14 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
 
     expect(result.rpcResult.success).toBe(false)
-    expect(feedback).toContain(
-      '"field":"media","code":"invalid_type","expected":"array"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_response_media_arguments',
+      validationIssues: [expect.objectContaining({
+        code: 'invalid_type',
+        expected: 'array',
+        path: ['media'],
+      })],
+    })
     expect(feedback).not.toContain(privateMarker)
     expect(feedback).not.toContain('privateMarker')
     expect(feedback).not.toContain('"received"')

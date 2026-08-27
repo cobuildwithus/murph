@@ -45,6 +45,15 @@ describe('Codex thread instructions', () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'search deferred tools via `tool_search`',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'code-mode `ALL_TOOLS`',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'eager absence is not proof',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
@@ -247,8 +256,6 @@ describe('Codex thread instructions', () => {
         memberMemoryMaintenanceAuthorized: scenario.maintenance === 'member',
         permissions: scenario.maintenance === 'group'
           ? 'murph-group-room-model-maintenance'
-          : scenario.maintenance === 'member'
-            ? 'murph-member-memory-maintenance'
           : null,
         processLifetime: 'one-shot',
         providerThreadEphemeral: true,
@@ -281,7 +288,11 @@ describe('Codex thread instructions', () => {
         expect(appServerInput?.memberMemoryMaintenanceAuthorized).toBe(
           scenario.maintenance === 'member',
         )
-        expect(appServerInput?.sandbox).toBeUndefined()
+        expect(appServerInput?.sandbox).toBe(
+          scenario.maintenance === 'group'
+            ? undefined
+            : 'danger-full-access',
+        )
       } else {
         expect(appServerInput?.configOverrides).toEqual(outputOnlyOverrides)
         expect(appServerInput?.dynamicTools).toEqual([])

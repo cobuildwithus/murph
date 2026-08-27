@@ -279,7 +279,8 @@ function parsePayload<TPayload>(
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
     throw new VaultCliError('invalid_payload', `${label} payload is invalid.`, {
-      errors: parsed.error.issues,
+      issues: parsed.error.issues.map(sanitizeClinicalValidationIssue),
+      stage: 'validation',
     })
   }
 
@@ -292,6 +293,41 @@ async function loadPayload<TPayload>(
   label: string,
 ): Promise<TPayload> {
   return parsePayload(schema, await loadJsonInputObject(inputFile, `${label} payload`), label)
+}
+
+function finiteClinicalPublicPath(path: readonly PropertyKey[]): Array<string | number> {
+  const publicPath: Array<string | number> = []
+
+  for (const segment of path) {
+    if (typeof segment === 'number' && Number.isSafeInteger(segment) && segment >= 0) {
+      publicPath.push(segment)
+      continue
+    }
+
+    if (typeof segment !== 'string') {
+      continue
+    }
+    publicPath.push(segment)
+    if (segment === 'qualifiers') {
+      return publicPath
+    }
+  }
+
+  return publicPath
+}
+
+function sanitizeClinicalValidationIssue(issue: z.ZodIssue) {
+  const publicPath = finiteClinicalPublicPath(issue.path)
+  const expected =
+    'expected' in issue && typeof issue.expected === 'string'
+      ? issue.expected
+      : undefined
+
+  return {
+    code: issue.code,
+    publicPath,
+    ...(expected === undefined ? {} : { expected }),
+  }
 }
 
 function toHistoryResult(vault: string, result: AppendHistoryEventResult): ClinicalImportResult {

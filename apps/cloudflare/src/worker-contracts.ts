@@ -203,6 +203,11 @@ export interface WorkerUserRunnerStubLike {
   recordRuntimeCompletionFromContainer?(
     input: WorkerRuntimeCompletionReceipt,
   ): Promise<{ completed: boolean }>;
+  revokeActiveRuntimePlatformAiUsage?(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<boolean>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;
@@ -332,6 +337,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
+  GEMINI_API_KEY?: string;
   EXA_API_KEY?: string;
   LINQ_ATTACHMENT_CDN_BASE_URL?: string;
   LINQ_API_BASE_URL?: string;

@@ -14,6 +14,7 @@ import {
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type DeviceSyncCredentialIndependentImportJobClassifier,
+  type HostedExecutionDeviceSyncCompletedImport,
   type HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 
@@ -1051,6 +1052,7 @@ export class PrismaHostedDirtyConnectionStore {
   }
 
   async markDirtyConnectionProcessed(input: {
+    completedImports?: readonly HostedExecutionDeviceSyncCompletedImport[];
     connectionId: string;
     processedDirtyPayloadIds?: readonly string[];
     processedRevision: bigint;
@@ -1088,6 +1090,7 @@ export class PrismaHostedDirtyConnectionStore {
   }
 
   private async markDirtyConnectionProcessedOnce(input: {
+    completedImports?: readonly HostedExecutionDeviceSyncCompletedImport[];
     connectionId: string;
     processedDirtyPayloadIds?: readonly string[];
     processedRevision: bigint;
@@ -1145,6 +1148,40 @@ export class PrismaHostedDirtyConnectionStore {
       const processedDirtyPayloadIds = [...new Set(input.processedDirtyPayloadIds)]
         .filter((id) => normalizeNullableString(id));
       if (processedDirtyPayloadIds.length > 0) {
+        const completedImportByPayloadId = new Map(
+          (input.completedImports ?? []).map((receipt) => [receipt.dirtyPayloadId, receipt]),
+        );
+        const importCandidateIds = processedDirtyPayloadIds.filter((id) =>
+          completedImportByPayloadId.has(id)
+        );
+        if (importCandidateIds.length > 0) {
+          const acknowledgedPayloads = await prisma.deviceSyncDirtyPayload.findMany({
+            where: {
+              connectionId: input.connectionId,
+              id: { in: importCandidateIds },
+              userId: input.userId,
+            },
+            select: { id: true },
+          });
+          const importSignals = acknowledgedPayloads.flatMap(({ id }) => {
+            const receipt = completedImportByPayloadId.get(id);
+            return receipt
+              ? [{
+                  connectionId: input.connectionId,
+                  createdAt: new Date(),
+                  eventType: `canonical.data.${receipt.resource}.imported`,
+                  kind: "canonical_import",
+                  occurredAt: new Date(receipt.importCompletedAt),
+                  provider: existing.provider,
+                  sourceProviderSlug: receipt.sourceProviderSlug,
+                  userId: input.userId,
+                }]
+              : [];
+          });
+          if (importSignals.length > 0) {
+            await prisma.deviceSyncSignal.createMany({ data: importSignals });
+          }
+        }
         await prisma.deviceSyncDirtyPayload.deleteMany({
           where: {
             connectionId: input.connectionId,

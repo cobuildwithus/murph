@@ -13,12 +13,17 @@ import { renderClientComponent } from "./render-client-component";
 const GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription: "One short topic.",
   idleTitle: "Only the missing details",
   topics: [
     {
       eyebrow: "Sleep",
-      focus: ["Night temperature"],
+      focus: [
+        "Night temperature",
+        "Bedroom darkness",
+        "Bedroom noise",
+        "Indoor smoke",
+        "Bedroom TV",
+      ],
       id: "sleep",
       prompt: "Cover only what is missing.",
       title: "Your sleep setup",
@@ -29,7 +34,6 @@ const GAP_SCRIPT: EnvironmentVoiceScript = {
 const UPDATE_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Update your environment",
   flow: "update",
-  idleDescription: "Mention only what changed.",
   idleTitle: "Record what changed",
   topics: [
     {
@@ -53,9 +57,9 @@ test("partial reports offer to fill only what is missing", async () => {
 
   try {
     const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Complete the picture/);
-    assert.match(bodyText, /Fill in what's missing/);
-    assert.match(bodyText, /1 useful detail Murph still needs/);
+    assert.match(bodyText, /Fill in the remaining 5 details/);
+    assert.match(bodyText, /Continue report/);
+    assert.doesNotMatch(bodyText, /detail missing|short topic/);
     assert.doesNotMatch(bodyText, /Update by voice/);
   } finally {
     await rendered.cleanup();
@@ -74,7 +78,7 @@ test("complete reports offer a free-form update instead of more questions", asyn
 
   try {
     const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Keep your environment current/);
+    assert.match(bodyText, /All current details covered/);
     assert.match(bodyText, /Update by voice/);
     assert.doesNotMatch(bodyText, /Fill in what's missing/);
   } finally {
@@ -98,8 +102,8 @@ test("an empty-looking profile still respects previously declined facts", async 
 
   try {
     const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Continue the walkthrough/);
-    assert.doesNotMatch(bodyText, /Start the 2-minute walkthrough/);
+    assert.match(bodyText, /Continue report/);
+    assert.doesNotMatch(bodyText, /Start report/);
   } finally {
     await rendered.cleanup();
   }

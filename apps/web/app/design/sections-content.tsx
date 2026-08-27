@@ -60,6 +60,7 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
+import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import {
   PersonaOnboardingStudy,
   PersonaSettingsStudy,
@@ -86,13 +87,15 @@ import {
 
 function StudySection({
   children,
+  id,
   title,
 }: {
   children: React.ReactNode;
+  id?: string;
   title: string;
 }) {
   return (
-    <section className="flex flex-col gap-6">
+    <section className="flex flex-col gap-6" id={id}>
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
         {title}
       </h2>
@@ -783,8 +786,17 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Ops usage dashboard pagination">
+          <StudySection title="Ops usage search and recovery">
             <OpsUsageStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection
+            id="operator-tasks"
+            title="Private Murph diagnostic and direct member message"
+          >
+            <OpsOperatorTaskStudy />
           </StudySection>
         </>
       ) : null}

@@ -1,0 +1,26 @@
+name: Pull Request Head Change
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions: {}
+
+jobs:
+  head-change:
+    name: Record pull request head change
+    if: ${{ github.event.pull_request.draft == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Publish exact-head synchronization receipt
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Pull request synchronize event did not expose an exact head SHA."
+            exit 1
+          }
+          echo "Pull request head changed to ${PR_HEAD_SHA}; the trusted reset controller will return it to draft."

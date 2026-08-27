@@ -14,6 +14,15 @@ It does not own canonical record schemas, canonical write behavior, query entity
 
 Keep this package thin. Add a surface here only when multiple CLI/headless callers need the same vault usecase orchestration and importing the lower-level owner internals would create the wrong dependency direction.
 
+Exact command paths compose core-owned canonical readers or query-owned bounded
+family readers; they must not call `query.readVault()`. Family aliases are
+resolved only within their owning family. Family collection commands may use a
+filtered projection API, while genuinely cross-family, aggregate, derived, or
+global-invariant commands may still materialize the shared query projection.
+When an exact read feeds a mutation, carry the observed lifecycle revision or
+source revision into the canonical core writer rather than treating projection
+state as write authority.
+
 ## Clinical FHIR snapshots
 
 `@murphai/vault-usecases/clinical-records` is the explicit execution seam for a

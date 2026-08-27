@@ -7,10 +7,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
-import {
-  createVaultReadModel,
-  type ProtocolSummary,
-} from "@murphai/query";
+import type { ProtocolSummary } from "@murphai/query";
 import * as queryRuntime from "@murphai/query";
 
 import {
@@ -197,6 +194,25 @@ async function loadManifestReadUsecases(queryRuntime: {
   readVault: (vault: string) => Promise<unknown>;
   lookupEntityById: (readModel: unknown, lookup: string) => QueryRecord | null;
 }) {
+  const readExactEventRecord = vi.fn(async (input: {
+    lookup: string
+    expectedKinds?: readonly string[]
+  }) => {
+    const readModel = await queryRuntime.readVault('./vault')
+    const record = queryRuntime.lookupEntityById(readModel, input.lookup)
+    if (!record || (input.expectedKinds && !input.expectedKinds.includes(record.kind))) {
+      throw new VaultCliError('not_found', `No event found for "${input.lookup}".`)
+    }
+    return { event: record.attributes, ledgerFile: record.path, record }
+  })
+  const readOwnedEventRecord = vi.fn(async (input: { lookup: string; kind: string }) => {
+    const readModel = await queryRuntime.readVault('./vault')
+    const record = queryRuntime.lookupEntityById(readModel, input.lookup)
+    if (!record || record.kind !== input.kind) {
+      throw new VaultCliError('not_found', `No ${input.kind} found for "${input.lookup}".`)
+    }
+    return { event: record.attributes, ledgerFile: record.path, record }
+  })
   const documentMeal = await importWithMocks<
     typeof import("../src/usecases/document-meal-read.ts")
   >("../src/usecases/document-meal-read.ts", {
@@ -207,6 +223,9 @@ async function loadManifestReadUsecases(queryRuntime: {
         loadQueryRuntime: vi.fn(async () => queryRuntime),
       }),
     ),
+    "../src/usecases/exact-event-record.ts": () => ({
+      readOwnedEventRecord,
+    }),
   });
   const workoutRead = await importWithMocks<
     typeof import("../src/usecases/workout-read.ts")
@@ -218,6 +237,9 @@ async function loadManifestReadUsecases(queryRuntime: {
         loadQueryRuntime: vi.fn(async () => queryRuntime),
       }),
     ),
+    "../src/usecases/exact-event-record.ts": () => ({
+      readExactEventRecord,
+    }),
   });
 
   return { documentMeal, workoutRead };
@@ -234,6 +256,7 @@ afterEach(() => {
   vi.doUnmock("../src/query-runtime.ts");
   vi.doUnmock("../src/commands/query-record-command-helpers.ts");
   vi.doUnmock("../src/usecases/event-record-mutations.ts");
+  vi.doUnmock("../src/usecases/exact-event-record.ts");
   vi.doUnmock("../src/usecases/provider-event.ts");
 });
 
@@ -467,6 +490,7 @@ describe("shared and vault helper functions", () => {
     assert.deepEqual(compactObject({ a: 1, b: undefined, c: null }), { a: 1, c: null });
     assert.deepEqual(relativePathEntries([{ relativePath: "x.md" }]), ["x.md"]);
   });
+
 });
 
 describe("record patching and duration helpers", () => {
@@ -575,7 +599,7 @@ describe("public barrel exports", () => {
 });
 
 describe("record service seams", () => {
-  test("document/meal read wrappers route through the query runtime and event mutations", async () => {
+  test("document/meal exact reads use their canonical owner while lists use the query runtime", async () => {
     const queryRuntime = {
       readVault: vi.fn(async () => ({ vault: "./vault" })),
       lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
@@ -625,7 +649,7 @@ describe("record service seams", () => {
                 })
             : null,
       ),
-      listEntities: vi.fn(() => [
+      listCanonicalEntities: vi.fn(async () => [
         sampleQueryRecord({
           kind: "document",
           family: "event",
@@ -636,8 +660,19 @@ describe("record service seams", () => {
         }),
       ]),
     };
-    const editEventRecord = vi.fn(async (input: { lookup: string }) => ({ lookupId: input.lookup }));
+    const editEventRecord = vi.fn(async (input: { lookup: string }) => ({
+      lookupId: input.lookup,
+      record: queryRuntime.lookupEntityById({}, input.lookup)!,
+    }));
     const deleteEventRecord = vi.fn(async () => ({ lookupId: "meal_1", deleted: true }));
+    const readOwnedEventRecord = vi.fn(async (input: { lookup: string; kind: string }) => {
+      const readModel = await queryRuntime.readVault();
+      const record = queryRuntime.lookupEntityById(readModel, input.lookup);
+      if (!record || record.kind !== input.kind) {
+        throw new VaultCliError('not_found', `No ${input.kind} found for "${input.lookup}".`)
+      }
+      return { event: record.attributes, ledgerFile: record.path, record };
+    });
 
     const documentMeal = await importWithMocks<
       typeof import("../src/usecases/document-meal-read.ts")
@@ -652,6 +687,9 @@ describe("record service seams", () => {
       "../src/usecases/event-record-mutations.ts": () => ({
         editEventRecord,
         deleteEventRecord,
+      }),
+      "../src/usecases/exact-event-record.ts": () => ({
+        readOwnedEventRecord,
       }),
     });
 
@@ -750,8 +788,7 @@ describe("record service seams", () => {
 
   test("event mutations require the requested id to identify the event directly", async () => {
     const queryRuntime = {
-      readVault: vi.fn(async () => ({ vault: "./vault" })),
-      lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
+      resolveCanonicalEntityInFamily: vi.fn((_vault: string, _family: string, lookup: string) =>
         lookup === "media_1"
           ? sampleQueryRecord({
               kind: "activity_session",
@@ -1206,6 +1243,138 @@ describe("record service seams", () => {
     assert.equal(recipe.parseRecipePayload(recipe.scaffoldRecipePayload()).title, "Sheet Pan Salmon Bowls");
   });
 
+  test("daily food scheduling validates the exact eventual slug before food persistence", async () => {
+    const createInvalidSlugError = () => Object.assign(
+      new Error("slug exceeds the maximum length."),
+      {
+        code: "VAULT_INVALID_INPUT",
+        details: {},
+        name: "VaultError",
+      },
+    );
+    const missingFoodError = Object.assign(new Error("Food record was not found."), {
+      code: "VAULT_FOOD_MISSING",
+      details: {},
+      name: "VaultError",
+    });
+    const buildDailyFoodScheduledLogSlug = vi.fn((food: { slug: string }) => {
+      const derivedSlug = `auto-log-${food.slug}`;
+      if (derivedSlug.length > 160) {
+        throw createInvalidSlugError();
+      }
+      return derivedSlug;
+    });
+    const buildDailyFoodScheduledLogTitle = vi.fn((food: { title: string }) => {
+      const derivedTitle = `Auto-log ${food.title}`;
+      if (derivedTitle.length > 160) {
+        throw createInvalidSlugError();
+      }
+      return derivedTitle;
+    });
+    const upsertFood = vi.fn();
+    const upsertDailyFoodScheduledLog = vi.fn();
+    const listFoods = vi.fn(async (): Promise<Array<{
+      foodId: string;
+      markdown: string;
+      relativePath: string;
+      slug: string;
+      status: string;
+      title: string;
+    }>> => []);
+    const core = {
+      buildDailyFoodScheduledLogSlug,
+      buildDailyFoodScheduledLogTitle,
+      listFoods,
+      readFood: vi.fn(async () => {
+        throw missingFoodError;
+      }),
+      upsertDailyFoodScheduledLog,
+      upsertFood,
+    };
+    const food = await importWithMocks<typeof import("../src/usecases/food.ts")>(
+      "../src/usecases/food.ts",
+      {
+        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") {
+              return core;
+            }
+            throw new Error(`Unexpected specifier: ${specifier}`);
+          }),
+        })),
+      },
+    );
+
+    await assert.rejects(
+      () => food.addDailyFoodRecord({
+        vault: "./vault",
+        title: "New boundary food",
+        slug: "n".repeat(152),
+        time: "08:00",
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "contract_invalid" &&
+        error.message ===
+          "The generated daily food schedule slug is too long. Retry food schedule with a shorter --slug.",
+    );
+    expect(buildDailyFoodScheduledLogSlug).toHaveBeenLastCalledWith({
+      slug: "n".repeat(152),
+    });
+    expect(upsertFood).not.toHaveBeenCalled();
+    expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
+
+    await assert.rejects(
+      () => food.addDailyFoodRecord({
+        vault: "./vault",
+        title: "t".repeat(152),
+        slug: "short-food-slug",
+        time: "08:00",
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "contract_invalid" &&
+        error.message ===
+          "The generated daily food schedule title is too long. Retry food schedule with a shorter title.",
+    );
+    expect(buildDailyFoodScheduledLogTitle).toHaveBeenLastCalledWith({
+      title: "t".repeat(152),
+    });
+    expect(upsertFood).not.toHaveBeenCalled();
+    expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
+
+    listFoods.mockResolvedValueOnce([{
+      foodId: "food_existing",
+      markdown: "# Existing boundary food",
+      relativePath: "bank/foods/existing-boundary-food.md",
+      slug: "e".repeat(152),
+      status: "active",
+      title: "Existing boundary food",
+    }]);
+    await assert.rejects(
+      () => food.addDailyFoodRecord({
+        vault: "./vault",
+        title: "Existing boundary food",
+        slug: "attempted-shorter-slug",
+        time: "09:00",
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "contract_invalid" &&
+        error.message ===
+          "The existing food slug is too long for daily scheduling. Use food rename to shorten its slug, then retry food schedule.",
+    );
+    expect(buildDailyFoodScheduledLogSlug).toHaveBeenLastCalledWith({
+      slug: "e".repeat(152),
+    });
+    expect(upsertFood).not.toHaveBeenCalled();
+    expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
+  });
+
   test("food edit clearing attached regimens does not preserve related regimen links", async () => {
     const foodCore = {
       upsertFood: vi.fn(async (_input: Record<string, unknown>) => ({
@@ -1261,12 +1430,7 @@ describe("record service seams", () => {
   test("private protocol listing filters by Health Commons protocol references", async () => {
     const query = {
       ...queryRuntime,
-      readVault: vi.fn(async () =>
-        createVaultReadModel({
-          vaultRoot: "./vault",
-          entities: [],
-        })
-      ),
+      readCanonicalEntityFamilySource: vi.fn(async () => []),
       listProtocolSummaries: vi.fn((): ProtocolSummary[] => [
         {
           id: "protocol_1",
@@ -1500,6 +1664,34 @@ describe("record service seams", () => {
         family: "experiment",
         kind: "experiment",
       })),
+      resolveCanonicalEntityInFamily: vi.fn(async (
+        _vault: string,
+        family: string,
+      ) => sampleQueryRecord({
+        entityId: family === "journal" ? "journal:2026-04-08" : "exp_1",
+        primaryLookupId: family === "journal" ? "journal:2026-04-08" : "exp_1",
+        family: family === "journal" ? "journal" : "experiment",
+        kind: family === "journal" ? "journal_day" : "experiment",
+      })),
+      readVaultMetadataSource: vi.fn(async () => ({
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        vaultId: "vault_1",
+        title: "Vault",
+        timezone: "UTC",
+        createdAt: "2026-04-08T12:00:00.000Z",
+      })),
+      readCanonicalEntityFamilySource: vi.fn(async (_vault: string, family: string) =>
+        family === "core"
+          ? [sampleQueryRecord({
+              entityId: "vault_1",
+              primaryLookupId: "vault_1",
+              family: "core",
+              kind: "core_document",
+              path: "core.md",
+              title: "Core",
+              occurredAt: "2026-04-08T11:00:00.000Z",
+            })]
+          : []),
       listEntities: vi.fn(() => [sampleQueryRecord({
         entityId: "exp_1",
         primaryLookupId: "exp_1",
@@ -1663,6 +1855,7 @@ describe("record service seams", () => {
     const anchoredMetricQuery = {
       readVault: vi.fn(async () => journalQuery.readVault()),
       lookupEntityById: vi.fn(() => anchoredExperiment),
+      resolveCanonicalEntityInFamily: vi.fn(async () => anchoredExperiment),
       listMetricPoints: vi.fn(async (_vault: string, filters: unknown) => {
         anchoredMetricPointFilters.push(filters);
         return [];

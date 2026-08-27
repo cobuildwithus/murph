@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
@@ -20,10 +21,16 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { worktreeCreationIntentPath } from './frog-autofix-recovery.ts'
-
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const roots: string[] = []
+
+function worktreeCreationIntentPath(stateDir: string, worktree: string): string {
+  return path.join(
+    stateDir,
+    'worktree-create-intents',
+    `${createHash('sha256').update(worktree).digest('hex')}.json`,
+  )
+}
 
 type Harness = {
   fakeBin: string
@@ -294,9 +301,9 @@ afterEach(() => {
 })
 
 describe('worktree storage guard', () => {
-  it('defaults the regular worktree ceiling to 100', () => {
+  it('defaults the regular worktree ceiling to 200', () => {
     expect(readFileSync(path.join(sourceRoot, 'scripts', 'worktree-storage-guard'), 'utf8')).toContain(
-      'MURPH_WORKTREE_MAX_LIVE:-100',
+      'MURPH_WORKTREE_MAX_LIVE:-200',
     )
   })
 

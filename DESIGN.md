@@ -289,7 +289,21 @@ as an exact count: prefix an affected today, WAU, or MAU count with `At least`,
 explain the private evidence retirement in the supporting copy, and withhold a
 week-over-week rate when either compared window is incomplete.
 
-Follow the scorecard with the existing two-column chart grid. Begin with one
+Place **Recent member retention** directly below the scorecard. Show at most the
+20 newest real member signups in deterministic newest-first order, excluding
+group and thread-container identities. Use only the persisted masked phone hint
+or a short opaque member-id suffix for identification. Keep Today, rolling seven
+days, latest activity inside that window, onboarding, and suspension state in
+one desktop table. At phone widths, use compact member rows that put the
+activity badge and both message counts before timing detail; do not make the
+operator scroll sideways to reach the main value. Use mailbox receipt time
+throughout, and label the three activity states as `Active today`, `Active in
+7d`, and `No activity in 7d`. Never infer lifetime activity or plan context from
+retention-bounded mailbox rows or raw member billing status. Never select or
+render message content, raw contact details, health data, device facts, or
+per-participant group activity for this section.
+
+Follow the recent-member table with the existing two-column chart grid. Begin with one
 full-width **People who messaged Murph** chart: a solid sage
 trailing-seven-day line and a dashed sand completed-day line, both built from
 anonymous daily snapshots. Keep the daily line above the rolling line so equal
@@ -545,11 +559,11 @@ its real component with synthetic states in both the components catalog and
 this section study.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
-and $20 as visually prominent monthly maximums. On desktop, use the shared
+$20, and $50 as visually prominent monthly maximums. On desktop, use the shared
 choice cards. On phones, use a near-full-height bottom drawer with one large
 circular cap slider. The handle follows a pointer anywhere around the arc and
 snaps to the nearest available maximum on release; Arrow keys and Home/End
-provide the same three-stop selection. Keep the opening explanation to
+provide the same four-stop selection. Keep the opening explanation to
 `Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
 the initial $5 activation purchase, whose amount is shown before payment;
 selecting a maximum alone does not charge the card. Keep both funding actions
@@ -587,14 +601,14 @@ terminal receipt. Never use a browser alert or confirm prompt for sponsorship
 changes.
 
 When group funding is fulfilled, switch from the payment-status composition to
-one confident success hierarchy: a compact sage confirmation mark and mono
-`NICE ONE` label, the Fraunces headline `This group has more Murph`, one
-sentence confirming that the contribution is ready, and one full-width **Open
-Messages** action. State that Messages opens without a group deep link and the
-member must choose the group. Keep the desktop dialog and mobile drawer at
-content height, and use their standard close control as the only separate exit.
-Do not add a divider band, a second dismissal action, a bordered status card,
-payment-pending copy, an invented amount, or celebration graphics. Once
+one confident success hierarchy: a compact sage confirmation mark, the
+Fraunces headline `This group has more Murph`, one sentence confirming that the
+contribution is ready, and one full-width **Open Messages** action. State that
+Messages opens without a group deep link and the member must choose the group.
+Keep the desktop dialog and mobile drawer at content height, and use their
+standard close control as the only separate exit. Do not add a congratulatory
+kicker, divider band, second dismissal action, bordered status card,
+payment-pending copy, invented amount, or celebration graphics. Once
 fulfillment is verified, do not carry frozen sponsor details or their
 payment-recovery instructions into the success receipt.
 

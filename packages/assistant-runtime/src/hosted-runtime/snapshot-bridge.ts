@@ -11,8 +11,10 @@ import {
   withCanonicalWriteLock,
 } from "@murphai/core";
 import {
+  AssistantGeneratedDeliveryResiduePruneError,
   pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
+  type AssistantGeneratedDeliveryResiduePruneErrorCode,
   type AssistantGeneratedDeliveryResiduePruneResult,
   type AssistantRuntimeResiduePruneResult,
 } from "@murphai/assistant-engine/assistant-runtime-residue";
@@ -24,12 +26,16 @@ import {
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
+  listTransientInboxVideoStoredPaths,
+} from "@murphai/inboxd/retention";
+import {
   compactHostedUnresolvedAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
   hasHostedProviderCleanupRecoveryCompleted,
 } from "./provider-cleanup.ts";
 import {
+  buildHostedExecutionSafeErrorDetails,
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedRuntimeSafeErrorText,
@@ -280,6 +286,8 @@ interface HostedWorkspaceSnapshotTimingDetails
   extends HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
   snapshotArchiveBuildElapsedMs?: number;
   snapshotDirectR2UploadElapsedMs?: number;
+  snapshotSessionCompleteElapsedMs?: number;
+  snapshotSessionStartElapsedMs?: number;
 }
 
 type HostedWorkspaceSnapshotStage =
@@ -327,6 +335,10 @@ async function createHostedWorkspaceV2Snapshot(
     | null = null;
   let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
   let assistantRuntimeGeneratedDeliveryPruneFailed = false;
+  let assistantRuntimeGeneratedDeliveryPruneErrorCode:
+    | AssistantGeneratedDeliveryResiduePruneErrorCode
+    | "unknown"
+    | null = null;
   let snapshotFailureObserved = false;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
@@ -356,13 +368,17 @@ async function createHostedWorkspaceV2Snapshot(
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const durableRoot = resolveWorkspaceDurableRoot(input.vaultRoot);
     const operatorHomeRoot = resolveWorkspaceOperatorHomeRoot(input.vaultRoot);
-    snapshotSession = await workspaceSnapshotPort.startSnapshotSession({
-      expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
-      inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
-      nextWakeAt: input.request.nextWakeAt,
-      nextWakeReason: input.request.nextWakeReason,
-      reason: input.request.reason,
-      signal: input.signal,
+    snapshotSession = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotSessionStartElapsedMs",
+      run: async () => await workspaceSnapshotPort.startSnapshotSession({
+        expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+        inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
+        nextWakeAt: input.request.nextWakeAt,
+        nextWakeReason: input.request.nextWakeReason,
+        reason: input.request.reason,
+        signal: input.signal,
+      }),
+      timings: snapshotTimings,
     });
     const activeSnapshotSession = snapshotSession;
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
@@ -442,11 +458,21 @@ async function createHostedWorkspaceV2Snapshot(
         assistantGeneratedDeliveryPruneResult.generatedDeliveryFilesPruned >
           0 ||
         assistantGeneratedDeliveryPruneResult
+          .generatedDeliveryActiveFilesMissing > 0 ||
+        assistantGeneratedDeliveryPruneResult
+          .generatedDeliveryNestedEntriesRetained > 0 ||
+        assistantGeneratedDeliveryPruneResult
           .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
         const generatedDeliveryCleanupSkipped =
           assistantGeneratedDeliveryPruneResult
             .generatedDeliveryCleanupSkippedUntrustedOutbox;
+        const generatedDeliveryActiveFilesMissing =
+          assistantGeneratedDeliveryPruneResult
+            .generatedDeliveryActiveFilesMissing > 0;
+        const generatedDeliveryNestedEntriesRetained =
+          assistantGeneratedDeliveryPruneResult
+            .generatedDeliveryNestedEntriesRetained > 0;
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
@@ -455,10 +481,19 @@ async function createHostedWorkspaceV2Snapshot(
             ),
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
-          level: generatedDeliveryCleanupSkipped ? "warn" : "info",
+          level:
+            generatedDeliveryCleanupSkipped ||
+            generatedDeliveryActiveFilesMissing ||
+            generatedDeliveryNestedEntriesRetained
+              ? "warn"
+              : "info",
           message: generatedDeliveryCleanupSkipped
             ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
-            : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
+            : generatedDeliveryActiveFilesMissing
+              ? "Hosted workspace generated-delivery cleanup found active references without staging files."
+              : generatedDeliveryNestedEntriesRetained
+                ? "Hosted workspace generated-delivery cleanup retained legacy nested entries."
+                : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
           phase: "checkpoint",
           userId: input.userId,
         });
@@ -466,10 +501,15 @@ async function createHostedWorkspaceV2Snapshot(
     } catch (cleanupError) {
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
       assistantRuntimeGeneratedDeliveryPruneFailed = true;
+      assistantRuntimeGeneratedDeliveryPruneErrorCode =
+        cleanupError instanceof AssistantGeneratedDeliveryResiduePruneError
+          ? cleanupError.code
+          : "unknown";
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
           assistantRuntimeGeneratedDeliveryPruneFailed: true,
+          assistantRuntimeGeneratedDeliveryPruneErrorCode,
           snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
         },
         error: cleanupError,
@@ -541,9 +581,16 @@ async function createHostedWorkspaceV2Snapshot(
     const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotArchiveBuildElapsedMs",
       run: async () => {
+        const transientInboxVideoStoredPaths =
+          await listTransientInboxVideoStoredPaths({
+            signal: input.signal,
+            vaultRoot: input.vaultRoot,
+          });
+        assertHostedWorkspaceSnapshotConstructionLive(input.signal);
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
           codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
+          excludedVaultPaths: transientInboxVideoStoredPaths,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           signal: input.signal,
@@ -668,12 +715,16 @@ async function createHostedWorkspaceV2Snapshot(
     checkpointAttempted = true;
     const checkpointRequest = { ...input.request };
     delete checkpointRequest.handledConversationFrontierSelected;
-    const completed = await workspaceSnapshotPort.completeSnapshotSession({
-      checkpointRequest: {
-        ...checkpointRequest,
-        snapshotRef,
-      },
-      ref: snapshotRef,
+    const completed = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotSessionCompleteElapsedMs",
+      run: async () => await workspaceSnapshotPort.completeSnapshotSession({
+        checkpointRequest: {
+          ...checkpointRequest,
+          snapshotRef,
+        },
+        ref: snapshotRef,
+      }),
+      timings: snapshotTimings,
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
@@ -856,6 +907,7 @@ async function createHostedWorkspaceV2Snapshot(
 
   await writeHostedCheckpointSnapshotFinishedLog({
     assistantGeneratedDeliveryPruneResult,
+    assistantRuntimeGeneratedDeliveryPruneErrorCode,
     assistantRuntimeGeneratedDeliveryPruneFailed,
     assistantRuntimeResiduePruneResult,
     encryptedByteSize,
@@ -1066,6 +1118,18 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const sessionFailure = readHostedWorkspaceSnapshotFailure(error);
+  if (sessionFailure?.kind === "start") {
+    redactedJson.snapshotSessionStartFailurePhase = sessionFailure.phase;
+    if (sessionFailure.timeoutMs !== undefined) {
+      redactedJson.snapshotSessionStartTimeoutMs = sessionFailure.timeoutMs;
+    }
+  } else if (sessionFailure?.kind === "complete") {
+    redactedJson.snapshotSessionCompleteFailurePhase = sessionFailure.phase;
+    if (sessionFailure.timeoutMs !== undefined) {
+      redactedJson.snapshotSessionCompleteTimeoutMs = sessionFailure.timeoutMs;
+    }
+  }
   let safeDiagnosticDetail: string | null = null;
   if (diagnostics) {
     if (typeof diagnostics.errorCode === "string") {
@@ -1124,6 +1188,57 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
       redactedJson.bundleArchiveValidationDetail = validationDetail;
     }
   }
+}
+
+const HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES = new Set([
+  "session_start_payload_validation",
+  "session_start_request",
+  "session_start_response_decode",
+  "session_start_write_fence_headers",
+]);
+const HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES = new Set([
+  "session_complete_payload_validation",
+  "session_complete_record_checkpoint",
+  "session_complete_request",
+  "session_complete_response_decode",
+  "session_complete_write_fence_headers",
+]);
+
+function readHostedWorkspaceSnapshotFailure(error: unknown): {
+  kind: "complete" | "start";
+  phase: string;
+  timeoutMs?: number;
+} | null {
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const properties = details?.errorProperties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+    return null;
+  }
+  const phase = properties.phase;
+  const timeoutMs = properties.timeoutMs;
+  if (typeof phase !== "string") {
+    return null;
+  }
+  const kind = HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES.has(phase)
+    ? "start"
+    : HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES.has(phase)
+      ? "complete"
+      : null;
+  if (!kind) {
+    return null;
+  }
+  if (timeoutMs === undefined) {
+    return { kind, phase };
+  }
+  if (
+    typeof timeoutMs !== "number"
+    || !Number.isSafeInteger(timeoutMs)
+    || timeoutMs < 0
+    || timeoutMs > 60_000
+  ) {
+    return null;
+  }
+  return { kind, phase, timeoutMs };
 }
 
 function normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(
@@ -1255,14 +1370,27 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
     !result ||
     (
       result.generatedDeliveryFilesPruned === 0 &&
+      result.generatedDeliveryFilesScanned === 0 &&
+      result.generatedDeliveryActiveFilesMissing === 0 &&
+      result.generatedDeliveryNestedEntriesRetained === 0 &&
       !result.generatedDeliveryCleanupSkippedUntrustedOutbox
     )
   ) {
     return {};
   }
   return {
+    assistantRuntimeGeneratedDeliveryActiveFilesMissing:
+      result.generatedDeliveryActiveFilesMissing,
+    assistantRuntimeGeneratedDeliveryActiveFilesRetained:
+      result.generatedDeliveryActiveFilesRetained,
+    assistantRuntimeGeneratedDeliveryBytesScanned:
+      result.generatedDeliveryBytesScanned,
     prunedAssistantRuntimeGeneratedDeliveryBytes:
       result.generatedDeliveryBytesPruned,
+    assistantRuntimeGeneratedDeliveryFilesScanned:
+      result.generatedDeliveryFilesScanned,
+    assistantRuntimeGeneratedDeliveryNestedEntriesRetained:
+      result.generatedDeliveryNestedEntriesRetained,
     prunedAssistantRuntimeGeneratedDeliveryFileCount:
       result.generatedDeliveryFilesPruned,
     assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
@@ -1277,6 +1405,10 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
     | AssistantGeneratedDeliveryResiduePruneResult
     | null;
   assistantRuntimeGeneratedDeliveryPruneFailed: boolean;
+  assistantRuntimeGeneratedDeliveryPruneErrorCode:
+    | AssistantGeneratedDeliveryResiduePruneErrorCode
+    | "unknown"
+    | null;
   assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
   fileCount: number;
@@ -1296,7 +1428,11 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     ...createHostedCheckpointSnapshotRequestLogDetails(input.request),
     ...(input.assistantRuntimeGeneratedDeliveryPruneFailed
-      ? { assistantRuntimeGeneratedDeliveryPruneFailed: true }
+      ? {
+          assistantRuntimeGeneratedDeliveryPruneErrorCode:
+            input.assistantRuntimeGeneratedDeliveryPruneErrorCode ?? "unknown",
+          assistantRuntimeGeneratedDeliveryPruneFailed: true,
+        }
       : {}),
     browserVaultReplicaState: "omitted",
     leaseCheckCount: input.leaseCheckCount,

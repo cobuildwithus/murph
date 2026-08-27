@@ -15,6 +15,7 @@ import type {
   CommandContext,
   JsonObject,
 } from "../health-cli-method-types.js"
+import type { QueryEntityFamily } from "../query-runtime.js"
 import type {
   CoreWriteServices,
   ImporterServices,
@@ -37,6 +38,7 @@ import {
   asEntityEnvelope,
   asListEnvelope,
   describeLookupConstraint,
+  inferEntityKind,
   materializeExportPack,
   matchesGenericKindFilter,
   normalizeIssues,
@@ -118,7 +120,14 @@ import {
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
 import { addCaptureRecord } from "./capture.js"
-import { toVaultCliError } from "./vault-usecase-helpers.js"
+import {
+  toAssessmentProjectVaultCliError,
+  toImporterInputFileVaultCliError,
+  toVaultCliError,
+  toVaultCliFilesystemError,
+  toVaultInitializationCliError,
+  toVaultMetadataCliError,
+} from "./vault-usecase-helpers.js"
 
 const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
   "candidateId",
@@ -134,6 +143,15 @@ const COMPACT_WEARABLE_ARRAY_LIMIT = 8
 const COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT = 8
 const COMPACT_WEARABLE_TREND_POINT_LIMIT = 14
 const COMPACT_WEARABLE_STRING_LENGTH = 160
+
+function genericShowFamily(id: string): QueryEntityFamily | null {
+  const entityKind = inferEntityKind(id)
+  if (entityKind === "document" || entityKind === "meal") {
+    return "event"
+  }
+
+  return ALL_QUERY_ENTITY_FAMILIES.find((family) => family === entityKind) ?? null
+}
 
 type CompactWearableValue = JsonValue | typeof OMIT_COMPACT_WEARABLE_VALUE
 
@@ -445,10 +463,14 @@ function createIntegratedCoreServices(): CoreWriteServices {
     }) {
       const { vault } = input
       const core = await loadCoreRuntime()
-      await core.initializeVault({
-        vaultRoot: vault,
-        timezone: input.timezone ?? resolveSystemTimeZone(),
-      })
+      try {
+        await core.initializeVault({
+          vaultRoot: vault,
+          timezone: input.timezone ?? resolveSystemTimeZone(),
+        })
+      } catch (error) {
+        throw toVaultInitializationCliError(error)
+      }
       return {
         vault,
         created: true,
@@ -469,7 +491,12 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async repairVault(input: CommandContext) {
       const { vault } = input
       const core = await loadCoreRuntime()
-      const result = await core.repairVault({ vaultRoot: vault })
+      let result: Awaited<ReturnType<typeof core.repairVault>>
+      try {
+        result = await core.repairVault({ vaultRoot: vault })
+      } catch (error) {
+        throw toVaultMetadataCliError(error)
+      }
       return {
         vault,
         metadataFile: result.metadataFile,
@@ -883,18 +910,22 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async projectAssessment(input: ProjectAssessmentInput) {
       const { vault, assessmentId } = input
       const core = await loadCoreRuntime()
-      const assessment = await core.readAssessmentResponse({
-        vaultRoot: vault,
-        assessmentId,
-      })
-      const proposal = await core.projectAssessmentResponse({
-        assessmentResponse: assessment,
-      })
+      try {
+        const assessment = await core.readAssessmentResponse({
+          vaultRoot: vault,
+          assessmentId,
+        })
+        const proposal = await core.projectAssessmentResponse({
+          assessmentResponse: assessment,
+        })
 
-      return {
-        vault,
-        assessmentId,
-        proposal,
+        return {
+          vault,
+          assessmentId,
+          proposal,
+        }
+      } catch (error) {
+        throw toAssessmentProjectVaultCliError(error)
       }
     },
     ...createExplicitHealthCoreServices(async () => {
@@ -921,6 +952,10 @@ function createIntegratedImporterServices(): ImporterServices {
           reuseExact,
         })
       } catch (error) {
+        const inputFileError = toImporterInputFileVaultCliError(error, file)
+        if (inputFileError !== error) {
+          throw inputFileError
+        }
         throw toVaultCliError(error, {
           DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
           RAW_MANIFEST_INVALID: { code: 'conflict' },
@@ -1226,8 +1261,10 @@ function createIntegratedQueryServices(): QueryServices {
       }
 
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(vault)
-      const entity = query.lookupEntityById(readModel, id)
+      const family = genericShowFamily(id)
+      const entity = family
+        ? await query.resolveCanonicalEntityInFamily(vault, family, id)
+        : null
 
       if (!entity) {
         throw new VaultCliError("not_found", `No entity found for "${id}".`)
@@ -1524,10 +1561,24 @@ function createIntegratedQueryServices(): QueryServices {
         experimentSlug: experiment,
       })
 
-      await materializeExportPack(vault, pack.files)
+      try {
+        await materializeExportPack(vault, pack.files)
+      } catch (error) {
+        throw toVaultCliFilesystemError(error, {
+          message: 'The export pack could not be stored in the vault.',
+          fieldPath: 'vault',
+        })
+      }
 
       if (out) {
-        await materializeExportPack(out, pack.files)
+        try {
+          await materializeExportPack(out, pack.files)
+        } catch (error) {
+          throw toVaultCliFilesystemError(error, {
+            message: 'The export pack could not be written to the output directory.',
+            fieldPath: 'out',
+          })
+        }
       }
 
       return {

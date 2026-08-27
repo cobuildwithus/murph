@@ -30,6 +30,7 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionCompletedWake,
@@ -73,6 +74,9 @@ import {
 import {
   buildAssistantProviderShellCommandCall,
 } from "./helpers/hosted-local-e2e-support.js";
+import {
+  hostedBrowserVaultReplicaObjectKey,
+} from "../src/storage-paths.js";
 import type {
   HostedLocalForegroundPriorityOrderingEvent,
   HostedLocalForegroundPriorityOrderingObservationState,
@@ -125,6 +129,8 @@ type ForegroundPriorityOrderingEventOfKind<
 > = Extract<HostedLocalForegroundPriorityOrderingEvent, { kind: Kind }>;
 
 const systemMailboxProbe = createProbeIdentity("system-mailbox");
+const environmentHandoffProbe = createProbeIdentity("environment-handoff");
+const environmentPriorityProbe = createProbeIdentity("environment-priority");
 const retentionProbe = createProbeIdentity("retention");
 const stuckInvocationProbe = createProbeIdentity("stuck-invocation");
 const activeTurnProbe = createProbeIdentity("active-turn");
@@ -143,6 +149,8 @@ const orderingProbeIdentities = [
 ] as const;
 const allProbeIdentities = [
   systemMailboxProbe,
+  environmentHandoffProbe,
+  environmentPriorityProbe,
   retentionProbe,
   stuckInvocationProbe,
   activeTurnProbe,
@@ -202,7 +210,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("replies promptly while model-free work owns every durable system wake", async () => {
+  it("aborts and replaces generic model-free system work for a signed foreground reply", async () => {
     await seedProbe(systemMailboxProbe);
     const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
     const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
@@ -215,9 +223,18 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     );
     expect(systemWakes.map((wake) => wake.kind).sort()).toEqual(
       HOSTED_EXECUTION_WAKE_KINDS
-        .filter((kind) => kind !== "conversation.message")
+        .filter((kind) =>
+          kind !== "conversation.message"
+          && kind !== "environment-interview.completed"
+        )
         .sort(),
     );
+    const deviceSyncWake = systemWakes.find((wake) =>
+      wake.kind === "device-sync.wake"
+    );
+    if (!deviceSyncWake) {
+      throw new Error("The foreground-priority wake storm omitted device maintenance.");
+    }
 
     const appended = [];
     for (const wake of systemWakes) {
@@ -232,10 +249,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       ["Background system notification acknowledged."],
       { matchInputContains: "Priority-gate background notification." },
     );
-    await armCheckpointPublicationBarrier(
-      systemMailboxProbe.userId,
-      "canonical",
-    );
+    await armForegroundPriorityOrderingObservation({
+      mode: "canonical",
+      scenario: requireScenario(),
+      userId: systemMailboxProbe.userId,
+    });
     const latestAppend = appended.at(-1);
     if (!latestAppend) {
       throw new Error("The foreground-priority system wake storm was empty.");
@@ -246,56 +264,384 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       laneSeq: latestAppend.wake.seq,
       mailboxItemId: latestAppend.wake.id,
     });
-    const systemFence = await waitForSystemWakeStormCheckpointBarrier(
+    const systemFence = await waitForSystemWakeStormCanonicalCommit(
       systemMailboxProbe.userId,
       latestAppend.wake.seq,
       systemWakes.length,
     );
-    let latencyMs: number;
-    let barrierReleased = false;
+    const inboundText = "Reply while the full system mailbox is active.";
+    const replyText = "Foreground reply won over the full system mailbox.";
+    const providerRequestBaseline = countAssistantProviderInputs(inboundText);
+    const recoveryEvidenceStartedAt = new Date();
+    const providerStartObservations: Array<{
+      activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
+      barrierState:
+        HostedLocalForegroundPriorityOrderingObservationState["barrierState"];
+      deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
+      systemLane: {
+        importedSeq: string;
+        lag: string;
+        maxSeq: string;
+      } | null;
+    }> = [];
+    let latencyMs = Number.POSITIVE_INFINITY;
+    let orderingBarrierReleased = false;
     try {
-      latencyMs = await sendInboundAndRequirePromptReply({
-        afterAccepted: async () => {
-          await requireSystemOwnerPreservedWhileBarrierHeld(
-            systemMailboxProbe.userId,
-            systemFence.attemptId,
-          );
-          await releaseBackgroundCheckpointBarrier(systemMailboxProbe.userId);
-          barrierReleased = true;
-        },
+      const foregroundReply = sendInboundAndRequirePromptReply({
         identity: systemMailboxProbe,
-        inboundText: "Reply while the full system mailbox is active.",
-        label: "system mailbox",
-        replyText: "Foreground reply won over the full system mailbox.",
+        inboundText,
+        label: "system mailbox exact replacement",
+        onAssistantProviderStart: async () => {
+          await requireScenario().harness
+            .recordForegroundPriorityAssistantProviderStartForTest(
+              systemMailboxProbe.userId,
+            );
+          const [ordering, activeFence, status, deviceMailboxItem] =
+            await Promise.all([
+              readForegroundPriorityOrderingObservation(
+                requireScenario(),
+                systemMailboxProbe.userId,
+              ),
+              readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
+              requireScenario().harness.readUserStatus(
+                systemMailboxProbe.userId,
+              ),
+              readHostedMailboxItemForTest({
+                dedupeKey: deviceSyncWake.eventId,
+                environment: requireScenario().runtimeEnv,
+                userId: systemMailboxProbe.userId,
+              }),
+            ]);
+          const systemLane = status.mailboxLag.find((lane) =>
+            lane.lane === "system"
+          );
+          providerStartObservations.push({
+            activeFence,
+            barrierState: ordering.barrierState,
+            deviceMailboxItem,
+            systemLane: systemLane
+              ? {
+                  importedSeq: systemLane.importedSeq,
+                  lag: systemLane.lag,
+                  maxSeq: systemLane.maxSeq,
+                }
+              : null,
+          });
+        },
+        replyText,
       });
+
+      await waitForConversationMailboxLag(systemMailboxProbe.userId);
+      await requireSystemOwnerPreservedWhileCanonicalAckHeld({
+        inboundText,
+        providerRequestBaseline,
+        systemAttemptId: systemFence.attemptId,
+        userId: systemMailboxProbe.userId,
+      });
+      await expect(releaseForegroundPriorityOrderingBarrier({
+        scenario: requireScenario(),
+        userId: systemMailboxProbe.userId,
+      })).resolves.toEqual({ ok: true, released: true });
+      orderingBarrierReleased = true;
+
+      latencyMs = await foregroundReply;
+
+      expect(providerStartObservations).toHaveLength(1);
+      const providerStart = providerStartObservations[0];
+      if (!providerStart?.activeFence) {
+        throw new Error(await requireScenario().buildFailureMessage(
+          systemMailboxProbe.userId,
+          ["Assistant provider started without an active runtime write fence."],
+        ));
+      }
+      expect(providerStart.barrierState).toBe("released");
+      expect(providerStart.activeFence.processingMode).toBe("default");
+      expect(providerStart.activeFence.attemptId).not.toBe(
+        systemFence.attemptId,
+      );
+      if (!providerStart.systemLane) {
+        throw new Error(await requireScenario().buildFailureMessage(
+          systemMailboxProbe.userId,
+          ["Assistant provider started without persisted system-mailbox lag."],
+        ));
+      }
+      expect(providerStart.systemLane.maxSeq).toBe(latestAppend.wake.seq);
+      expect(providerStart.systemLane.lag).toBe("0");
+      expect(providerStart.systemLane.importedSeq).toBe(latestAppend.wake.seq);
+      expect(providerStart.deviceMailboxItem).toMatchObject({
+        consumedAt: null,
+        dedupeKey: deviceSyncWake.eventId,
+        kind: "device-sync.wake",
+        lane: "system",
+      });
+
+      for (const wake of systemWakes) {
+        await expect(readHostedMailboxItemForTest({
+          dedupeKey: wake.eventId,
+          environment: requireScenario().runtimeEnv,
+          userId: systemMailboxProbe.userId,
+        })).resolves.toMatchObject({
+          dedupeKey: wake.eventId,
+          kind: wake.kind,
+          lane: "system",
+        });
+      }
+      await assertExactlyOneAcceptedReplyAfterBoundary({
+        identity: systemMailboxProbe,
+        label: "system mailbox exact replacement",
+        replyText,
+      });
+      expect(countAssistantProviderInputs(inboundText)).toBe(
+        providerRequestBaseline + 1,
+      );
+
+      // Do not manufacture a second system pointer. The existing durable
+      // mailbox/Temporal continuation must recover the yielded device/system
+      // work under a non-overlapping invocation and advance the frontier.
+      await requireSystemWakeStormPreserved(
+        systemMailboxProbe.userId,
+        latestAppend.wake.seq,
+        {
+          expectedWakeKinds: systemWakes.map((wake) => wake.kind),
+          preemptedAttemptId: systemFence.attemptId,
+          recoveryEvidenceStartedAt,
+        },
+      );
     } finally {
-      if (!barrierReleased) {
-        await releaseBackgroundCheckpointBarrier(systemMailboxProbe.userId);
+      if (!orderingBarrierReleased) {
+        await releaseForegroundPriorityOrderingBarrier({
+          scenario: requireScenario(),
+          userId: systemMailboxProbe.userId,
+        }).catch(() => undefined);
+      }
+      await clearForegroundPriorityOrderingObservation(
+        requireScenario(),
+        systemMailboxProbe.userId,
+      ).catch(() => undefined);
+    }
+
+    writeLatencyProof("system_mailbox", latencyMs);
+  }, 300_000);
+
+  it("hands queued Environment work off after the active foreground turn", async () => {
+    await seedProbe(environmentHandoffProbe);
+    const baselineStatus = await requireScenario().harness.readUserStatus(
+      environmentHandoffProbe.userId,
+    );
+    const baselineReplicaRef = baselineStatus.workspace?.browserVaultReplicaRef;
+    expect(baselineReplicaRef).toBeDefined();
+    const providerRequestBaseline =
+      requireScenario().assistantProviderRequests.length;
+    const foregroundText =
+      "Finish this foreground turn before applying my queued Environment answer.";
+    const foregroundReply =
+      "The foreground turn finished before Environment work took ownership.";
+    const replyPath = replyPathFor(environmentHandoffProbe);
+    const replyMatcher = matchLinqMessageText(foregroundReply);
+    const replyBaseline = requireLinqStub().countAcceptedSends(
+      replyPath,
+      replyMatcher,
+    );
+    const heldProviderResponse = createHeldAssistantProviderTextResponse(
+      foregroundReply,
+    );
+    requireScenario().queueAssistantResponses(
+      [heldProviderResponse.response],
+      { matchInputContains: foregroundText },
+    );
+
+    const foregroundResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(
+        environmentHandoffProbe.userId,
+        environmentHandoffProbe.chatId,
+        {
+          eventId: `evt_priority_environment_handoff_${runId}`,
+          messageId: `msg_priority_environment_handoff_${runId}`,
+          text: foregroundText,
+        },
+      ),
+    );
+    expect(foregroundResponse.status).toBe(202);
+    await expect(foregroundResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    await heldProviderResponse.started;
+    await waitForRuntimeInFlight(
+      environmentHandoffProbe.userId,
+      "foreground work before Environment handoff",
+      "default",
+    );
+
+    const environmentCompletion = await appendEnvironmentInterviewCompletion(
+      environmentHandoffProbe,
+      "handoff",
+    );
+    const runtimeWakeBefore = await readRuntimeWakeObservation({
+      scenario: requireScenario(),
+      userId: environmentHandoffProbe.userId,
+    });
+    let providerReleased = false;
+    try {
+      await signalTemporalRuntime(environmentHandoffProbe.userId, {
+        kind: "mailbox_appended",
+        lane: "system",
+        laneSeq: environmentCompletion.append.wake.seq,
+        mailboxItemId: environmentCompletion.append.wake.id,
+      });
+      await waitForRuntimeWakeExecution({
+        previous: runtimeWakeBefore,
+        scenario: requireScenario(),
+        userId: environmentHandoffProbe.userId,
+      });
+      await expect(
+        readActiveRuntimeFenceForTest(environmentHandoffProbe.userId),
+      ).resolves.toMatchObject({
+        processingMode: "default",
+      });
+      heldProviderResponse.release();
+      providerReleased = true;
+    } finally {
+      if (!providerReleased) {
+        heldProviderResponse.release();
       }
     }
 
-    for (const wake of systemWakes) {
-      await expect(readHostedMailboxItemForTest({
-        dedupeKey: wake.eventId,
-        environment: requireScenario().runtimeEnv,
-        userId: systemMailboxProbe.userId,
-      })).resolves.toMatchObject({
-        dedupeKey: wake.eventId,
-        kind: wake.kind,
-        lane: "system",
-      });
-    }
-    await requireSystemWakeStormPreserved(
-      systemMailboxProbe.userId,
-      latestAppend.wake.seq,
-    );
-    await assertExactlyOneAcceptedReplyAfterBoundary({
-      identity: systemMailboxProbe,
-      label: "system mailbox",
-      replyText: "Foreground reply won over the full system mailbox.",
+    await waitForAcceptedReplyInScenario({
+      baselineCount: replyBaseline,
+      identity: environmentHandoffProbe,
+      label: "foreground-to-Environment handoff",
+      linqStub: requireLinqStub(),
+      matcher: replyMatcher,
+      replyPath,
+      scenario: requireScenario(),
     });
+    await waitForEnvironmentCompletion({
+      baselineReplicaRef,
+      completion: environmentCompletion,
+      identity: environmentHandoffProbe,
+    });
+    expect(requireScenario().assistantProviderRequests).toHaveLength(
+      providerRequestBaseline + 1,
+    );
+  }, 300_000);
 
-    writeLatencyProof("system_mailbox", latencyMs);
+  it("lets fresh foreground work preempt the active Environment owner", async () => {
+    await seedProbe(environmentPriorityProbe);
+    const baselineStatus = await requireScenario().harness.readUserStatus(
+      environmentPriorityProbe.userId,
+    );
+    const baselineReplicaRef = baselineStatus.workspace?.browserVaultReplicaRef;
+    expect(baselineReplicaRef).toBeDefined();
+    const environmentCompletion = await appendEnvironmentInterviewCompletion(
+      environmentPriorityProbe,
+      "foreground-priority",
+    );
+
+    await armCheckpointPublicationBarrier(
+      environmentPriorityProbe.userId,
+      "canonical",
+    );
+    let barrierReleased = false;
+    try {
+      await signalTemporalRuntime(environmentPriorityProbe.userId, {
+        kind: "mailbox_appended",
+        lane: "system",
+        laneSeq: environmentCompletion.append.wake.seq,
+        mailboxItemId: environmentCompletion.append.wake.id,
+      });
+      const environmentFence = await waitForProcessingCheckpointBarrier(
+        environmentPriorityProbe.userId,
+        "environment_interview",
+      );
+      const providerRequestBaseline =
+        requireScenario().assistantProviderRequests.length;
+      const foregroundText =
+        "Reply now even though my Environment report is refreshing.";
+      const foregroundReply =
+        "Foreground authority preempted the Environment refresh.";
+      const replyPath = replyPathFor(environmentPriorityProbe);
+      const replyMatcher = matchLinqMessageText(foregroundReply);
+      const replyBaseline = requireLinqStub().countAcceptedSends(
+        replyPath,
+        replyMatcher,
+      );
+      let replicaRefAtProviderStart: unknown;
+      requireScenario().queueAssistantResponses(
+        [{
+          beforeResponse: async () => {
+            replicaRefAtProviderStart =
+              (await requireScenario().harness.readUserStatus(
+                environmentPriorityProbe.userId,
+              )).workspace?.browserVaultReplicaRef;
+          },
+          text: foregroundReply,
+        }],
+        { matchInputContains: foregroundText },
+      );
+      const runtimeWakeBefore = await readRuntimeWakeObservation({
+        scenario: requireScenario(),
+        userId: environmentPriorityProbe.userId,
+      });
+      const foregroundResponse = await postSignedLinqWebhook(
+        buildHostedLinqInboundEvent(
+          environmentPriorityProbe.userId,
+          environmentPriorityProbe.chatId,
+          {
+            eventId: `evt_priority_environment_preemption_${runId}`,
+            messageId: `msg_priority_environment_preemption_${runId}`,
+            text: foregroundText,
+          },
+        ),
+      );
+      expect(foregroundResponse.status).toBe(202);
+      await expect(foregroundResponse.json()).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+      await waitForRuntimeWakeExecution({
+        previous: runtimeWakeBefore,
+        scenario: requireScenario(),
+        userId: environmentPriorityProbe.userId,
+      });
+      await requireProcessingOwnerPreserved(
+        environmentPriorityProbe.userId,
+        "environment_interview",
+        environmentFence.attemptId,
+      );
+      await releaseBackgroundCheckpointBarrier(
+        environmentPriorityProbe.userId,
+      );
+      barrierReleased = true;
+
+      await waitForAcceptedReplyInScenario({
+        baselineCount: replyBaseline,
+        identity: environmentPriorityProbe,
+        label: "Environment-to-foreground preemption",
+        linqStub: requireLinqStub(),
+        matcher: replyMatcher,
+        replyPath,
+        scenario: requireScenario(),
+      });
+      expect(replicaRefAtProviderStart).toEqual(baselineReplicaRef);
+      expect(requireScenario().assistantProviderRequests).toHaveLength(
+        providerRequestBaseline + 1,
+      );
+    } finally {
+      if (!barrierReleased) {
+        await requireScenario().harness
+          .releaseShutdownCheckpointPublicationBarrierForTest(
+            environmentPriorityProbe.userId,
+          )
+          .catch(() => undefined);
+      }
+    }
+
+    await waitForEnvironmentCompletion({
+      baselineReplicaRef,
+      completion: environmentCompletion,
+      identity: environmentPriorityProbe,
+    });
   }, 300_000);
 
   it("replies promptly while retention-only work owns the runner", async () => {
@@ -588,6 +934,16 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         const status = await requireScenario().harness.readUserStatus(
           identity.userId,
         );
+        const activationProcessed = (await listHostedRuntimeLogsForTest({
+          environment: requireScenario().runtimeEnv,
+          limit: 100,
+          userId: identity.userId,
+        })).some((entry) =>
+          entry.eventCode === "mailbox.system_processed"
+          && entry.redactedJson?.routeAction === "apply-member-activation"
+          && entry.redactedJson?.status === "processed"
+          && entry.redactedJson?.wakeKind === "member.activated"
+        );
         systemMailboxPreparedObserved = Math.max(
           systemMailboxPreparedObserved,
           Number(
@@ -608,6 +964,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         });
         return {
           activeFence: await readActiveRuntimeFenceForTest(identity.userId),
+          activationProcessed,
           conversationConsumed: consumedConversation.consumedAt !== null,
           lastErrorCode: status.lastErrorCode ?? null,
           mailboxLag: status.mailboxLag.map(({ importedSeq, lag, lane, maxSeq }) => ({
@@ -616,9 +973,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
             lane,
             maxSeq,
           })),
-          systemHandledThroughSeq:
-            status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq
-              ?? null,
           systemImportedSeq:
             status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq
               ?? null,
@@ -630,6 +984,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         timeout: 60_000,
       }).toEqual({
         activeFence: conversationFence,
+        activationProcessed: true,
         conversationConsumed: true,
         lastErrorCode: null,
         mailboxLag: [
@@ -646,7 +1001,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
             maxSeq: conversationItem.laneSeq,
           },
         ],
-        systemHandledThroughSeq: activationAppend.wake.seq,
         systemImportedSeq: activationAppend.wake.seq,
         systemMailboxPreparedObserved: 0,
         systemMailboxRetryableFailedObserved: 0,
@@ -1809,10 +2163,10 @@ function hostedOrderingSeqAtLeast(
 }
 
 async function sendInboundAndRequirePromptReply(input: {
-  afterAccepted?: () => Promise<void>;
   identity: ProbeIdentity;
   inboundText: string;
   label: string;
+  onAssistantProviderStart?: () => Promise<void>;
   replyText: string;
 }): Promise<number> {
   const replyPath = replyPathFor(input.identity);
@@ -1822,7 +2176,12 @@ async function sendInboundAndRequirePromptReply(input: {
     replyMatcher,
   );
   requireScenario().queueAssistantResponses(
-    [input.replyText],
+    input.onAssistantProviderStart
+      ? [{
+          beforeResponse: input.onAssistantProviderStart,
+          text: input.replyText,
+        }]
+      : [input.replyText],
     { matchInputContains: input.inboundText },
   );
 
@@ -1840,7 +2199,6 @@ async function sendInboundAndRequirePromptReply(input: {
     ok: true,
     reason: "wake-appended-active-member",
   });
-  await input.afterAccepted?.();
 
   await waitForAcceptedReplyBeforeDeadline({
     baselineCount: baselineReplyCount,
@@ -1857,6 +2215,123 @@ async function sendInboundAndRequirePromptReply(input: {
   );
 
   return latencyMs;
+}
+
+function createHeldAssistantProviderTextResponse(text: string): {
+  release: () => void;
+  response: Parameters<
+    HostedLocalFullStackScenario["queueAssistantResponses"]
+  >[0][number];
+  started: Promise<void>;
+} {
+  let release = (): void => {};
+  let markStarted = (): void => {};
+  const releasePromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+
+  return {
+    release,
+    response: {
+      beforeResponse: () => releasePromise,
+      onResponseStarted: markStarted,
+      text,
+    },
+    started,
+  };
+}
+
+async function appendEnvironmentInterviewCompletion(
+  identity: ProbeIdentity,
+  label: string,
+) {
+  const completedAt = new Date().toISOString();
+  const completionId = randomUUID();
+  const eventId =
+    `environment-interview:foreground-priority:${label}:${completionId}`;
+  const append = await appendHostedExecutionWakeForTest({
+    environment: requireScenario().runtimeEnv,
+    wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
+      completedAt,
+      completionId,
+      eventId,
+      memberId: identity.userId,
+      occurredAt: completedAt,
+      topics: [{
+        answers: [{
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+          note: `Synthetic Environment proof ${completionId}.`,
+          value: label === "handoff" ? 17 : 18,
+        }],
+        topicId: "sleep:0",
+      }],
+    }),
+  });
+  expect(append.inserted).toBe(true);
+  return { append, eventId };
+}
+
+async function waitForEnvironmentCompletion(input: {
+  baselineReplicaRef: unknown;
+  completion: Awaited<
+    ReturnType<typeof appendEnvironmentInterviewCompletion>
+  >;
+  identity: ProbeIdentity;
+}): Promise<void> {
+  try {
+    await expect.poll(async () => {
+      const status = await requireScenario().harness.readUserStatus(
+        input.identity.userId,
+      );
+      const handledThrough =
+        status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq;
+      return {
+        handled:
+          typeof handledThrough === "string"
+          && BigInt(handledThrough) >= BigInt(input.completion.append.wake.seq),
+        lastErrorCode: status.lastErrorCode ?? null,
+        replicaAdvanced:
+          JSON.stringify(status.workspace?.browserVaultReplicaRef ?? null)
+            !== JSON.stringify(input.baselineReplicaRef),
+      };
+    }, {
+      interval: 250,
+      timeout: 120_000,
+    }).toEqual({
+      handled: true,
+      lastErrorCode: null,
+      replicaAdvanced: true,
+    });
+  } catch (error) {
+    const runtimeState = await readRuntimeWakeObservation({
+      scenario: requireScenario(),
+      userId: input.identity.userId,
+    });
+    const activeFence = await readActiveRuntimeFenceForTest(
+      input.identity.userId,
+    );
+    throw new Error(await requireScenario().buildFailureMessage(
+      input.identity.userId,
+      [
+        "Timed out waiting for Environment completion after foreground release.",
+        `last Temporal state: ${JSON.stringify(runtimeState)}`,
+        `active runtime fence: ${JSON.stringify(activeFence)}`,
+      ],
+    ), { cause: error });
+  }
+
+  await expect(readHostedMailboxItemForTest({
+    dedupeKey: input.completion.eventId,
+    environment: requireScenario().runtimeEnv,
+    userId: input.identity.userId,
+  })).resolves.toMatchObject({
+    kind: "environment-interview.completed",
+    lane: "system",
+  });
 }
 
 async function assertExactlyOneAcceptedReplyAfterBoundary(input: {
@@ -2004,7 +2479,7 @@ async function releaseBackgroundCheckpointBarrier(userId: string): Promise<void>
   });
 }
 
-async function waitForSystemWakeStormCheckpointBarrier(
+async function waitForSystemWakeStormCanonicalCommit(
   userId: string,
   expectedImportedSeq: string,
   expectedFetchedCount: number,
@@ -2014,10 +2489,10 @@ async function waitForSystemWakeStormCheckpointBarrier(
 
   while (Date.now() < deadlineAt) {
     lastStatus = await requireScenario().harness.readUserStatus(userId);
-    const barrier =
-      await requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(
-        userId,
-      );
+    const ordering = await readForegroundPriorityOrderingObservation(
+      requireScenario(),
+      userId,
+    );
     const importLog = lastStatus.recentLogs?.find((log) =>
       log.eventCode === "mailbox.imported"
       && log.redactedJson?.systemSeqEnd === expectedImportedSeq
@@ -2027,7 +2502,8 @@ async function waitForSystemWakeStormCheckpointBarrier(
     const fence = await readActiveRuntimeFenceForTest(userId);
     if (
       lastStatus.inFlight
-      && barrier.state === "entered"
+      && ordering.barrierState === "entered"
+      && ordering.barrierTarget === "canonical_post_commit"
       && importLog
       && fence?.processingMode === "system_mailbox"
     ) {
@@ -2037,16 +2513,53 @@ async function waitForSystemWakeStormCheckpointBarrier(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "The complete system wake storm did not reach held canonical publication.",
+    "The complete system wake storm did not reach its held post-commit acknowledgement.",
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected fetched count: ${expectedFetchedCount}`,
     `last status: ${JSON.stringify(lastStatus)}`,
   ]));
 }
 
-async function requireSystemOwnerPreservedWhileBarrierHeld(
+async function waitForProcessingCheckpointBarrier(
   userId: string,
-  systemAttemptId: string,
+  expectedProcessingMode: "environment_interview",
+): Promise<{ attemptId: string }> {
+  const deadlineAt = Date.now() + 90_000;
+  let lastStatus = await requireScenario().harness.readUserStatus(userId);
+  let lastFence = await readActiveRuntimeFenceForTest(userId);
+
+  while (Date.now() < deadlineAt) {
+    const barrier =
+      await requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(
+        userId,
+      );
+    lastStatus = await requireScenario().harness.readUserStatus(userId);
+    lastFence = await readActiveRuntimeFenceForTest(userId);
+    if (
+      lastStatus.inFlight
+      && barrier.state === "entered"
+      && lastFence?.processingMode === expectedProcessingMode
+    ) {
+      return { attemptId: lastFence.attemptId };
+    }
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Environment work did not reach held canonical publication.",
+    `expected processing mode: ${expectedProcessingMode}`,
+    `last active fence: ${JSON.stringify(lastFence)}`,
+    `last status: ${JSON.stringify(lastStatus)}`,
+  ]));
+}
+
+async function requireProcessingOwnerPreserved(
+  userId: string,
+  expectedProcessingMode:
+    | "default"
+    | "environment_interview"
+    | "system_mailbox",
+  expectedAttemptId?: string,
 ): Promise<void> {
   for (let observation = 0; observation < 3; observation += 1) {
     const barrier =
@@ -2060,12 +2573,14 @@ async function requireSystemOwnerPreservedWhileBarrierHeld(
     }
     const activeFence = await readActiveRuntimeFenceForTest(userId);
     if (
-      activeFence?.attemptId !== systemAttemptId
-      || activeFence?.processingMode !== "system_mailbox"
+      (expectedAttemptId !== undefined
+        && activeFence?.attemptId !== expectedAttemptId)
+      || activeFence?.processingMode !== expectedProcessingMode
     ) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
-        "Foreground admission replaced the system owner before its held checkpoint became durable.",
-        `system attempt id: ${systemAttemptId}`,
+        "Priority handoff replaced the active owner before its held checkpoint became durable.",
+        `expected attempt id: ${expectedAttemptId ?? "current"}`,
+        `expected processing mode: ${expectedProcessingMode}`,
         `active fence: ${JSON.stringify(activeFence)}`,
       ]));
     }
@@ -2073,9 +2588,70 @@ async function requireSystemOwnerPreservedWhileBarrierHeld(
   }
 }
 
+async function waitForConversationMailboxLag(userId: string): Promise<void> {
+  const deadlineAt = Date.now() + 15_000;
+  while (Date.now() < deadlineAt) {
+    const status = await requireScenario().harness.readUserStatus(userId);
+    const conversationLane = status.mailboxLag.find((lane) =>
+      lane.lane === "conversation"
+    );
+    if (conversationLane && conversationLane.lag !== "0") {
+      return;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "The signed foreground webhook did not persist conversation mailbox lag.",
+  ]));
+}
+
+async function requireSystemOwnerPreservedWhileCanonicalAckHeld(input: {
+  inboundText: string;
+  providerRequestBaseline: number;
+  systemAttemptId: string;
+  userId: string;
+}): Promise<void> {
+  for (let observation = 0; observation < 20; observation += 1) {
+    const [ordering, activeFence] = await Promise.all([
+      readForegroundPriorityOrderingObservation(
+        requireScenario(),
+        input.userId,
+      ),
+      readActiveRuntimeFenceForTest(input.userId),
+    ]);
+    if (
+      ordering.barrierState !== "entered"
+      || ordering.barrierTarget !== "canonical_post_commit"
+    ) {
+      throw new Error(
+        "The committed system checkpoint acknowledgement escaped its ordering barrier.",
+      );
+    }
+    if (
+      activeFence?.attemptId !== input.systemAttemptId
+      || activeFence.processingMode !== "system_mailbox"
+    ) {
+      throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+        "Foreground admission replaced the system owner before its committed checkpoint acknowledged.",
+        `system attempt id: ${input.systemAttemptId}`,
+        `active fence: ${JSON.stringify(activeFence)}`,
+      ]));
+    }
+    expect(countAssistantProviderInputs(input.inboundText)).toBe(
+      input.providerRequestBaseline,
+    );
+    await sleep(100);
+  }
+}
+
 async function readActiveRuntimeFenceForTest(userId: string): Promise<{
   attemptId: string;
-  processingMode: "default" | "inbox_media_retention" | "system_mailbox";
+  processingMode:
+    | "default"
+    | "environment_interview"
+    | "inbox_media_retention"
+    | "system_mailbox";
 } | null> {
   return await requireScenario().harness.requestJson(
     `/__test/users/${encodeURIComponent(userId)}/active-runtime-fence`,
@@ -2091,9 +2667,18 @@ async function readActiveRuntimeFenceForTest(userId: string): Promise<{
 async function requireSystemWakeStormPreserved(
   userId: string,
   expectedImportedSeq: string,
+  input: {
+    expectedWakeKinds: readonly string[];
+    preemptedAttemptId: string;
+    recoveryEvidenceStartedAt: Date;
+  },
 ): Promise<void> {
   const deadlineAt = Date.now() + 60_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
+  let lastRecoveryLogs: Array<{
+    attemptId: string | null;
+    redactedJson: Record<string, unknown> | null;
+  }> = [];
 
   while (Date.now() < deadlineAt) {
     lastStatus = await requireScenario().harness.readUserStatus(userId);
@@ -2105,14 +2690,42 @@ async function requireSystemWakeStormPreserved(
       && redactedStatus?.hostedMailboxSystemImportedSeq === expectedImportedSeq
       && redactedStatus.hostedMailboxRetryableBlockedCount === 0
     ) {
-      return;
+      lastRecoveryLogs = (await listHostedRuntimeLogsForTest({
+        environment: requireScenario().runtimeEnv,
+        fromAt: input.recoveryEvidenceStartedAt,
+        limit: 2_000,
+        userId,
+      }))
+        .filter((entry) => entry.eventCode === "mailbox.system_processed")
+        .map((entry) => ({
+          attemptId: entry.attemptId,
+          redactedJson: entry.redactedJson,
+        }));
+      const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
+        const wakeKind = entry.redactedJson?.wakeKind;
+        return entry.attemptId !== null
+          && entry.attemptId !== input.preemptedAttemptId
+          && typeof wakeKind === "string"
+          && input.expectedWakeKinds.includes(wakeKind)
+          && (
+            entry.redactedJson?.status === "processed"
+            || entry.redactedJson?.status === "recorded"
+          )
+          && (entry.redactedJson?.recordFailed ?? 0) === 0;
+      });
+      if (recoveredSystemContinuation) {
+        return;
+      }
     }
-    await sleep(250);
+    await sleep(500);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but the imported system wake storm was not preserved.",
+    "Foreground reply succeeded, but seeded system work did not continue under a replacement attempt.",
+    `preempted system attempt id: ${input.preemptedAttemptId}`,
     `expected imported sequence: ${expectedImportedSeq}`,
+    `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
+    `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,
     `last status: ${JSON.stringify(lastStatus)}`,
   ]));
 }
@@ -2120,7 +2733,11 @@ async function requireSystemWakeStormPreserved(
 async function waitForRuntimeInFlight(
   userId: string,
   label: string,
-  expectedProcessingMode: "default" | "inbox_media_retention" | "system_mailbox",
+  expectedProcessingMode:
+    | "default"
+    | "environment_interview"
+    | "inbox_media_retention"
+    | "system_mailbox",
 ): Promise<void> {
   const deadlineAt = Date.now() + 60_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
@@ -2218,7 +2835,7 @@ async function seedActivatedWorkspaceCheckpointInScenario(
   });
   const hash = sha256HostedBundleHex(snapshot.bundle);
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
-    browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
+    browserVaultReplicaRef: await createBrowserVaultReplicaRef(hash, userId),
     environment: targetScenario.runtimeEnv,
     nextWakeAt: null,
     nextWakeReason: null,
@@ -2593,15 +3210,22 @@ function createSnapshotBundleRef(input: {
   };
 }
 
-function createBrowserVaultReplicaRef(
+async function createBrowserVaultReplicaRef(
   sourceBundleHash: string,
-): HostedBrowserVaultReplicaRef {
+  userId: string,
+): Promise<HostedBrowserVaultReplicaRef> {
+  const dataVersion = `priority-${sourceBundleHash.slice(0, 16)}`;
+  const generatedAt = new Date().toISOString();
   return {
     byteLength: 256,
-    dataVersion: `priority-${sourceBundleHash.slice(0, 16)}`,
-    generatedAt: new Date().toISOString(),
+    dataVersion,
+    generatedAt,
     keyId: "browser-vault-replica:foreground-priority",
-    objectKey: `browser-vault/priority-${sourceBundleHash.slice(0, 32)}.json`,
+    objectKey: await hostedBrowserVaultReplicaObjectKey({
+      dataVersion,
+      generatedAt,
+      userId,
+    }),
     replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:foreground-priority",
     schema: "murph.hosted-browser-vault-replica-ref.v1",

@@ -134,6 +134,7 @@ import {
   resetRunnerOutboundSharedCachesForTest,
 } from "../src/runner-outbound/shared.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -304,6 +305,16 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync reconcile",
     path: "/api/internal/device-sync/reconcile",
+  },
+  {
+    body: {
+      assistantInputId: `ain_${"a".repeat(32)}`,
+      afterDays: 10,
+      mode: "after_days",
+      sourceProviderSlug: "garmin",
+    },
+    name: "device-sync no-data outreach",
+    path: HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   },
   {
     body: {
@@ -752,18 +763,23 @@ describe("handleRunnerOutboundRequest", () => {
       })).toBe(true);
 
       const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      const responseBody = path === "/api/internal/hosted-workspace/checkpoint"
+        ? createHostedWorkspaceCheckpointResponse("5")
+        : path === HOSTED_RUNTIME_USAGE_RECORD_PATH
+        ? {
+            platformAiUsageAllowedAfter: true,
+            recorded: true,
+            usageId: "usage_allowlisted_proxy",
+          }
+        : {
+            ok: true,
+            path,
+          };
       const fetchMock = vi.fn(async (
         ..._args: Parameters<typeof fetch>
       ): Promise<Response> =>
         new Response(
-          JSON.stringify(
-            path === "/api/internal/hosted-workspace/checkpoint"
-              ? createHostedWorkspaceCheckpointResponse("5")
-              : {
-                  ok: true,
-                  path,
-                },
-          ),
+          JSON.stringify(responseBody),
           {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -799,14 +815,7 @@ describe("handleRunnerOutboundRequest", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual(
-        path === "/api/internal/hosted-workspace/checkpoint"
-          ? createHostedWorkspaceCheckpointResponse("5")
-          : {
-              ok: true,
-              path,
-            },
-      );
+      await expect(response.json()).resolves.toEqual(responseBody);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const firstCall = fetchMock.mock.calls[0];
       if (!firstCall) {
@@ -1901,6 +1910,7 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("adds hosted usage reporting attribution inside the Worker web-control proxy", async () => {
+    const revokeActiveRuntimePlatformAiUsage = vi.fn(async () => true);
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> =>
@@ -1931,6 +1941,13 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              revokeActiveRuntimePlatformAiUsage,
+            };
+          },
+        },
       }),
       "member_123",
     );
@@ -1951,13 +1968,22 @@ describe("handleRunnerOutboundRequest", () => {
         }),
       },
     }));
+    expect(revokeActiveRuntimePlatformAiUsage).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
   });
 
   it("clears hosted usage reporting attribution when the Worker secret is absent", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> =>
-      new Response(JSON.stringify({ ok: true }), {
+      new Response(JSON.stringify({
+        platformAiUsageAllowedAfter: true,
+        recorded: true,
+        usageId: "turn_123.attempt-1",
+      }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -4396,6 +4422,7 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotStartSubstageKind: "completed",
       snapshotStartTotalDurationMs: 60_000,
       userIdPresent: true,
+      workspaceAttemptId: "attempt_1",
     });
     const durationKeys = [
       "snapshotStartAlarmCandidateWorkDurationMs",
@@ -4432,6 +4459,7 @@ describe("handleRunnerOutboundRequest", () => {
       "snapshotStartTotalDurationMs",
       "snapshotStartWriteFenceOwnerValidationDurationMs",
       "userIdPresent",
+      "workspaceAttemptId",
     ]);
     const serializedDetails = JSON.stringify(details);
     expect(serializedDetails).not.toContain(requireTestString(
@@ -4450,6 +4478,54 @@ describe("handleRunnerOutboundRequest", () => {
       responseEncryption.wrappedDataKey,
       "bounded workspace snapshot wrapped data key",
     ));
+  });
+
+  it("correlates failed workspace snapshot start route diagnostics", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const runnerStub = runner.getByName();
+    const failedStub: WorkerUserRunnerStubLike = {
+      ...runnerStub,
+      async createHostedWorkspaceSnapshotUploadSession() {
+        throw new Error("workspace snapshot session create failed");
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: { getByName: () => failedStub },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
+
+    await expect(handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    )).rejects.toThrow("workspace snapshot session create failed");
+    const diagnosticLog =
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([entry]) => entry)
+        .find(
+          (entry: { details?: unknown; level?: string; message?: string }) =>
+            entry.message
+              === "Hosted runner workspace snapshot start diagnostic.",
+        );
+    expect(diagnosticLog).toMatchObject({
+      level: "warn",
+      userId: null,
+    });
+    expect(requireTestObject(
+      diagnosticLog?.details,
+      "failed workspace snapshot start route diagnostic details",
+    )).toMatchObject({
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartOutcomeKind: "failed",
+      snapshotStartSubstageKind: "session_create_storage",
+      workspaceAttemptId: "attempt_1",
+    });
   });
 
   it.each([
@@ -5867,6 +5943,23 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
+    const diagnosticLog =
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([entry]) => entry)
+        .find(
+          (entry: { details?: unknown; message?: string }) =>
+            entry.message
+              === "Hosted runner workspace snapshot start diagnostic.",
+        );
+    const details = requireTestObject(
+      diagnosticLog?.details,
+      "unauthorized workspace snapshot start route diagnostic details",
+    );
+    expect(details).toMatchObject({
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartOutcomeKind: "unauthorized",
+    });
+    expect(details).not.toHaveProperty("workspaceAttemptId");
   });
 
   it("does not expose a test-gated Worker body upload route for workspace snapshots", async () => {

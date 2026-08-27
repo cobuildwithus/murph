@@ -1726,6 +1726,43 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
   return wakeAt;
 }
 
+export interface HostedAssistantDeliveryIntentState {
+  intentId: string;
+  nextWakeAt: string | null;
+  terminal: boolean;
+}
+
+export async function resolveHostedAssistantDeliveryIntentState(input: {
+  deliveryIdempotencyKey: string;
+  now?: Date;
+  vaultRoot: string;
+}): Promise<HostedAssistantDeliveryIntentState | null> {
+  const matches = (await listAssistantOutboxIntents(input.vaultRoot)).filter(
+    (intent) =>
+      intent.deliveryIdempotencyKey === input.deliveryIdempotencyKey,
+  );
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    throw new TypeError(
+      "An exact hosted delivery identity matched multiple outbox intents.",
+    );
+  }
+  const intent = matches[0]!;
+  return {
+    intentId: intent.intentId,
+    nextWakeAt: resolveHostedAssistantOutboxIntentWakeAt(
+      intent,
+      input.now ?? new Date(),
+    ),
+    terminal:
+      intent.status === "sent"
+      || intent.status === "failed"
+      || intent.status === "abandoned",
+  };
+}
+
 function resolveHostedAssistantDeliveryBoundaryWakeAt(
   intents: readonly AssistantOutboxIntent[],
   now: Date,
@@ -6099,6 +6136,46 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     });
   }
   return normalized;
+}
+
+export async function assertHostedAssistantLinqTurnCommitAuthority(input: {
+  effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement">;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const checked = new Set<string>();
+  for (const context of input.linqDeliveryContexts) {
+    const target = context.target?.trim() ?? "";
+    const replyToMessageId = context.replyToMessageId?.trim() ?? "";
+    if (
+      context.threadIsDirect !== true
+      || context.service?.trim().toLowerCase() !== "imessage"
+      || !target
+      || !replyToMessageId
+    ) {
+      continue;
+    }
+    const key = JSON.stringify([target, replyToMessageId]);
+    if (checked.has(key)) {
+      continue;
+    }
+    checked.add(key);
+    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      authorityCheckOnly: true,
+      directRecipientPhoneNumber:
+        normalizeHostedLinqDirectRecipient(context.directRecipientPhoneNumber),
+      effectsPort: input.effectsPort,
+      fromPhoneNumber:
+        normalizeHostedLinqDirectRecipient(context.fromPhoneNumber),
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: null,
+      intentId: null,
+      replyToMessageId,
+      signal: input.signal,
+      target,
+      targetKind: "thread",
+    });
+  }
 }
 
 function isHostedLinqProviderDispatchAlreadyStartedError(error: unknown): boolean {

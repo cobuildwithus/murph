@@ -179,6 +179,8 @@ review_gpt_option_requires_value() {
       | --responseFile \
       | --response-marker \
       | --responseMarker \
+      | --minimum-marked-response-time \
+      | --minimumMarkedResponseTime \
       | --browser-path \
       | --browserPath \
       | --filter-output \
@@ -194,6 +196,24 @@ review_gpt_option_requires_value() {
       ;;
   esac
   return 1
+}
+
+review_gpt_reject_repository_policy_overrides() {
+  local argument
+
+  for argument in "$@"; do
+    case "$argument" in
+      --config \
+        | --config=* \
+        | --minimum-marked-response-time \
+        | --minimum-marked-response-time=* \
+        | --minimumMarkedResponseTime \
+        | --minimumMarkedResponseTime=*)
+        echo "Error: Murph's repository ReviewGPT policy cannot be overridden on the command line." >&2
+        return 64
+        ;;
+    esac
+  done
 }
 
 review_gpt_detect_pr_phase() {
@@ -351,7 +371,7 @@ review_gpt_require_completion_specialists_prompt_budget() {
   done
 
   if (( assembled_bytes > review_gpt_completion_specialists_prompt_max_bytes )); then
-    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical/Frog budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
+    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
     return 1
   fi
 }
@@ -361,6 +381,7 @@ review_gpt_run() {
   local explicit_phase="${REVIEW_GPT_REVIEW_PHASE:-}"
   local pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
 
+  review_gpt_reject_repository_policy_overrides "$@" || return
   detected_phase="$(review_gpt_detect_pr_phase "$@")"
   if [[ -n "$detected_phase" ]]; then
     if [[ -n "$explicit_phase" && "$explicit_phase" != "$detected_phase" ]]; then
@@ -386,7 +407,10 @@ review_gpt_run() {
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
   fi
 
-  exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
+  exec pnpm exec cobuild-review-gpt \
+    --config scripts/review-gpt.config.sh \
+    --minimum-marked-response-time 5m \
+    "$@"
 }
 
 review_gpt_main() {

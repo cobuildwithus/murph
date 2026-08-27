@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   decryptHostedLinqLinePhoneNumber: vi.fn(),
+  encryptHostedLinqLinePhoneNumber: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberIdentityPhoneNumber: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
@@ -61,6 +62,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-line-phone-codec", () => ({
   decryptHostedLinqLinePhoneNumber:
     mocks.decryptHostedLinqLinePhoneNumber,
+  encryptHostedLinqLinePhoneNumber:
+    mocks.encryptHostedLinqLinePhoneNumber,
 }));
 
 import {
@@ -78,6 +81,9 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  buildHostedSourceDeliveryStallNoticeKey,
+} from "@/src/lib/device-sync/source-delivery-stall-episode";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
@@ -122,6 +128,10 @@ describe("hosted Linq egress authority", () => {
     mocks.decryptHostedLinqLinePhoneNumber.mockImplementation(
       (encrypted: string | null | undefined) =>
         decodeTestEncryptedValue(encrypted),
+    );
+    mocks.encryptHostedLinqLinePhoneNumber.mockImplementation(
+      (phoneNumber: string | null | undefined) =>
+        encodeTestEncryptedValue(phoneNumber),
     );
   });
 
@@ -649,6 +659,7 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: true,
       },
+      sourceEventId: "linq-event-current",
     });
 
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
@@ -712,6 +723,169 @@ describe("hosted Linq egress authority", () => {
     });
     expect(prisma.hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      expectedCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
+      expectedRetryable: true,
+      expectedStatus: 503,
+      label: "an ambiguous encrypted Web reply",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-07-14T00:05:00.000Z"),
+        failureCode: "LINQ_SEND_FAILED",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: "sealed-reply",
+        payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+    {
+      expectedCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      expectedRetryable: false,
+      expectedStatus: 409,
+      label: "an accepted Web reply",
+      row: {
+        acceptedAt: new Date("2026-07-14T00:05:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: "hbidx:linq-message:accepted",
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "accepted",
+      },
+    },
+  ].flatMap((testCase) => [true, false].map((authorityCheckOnly) => ({
+    ...testCase,
+    authorityCheckOnly,
+  }))))("blocks runtime authority for $label when authorityCheckOnly=$authorityCheckOnly", async ({
+    authorityCheckOnly,
+    expectedCode,
+    expectedRetryable,
+    expectedStatus,
+    row,
+  }) => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-inbound",
+      dedupeKey: "linq-event-owned",
+      mailboxItemId: "mailbox-owned",
+      messageId: "linq-message-owned",
+      occurredAt: "2026-07-14T00:04:47.000Z",
+      prisma,
+      threadIsDirect: true,
+    });
+    prisma.hostedLinqDelivery.findFirst.mockResolvedValueOnce(row);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          answeredMailboxItemIds: ["mailbox-owned"],
+          authorityCheckOnly,
+          ...(authorityCheckOnly
+            ? {}
+            : { idempotencyKey: "assistant-outbox:owned-first-turn" }),
+          replyToMessageId: "linq-message-owned",
+          target: "chat-inbound",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(expectedStatus);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: expectedCode,
+        retryable: expectedRetryable,
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "a skipped Web reply",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: new Date("2026-07-14T00:05:00.000Z"),
+        status: "skipped",
+      },
+    },
+    {
+      label: "a definitive failed Web reply",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-07-14T00:05:00.000Z"),
+        failureCode: "LINQ_REJECTED",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+  ])("allows runtime provider entry after $label", async ({ row }) => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-inbound",
+      dedupeKey: "linq-event-fallback",
+      mailboxItemId: "mailbox-fallback",
+      messageId: "linq-message-fallback",
+      occurredAt: "2026-07-14T00:04:47.000Z",
+      prisma,
+      threadIsDirect: true,
+    });
+    prisma.hostedLinqDelivery.findFirst.mockResolvedValueOnce(row);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          answeredMailboxItemIds: ["mailbox-fallback"],
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-outbox:fallback-first-turn",
+          replyToMessageId: "linq-message-fallback",
+          target: "chat-inbound",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      providerDispatchClaimed: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
   });
 
   it("recovers exact direct-inbound authority when the runtime mailbox sidecar is missing", async () => {
@@ -1703,6 +1877,85 @@ describe("hosted Linq egress authority", () => {
       .not.toHaveBeenCalled();
   });
 
+  it.each([
+    { expectedStatus: 200, recovered: false, reminderAfterDays: undefined },
+    { expectedStatus: 409, recovered: true, reminderAfterDays: undefined },
+    { expectedStatus: 409, recovered: false, reminderAfterDays: 30 },
+  ])(
+    "revalidates a queued wearable silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
+    async ({ expectedStatus, recovered, reminderAfterDays }) => {
+      const sourceId = "dcs_abcdefghijklmnop";
+      const originalLastDataAt = new Date(
+        Date.now() - 6 * 24 * 60 * 60_000,
+      ).toISOString();
+      const notificationKey = buildHostedSourceDeliveryStallNoticeKey({
+        connectionId: "connection-1",
+        lastDataAt: originalLastDataAt,
+        lifecycleEpoch: 1,
+        sourceId,
+        sourceInstanceKey: "junction:garmin",
+        sourceProviderSlug: "garmin",
+      });
+      const prisma = createPrismaStub({ homeChatId: "chat-home" });
+      prisma.$queryRaw.mockResolvedValue([{ id: sourceId }]);
+      prisma.deviceConnectionSource.findUnique.mockResolvedValue({
+        connection: { status: "active", userId: "member-1" },
+        connectionId: "connection-1",
+        id: sourceId,
+        lastDataAt: new Date(
+          recovered ? new Date().toISOString() : originalLastDataAt,
+        ),
+        lifecycleEpoch: 1,
+        sourceInstanceKey: "junction:garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      });
+      prisma.deviceSourceNoDataOutreachPreference.findUnique.mockResolvedValue(
+        reminderAfterDays === undefined ? null : { reminderAfterDays },
+      );
+      mockPersistedLinqInbound({
+        chatId: "chat-home",
+        dedupeKey: "linq-event-wearable-recovery",
+        mailboxItemId: "mailbox-wearable-recovery",
+        messageId: "linq-message-wearable-recovery",
+        occurredAt: new Date().toISOString(),
+        prisma,
+        threadIsDirect: true,
+      });
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const response = await postHostedLinqEgressEngagement(
+        new Request("https://internal.example.test/engagement", {
+          body: JSON.stringify({
+            authorityCheckOnly: false,
+            idempotencyKey: notificationKey,
+            target: "chat-home",
+            targetKind: "thread",
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(expectedStatus);
+      if (expectedStatus === 409) {
+        await expect(response.json()).resolves.toMatchObject({
+          error: {
+            code: "HOSTED_DEVICE_DELIVERY_STALL_EPISODE_SUPERSEDED",
+            retryable: false,
+          },
+        });
+        expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+      } else {
+        await expect(response.json()).resolves.toMatchObject({
+          ok: true,
+          providerDispatchClaimed: true,
+        });
+        expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
   it("uses the persisted direct-route line when chat attribution and sender are absent", async () => {
     const homeLinePhone = "+15550100009";
     const homeLineLookupKey = createRequiredPhoneLookupKey(homeLinePhone);
@@ -1891,6 +2144,13 @@ function createPrismaStub(input: {
   const defaultLineLookupKey = createRequiredPhoneLookupKey(defaultLinePhone);
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(1),
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    deviceConnectionSource: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    deviceSourceNoDataOutreachPreference: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue(input.activeMemberAccess === false
         ? null
@@ -1962,6 +2222,7 @@ function createPrismaStub(input: {
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "delivery-1" }),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
@@ -1973,6 +2234,7 @@ function createPrismaStub(input: {
         providerReputationStatus: "HEALTHY",
         providerServiceStatus: "ACTIVE",
       }),
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn(async ({ where }: {
         where: { phoneNumberLookupKey: string };
       }) => {
@@ -1989,6 +2251,12 @@ function createPrismaStub(input: {
           ? { phoneNumberEncrypted: encodeTestEncryptedValue(phoneNumber) }
           : null;
       }),
+      update: vi.fn(async ({ where }: {
+        where: { phoneNumberLookupKey: string };
+      }) => ({ phoneNumberLookupKey: where.phoneNumberLookupKey })),
+      upsert: vi.fn(async ({ create }: {
+        create: { phoneNumberLookupKey: string };
+      }) => ({ phoneNumberLookupKey: create.phoneNumberLookupKey })),
     },
   };
   const transaction = vi.fn(async (

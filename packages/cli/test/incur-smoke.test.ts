@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -22,10 +23,14 @@ import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { createVaultCli } from '../src/vault-cli.js'
 import { runMurphCliEntrypoint } from '../src/cli-entry.js'
 import {
+  binPath,
+  ensureCliRuntimeArtifacts,
   type CliEnvelope,
   requireData,
+  repoRoot,
   runCli,
   runRawCli,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
@@ -253,6 +258,63 @@ async function runJsonCli<TData>(
   }
 }
 
+async function runBuiltCliProcess(args: string[]): Promise<{
+  exitCode: number
+  stderr: string
+  stdout: string
+}> {
+  await ensureCliRuntimeArtifacts()
+
+  return await new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [binPath, ...args],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        }),
+        maxBuffer: 8 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ exitCode: 0, stderr, stdout })
+          return
+        }
+
+        if (typeof error.code !== 'number') {
+          reject(error)
+          return
+        }
+
+        resolve({ exitCode: error.code, stderr, stdout })
+      },
+    )
+  })
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const snapshot: Array<[string, string]> = []
+
+  async function visit(directory: string, relativeDirectory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relativePath = path.posix.join(relativeDirectory, entry.name)
+      const absolutePath = path.join(directory, entry.name)
+
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath)
+      } else {
+        snapshot.push([relativePath, (await readFile(absolutePath)).toString('base64')])
+      }
+    }
+  }
+
+  await visit(vaultRoot, '')
+  return snapshot.sort(([left], [right]) => left.localeCompare(right))
+}
+
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
   const help = await runSourceCliRaw(['--help'])
 
@@ -323,6 +385,170 @@ test('built CLI discovery surfaces remain available', async () => {
   )
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
+
+test('built duplicate-vault failures emit one safe machine document in every mode', async () => {
+  const firstVault = '/private/synthetic/first-vault'
+  const secondVault = '/private/synthetic/second-vault'
+  const modes = [
+    { args: ['--format', 'json'], envelope: false, format: 'json' },
+    { args: ['--json'], envelope: false, format: 'json' },
+    { args: ['--format', 'toon'], envelope: false, format: 'toon' },
+    {
+      args: ['--full-output', '--format', 'json'],
+      envelope: true,
+      format: 'json',
+    },
+    {
+      args: ['--full-output', '--format', 'toon'],
+      envelope: true,
+      format: 'toon',
+    },
+    {
+      args: ['--full-output', '--format', 'yaml'],
+      envelope: true,
+      format: 'yaml',
+    },
+  ] as const
+
+  for (const mode of modes) {
+    const result = await runBuiltCliProcess([
+      '--vault',
+      firstVault,
+      '--vault',
+      secondVault,
+      ...mode.args,
+    ])
+    const combinedOutput = `${result.stdout}\n${result.stderr}`
+
+    assert.equal(result.exitCode, 1, mode.args.join(' '))
+    assert.equal(combinedOutput.includes(firstVault), false, mode.args.join(' '))
+    assert.equal(combinedOutput.includes(secondVault), false, mode.args.join(' '))
+    assert.equal(result.stdout.trim().length > 0, true, mode.args.join(' '))
+
+    if (mode.format === 'json') {
+      const document = JSON.parse(result.stdout) as {
+        code?: string
+        error?: { code?: string }
+        ok?: boolean
+      }
+      assert.equal(document.ok, mode.envelope ? false : undefined)
+      assert.equal(
+        mode.envelope ? document.error?.code : document.code,
+        'invalid_option',
+      )
+      assert.equal(mode.envelope ? document.code : document.error, undefined)
+      continue
+    }
+
+    assert.equal(
+      result.stdout.split('invalid_option').length - 1,
+      1,
+      mode.args.join(' '),
+    )
+    assert.equal(
+      /^ok:\s+false$/mu.test(result.stdout),
+      mode.envelope,
+      mode.args.join(' '),
+    )
+  }
+}, INCUR_HELP_TIMEOUT_MS)
+
+test('built CLI preserves nutrition validation fields without submitted-value echoes', async () => {
+  const privateTitle = 'Private Built Food Title'
+  const privateTag = 'PrivateBuiltFoodTag'
+  const envelope = await runCli([
+    'food',
+    'save',
+    privateTitle,
+    '--tag',
+    privateTag,
+    '--vault',
+    './vault',
+  ])
+
+  assert.equal(envelope.ok, false)
+  if (!envelope.ok) {
+    assert.equal(envelope.error.code, 'contract_invalid')
+    assert.equal(envelope.error.retryable, false)
+    assert.equal(envelope.error.stage, 'validation')
+    assert.equal(envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    assert.equal(envelope.error.hint, undefined)
+  }
+  assert.doesNotMatch(
+    JSON.stringify(envelope),
+    /Private Built Food Title|PrivateBuiltFoodTag/u,
+  )
+}, INCUR_HELP_TIMEOUT_MS)
+
+test('built protocol import hides identifier-shaped unknown keys and writes no state', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-protocol-unknown-key-'))
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const payloadPath = path.join(tempRoot, 'protocol.json')
+  const privateKey = 'PrivateField123'
+  const privateValue = 'PrivateValue456'
+
+  try {
+    await initializeVault({ vaultRoot })
+    const before = await snapshotVaultFiles(vaultRoot)
+    await writeFile(payloadPath, JSON.stringify({
+      slug: 'unknown-key-candidate',
+      title: 'Unknown Key Candidate',
+      commonsProtocolRef: {
+        key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        pageRevisionId: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+        runSpecRevisionId: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
+      },
+      lineage: {
+        sourceKind: 'health_commons_protocol',
+      },
+      diff: [],
+      effectiveSpec: {
+        doseSignature: 'Synthetic protocol dose',
+      },
+      personalization: {},
+      [privateKey]: privateValue,
+    }))
+
+    const result = await runBuiltCliProcess([
+      'protocol',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const envelope = JSON.parse(result.stdout) as CliEnvelope
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(envelope.ok, false)
+    if (envelope.ok) {
+      assert.fail('Expected protocol import with an unknown key to fail.')
+    }
+    assert.equal(envelope.error.code, 'contract_invalid')
+    assert.equal(envelope.error.retryable, false)
+    assert.equal(envelope.error.stage, 'validation')
+    assert.equal(envelope.error.hint, undefined)
+    assert.deepEqual(envelope.error.fieldErrors?.map((field) => ({
+      code: field.code,
+      path: field.path,
+    })), [{
+      code: 'unrecognized_keys',
+      path: '$',
+    }])
+
+    const serialized = `${result.stdout}\n${result.stderr}`
+    assert.equal(serialized.includes(privateKey), false)
+    assert.equal(serialized.includes(privateValue), false)
+    assert.equal(serialized.includes(payloadPath), false)
+    assert.equal(serialized.includes('bank/protocols'), false)
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+}, INCUR_HELP_TIMEOUT_MS)
 
 test('root config file can provide command option defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
@@ -536,6 +762,16 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
         {
           exitCode: 7,
           retryable: true,
+          issues: [
+            {
+              path: ['schedule', 'timeZone'],
+              publicPath: ['schedule', 'timeZone'],
+              code: 'invalid_value',
+              expected: 'string',
+              message: 'Use a valid IANA time zone.',
+            },
+          ],
+          stage: 'validation',
         },
       )
     },
@@ -547,7 +783,346 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
   assert.equal(result.envelope.error?.code, 'BRIDGE_SMOKE')
   assert.equal(result.envelope.error?.message, 'bridge preserved the command error')
   assert.equal(result.envelope.error?.retryable, true)
+  assert.equal(result.envelope.error?.stage, 'validation')
+  assert.equal(result.envelope.error?.hint, undefined)
+  assert.deepEqual(result.envelope.error?.fieldErrors, [
+    {
+      code: 'invalid_value',
+      path: 'schedule.timeZone',
+      expected: 'string',
+      received: 'invalid',
+      message: 'This field is invalid.',
+    },
+  ])
   assert.equal(result.exitCode, 7)
+})
+
+test('Cli.fetch returns safe validation fields without arbitrary error context', async () => {
+  const cli = Cli.create('bridge-fetch-smoke', {
+    description: 'bridge fetch smoke test',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+  cli.command('fail', {
+    args: z.object({}),
+    async run() {
+      throw new VaultCliError(
+        'BRIDGE_FETCH_SMOKE',
+        'bridge preserved the fetch error',
+        {
+          ignored: 'private-submitted-value',
+          retryable: false,
+          issues: [
+            {
+              path: ['schedule', 'timeZone'],
+              publicPath: ['schedule', 'timeZone'],
+              code: 'invalid_value',
+              expected: 'string',
+              message: 'Use a valid IANA time zone.',
+            },
+          ],
+          stage: 'validation',
+        },
+      )
+    },
+  })
+
+  const response = await cli.fetch(new Request('http://localhost/fail'))
+  const envelope = (await response.json()) as CliEnvelope
+
+  assert.equal(response.status, 500)
+  assert.equal(envelope.ok, false)
+  assert.equal(envelope.error.code, 'BRIDGE_FETCH_SMOKE')
+  assert.equal(envelope.error.retryable, false)
+  assert.equal(envelope.error.stage, 'validation')
+  assert.equal(envelope.error.hint, undefined)
+  assert.deepEqual(envelope.error.fieldErrors, [
+    {
+      code: 'invalid_value',
+      path: 'schedule.timeZone',
+      expected: 'string',
+      received: 'invalid',
+      message: 'This field is invalid.',
+    },
+  ])
+  assert.equal(JSON.stringify(envelope).includes('private-submitted-value'), false)
+})
+
+test('built validation owners project safe field repair details', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-validation-repair-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const cases = [
+      {
+        args: [
+          'workout',
+          'add',
+          '--vault',
+          vaultRoot,
+          '--workout-exercise',
+          'order=1;name=Bench press',
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'too_small',
+        message: 'Invalid workout session fields.',
+        path: 'workoutSet',
+        privateText: 'Bench press',
+      },
+      {
+        args: [
+          'scheduled-log',
+          'save',
+          'Weekly strength template',
+          '--vault',
+          vaultRoot,
+          '--schedule-kind',
+          'cron',
+          '--schedule-cron',
+          '0 7 * * 1',
+          '--action-kind',
+          'meal.add',
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'custom',
+        message: 'Invalid scheduled-log action fields.',
+        path: 'foodId',
+        privateText: 'Weekly strength template',
+      },
+      {
+        args: [
+          'blood-test',
+          'save',
+          'Invalid analyte panel',
+          '--vault',
+          vaultRoot,
+          '--occurred-at',
+          '2026-03-12T13:00:00.000Z',
+          '--test-name',
+          'invalid_analyte_panel',
+          '--result',
+          JSON.stringify({
+            note: 'Ferritin private marker',
+          }),
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'invalid_type',
+        message: 'Invalid --result blood-test analyte payload.',
+        path: 'result.0.analyte',
+        privateText: 'Ferritin private marker',
+      },
+    ] as const
+
+    for (const candidate of cases) {
+      const result = await runBuiltCliProcess([
+        ...candidate.args,
+        '--full-output',
+        '--format',
+        'json',
+      ])
+      const envelope = JSON.parse(result.stdout) as CliEnvelope
+      assert.equal(result.exitCode, 1, candidate.message)
+      assert.equal(envelope.ok, false, candidate.message)
+      if (envelope.ok) {
+        assert.fail(`Expected ${candidate.message} to fail.`)
+      }
+
+      const error = envelope.error
+      const serialized = JSON.stringify(error)
+      assert.equal(error.code, candidate.errorCode)
+      assert.equal(error.message, candidate.message)
+      assert.equal(error.retryable, false)
+      assert.equal(error.stage, 'validation')
+      assert.equal(error.hint, undefined)
+      assert.deepEqual(error.fieldErrors?.[0], {
+        code: candidate.issueCode,
+        expected: '',
+        message: candidate.fieldMessage,
+        path: candidate.path,
+        received: 'invalid',
+      })
+      assert.equal(result.stderr.includes(candidate.privateText), false)
+      assert.equal(serialized.includes(candidate.privateText), false)
+      assert.equal(serialized.includes('Required'), false)
+      assert.equal(serialized.includes('Too small'), false)
+    }
+
+    const privateWorkoutText = 'Private built workout option'
+    const repeatedWorkout = await runBuiltCliProcess([
+      'workout',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--note',
+      'Repeated built workout validation.',
+      '--duration',
+      '45',
+      '--type',
+      'strength-training',
+      '--workout-media',
+      'kind=photo;relativePath=raw/workouts/first.jpg',
+      '--workout-media',
+      'kind=private-kind;relativePath=raw/workouts/private.jpg',
+      '--workout-exercise',
+      'order=2;name=First public occurrence',
+      '--workout-exercise',
+      `order=1;name=${privateWorkoutText};unitOverride=stone`,
+      '--workout-set',
+      'exercise=2;order=1;reps=5;weightUnit=lb',
+      '--workout-set',
+      'exercise=1;order=1;reps=5;weightUnit=stone',
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const repeatedWorkoutEnvelope = JSON.parse(repeatedWorkout.stdout) as CliEnvelope
+    assert.equal(repeatedWorkout.exitCode, 1)
+    assert.equal(repeatedWorkoutEnvelope.ok, false)
+    if (repeatedWorkoutEnvelope.ok) {
+      assert.fail('Expected repeated workout option validation to fail.')
+    }
+    assert.deepEqual(
+      repeatedWorkoutEnvelope.error.fieldErrors?.map(({ path }) => path),
+      [
+        'workoutMedia.1.kind',
+        'workoutExercise.1.unitOverride',
+        'workoutSet.1.weightUnit',
+      ],
+    )
+    assert.equal(JSON.stringify(repeatedWorkoutEnvelope.error).includes(privateWorkoutText), false)
+    assert.equal(repeatedWorkout.stderr.includes(privateWorkoutText), false)
+
+    const privateScheduledText = 'Private built scheduled option'
+    const repeatedScheduledWorkout = await runBuiltCliProcess([
+      'scheduled-log',
+      'save',
+      'Repeated scheduled workout validation',
+      '--vault',
+      vaultRoot,
+      '--slug',
+      'repeated-scheduled-workout-validation',
+      '--schedule-kind',
+      'dailyLocal',
+      '--schedule-local-time',
+      '09:00',
+      '--action-kind',
+      'activity_session.add',
+      '--action-title',
+      'Strength',
+      '--activity-type',
+      'strength',
+      '--duration-minutes',
+      '30',
+      '--workout-exercise',
+      'order=2;name=First public occurrence',
+      '--workout-exercise',
+      `order=1;name=${privateScheduledText};unitOverride=stone`,
+      '--workout-set',
+      'exercise=2;order=1;reps=10;weightUnit=kg',
+      '--workout-set',
+      'exercise=1;order=1;reps=10;weightUnit=stone',
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const repeatedScheduledEnvelope = JSON.parse(
+      repeatedScheduledWorkout.stdout,
+    ) as CliEnvelope
+    assert.equal(repeatedScheduledWorkout.exitCode, 1)
+    assert.equal(repeatedScheduledEnvelope.ok, false)
+    if (repeatedScheduledEnvelope.ok) {
+      assert.fail('Expected repeated scheduled workout option validation to fail.')
+    }
+    assert.deepEqual(
+      repeatedScheduledEnvelope.error.fieldErrors?.map(({ path }) => path),
+      ['workoutExercise.1.unitOverride', 'workoutSet.1.weightUnit'],
+    )
+    assert.equal(
+      JSON.stringify(repeatedScheduledEnvelope.error).includes(privateScheduledText),
+      false,
+    )
+    assert.equal(repeatedScheduledWorkout.stderr.includes(privateScheduledText), false)
+
+    const privateAnalyte = 'Private built analyte'
+    const repeatedResult = await runBuiltCliProcess([
+      'blood-test',
+      'save',
+      'Repeated built result validation',
+      '--vault',
+      vaultRoot,
+      '--occurred-at',
+      '2026-03-12T13:00:00.000Z',
+      '--test-name',
+      'repeated_built_result_validation',
+      '--result',
+      JSON.stringify({ analyte: 'Glucose', value: 92, unit: 'mg/dL' }),
+      '--result',
+      JSON.stringify({ analyte: privateAnalyte, value: 7, unit: '' }),
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const repeatedResultEnvelope = JSON.parse(repeatedResult.stdout) as CliEnvelope
+    assert.equal(repeatedResult.exitCode, 1)
+    assert.equal(repeatedResultEnvelope.ok, false)
+    if (repeatedResultEnvelope.ok) {
+      assert.fail('Expected repeated blood-test result validation to fail.')
+    }
+    assert.equal(
+      repeatedResultEnvelope.error.fieldErrors?.[0]?.path,
+      'result.1.unit',
+    )
+    assert.equal(JSON.stringify(repeatedResultEnvelope.error).includes(privateAnalyte), false)
+    assert.equal(repeatedResult.stderr.includes(privateAnalyte), false)
+
+    const manyExerciseArgs = [
+      'workout',
+      'add',
+      '--vault',
+      vaultRoot,
+      ...Array.from({ length: 14 }, (_, index) => [
+        '--workout-exercise',
+        `order=${index + 1};name=Lift ${index + 1}`,
+      ]).flat(),
+    ]
+    const manyExercises = await runBuiltCliProcess([
+      ...manyExerciseArgs,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const manyExerciseEnvelope = JSON.parse(manyExercises.stdout) as CliEnvelope
+    assert.equal(manyExercises.exitCode, 1)
+    assert.equal(manyExerciseEnvelope.ok, false)
+    if (manyExerciseEnvelope.ok) {
+      assert.fail('Expected many missing workout sets to fail.')
+    }
+    assert.equal(manyExerciseEnvelope.error.stage, 'validation')
+    assert.equal(manyExerciseEnvelope.error.fieldErrors?.length, 13)
+    assert.deepEqual(manyExerciseEnvelope.error.fieldErrors?.at(-1), {
+      path: '$',
+      code: 'issues_omitted',
+      expected: '',
+      received: 'invalid',
+      message: '2 additional validation issues were omitted.',
+    })
+    assert.equal(JSON.stringify(manyExerciseEnvelope.error).includes('Lift'), false)
+    assert.equal(manyExercises.stderr.includes('Lift'), false)
+    assert.deepEqual(
+      await readdir(path.join(vaultRoot, 'ledger', 'events')).catch(() => []),
+      [],
+    )
+    assert.deepEqual(
+      await readdir(path.join(vaultRoot, 'bank', 'scheduled-logs')).catch(() => []),
+      [],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('VaultCliError envelopes default retryable to false', async () => {

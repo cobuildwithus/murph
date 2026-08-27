@@ -18,6 +18,8 @@ import type {
 import type {
   DeviceSyncJobFailureDiagnostic,
   DeviceSyncJobFailureEventOrigin,
+  DeviceSyncJobRecord,
+  DeviceSyncJobTimingDiagnostic,
 } from "@murphai/device-syncd/types";
 import {
   resolveDeviceSyncStoreNextJobWakeAt,
@@ -84,18 +86,23 @@ import {
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
 } from "./system-mailbox-state.ts";
 import {
-  hasHostedRuntimeJunctionPlatformEnv,
   resolveHostedRuntimeDeviceSyncProviderConfigs,
 } from "./device-sync-provider-configs.ts";
 import {
   createHostedBackgroundMaintenanceCancellation,
   type HostedBackgroundMaintenanceCancellationReason,
 } from "./background-maintenance-cancellation.ts";
+import {
+  HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
+} from "./device-sync-maintenance-limits.ts";
 
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
+const HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+const HOSTED_DEVICE_SYNC_QUEUE_READ_LIMIT = HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT + 1;
+const HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT = 16;
 type HostedDeviceSyncPassStage =
   | "completed"
   | "control_plane_reconcile"
@@ -124,6 +131,21 @@ type HostedDeviceSyncYieldReason =
   | HostedBackgroundMaintenanceCancellationReason
   | "unknown";
 
+type HostedDeviceSyncQueueSnapshot = {
+  jobCount: number;
+  jobCountTruncated: boolean;
+  jobKindCounts: string[];
+  maxJobAttempts: number | null;
+  oldestJobAgeMs: number | null;
+  queuedJobCount: number;
+  runningJobCount: number;
+};
+
+type HostedDeviceSyncPassQueueSnapshots = {
+  after: HostedDeviceSyncQueueSnapshot | null;
+  before: HostedDeviceSyncQueueSnapshot | null;
+};
+
 const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS = 4;
 const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS = 30_000;
 type HostedDeviceSyncMaintenanceStore = ReturnType<
@@ -137,7 +159,11 @@ export async function runHostedDeviceSyncPass(
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
   options: {
+    onJobTimingDiagnostics?: (
+      diagnostics: readonly DeviceSyncJobTimingDiagnostic[]
+    ) => void;
     onProcessedJobs?: ((processedJobs: number) => void) | null;
+    onQueueSnapshots?: ((snapshots: HostedDeviceSyncPassQueueSnapshots) => void) | null;
     platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     onStage?: ((stage: HostedDeviceSyncPassStage) => void) | null;
@@ -154,13 +180,8 @@ export async function runHostedDeviceSyncPass(
   skipped: boolean;
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
-  const platformEnv = options.platformEnv ?? {};
   options.onStage?.("starting");
-  await writeHostedLegacyDeviceSyncPlatformEnvLog({
-    deviceSyncConfig,
-    platform: options.runtimeLogPlatform ?? null,
-    platformEnv,
-  });
+  const platformEnv = options.platformEnv ?? {};
   const shouldYield = createHostedDeviceSyncYieldPredicate(
     options.shouldYield ?? null,
     options.signal ?? null,
@@ -231,6 +252,7 @@ export async function runHostedDeviceSyncPass(
     options.onStage?.("retry_fence");
     await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
       nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+      persistAtCanonicalBoundary: true,
       userId: wake.userId,
       vaultRoot,
     });
@@ -327,12 +349,37 @@ export async function runHostedDeviceSyncPass(
     }
 
     options.onStage?.("worker_drain");
-    processedJobs = await drainHostedDeviceSyncWorker({
-      accountId: wakeLocalAccountId,
-      service,
-      shouldYield,
-    });
-    options.onProcessedJobs?.(processedJobs);
+    const queueSnapshotBefore = options.onQueueSnapshots
+      ? readHostedDeviceSyncQueueSnapshot({
+          accountId: wakeLocalAccountId,
+          service,
+        })
+      : null;
+    try {
+      processedJobs = await drainHostedDeviceSyncWorker({
+        accountId: wakeLocalAccountId,
+        onProcessedJobs: (observedProcessedJobs) => {
+          processedJobs = observedProcessedJobs;
+          options.onProcessedJobs?.(observedProcessedJobs);
+        },
+        service,
+        shouldYield,
+      });
+    } finally {
+      options.onJobTimingDiagnostics?.(service.listJobTimingDiagnostics?.() ?? []);
+      const queueSnapshotAfter = options.onQueueSnapshots
+        ? readHostedDeviceSyncQueueSnapshot({
+            accountId: wakeLocalAccountId,
+            service,
+          })
+        : null;
+      if (queueSnapshotBefore || queueSnapshotAfter) {
+        options.onQueueSnapshots?.({
+          after: queueSnapshotAfter,
+          before: queueSnapshotBefore,
+        });
+      }
+    }
     const completedImports = promoteHostedCompletedDirtyPayloadAcks({
       service,
       state: syncState,
@@ -418,7 +465,10 @@ export async function runHostedDeviceSyncPass(
 
     options.onStage?.("dense_raw_retention");
     const denseRawRetention = await runHostedDeviceSyncDenseRawRetention({
-      deadlineMs: remainingHostedDeviceSyncDeadlineMs(startedAtMs, timeoutMs),
+      deadlineMs: remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
+        startedAtMs,
+        timeoutMs,
+      ),
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
       shouldYield,
@@ -873,46 +923,125 @@ function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {
   return new Date(now.getTime() + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
 }
 
-function remainingHostedDeviceSyncDeadlineMs(
+function remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
   startedAtMs: number,
   timeoutMs: number | null,
-): number | undefined {
-  if (timeoutMs === null) {
-    return undefined;
-  }
-  return Math.max(0, timeoutMs - (Date.now() - startedAtMs));
+): number {
+  const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+  const passRelativeTimeoutMs = timeoutMs === null
+    ? HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS
+    : Math.min(timeoutMs, HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS);
+  return Math.max(0, passRelativeTimeoutMs - elapsedMs);
 }
 
 async function drainHostedDeviceSyncWorker(input: {
   accountId: string | null;
+  onProcessedJobs?: ((processedJobs: number) => void) | null;
   service: DeviceSyncService;
   shouldYield?: (() => boolean) | null;
 }): Promise<number> {
   if (!input.accountId) {
+    input.onProcessedJobs?.(0);
     return 0;
   }
-  if (!input.shouldYield) {
-    return await input.service.drainWorker(
-      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
-      input.accountId,
-    );
+  if (input.shouldYield?.()) {
+    input.onProcessedJobs?.(0);
+    return 0;
   }
 
-  let processedJobs = 0;
-  for (let index = 0; index < HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT; index += 1) {
-    if (input.shouldYield()) {
-      break;
-    }
-    const processed = await input.service.drainWorker(1, input.accountId);
-    if (processed <= 0) {
-      break;
-    }
-    processedJobs += processed;
-    if (processed !== 1) {
-      break;
-    }
+  let reportedProcessedJobs = -1;
+  const processedJobs = await input.service.drainWorker(
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+    input.accountId,
+    {
+      onProcessedJobRows(observedProcessedJobs) {
+        reportedProcessedJobs = observedProcessedJobs;
+        input.onProcessedJobs?.(observedProcessedJobs);
+      },
+    },
+  );
+  if (reportedProcessedJobs !== processedJobs) {
+    input.onProcessedJobs?.(processedJobs);
   }
   return processedJobs;
+}
+
+function readHostedDeviceSyncQueueSnapshot(input: {
+  accountId: string | null;
+  service: DeviceSyncService;
+}): HostedDeviceSyncQueueSnapshot | null {
+  if (!input.accountId) {
+    return null;
+  }
+
+  try {
+    const pendingJobs = requireHostedRuntimeDeviceSyncStore(input.service)
+      .listPendingJobsForAccount(
+        input.accountId,
+        HOSTED_DEVICE_SYNC_QUEUE_READ_LIMIT,
+      );
+    return buildHostedDeviceSyncQueueSnapshot(pendingJobs, Date.now());
+  } catch {
+    // Queue diagnostics must never become another device-sync failure mode.
+    return null;
+  }
+}
+
+function buildHostedDeviceSyncQueueSnapshot(
+  pendingJobs: readonly DeviceSyncJobRecord[],
+  nowMs: number,
+): HostedDeviceSyncQueueSnapshot {
+  const sampledJobs = pendingJobs.slice(0, HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT);
+  const jobKindCounts = new Map<string, number>();
+  let maxJobAttempts: number | null = null;
+  let oldestCreatedAtMs: number | null = null;
+  let queuedJobCount = 0;
+  let runningJobCount = 0;
+
+  for (const job of sampledJobs) {
+    const jobKind = toHostedDeviceSyncQueueJobKindLogCode(job.kind);
+    jobKindCounts.set(jobKind, (jobKindCounts.get(jobKind) ?? 0) + 1);
+    maxJobAttempts = Math.max(maxJobAttempts ?? 0, job.attempts);
+    const createdAtMs = Date.parse(job.createdAt);
+    if (Number.isFinite(createdAtMs)) {
+      oldestCreatedAtMs = Math.min(oldestCreatedAtMs ?? createdAtMs, createdAtMs);
+    }
+    if (job.status === "queued") {
+      queuedJobCount += 1;
+    } else if (job.status === "running") {
+      runningJobCount += 1;
+    }
+  }
+
+  return {
+    jobCount: sampledJobs.length,
+    jobCountTruncated: pendingJobs.length > sampledJobs.length,
+    jobKindCounts: [...jobKindCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([jobKind, count]) => `${jobKind}=${count}`),
+    maxJobAttempts,
+    oldestJobAgeMs: oldestCreatedAtMs === null
+      ? null
+      : Math.max(0, nowMs - oldestCreatedAtMs),
+    queuedJobCount,
+    runningJobCount,
+  };
+}
+
+function toHostedDeviceSyncQueueJobKindLogCode(jobKind: string): string {
+  switch (jobKind) {
+    case "backfill":
+    case "delete":
+    case "push_source_recovery":
+    case "reconcile":
+    case "resource":
+      return jobKind;
+    case "deauthorization":
+    case "deauthorize":
+      return "deauth";
+    default:
+      return "other";
+  }
 }
 
 async function runHostedDeviceSyncDenseRawRetention(input: {
@@ -1127,6 +1256,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
   const startedAtMs = Date.now();
   let passStage: HostedDeviceSyncPassStage = "starting";
   let processedJobs = 0;
+  let jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[] = [];
+  let queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null = null;
   let foregroundYieldObserved = false;
   const shouldYieldDeviceSync = input.shouldYieldDeviceSync
     ? () => {
@@ -1148,6 +1279,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome: null,
       passStage,
       processedJobs: 0,
+      jobTimingDiagnostics,
+      queueSnapshots,
       result: null,
       startedAtMs,
       yieldReason: null,
@@ -1165,6 +1298,18 @@ export async function runHostedDeviceSyncWakeLane(input: {
           onProcessedJobs: (observedProcessedJobs) => {
             processedJobs = observedProcessedJobs;
           },
+          ...(input.runtimeLogPlatform?.logPort
+            ? {
+                onJobTimingDiagnostics: (
+                  observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+                ) => {
+                  jobTimingDiagnostics = observedJobTimingDiagnostics;
+                },
+                onQueueSnapshots: (observedQueueSnapshots: HostedDeviceSyncPassQueueSnapshots) => {
+                  queueSnapshots = observedQueueSnapshots;
+                },
+              }
+            : {}),
           onStage: (stage) => {
             passStage = stage;
           },
@@ -1185,6 +1330,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
         outcome: "failed",
         passStage,
         processedJobs,
+        jobTimingDiagnostics,
+        queueSnapshots,
         result: null,
         startedAtMs,
         yieldReason: cancellation.readReason(),
@@ -1230,6 +1377,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome,
       passStage,
       processedJobs: deviceSyncResult.processedJobs,
+      jobTimingDiagnostics,
+      queueSnapshots,
       result: metrics,
       startedAtMs,
       yieldReason,
@@ -1284,6 +1433,8 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   outcome: HostedDeviceSyncPassOutcome | null;
   passStage: HostedDeviceSyncPassStage;
   processedJobs: number;
+  jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[];
+  queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null;
   result: HostedMaintenanceMetrics | null;
   startedAtMs: number;
   yieldReason: HostedDeviceSyncYieldReason | null;
@@ -1297,6 +1448,11 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     : input.input.wake.kind === "runtime.timer"
     ? input.input.wake.triggerKind
     : "other";
+  const queueSnapshotBefore = input.queueSnapshots?.before ?? null;
+  const queueSnapshotAfter = input.queueSnapshots?.after ?? null;
+  const jobTimingSummary = summarizeHostedDeviceSyncJobTimings(
+    input.jobTimingDiagnostics,
+  );
   void writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
@@ -1315,6 +1471,35 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         passStage: input.passStage,
         postCheckpointRecordPresent: input.result?.postCheckpointRecord != null,
         processedJobs: input.processedJobs,
+        ...(input.lifecycle === "finished"
+          ? {
+              pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,
+              pendingJobCountAfterTruncated:
+                queueSnapshotAfter?.jobCountTruncated ?? null,
+              pendingJobCountBefore: queueSnapshotBefore?.jobCount ?? null,
+              pendingJobCountBeforeTruncated:
+                queueSnapshotBefore?.jobCountTruncated ?? null,
+              pendingJobKindCountsAfter: queueSnapshotAfter?.jobKindCounts ?? [],
+              pendingJobKindCountsBefore: queueSnapshotBefore?.jobKindCounts ?? [],
+              pendingJobMaxAttemptsAfter: queueSnapshotAfter?.maxJobAttempts ?? null,
+              pendingJobMaxAttemptsBefore: queueSnapshotBefore?.maxJobAttempts ?? null,
+              pendingJobOldestAgeMsAfter: queueSnapshotAfter?.oldestJobAgeMs ?? null,
+              pendingJobOldestAgeMsBefore: queueSnapshotBefore?.oldestJobAgeMs ?? null,
+              pendingJobQueueSampleLimit: HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT,
+              pendingQueuedJobCountAfter: queueSnapshotAfter?.queuedJobCount ?? null,
+              pendingQueuedJobCountBefore: queueSnapshotBefore?.queuedJobCount ?? null,
+              pendingRunningJobCountAfter: queueSnapshotAfter?.runningJobCount ?? null,
+              pendingRunningJobCountBefore: queueSnapshotBefore?.runningJobCount ?? null,
+              queueSnapshotAfterPresent: queueSnapshotAfter !== null,
+              queueSnapshotBeforePresent: queueSnapshotBefore !== null,
+              deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
+              deviceSyncJobTimingSampleLimit: HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
+              deviceSyncJobTimingSummaries: jobTimingSummary.summaries,
+              deviceSyncJobTimingTruncated: jobTimingSummary.truncated,
+              workerJobLimitReached:
+                input.processedJobs >= HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+            }
+          : {}),
         retainFollowUpWakeUntilCheckpoint:
           input.input.retainFollowUpWakeUntilCheckpoint === true,
         skipped: input.result?.deviceSyncSkipped ?? null,
@@ -1327,6 +1512,51 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     },
     platform: input.input.runtimeLogPlatform,
   });
+}
+
+function summarizeHostedDeviceSyncJobTimings(
+  diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+): {
+  summaries: Array<Record<string, boolean | number | string | null>>;
+  truncated: boolean;
+} {
+  const slowest = [...diagnostics]
+    .sort((left, right) => right.elapsedMs - left.elapsedMs)
+    .slice(0, HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT);
+
+  return {
+    summaries: slowest.map((diagnostic) => ({
+      attempts: diagnostic.attempts,
+      connectionSourceReadCount: diagnostic.connectionSourceReadCount,
+      connectionSourceReadElapsedMs: diagnostic.connectionSourceReadElapsedMs,
+      credentialRefreshCount: diagnostic.credentialRefreshCount,
+      credentialRefreshElapsedMs: diagnostic.credentialRefreshElapsedMs,
+      durableProgressCommitted: diagnostic.durableProgressCommitted,
+      elapsedMs: diagnostic.elapsedMs,
+      jobCount: diagnostic.jobCount,
+      jobKind: toHostedRuntimeLogCode(diagnostic.jobKind),
+      outcome: toHostedRuntimeLogCode(diagnostic.outcome),
+      provider: toHostedRuntimeLogCode(diagnostic.provider),
+      providerExecutionElapsedMs: diagnostic.providerExecutionElapsedMs,
+      providerInventoryRequestCount: diagnostic.providerInventoryRequestCount,
+      providerInventoryRequestElapsedMs: diagnostic.providerInventoryRequestElapsedMs,
+      providerResourceRequestCount: diagnostic.providerResourceRequestCount,
+      providerResourceRequestElapsedMs: diagnostic.providerResourceRequestElapsedMs,
+      providerUnattributedElapsedMs: diagnostic.providerUnattributedElapsedMs,
+      ...(diagnostic.resource
+        ? { resource: toHostedRuntimeLogCode(diagnostic.resource) }
+        : {}),
+      snapshotImportCount: diagnostic.snapshotImportCount,
+      snapshotImportElapsedMs: diagnostic.snapshotImportElapsedMs,
+      snapshotCanonicalCoreElapsedMs: diagnostic.snapshotCanonicalCoreElapsedMs,
+      snapshotCanonicalWriteElapsedMs: diagnostic.snapshotCanonicalWriteElapsedMs,
+      snapshotEventIdentityIndexCacheHitCount:
+        diagnostic.snapshotEventIdentityIndexCacheHitCount,
+      snapshotEventIdentityIndexElapsedMs: diagnostic.snapshotEventIdentityIndexElapsedMs,
+      snapshotNormalizationElapsedMs: diagnostic.snapshotNormalizationElapsedMs,
+    })),
+    truncated: diagnostics.length > HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
+  };
 }
 
 function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
@@ -1431,6 +1661,9 @@ function toHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
   ack: HostedDeviceSyncRuntimeSyncState["pendingDirtyAcks"][number],
 ): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
   return {
+    ...(ack.completedImports
+      ? { completedImports: ack.completedImports }
+      : {}),
     connectionId: ack.connectionId,
     nextWakeAt: ack.nextWakeAt,
     ...(ack.processedDirtyPayloadIds
@@ -1526,36 +1759,6 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
   });
 }
 
-async function writeHostedLegacyDeviceSyncPlatformEnvLog(input: {
-  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
-  platformEnv: Readonly<Record<string, string>>;
-}): Promise<void> {
-  if (!input.platform?.logPort || !input.deviceSyncConfig?.providerConfigs.junction) {
-    return;
-  }
-
-  const legacyPlatformEnvKeyCount = Object.keys(input.platformEnv).length;
-  const junctionPlatformEnvPresent = hasHostedRuntimeJunctionPlatformEnv(input.platformEnv);
-  if (legacyPlatformEnvKeyCount === 0 || !junctionPlatformEnvPresent) {
-    return;
-  }
-
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      component: "device-sync",
-      eventCode: "device-sync.legacy_platform_env_present",
-      level: "info",
-      phase: "invoke",
-      redactedJson: {
-        junctionPlatformEnvPresent,
-        legacyPlatformEnvKeyCount,
-      },
-    },
-    platform: input.platform,
-  });
-}
-
 type HostedDeviceSyncRuntimeService = NonNullable<ReturnType<typeof createHostedDeviceSyncRuntime>>;
 type HostedDeviceSyncRuntimeSnapshotEntry = NonNullable<HostedDeviceSyncRuntimeSyncState["snapshot"]>["connections"][number];
 
@@ -1638,6 +1841,7 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "failureCauseCode",
   "failureCauseName",
   "failureErrorName",
+  "junctionWorkoutStreamTimestampCardinalityKind",
   "normalizationFailureReason",
   "normalizationSourceProvider",
   "normalizationTimestampKind",
@@ -1675,6 +1879,8 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
 
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
   "normalizationRowOrdinal",
+  "junctionWorkoutStreamMaxTimestampCount",
+  "junctionWorkoutStreamTimestampCount",
   "providerHttpStatus",
   "providerRequestBodyFieldCount",
   "providerRequestCandidateCount",

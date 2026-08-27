@@ -41,6 +41,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH =
+  "/api/internal/device-sync/no-data-outreach";
 export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =
   "/api/internal/device-sync/fitbit-migration/cutover";
 export const HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT = 100;
@@ -65,6 +67,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
+export const HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT = 500;
 
 export const HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS = [
   "under_5_minutes",
@@ -265,6 +268,23 @@ export interface HostedExecutionDeviceSyncReconcileResponse {
   connectionId: string;
   occurredAt: string;
   status: "queued";
+}
+
+export type HostedExecutionDeviceSyncNoDataOutreachRequest = {
+  assistantInputId: string;
+  sourceProviderSlug: string;
+} & (
+  | { mode: "after_days"; afterDays: number }
+  | { mode: "default" }
+  | { mode: "off" }
+);
+
+export interface HostedExecutionDeviceSyncNoDataOutreachResponse {
+  action: "configure_no_data_outreach";
+  effectiveAfterDays: number | null;
+  setting: "custom" | "default" | "off";
+  sourceProviderSlug: string;
+  status: "saved" | "unchanged";
 }
 
 export interface HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
@@ -673,11 +693,19 @@ export interface HostedExecutionDeviceSyncDirtyPendingResponse {
 }
 
 export interface HostedExecutionDeviceSyncDirtyAckRequest {
+  completedImports?: HostedExecutionDeviceSyncCompletedImport[];
   connectionId: string;
   processedDirtyPayloadIds?: string[];
   processedRevision: string;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
+}
+
+export interface HostedExecutionDeviceSyncCompletedImport {
+  dirtyPayloadId: string;
+  importCompletedAt: string;
+  resource: string;
+  sourceProviderSlug: string;
 }
 
 export interface HostedExecutionDeviceSyncDirtyAckResponse {
@@ -746,6 +774,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   eventType: "string",
   historicalBackfill: "boolean",
   historicalBackfillVersion: "number",
+  historicalProofFirstSeenAt: "isoTimestamp",
+  historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
@@ -770,6 +800,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   timeseriesWindowHours: "number",
   webhookDataJson: "string",
   workoutStreamCursor: "string",
+  workoutStreamEmptyReplay: "boolean",
+  workoutStreamEmptySeen: "boolean",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
@@ -891,6 +923,110 @@ export function parseHostedExecutionDeviceSyncReconcileResponse(
       "Hosted device-sync reconcile response occurredAt",
     ),
     status: "queued",
+  };
+}
+
+export function parseHostedExecutionDeviceSyncNoDataOutreachRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncNoDataOutreachRequest {
+  const record = requireObject(value, "Hosted device-sync no-data outreach request");
+  const mode = requireString(
+    record.mode,
+    "Hosted device-sync no-data outreach request mode",
+  );
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    "Hosted device-sync no-data outreach request assistantInputId",
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError(
+      "Hosted device-sync no-data outreach request assistantInputId is invalid.",
+    );
+  }
+  const common = {
+    assistantInputId,
+    sourceProviderSlug: requireString(
+      record.sourceProviderSlug,
+      "Hosted device-sync no-data outreach request sourceProviderSlug",
+    ),
+  };
+  if (mode === "after_days") {
+    assertSupportedFields(
+      record,
+      "Hosted device-sync no-data outreach request",
+      ["afterDays", "assistantInputId", "mode", "sourceProviderSlug"],
+    );
+    const afterDays = requirePositiveInteger(
+      record.afterDays,
+      "Hosted device-sync no-data outreach request afterDays",
+    );
+    if (afterDays < 5 || afterDays > 30) {
+      throw new TypeError(
+        "Hosted device-sync no-data outreach request afterDays must be between 5 and 30.",
+      );
+    }
+    return { ...common, afterDays, mode };
+  }
+  if (mode !== "default" && mode !== "off") {
+    throw new TypeError("Hosted device-sync no-data outreach request mode is invalid.");
+  }
+  assertSupportedFields(
+    record,
+    "Hosted device-sync no-data outreach request",
+    ["assistantInputId", "mode", "sourceProviderSlug"],
+  );
+  return { ...common, mode };
+}
+
+export function parseHostedExecutionDeviceSyncNoDataOutreachResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncNoDataOutreachResponse {
+  const record = requireObject(value, "Hosted device-sync no-data outreach response");
+  assertSupportedFields(
+    record,
+    "Hosted device-sync no-data outreach response",
+    ["action", "effectiveAfterDays", "setting", "sourceProviderSlug", "status"],
+  );
+  if (record.action !== "configure_no_data_outreach") {
+    throw new TypeError("Hosted device-sync no-data outreach response action is invalid.");
+  }
+  if (
+    record.setting !== "custom"
+    && record.setting !== "default"
+    && record.setting !== "off"
+  ) {
+    throw new TypeError("Hosted device-sync no-data outreach response setting is invalid.");
+  }
+  if (record.status !== "saved" && record.status !== "unchanged") {
+    throw new TypeError("Hosted device-sync no-data outreach response status is invalid.");
+  }
+  const effectiveAfterDays = record.effectiveAfterDays === null
+    ? null
+    : requirePositiveInteger(
+        record.effectiveAfterDays,
+        "Hosted device-sync no-data outreach response effectiveAfterDays",
+      );
+  if (
+    (record.setting === "off" && effectiveAfterDays !== null)
+    || (record.setting !== "off" && (
+      effectiveAfterDays === null
+      || effectiveAfterDays < 5
+      || effectiveAfterDays > 30
+    ))
+  ) {
+    throw new TypeError(
+      "Hosted device-sync no-data outreach response setting and effectiveAfterDays are inconsistent.",
+    );
+  }
+  return {
+    action: record.action,
+    effectiveAfterDays,
+    setting: record.setting,
+    sourceProviderSlug: requireString(
+      record.sourceProviderSlug,
+      "Hosted device-sync no-data outreach response sourceProviderSlug",
+    ),
+    status: record.status,
   };
 }
 
@@ -1231,6 +1367,47 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
   trustedUserId: string | null = null,
 ): HostedExecutionDeviceSyncDirtyAckRequest {
   const record = requireObject(value, "Hosted device-sync dirty ack request");
+  const processedDirtyPayloadIds = record.processedDirtyPayloadIds === undefined
+    ? undefined
+    : requireBoundedArray(
+      record.processedDirtyPayloadIds,
+      "Hosted device-sync dirty ack request processedDirtyPayloadIds",
+      HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
+    ).map((entry, index) =>
+      requireString(
+        entry,
+        `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
+      )
+    );
+  const completedImports = record.completedImports === undefined
+    ? undefined
+    : requireBoundedArray(
+      record.completedImports,
+      "Hosted device-sync dirty ack request completedImports",
+      HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT,
+    ).map((entry, index) =>
+      parseHostedExecutionDeviceSyncCompletedImport(
+        entry,
+        `Hosted device-sync dirty ack request completedImports[${index}]`,
+      )
+    );
+  if (completedImports) {
+    const processedIds = new Set(processedDirtyPayloadIds ?? []);
+    const completedIds = new Set<string>();
+    for (const completedImport of completedImports) {
+      if (!processedIds.has(completedImport.dirtyPayloadId)) {
+        throw new TypeError(
+          "Hosted device-sync dirty ack request completedImports must reference processed dirty payload ids.",
+        );
+      }
+      if (completedIds.has(completedImport.dirtyPayloadId)) {
+        throw new TypeError(
+          "Hosted device-sync dirty ack request completedImports must not repeat a dirty payload id.",
+        );
+      }
+      completedIds.add(completedImport.dirtyPayloadId);
+    }
+  }
   const stagedDirtyAcks = record.stagedDirtyAcks === undefined
     ? undefined
     : parseHostedExecutionDeviceSyncStagedDirtyAcks(
@@ -1239,20 +1416,9 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     );
 
   return {
+    ...(completedImports === undefined ? {} : { completedImports }),
     connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack request connectionId"),
-    ...(record.processedDirtyPayloadIds === undefined
-      ? {}
-      : {
-          processedDirtyPayloadIds: requireArray(
-            record.processedDirtyPayloadIds,
-            "Hosted device-sync dirty ack request processedDirtyPayloadIds",
-          ).map((entry, index) =>
-            requireString(
-              entry,
-              `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
-            )
-          ),
-        }),
+    ...(processedDirtyPayloadIds === undefined ? {} : { processedDirtyPayloadIds }),
     processedRevision: requireBigIntString(
       record.processedRevision,
       "Hosted device-sync dirty ack request processedRevision",
@@ -1260,6 +1426,33 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     ...(stagedDirtyAcks === undefined ? {} : { stagedDirtyAcks }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
+}
+
+export function parseHostedExecutionDeviceSyncCompletedImport(
+  value: unknown,
+  label = "Hosted device-sync completed import",
+): HostedExecutionDeviceSyncCompletedImport {
+  const record = requireObject(value, label);
+  return {
+    dirtyPayloadId: requireString(record.dirtyPayloadId, `${label}.dirtyPayloadId`),
+    importCompletedAt: requireIsoTimestamp(
+      record.importCompletedAt,
+      `${label}.importCompletedAt`,
+    ),
+    resource: requireDeviceSyncImportReceiptKey(record.resource, `${label}.resource`),
+    sourceProviderSlug: requireDeviceSyncImportReceiptKey(
+      record.sourceProviderSlug,
+      `${label}.sourceProviderSlug`,
+    ),
+  };
+}
+
+function requireDeviceSyncImportReceiptKey(value: unknown, label: string): string {
+  const key = requireString(value, label);
+  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(key)) {
+    throw new TypeError(`${label} must be a normalized device-sync key.`);
+  }
+  return key;
 }
 
 export function parseHostedExecutionDeviceSyncDirtyAckResponse(

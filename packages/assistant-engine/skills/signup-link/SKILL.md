@@ -10,7 +10,7 @@ link merely because someone mentions a friend, starts a group, asks about an
 earned group referral option, or agrees to introduce Murph.
 
 Only when the current member explicitly asks for a signup, invite, referral, or
-shareable link to forward, call `murph.group` with
+shareable link to forward, call `murph.group_usage` with
 `action="create_signup_referral_link"`. In a group, pass the exact accepted
 `message_ref` from the requester.
 

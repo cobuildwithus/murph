@@ -1,4 +1,4 @@
-name: Live Junction WHOOP Canary
+name: Live Junction Garmin Canary
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   connect:
-    name: Connect WHOOP through Junction
+    name: Connect Garmin through Junction
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
     environment: junction-wearable-canary
     runs-on: ubuntu-24.04
@@ -62,15 +62,37 @@ jobs:
           echo "${codex_bin_dir}" >> "$GITHUB_PATH"
           "${codex_bin_dir}/codex" --version
 
-      # The protected WHOOP proof uses Playwright's stable Chrome channel so
-      # the provider sees the current public browser rather than the ahead-of-
-      # stable bundled Chromium build. Ubuntu 24.04 runners include Chrome.
-      - name: Verify stable Chrome
-        run: google-chrome --version
+      # Kernel's pinned CLI creates the reverse SSH tunnel that lets its remote
+      # browser reach hosted-local Web. Keep both tool checks credential-free.
+      - name: Prepare pinned Kernel tunnel tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tools_dir="${RUNNER_TEMP}/kernel-tools"
+          mkdir -p "${tools_dir}"
+          kernel_archive="${tools_dir}/kernel.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${kernel_archive}" \
+            https://github.com/kernel/cli/releases/download/v0.31.0/kernel_0.31.0_linux_amd64.tar.gz
+          echo "8a0e41c96b61396f53e2e9e6593a3f987f836cdd39870ed2649916f711b9377c  ${kernel_archive}" \
+            | sha256sum --check --strict
+          tar --extract --gzip --file "${kernel_archive}" --directory "${tools_dir}" kernel
+          chmod 0755 "${tools_dir}/kernel"
+          "${tools_dir}/kernel" --version
+          curl --fail --location --silent --show-error \
+            --output "${tools_dir}/websocat" \
+            https://github.com/vi/websocat/releases/download/v1.14.1/websocat.x86_64-unknown-linux-musl
+          echo "66f8dd3a0394761556339117f8bb5123bddefd44e087af2a72ec22b0bd08d514  ${tools_dir}/websocat" \
+            | sha256sum --check --strict
+          chmod 0755 "${tools_dir}/websocat"
+          echo "${tools_dir}" >> "$GITHUB_PATH"
+          echo "MURPH_E2E_KERNEL_CLI_PATH=${tools_dir}/kernel" >> "$GITHUB_ENV"
+          "${tools_dir}/websocat" --version
 
       # Keep credentials off every checkout, install, bundle, and browser-check
       # step. The hosted-local suite further partitions Junction authority into
-      # the platform and one provider login at a time into the Chrome child.
+      # the platform and one provider login at a time into the Kernel child.
       - name: Run live Junction wearable browser canary
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync
@@ -78,15 +100,17 @@ jobs:
           JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
           JUNCTION_ENV: sandbox
           JUNCTION_REGION: ${{ vars.JUNCTION_REGION || 'us' }}
+          KERNEL_API_KEY: ${{ secrets.KERNEL_API_KEY }}
           MURPH_DEV_TEMPORAL: disabled
           MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
-          MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop
-          MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
-          # WHOOP's identity boundary challenges Playwright's bundled browser.
-          # Use the stable Chrome channel headed inside the runner's isolated
-          # virtual display; authorization and callback assertions stay exact.
+          MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID: member_e2e_junction_garmin_github_canary
+          MURPH_E2E_JUNCTION_WEARABLE_SOURCES: garmin
+          MURPH_E2E_PROVIDER_BROWSER: kernel
+          # Kernel owns the headed remote stealth browser and its dedicated
+          # persisted Garmin profile. CI remains unattended and the exact
+          # authorization and callback assertions stay fail-closed.
           MURPH_E2E_WEARABLE_HEADLESS: "0"
           MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
-          MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}
-          MURPH_E2E_WHOOP_PASSWORD: ${{ secrets.WHOOP_CANARY_PASSWORD }}
-        run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect
+          MURPH_E2E_GARMIN_EMAIL: ${{ secrets.GARMIN_CANARY_EMAIL }}
+          MURPH_E2E_GARMIN_PASSWORD: ${{ secrets.GARMIN_CANARY_PASSWORD }}
+        run: pnpm hosted-local e2e device-connect

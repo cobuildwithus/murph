@@ -1112,6 +1112,119 @@ function writeHarnessFile(
   }
 }
 
+function runFinishTaskHarnessGit(harnessRoot: string, ...command: string[]) {
+  const result = spawnSync('git', command, {
+    cwd: harnessRoot,
+    encoding: 'utf8',
+    env: withoutNodeV8Coverage(),
+  })
+
+  if (result.status !== 0) {
+    throw new Error(
+      `Harness git command failed (${command.join(' ')}):\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    )
+  }
+
+  return result.stdout.trim()
+}
+
+function createFinishTaskHarness(baselineFiles: Record<string, string>) {
+  const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
+
+  try {
+    writeHarnessFile(
+      harnessRoot,
+      'node_modules/@cobuild/repo-tools/src/consumer-shell.sh',
+      `#!/usr/bin/env bash
+repo_tools_join_lines() {
+  local var_name="$1"
+  shift
+  local joined=""
+  local item
+  for item in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined+=$'\\n'
+    fi
+    joined+="$item"
+  done
+  printf -v "$var_name" '%s' "$joined"
+  export "$var_name"
+}
+
+cobuild_repo_tool_bin() {
+  printf '%s\\n' "$COBUILD_REPO_ROOT/.fake-tools/$1"
+}
+`,
+      true,
+    )
+
+    for (const relativePath of [
+      'scripts/repo-tools.config.sh',
+      'scripts/finish-task',
+      'scripts/close-exec-plan.sh',
+      'scripts/committer',
+    ]) {
+      writeHarnessFile(
+        harnessRoot,
+        relativePath,
+        readFileSync(path.join(repoRoot, relativePath), 'utf8'),
+        true,
+      )
+    }
+
+    writeHarnessFile(
+      harnessRoot,
+      'scripts/install-git-hooks',
+      `#!/usr/bin/env bash
+set -euo pipefail
+touch .fake-tools/install-git-hooks.called
+`,
+      true,
+    )
+    writeHarnessFile(
+      harnessRoot,
+      '.fake-tools/cobuild-close-exec-plan',
+      `#!/usr/bin/env bash
+set -euo pipefail
+plan_path="$1"
+completed_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
+mkdir -p "$(dirname "$completed_path")"
+mv "$plan_path" "$completed_path"
+printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
+`,
+      true,
+    )
+    writeHarnessFile(
+      harnessRoot,
+      '.fake-tools/cobuild-committer',
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$@" > .fake-tools/committer.args
+`,
+      true,
+    )
+
+    for (const [relativePath, contents] of Object.entries(baselineFiles)) {
+      writeHarnessFile(harnessRoot, relativePath, contents)
+    }
+
+    for (const command of [
+      ['init'],
+      ['config', 'user.name', 'Harness'],
+      ['config', 'user.email', '123456+murph-harness@users.noreply.github.com'],
+      ['add', '.'],
+      ['commit', '-m', 'baseline'],
+    ]) {
+      runFinishTaskHarnessGit(harnessRoot, ...command)
+    }
+
+    return harnessRoot
+  } catch (error) {
+    rmSync(harnessRoot, { recursive: true, force: true })
+    throw error
+  }
+}
+
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
@@ -1151,6 +1264,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt-context-policy.sh'),
       'utf8',
     )
+    const reviewGptPrHeadPreflight = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
+      'utf8',
+    )
     const reviewGptDriver = readFileSync(
       path.join(
         repoRoot,
@@ -1187,6 +1304,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
       'bash scripts/review-gpt-pr-head-preflight.sh --run',
     )
+    expect(reviewGptConfig).not.toContain('minimum_marked_response_ms=300000')
+    expect(reviewGptPrHeadPreflight).toContain(
+      'review_gpt_reject_repository_policy_overrides "$@"',
+    )
+    expect(reviewGptPrHeadPreflight).toContain(
+      '--minimum-marked-response-time 5m \\\n    "$@"',
+    )
+    expect(reviewGptPrHeadPreflight).not.toContain(
+      'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
+    )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
     }
@@ -1200,13 +1327,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.136')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.138')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.136'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.138'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1621,7 +1748,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -1716,6 +1843,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     expect(prDeepReviewPrompt).toContain('Our utmost priority is clean, simple, long-term maintainable')
     expect(prDeepReviewPrompt).toContain('Default to deletion and radical')
+    expect(prDeepReviewPrompt).toContain('merge veto, not product brainstorming')
+    expect(prDeepReviewPrompt).toContain('it is not a product\nbacklog')
+    expect(prDeepReviewPrompt).toContain('current writer, current consumer')
+    expect(prDeepReviewPrompt).toContain(
+      'Inspect an exceptional state only when the diff changes it',
+    )
     expect(prDeepReviewPrompt).toContain('`full` is a fresh full-patch audit')
     expect(prDeepReviewPrompt).toContain(
       '`correction` is a same-thread correction-verification round',
@@ -1775,12 +1908,37 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toMatch(
       /A contract\s+mismatch or theoretical concern is evidence, not a finding, unless it\s+establishes that harm/u,
     )
+    expect(prDeepReviewPrompt).toContain(
+      '`FINDINGS` means the PR is not ready to merge as written',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'A category label never lowers this threshold',
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /If the PR can responsibly merge without correcting an observation, it is not a\s+finding/u,
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'as a non-blocking review note under',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'whose only gap is supplementary disclosure',
+    )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
     expect(prDeepReviewPrompt).toMatch(
       /rare one-window miss affecting one or\s+a\s+few members/u,
     )
     expect(prDeepReviewPrompt).toContain('Do not demand replay, backfill, migration, dual-write,')
+    expect(prDeepReviewPrompt).toContain('`Review notes:` section')
+    expect(prDeepReviewPrompt).toContain(
+      'Review notes do not require remediation before merge',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'do not become prior\nfindings in later rounds',
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /no\s+qualifying findings and one or more review notes must return `ROUND_OUTCOME:\s+PASS`/u,
+    )
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: PASS`')
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: FINDINGS`')
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: RETROSPECTIVE_REQUIRED`')
@@ -1802,7 +1960,7 @@ describe('monorepo release flow coverage audit', () => {
       'Every material behavior or ownership change is necessary',
     )
     expect(prDeepReviewPrompt).toMatch(
-      /Every non-obvious affected surface is(?: also)?\s+disclosed/u,
+      /Every material non-obvious affected surface whose omission would\s+make the merge contract meaningfully misleading is disclosed/u,
     )
     expect(prDeepReviewPrompt).toContain(
       'applicable frontend and Product UX lenses own rendered proof',
@@ -1810,14 +1968,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain(
       'routed local Product UX review',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'Disclosure does not make\nan unsafe or needless change acceptable',
+    expect(prDeepReviewPrompt).toMatch(
+      /Disclosure does not make an\s+unsafe or needless change acceptable/u,
     )
     expect(prDeepReviewPrompt).toContain(
-      'Delete or split unnecessary scope. When\nthe surface is necessary but undisclosed',
+      'under the\n**Purpose Drift** rule in the Finding bar below',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'require the intent contract to add the reason',
+    expect(prDeepReviewPrompt).not.toMatch(
+      /surface is necessary but undisclosed, require the PR intent contract/u,
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /for necessary but materially misleading undisclosed\s+scope, require the intent contract to add the reason and regression proof/u,
     )
     expect(reviewGptConfig).toContain(
       'review_gpt_register_dir_preset "completion-specialists"',
@@ -1836,6 +1997,12 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionSpecialistsPrompt).toContain(
       'Product purpose verdict:',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'merge veto, not a product backlog',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'current writer, current consumer',
     )
     expect(completionSpecialistsPrompt).toContain('`reviewgpt-coverage.patch`')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: PASS`')
@@ -1899,7 +2066,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
     expect(prReviewGptLoop).toContain('Apollo on')
     expect(prReviewGptLoop).toContain('`9454`, always with profile `Default`')
-    expect(prReviewGptLoop).toContain('through six lanes and defaults to four')
+    expect(prReviewGptLoop).toContain('through six lanes and defaults to all six')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
@@ -1915,6 +2082,47 @@ describe('monorepo release flow coverage audit', () => {
       'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
+    expect(prReviewGptLoop).toContain('## Finding Disposition Boundary')
+    expect(prReviewGptLoop).toMatch(
+      /A preliminary specialist result does not end the active task turn/u,
+    )
+    expect(prReviewGptLoop).toMatch(
+      /After the\s+parent reports the result and dispositions as a progress update, it may inspect\s+an attached coverage artifact and remediate accepted findings/u,
+    )
+    expect(prReviewGptLoop).toMatch(
+      /A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'that stricter pause\nalso blocks pending specialist-driven mutation',
+    )
+    expect(prReviewGptLoop).toMatch(
+      /A validated final\s+`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'Two narrow exceptions let a final `FINDINGS` result complete its disposition',
+    )
+    expect(prReviewGptLoop).toContain('`Non-Production Remediation`')
+    expect(prReviewGptLoop).toContain(
+      'complete correction changes no production source',
+    )
+    expect(prReviewGptLoop).toMatch(
+      /every\s+accepted finding must qualify/u,
+    )
+    expect(prReviewGptLoop).toMatch(
+      /continue the ReviewGPT loop without asking the user for\s+separate permission/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'may reject a finding as wrong, already handled,',
+    )
+    expect(prReviewGptLoop).toMatch(
+      /requires neither a code change nor\s+reviewer withdrawal/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'A `FINDINGS` result needs no review rerun',
+    )
+    expect(prReviewGptLoop).toContain(
+      'continue with accepted remediation or artifact inspection without\na user-resume pause',
+    )
     expect(prReviewGptLoop).toMatch(/non-obvious\s+affected\s+surfaces/iu)
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
     expect(prReviewGptLoop).toContain('disclosure-only finding')
@@ -1977,6 +2185,12 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(agentsGuide).toMatch(
       /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
+    )
+    expect(agentsGuide).toContain(
+      'Agents may reject speculative, unproven, or disproportionate fixes',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'evidence-backed rejections are terminal',
     )
     expect(agentWorkflowRouting).toContain(
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
@@ -2083,12 +2297,24 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
+    expect(completionWorkflow).toContain(
+      'complete `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Boundary',
+    )
+    expect(completionWorkflow).toContain(
+      'After a preliminary specialist report, continue with accepted remediation',
+    )
+    expect(completionWorkflow).toContain(
+      'A final `ROUND_OUTCOME: FINDINGS` still pauses all candidate mutation',
+    )
+    expect(completionWorkflow).toContain(
+      'A rejected finding is terminal and does not require model agreement',
+    )
     expect(completionWorkflow).not.toContain(
       'User experience (when applicable)',
     )
-    expect(prDeepReviewPrompt).toContain('expected timing class and longest')
+    expect(prDeepReviewPrompt).toContain('Trace the ordinary current')
     expect(prDeepReviewPrompt).toContain(
-      'without requiring an unrelated new inbound action',
+      'Do not infer a new feature,\ncontrol, cascade, or lifecycle',
     )
     expect(completionWorkflow).toContain('direct journey proof')
     expect(completionWorkflow).toContain('Add a **Risks** section only when')
@@ -2155,7 +2381,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
-  it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
+  it('applies ReviewGPT wrapper precedence while preserving direct package config', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
     const harnessBin = path.join(harnessRoot, 'bin')
@@ -2166,56 +2392,142 @@ describe('monorepo release flow coverage audit', () => {
       'cobuild-review-gpt',
     )
     writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/bin/sh\nexit 0\n', true)
-    const runDry = (extraArgs: string[] = []) =>
+    const dryArgs = [
+      '--wait',
+      '--response-marker',
+      'REVIEW_COMPLETE',
+      '--dry-run',
+      '--no-zip',
+      '--browser-path',
+      process.execPath,
+      '--prompt',
+      'Validate response timeout precedence.',
+    ]
+    const spawnOptions = {
+      cwd: repoRoot,
+      encoding: 'utf8' as const,
+      env: {
+        ...withoutNodeV8Coverage(),
+        HOME: harnessRoot,
+        ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+        PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
+        REVIEW_GPT_BROWSER_LANE_COUNT: '1',
+        XDG_CONFIG_HOME: localConfigRoot,
+      },
+    }
+    const runRepositoryDry = (extraArgs: string[] = []) =>
+      spawnSync(
+        'bash',
+        [
+          'scripts/review-gpt-pr-head-preflight.sh',
+          '--run',
+          ...dryArgs,
+          ...extraArgs,
+        ],
+        spawnOptions,
+      )
+    const runDirectDry = (extraArgs: string[] = []) =>
       spawnSync(
         reviewGptBin,
         [
           '--config',
           'scripts/review-gpt.config.sh',
-          '--wait',
-          '--dry-run',
-          '--no-zip',
-          '--browser-path',
-          process.execPath,
-          '--prompt',
-          'Validate response timeout precedence.',
+          ...dryArgs,
           ...extraArgs,
         ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: {
-            ...withoutNodeV8Coverage(),
-            HOME: harnessRoot,
-            PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
-            REVIEW_GPT_BROWSER_LANE_COUNT: '1',
-            XDG_CONFIG_HOME: localConfigRoot,
-          },
-        },
+        spawnOptions,
       )
 
     try {
-      const defaultResult = runDry()
+      const defaultResult = runRepositoryDry()
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
       expect(defaultResult.stdout).toContain(
-        'Response capture: enabled (10800000ms timeout)',
+        'Response capture: enabled (15000000ms timeout)',
       )
+      const responseTimeoutMatch = defaultResult.stdout.match(
+        /Response capture: enabled \((\d+)ms timeout\)/,
+      )
+      if (!responseTimeoutMatch?.[1]) {
+        throw new Error('ReviewGPT dry run omitted its response timeout')
+      }
+      const responseTimeoutMs = Number(responseTimeoutMatch[1])
+
+      for (const guidancePath of [
+        'AGENTS.md',
+        'agent-docs/operations/pr-reviewgpt-loop.md',
+      ]) {
+        const guidance = readFileSync(path.join(repoRoot, guidancePath), 'utf8')
+        const pollIntervalMatch = guidance.match(/--poll-interval (\d+)m/)
+        const wakeTimeoutMatch = guidance.match(/--poll-timeout (\d+)m/)
+        if (!pollIntervalMatch?.[1] || !wakeTimeoutMatch?.[1]) {
+          throw new Error(`${guidancePath} omitted the ReviewGPT wake defaults`)
+        }
+        expect(
+          Number(wakeTimeoutMatch[1]) * 60_000,
+          guidancePath,
+        ).toBeGreaterThanOrEqual(
+          responseTimeoutMs + Number(pollIntervalMatch[1]) * 60_000,
+        )
+      }
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
+      )
+      expect(defaultResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'response_timeout_ms=7654321\n',
+        'minimum_marked_response_ms=1\nresponse_timeout_ms=7654321\n',
       )
-      const localResult = runDry()
+      const localResult = runRepositoryDry()
       expect(localResult.status, localResult.stderr).toBe(0)
       expect(localResult.stdout).toContain(
         'Response capture: enabled (7654321ms timeout)',
       )
+      expect(localResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
 
-      const perRunResult = runDry(['--wait-timeout', '42m', '--idle-draft-timeout', '2s'])
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        [
+          'minimum_marked_response_ms=1',
+          'response_timeout_ms=7654321',
+          'review_gpt_register_preset_group() { minimum_marked_response_ms=1; }',
+          '',
+        ].join('\n'),
+      )
+      const callbackResult = runRepositoryDry()
+      expect(callbackResult.status, callbackResult.stderr).toBe(0)
+      expect(callbackResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
+
+      const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
+      writeHarnessFile(
+        harnessRoot,
+        'weak-review-gpt.sh',
+        [
+          `source ${JSON.stringify(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))}`,
+          'minimum_marked_response_ms=1',
+          '',
+        ].join('\n'),
+      )
+      const directOverrideResult = runDirectDry(['--config', weakConfigPath])
+      expect(directOverrideResult.status, directOverrideResult.stderr).toBe(0)
+      expect(directOverrideResult.stdout).toContain(
+        'Minimum marked response time: 1ms',
+      )
+
+      const perRunResult = runRepositoryDry([
+        '--wait-timeout',
+        '42m',
+        '--idle-draft-timeout',
+        '2s',
+      ])
       expect(perRunResult.status, perRunResult.stderr).toBe(0)
       expect(perRunResult.stdout).toContain(
         'Response capture: enabled (2520000ms timeout)',
@@ -2447,8 +2759,8 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultBackgroundMode,
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
-      expect(['eragon', 'phlebas', 'hercules', 'mountain']).toContain(defaultLane)
-      expect(defaultLaneCount).toBe('4')
+      expect(['vonneumann', 'apollo']).toContain(defaultLane)
+      expect(defaultLaneCount).toBe('6')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2468,7 +2780,7 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
@@ -2725,7 +3037,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     }
   })
 
-  it('enforces the assembled completion-specialists prompt budget for canonical and Frog callers', () => {
+  it('enforces the assembled completion-specialists prompt budget', () => {
     const preflightHarness = `
 source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"
 review_gpt_require_completion_specialists_prompt_budget "$@"
@@ -2737,28 +3049,11 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     const canonicalPrompt = workflow.match(
       /pnpm --silent review:gpt completion-specialists[\s\S]*?--prompt "([^"]+)"/u,
     )?.[1]
-    const frogAutofix = readFileSync(
-      path.join(repoRoot, 'scripts', 'frog-autofix.ts'),
-      'utf8',
-    )
-    const frogPromptTemplate = frogAutofix.match(
-      /prompt: `([^`]*SPECIALIST_REVIEW_COMPLETE[^`]*)`/u,
-    )?.[1]
     expect(canonicalPrompt).toBeTruthy()
-    expect(frogPromptTemplate).toBeTruthy()
 
     const renderedCanonicalPrompt = canonicalPrompt!.replace(
       /\$\([^)]*\)/gu,
       'a'.repeat(40),
-    )
-    const renderedFrogPrompt = frogPromptTemplate!
-      .replace(/\$\{pullRequest\}/gu, '9'.repeat(10))
-      .replace(/\$\{options\.issueNumber\}/gu, '9'.repeat(10))
-      .replace(/\$\{head\.slice\(0, 7\)\}/gu, 'a'.repeat(7))
-      .replace(/\$\{head\.slice\(0, 12\)\}/gu, 'a'.repeat(12))
-      .replace(/\$\{head\}/gu, 'a'.repeat(40))
-    expect(renderedFrogPrompt).toContain(
-      'place one SPECIALIST_OUTCOME line immediately before final SPECIALIST_REVIEW_COMPLETE',
     )
 
     const runBudget = (prompt: string) =>
@@ -2782,10 +3077,8 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
         },
       )
 
-    for (const prompt of [renderedCanonicalPrompt, renderedFrogPrompt]) {
-      const result = runBudget(prompt)
-      expect(result.status, result.stderr).toBe(0)
-    }
+    const canonicalResult = runBudget(renderedCanonicalPrompt)
+    expect(canonicalResult.status, canonicalResult.stderr).toBe(0)
 
     const oversizedResult = runBudget('x'.repeat(1_000))
     expect(oversizedResult.status).not.toBe(0)
@@ -2793,7 +3086,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'assembled completion-specialists prompt is',
     )
     expect(oversizedResult.stderr).toContain(
-      'canonical/Frog budget is 6500',
+      'canonical budget is 6500',
     )
     const mixedPresetResult = spawnSync(
       'bash',
@@ -2818,6 +3111,65 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(mixedPresetResult.stderr).toContain(
       'completion-specialists must run as the only preset',
     )
+  })
+
+  it('rejects package ReviewGPT policy overrides at the repository boundary', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-floor-'))
+    const binRoot = path.join(harnessRoot, 'bin')
+    const fakePnpmPath = path.join(binRoot, 'pnpm')
+    const packageInvokedMarker = path.join(harnessRoot, 'package-invoked')
+    const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
+    try {
+      mkdirSync(binRoot, { recursive: true })
+      writeHarnessFile(
+        harnessRoot,
+        'weak-review-gpt.sh',
+        'minimum_marked_response_ms=1\n',
+      )
+      writeFileSync(
+        fakePnpmPath,
+        '#!/usr/bin/env bash\n: > "$PACKAGE_INVOKED_MARKER"\n',
+        { mode: 0o755 },
+      )
+      for (const overrideArgs of [
+        ['--minimum-marked-response-time', '1s'],
+        ['--minimum-marked-response-time=1s'],
+        ['--minimumMarkedResponseTime', '1s'],
+        ['--minimumMarkedResponseTime=1s'],
+        ['--config', weakConfigPath],
+        [`--config=${weakConfigPath}`],
+      ]) {
+        rmSync(packageInvokedMarker, { force: true })
+        const result = spawnSync(
+          'bash',
+          [
+            '-c',
+            'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_run "$@"',
+            'review-gpt-floor',
+            ...overrideArgs,
+            '--version',
+          ],
+          {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: {
+              ...withoutNodeV8Coverage(),
+              ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+              PACKAGE_INVOKED_MARKER: packageInvokedMarker,
+              PATH: `${binRoot}:${process.env.PATH ?? ''}`,
+              REPO_ROOT: repoRoot,
+            },
+          },
+        )
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain(
+          "Murph's repository ReviewGPT policy cannot be overridden",
+        )
+        expect(existsSync(packageInvokedMarker)).toBe(false)
+      }
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
   })
 
   it('keeps Product UX decisions in one owner inside the unified specialist review', () => {
@@ -2855,14 +3207,11 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(prDeepReview).toMatch(
       /Frontend-facing changes express the feature's irreducible purpose with the\s+fewest necessary words, actions, choices, and screens/u,
     )
-    expect(prDeepReview).toMatch(
-      /work waits behind\s+unrelated idle or maintenance activity/u,
+    expect(prDeepReview).toContain(
+      'Trace the ordinary current',
     )
     expect(prDeepReview).toContain(
-      'result without requiring an unrelated new inbound action',
-    )
-    expect(prDeepReview).toContain(
-      'Make every word, click, field, choice,',
+      'Inspect only states touched by the diff or required by the declared',
     )
     expect(completionSpecialists).toContain(
       'rendered interactions, or design-system UI outside the tiny-copy fast path',
@@ -2874,6 +3223,11 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
     expect(productUx).toContain('irreducible user purpose')
+    expect(productUx).toContain('### Requirement Boundary')
+    expect(productUx).toContain('current writer, current consumer')
+    expect(productUx).toContain(
+      'The parent owns finding disposition',
+    )
     expect(productUx).toContain('Restore the existing promise: `Patch`.')
     expect(productUx).toContain(
       'Change the existing promise: `Product change`.',
@@ -3879,114 +4233,18 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
   })
 
   it('archives the active plan before invoking committer', () => {
-    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
-
-    try {
-      writeHarnessFile(
-        harnessRoot,
-        'node_modules/@cobuild/repo-tools/src/consumer-shell.sh',
-        `#!/usr/bin/env bash
-repo_tools_join_lines() {
-  local var_name="$1"
-  shift
-  local joined=""
-  local item
-  for item in "$@"; do
-    if [[ -n "$joined" ]]; then
-      joined+=$'\\n'
-    fi
-    joined+="$item"
-  done
-  printf -v "$var_name" '%s' "$joined"
-  export "$var_name"
-}
-
-cobuild_repo_tool_bin() {
-  printf '%s\\n' "$COBUILD_REPO_ROOT/.fake-tools/$1"
-}
-`,
-        true,
-      )
-
-      for (const relativePath of [
-        'scripts/repo-tools.config.sh',
-        'scripts/finish-task',
-        'scripts/close-exec-plan.sh',
-        'scripts/committer',
-      ]) {
-        writeHarnessFile(
-          harnessRoot,
-          relativePath,
-          readFileSync(path.join(repoRoot, relativePath), 'utf8'),
-          true,
-        )
-      }
-
-      writeHarnessFile(
-        harnessRoot,
-        'scripts/install-git-hooks',
-        `#!/usr/bin/env bash
-set -euo pipefail
-touch .fake-tools/install-git-hooks.called
-`,
-        true,
-      )
-
-      writeHarnessFile(
-        harnessRoot,
-        '.fake-tools/cobuild-close-exec-plan',
-        `#!/usr/bin/env bash
-set -euo pipefail
-plan_path="$1"
-completed_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
-mkdir -p "$(dirname "$completed_path")"
-mv "$plan_path" "$completed_path"
-printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
-`,
-        true,
-      )
-      writeHarnessFile(
-        harnessRoot,
-        '.fake-tools/cobuild-committer',
-        `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$@" > .fake-tools/committer.args
-`,
-        true,
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/exec-plans/active/2026-04-24-harness.md',
-        `# Harness Plan
+    const harnessRoot = createFinishTaskHarness({
+      'agent-docs/exec-plans/active/2026-04-24-harness.md': `# Harness Plan
 
 Status: active
 Created: 2026-04-24
 Updated: 2026-04-24
 `,
-      )
-      writeHarnessFile(harnessRoot, 'agent-docs/exec-plans/completed/README.md', '# Completed\n')
-      writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n')
+      'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+      'docs/touched.md': '# Before\n',
+    })
 
-      for (const command of [
-        ['init'],
-        ['config', 'user.name', 'Harness'],
-        ['config', 'user.email', '123456+murph-harness@users.noreply.github.com'],
-        ['add', '.'],
-        ['commit', '-m', 'baseline'],
-      ]) {
-        const result = spawnSync('git', command, {
-          cwd: harnessRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(),
-        })
-
-        if (result.status !== 0) {
-          throw new Error(
-            `Harness git command failed (${command.join(' ')}):\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
-          )
-        }
-      }
-
+    try {
       writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n\nAfter\n')
 
       const result = spawnSync(
@@ -4011,7 +4269,6 @@ Updated: 2026-04-24
       }
 
       expect(existsSync(path.join(harnessRoot, '.fake-tools/install-git-hooks.called'))).toBe(true)
-
       expect(
         existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/2026-04-24-harness.md')),
       ).toBe(false)
@@ -4055,6 +4312,123 @@ Updated: 2026-04-24
     }
   })
 
+  it('omits an untracked active plan found while expanding a task directory', () => {
+    const planPath = 'agent-docs/exec-plans/active/2026-04-24-untracked.md'
+    const completedPlanPath = 'agent-docs/exec-plans/completed/2026-04-24-untracked.md'
+    const taskPath = 'agent-docs/task-note.md'
+    const harnessRoot = createFinishTaskHarness({
+      'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+      [taskPath]: '# Before\n',
+    })
+
+    try {
+      writeHarnessFile(harnessRoot, planPath, '# Harness Plan\n')
+      writeHarnessFile(harnessRoot, taskPath, '# Before\n\nAfter\n')
+
+      const result = spawnSync(
+        'bash',
+        ['scripts/finish-task', planPath, 'close untracked harness plan', 'agent-docs'],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+
+      if (result.status !== 0) {
+        throw new Error(
+          `finish-task untracked-plan harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+        )
+      }
+
+      const commitArgs = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'committer.args'),
+        'utf8',
+      )
+        .trim()
+        .split(/\r?\n/u)
+
+      expect(existsSync(path.join(harnessRoot, planPath))).toBe(false)
+      expect(existsSync(path.join(harnessRoot, completedPlanPath))).toBe(true)
+      expect(commitArgs).toEqual([
+        'close untracked harness plan',
+        completedPlanPath,
+        taskPath,
+      ])
+    } finally {
+      rmSync(harnessRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts a locally proven branch deletion without forwarding the missing path', () => {
+    const planPath = 'agent-docs/exec-plans/active/2026-04-24-delete.md'
+    const completedPlanPath = 'agent-docs/exec-plans/completed/2026-04-24-delete.md'
+    const deletedPath = 'docs/delete-me.md'
+    const harnessRoot = createFinishTaskHarness({
+      [planPath]: '# Harness Plan\n',
+      'agent-docs/exec-plans/completed/README.md': '# Completed\n',
+      [deletedPath]: '# Delete me\n',
+    })
+
+    try {
+      const baseHead = runFinishTaskHarnessGit(harnessRoot, 'rev-parse', 'HEAD')
+      runFinishTaskHarnessGit(harnessRoot, 'checkout', '-b', 'task')
+      runFinishTaskHarnessGit(harnessRoot, 'rm', deletedPath)
+      runFinishTaskHarnessGit(harnessRoot, 'commit', '-m', 'delete task path')
+      writeHarnessFile(harnessRoot, planPath, '# Harness Plan\n\nStatus: complete\n')
+
+      const withoutDefaultRef = spawnSync(
+        'bash',
+        ['scripts/finish-task', planPath, 'close deleted harness path', deletedPath],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+      expect(withoutDefaultRef.status).not.toBe(0)
+      expect(withoutDefaultRef.stderr).toContain(`Commit path not found: ${deletedPath}`)
+      expect(existsSync(path.join(harnessRoot, planPath))).toBe(true)
+
+      runFinishTaskHarnessGit(harnessRoot, 'update-ref', 'refs/remotes/origin/main', baseHead)
+
+      const result = spawnSync(
+        'bash',
+        ['scripts/finish-task', planPath, 'close deleted harness path', deletedPath],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+
+      if (result.status !== 0) {
+        throw new Error(
+          `finish-task deleted-path harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+        )
+      }
+
+      const commitArgs = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'committer.args'),
+        'utf8',
+      )
+        .trim()
+        .split(/\r?\n/u)
+
+      expect(result.stdout).toContain(
+        'finish-task: commit includes closed plan plus 0 resolved task path(s)',
+      )
+      expect(commitArgs).toEqual([
+        'close deleted harness path',
+        planPath,
+        completedPlanPath,
+      ])
+      expect(commitArgs).not.toContain(deletedPath)
+    } finally {
+      rmSync(harnessRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps repo-tools audit bundles wired without review-gpt wrappers', () => {
     const repoToolsConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'repo-tools.config.sh'),
@@ -4090,8 +4464,6 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS')
-    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_PATH')
-    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_SHA256')
     expect(fullPackageScript).toContain('review-phase.json')
     expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
@@ -4284,6 +4656,11 @@ printf 'ZIP: %s (%s bytes)\n' \
         'agent-docs/operations/product-ux.md',
         'product UX workflow\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+        'assistant verification workflow\n',
+      )
       writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
       writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
@@ -4308,21 +4685,6 @@ printf 'ZIP: %s (%s bytes)\n' \
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
-      const expectedParentBody = [
-        `ReviewGPT first-reviewed head: ${firstHead}`,
-        'ReviewGPT context sensitivity: routine',
-        'Frog autofix issue: #123',
-        '',
-      ].join('\n')
-      writeHarnessFile(
-        harnessRoot,
-        'audit-packages/frog-autofix-pr-body.md',
-        expectedParentBody,
-      )
-      const expectedParentBodySha256 = createHash('sha256')
-        .update(expectedParentBody)
-        .digest('hex')
-
       writeHarnessFile(
         harnessRoot,
         'packages/health-commons/content/sources/demo/source.md',
@@ -4493,6 +4855,7 @@ printf 'ZIP: %s (%s bytes)\n' \
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
+          '.agents/skills/verify-murph-assistant/SKILL.md',
           packagedEvidencePath,
           supplementalSkillPath,
           supplementalProofPath,
@@ -4760,46 +5123,6 @@ printf 'ZIP: %s (%s bytes)\n' \
           { encoding: 'utf8' },
         ),
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
-      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
-
-      writeHarnessFile(
-        harnessRoot,
-        'audit-packages/frog-autofix-pr-body.md',
-        expectedParentBody,
-      )
-      const roundOneParentBody = invokePackager('round-one-parent-body', firstHead, {
-        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
-          'audit-packages/frog-autofix-pr-body.md',
-        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: expectedParentBodySha256,
-        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
-        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
-        REVIEW_GPT_ROUND_NUMBER: '1',
-      })
-      expect(
-        roundOneParentBody.result.status,
-        roundOneParentBody.result.stderr,
-      ).toBe(0)
-      expect(execFileSync(
-        'unzip',
-        ['-p', roundOneParentBody.zipPath, 'review-gpt-pr-context/pr-body.md'],
-        { encoding: 'utf8' },
-      )).toBe(expectedParentBody)
-      expect(listZipEntries(roundOneParentBody.zipPath)).not.toContain(
-        'audit-packages/frog-autofix-pr-body.md',
-      )
-
-      const changedParentBody = invokePackager('changed-parent-body', firstHead, {
-        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
-          'audit-packages/frog-autofix-pr-body.md',
-        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: 'f'.repeat(64),
-        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
-        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
-        REVIEW_GPT_ROUND_NUMBER: '1',
-      })
-      expect(changedParentBody.result.status).not.toBe(0)
-      expect(changedParentBody.result.stderr).toContain(
-        'expected ReviewGPT PR body evidence changed before packaging',
-      )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {

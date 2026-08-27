@@ -96,12 +96,19 @@ Current providers:
   collection contract permits chunks no larger than 30 days. `fat` remains the
   public resource name while the client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
-  that same code-owned production set. ECG voltage uses one-day grouped windows capped at
-  100,000 admitted samples and 64 recordings, then reduces each recording to one
-  clinically neutral feature record before a sync snapshot exists. Workout stream
-  uses the ordinary workout index only to admit at most 32 stable workouts per
-  one-day window, then reads Junction's dedicated per-workout stream endpoint
-  serially and caps each stream at 100,000 points. The exact production assembly has
+  that same code-owned production set. ECG voltage first reads the stable ECG
+  summaries for a one-day window, then serially reads each recording's exact
+  source/session interval. Junction's id-less voltage group is bound only to
+  that summary ID; source, interval, ambiguity, and declared sample-count
+  mismatches retry without inventing identity. The path admits at most 100,000
+  samples and 64 recordings, then reduces each recording to one clinically
+  neutral feature before a sync snapshot exists. Workout stream
+  runs only for sources admitted for current import by the control-plane
+  lifecycle state and whose current Junction provider inventory advertises that
+  capability. It uses the ordinary workout index to admit at most 32 eligible,
+  attributed workouts per one-day window, then reads Junction's dedicated
+  per-workout stream endpoint serially and caps each stream at 100,000 points.
+  The exact production assembly has
   48 production timeseries resources: 6 wide and 42 one-day resources, including
   41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
@@ -126,14 +133,19 @@ Current providers:
   timestamps, unit-bearing compact metrics, and splits for each workout. This
   adds no control-database collection path, pooled transaction, foreground
   full-vault hydration, or sample persistence. Each present workout metric
-  array must align with the timestamp array. A workout whose present metric
-  arrays do not align is skipped so one malformed stream cannot block other
-  workouts or replace a previously complete canonical measurement; the skip
-  emits a metadata-only cardinality warning for provider follow-up. A retryable
-  per-workout request failure remains owned by the existing job retry transition
-  and still stops the serial loop. Its worker-attempt runtime diagnostic records
-  only the canonical-order candidate ordinal/count and which supported summary-id
-  alias selected the request; it never records the workout id, summary, stream
+  array must align with the timestamp array. An empty timestamp array or a
+  workout whose present metric arrays do not align produces no feature for that
+  pass, so one incomplete stream cannot block other workouts or replace a
+  previously complete canonical measurement. An empty stream schedules one
+  exact-day replay 24 hours later, allowing subsequently populated provider
+  data to import even after the day leaves the rolling reconcile window. The
+  replay cannot schedule another delayed replay. The skip emits a metadata-only
+  cardinality warning for provider follow-up. A
+  retryable per-workout request failure remains owned by the existing job retry
+  transition and still stops the serial loop. Its worker-attempt runtime
+  diagnostic records only the canonical-order candidate ordinal/count and
+  which supported summary-id alias selected the request; it never records the
+  workout id, summary, stream
   payload, URL, or provider response identifier. Worker-attempt logs also report
   the committed `queued`/`dead` transition and remaining bounded attempt budget,
   while a typed origin distinguishes them from canonical-apply and checkpoint-side
@@ -231,6 +243,21 @@ such as workouts or body measurements do not become failed-export signals.
 that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
+
+One worker drain reuses a single in-memory canonical import session. Core may
+reuse its event-identity index only when the event-ledger metadata fingerprint
+is unchanged and every event id, external reference, Junction profile scope,
+and authoritative facet scope changed earlier in the drain is disjoint from
+the next import. Overlap, an external ledger write, or an import failure forces
+a full rescan. The session is neither persisted nor shared across drains, and
+the worker still checks the foreground-yield fence before each job.
+
+Privacy-safe job timing separates Junction inventory requests, Junction
+resource requests, normalization, event-identity indexing, canonical writes,
+and remaining provider time. `device-sync.pass_finished` reports only bounded
+counts, durations, cache-hit counts, and provider/job/resource classification;
+it never includes account or job ids, cursors, provider records, health values,
+credentials, or filesystem paths.
 
 Junction timeseries use one exhaustive static history policy. Dense/default
 resources, ECG voltage, workout streams, and ordinary full-timeseries collection

@@ -71,6 +71,8 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+  HostedOperatorTaskControlRequest,
+  HostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
 import type {
   HostedVaultShareDeliverRequest,
@@ -96,6 +98,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -118,6 +122,8 @@ import type {
   HostedExecutionDeviceSyncDirtyAckResponse,
   HostedExecutionDeviceSyncDirtyPendingRequest,
   HostedExecutionDeviceSyncDirtyPendingResponse,
+  HostedExecutionDeviceSyncNoDataOutreachRequest,
+  HostedExecutionDeviceSyncNoDataOutreachResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
@@ -185,6 +191,20 @@ export class HostedRuntimeArtifactWriteError extends Error {
     );
     this.name = "HostedRuntimeArtifactWriteError";
     this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeCanonicalCheckpointError extends Error {
+  readonly retryable = true;
+
+  constructor(input: { cause: unknown }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime canonical checkpoint failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeCanonicalCheckpointError";
   }
 }
 
@@ -426,6 +446,10 @@ type HostedRuntimeEffectsPortBase = {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
+  controlOperatorTask?(
+    request: HostedOperatorTaskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedOperatorTaskControlResponse>;
   assertAssistantAskPrivateCompletionAuthority?(
     authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
     context?: { signal?: AbortSignal | null },
@@ -465,6 +489,9 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  configureNoDataOutreach?(input: HostedExecutionDeviceSyncNoDataOutreachRequest & {
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse>;
   completeFitbitMigration?(input: {
     connectionId: string;
     signal?: AbortSignal | null;
@@ -606,6 +633,12 @@ export interface HostedRuntimePhoneCallPort {
 }
 
 export interface HostedRuntimePhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>;
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {

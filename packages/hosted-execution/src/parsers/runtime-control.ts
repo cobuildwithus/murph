@@ -143,13 +143,17 @@ import {
   type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   hostedRuntimeLinqProviderErrorMessageForCode,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -360,9 +364,11 @@ const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
+const HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS = 32;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
+  "deviceSyncJobTimingSummaries",
 ]);
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
@@ -884,6 +890,10 @@ export function parseHostedRuntimeUsageRecordResponse(
   const record = requireObject(value, "Hosted runtime usage record response");
 
   return {
+    platformAiUsageAllowedAfter: requireBoolean(
+      record.platformAiUsageAllowedAfter,
+      "Hosted runtime usage record response platformAiUsageAllowedAfter",
+    ),
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
   };
@@ -1138,6 +1148,38 @@ export function parseHostedRuntimeGroupToolRequest(
                 }),
           }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
+    };
+  }
+  if (action === "handoff") {
+    const label = "Hosted runtime group tool handoff request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "context", "groupLabel", "originAssistantInputId"]),
+      label,
+    );
+    return {
+      action,
+      context: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} context`,
+        maxCodePoints: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+        value: record.context,
+      }),
+      ...(record.groupLabel === undefined
+        ? {}
+        : {
+            groupLabel: record.groupLabel === null
+              ? null
+              : parseHostedRuntimeGroupAskBoundedText({
+                  label: `${label} groupLabel`,
+                  maxCodePoints:
+                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+                  value: record.groupLabel,
+                }),
+          }),
+      originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+        record.originAssistantInputId,
+        `${label} originAssistantInputId`,
+      ),
     };
   }
   if (action === "ask_current_sender") {
@@ -1462,13 +1504,32 @@ export function parseHostedRuntimeGroupToolRequest(
         : { setup: parseHostedRuntimePendingGroupSetupInput(record.setup) }),
     };
   }
+  if (action === "read_current") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "disclosureGrantCursor"]),
+      "Hosted runtime group tool read_current request",
+    );
+    return {
+      action,
+      ...(record.disclosureGrantCursor === undefined
+        ? {}
+        : {
+            disclosureGrantCursor: parseHostedRuntimeGroupAskBoundedText({
+              label:
+                "Hosted runtime group tool read_current request disclosureGrantCursor",
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+              value: record.disclosureGrantCursor,
+            }),
+          }),
+    };
+  }
   if (
-    action === "read_current"
-    || action === "read_next_group"
+    action === "read_next_group"
     || action === "cancel_next_group"
     || action === "read_chat_name"
     || action === "read_usage"
-    || action === "list_memberships"
   ) {
     assertAllowedObjectKeys(
       record,
@@ -1476,6 +1537,37 @@ export function parseHostedRuntimeGroupToolRequest(
       `Hosted runtime group tool ${action} request`,
     );
     return { action };
+  }
+  if (action === "list_memberships") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "cursor", "disclosureGrantCursor"]),
+      "Hosted runtime group tool list_memberships request",
+    );
+    return {
+      action,
+      ...(record.cursor === undefined
+        ? {}
+        : {
+            cursor: parseHostedRuntimeGroupAskBoundedText({
+              label: "Hosted runtime group tool list_memberships request cursor",
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+              value: record.cursor,
+            }),
+          }),
+      ...(record.disclosureGrantCursor === undefined
+        ? {}
+        : {
+            disclosureGrantCursor: parseHostedRuntimeGroupAskBoundedText({
+              label:
+                "Hosted runtime group tool list_memberships request disclosureGrantCursor",
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+              value: record.disclosureGrantCursor,
+            }),
+          }),
+    };
   }
   if (action === "leave_membership") {
     assertAllowedObjectKeys(
@@ -1532,7 +1624,12 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "post_join_offer") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "joinOffer", "linqThread"]),
+      new Set([
+        "action",
+        "joinOffer",
+        "linqThread",
+        "repostOriginAssistantInputId",
+      ]),
       "Hosted runtime group tool post_join_offer request",
     );
     return {
@@ -1548,6 +1645,15 @@ export function parseHostedRuntimeGroupToolRequest(
               "Hosted runtime group tool post_join_offer request linqThread",
             ),
       }),
+      ...(record.repostOriginAssistantInputId === undefined
+        ? {}
+        : {
+            repostOriginAssistantInputId:
+              parseHostedExecutionAssistantAskOriginInputId(
+                record.repostOriginAssistantInputId,
+                "Hosted runtime group tool post_join_offer request repostOriginAssistantInputId",
+              ),
+          }),
     };
   }
   if (action === "set_chat_avatar") {
@@ -2746,14 +2852,15 @@ export function parseHostedRuntimeGroupToolResponse(
       result: parseHostedRuntimeGroupMemberAskResult(record.result, action),
     };
   }
-  if (action === "ask") {
+  if (action === "ask" || action === "handoff") {
+    const responseLabel = `Hosted runtime group tool ${action} response`;
     const result = requireObject(
       record.result,
-      "Hosted runtime group tool ask response result",
+      `${responseLabel} result`,
     );
     const status = requireString(
       result.status,
-      "Hosted runtime group tool ask response status",
+      `${responseLabel} status`,
     );
     if (status === "accepted") {
       assertAllowedObjectKeys(
@@ -2788,10 +2895,10 @@ export function parseHostedRuntimeGroupToolResponse(
       );
       if (
         groupLabels.length === 0
-        || groupLabels.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX
+        || groupLabels.length > HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX
       ) {
         throw new TypeError(
-          `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX} entries.`,
+          `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX} entries.`,
         );
       }
       return {
@@ -2912,8 +3019,35 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool read_current response result");
     const status = requireString(result.status, "Hosted runtime group tool read_current response status");
     if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current ok response result");
-      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+      assertAllowedObjectKeys(
+        result,
+        new Set([
+          "disclosureGrantsTruncated",
+          "group",
+          "nextDisclosureGrantCursor",
+          "status",
+        ]),
+        "Hosted runtime group tool read_current ok response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          ...(result.disclosureGrantsTruncated === undefined
+            ? {}
+            : {
+                disclosureGrantsTruncated: requireBoolean(
+                  result.disclosureGrantsTruncated,
+                  "Hosted runtime group tool read_current disclosureGrantsTruncated",
+                ),
+              }),
+          group: parseHostedRuntimeGroupSummary(result.group),
+          ...parseHostedRuntimeGroupDisclosureNextCursor(
+            result.nextDisclosureGrantCursor,
+            "Hosted runtime group tool read_current nextDisclosureGrantCursor",
+          ),
+        },
+      };
     }
     if (status === "none") {
       assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current none response result");
@@ -3337,7 +3471,15 @@ export function parseHostedRuntimeGroupToolResponse(
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
-        new Set(["disclosureGrants", "status", "memberships", "truncated"]),
+        new Set([
+          "disclosureGrants",
+          "disclosureGrantsTruncated",
+          "memberships",
+          "nextDisclosureGrantCursor",
+          "nextCursor",
+          "status",
+          "truncated",
+        ]),
         "Hosted runtime group tool list_memberships ok response result",
       );
       return {
@@ -3349,8 +3491,33 @@ export function parseHostedRuntimeGroupToolResponse(
                 result.disclosureGrants,
                 "Hosted runtime group tool list_memberships disclosureGrants",
               ),
+          ...(result.disclosureGrantsTruncated === undefined
+            ? {}
+            : {
+                disclosureGrantsTruncated: requireBoolean(
+                  result.disclosureGrantsTruncated,
+                  "Hosted runtime group tool list_memberships disclosureGrantsTruncated",
+                ),
+              }),
           status,
           memberships: parseHostedRuntimeGroupMembershipSummaries(result.memberships),
+          ...parseHostedRuntimeGroupDisclosureNextCursor(
+            result.nextDisclosureGrantCursor,
+            "Hosted runtime group tool list_memberships nextDisclosureGrantCursor",
+          ),
+          ...(result.nextCursor === undefined
+            ? {}
+            : {
+                nextCursor: result.nextCursor === null
+                  ? null
+                  : parseHostedRuntimeGroupAskBoundedText({
+                      label:
+                        "Hosted runtime group tool list_memberships nextCursor",
+                      maxCodePoints:
+                        HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+                      value: result.nextCursor,
+                    }),
+              }),
           truncated: requireBoolean(
             result.truncated,
             "Hosted runtime group tool list_memberships truncated",
@@ -4545,6 +4712,24 @@ function parseHostedRuntimeGroupDisclosurePermissionText(
       HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
     value,
   });
+}
+
+function parseHostedRuntimeGroupDisclosureNextCursor(
+  value: unknown,
+  label: string,
+): { nextDisclosureGrantCursor?: string | null } {
+  if (value === undefined) {
+    return {};
+  }
+  return {
+    nextDisclosureGrantCursor: value === null
+      ? null
+      : parseHostedRuntimeGroupAskBoundedText({
+          label,
+          maxCodePoints: HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+          value,
+        }),
+  };
 }
 
 function parseHostedRuntimeGroupDisclosureGrantId(
@@ -6688,6 +6873,13 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
         record.platformAiUsageAllowed,
         "Hosted workspace read response platformAiUsageAllowed",
       );
+  const hostedAssistantSubagentModelOverridesAllowed =
+    record.hostedAssistantSubagentModelOverridesAllowed === undefined
+      ? null
+      : requireBoolean(
+          record.hostedAssistantSubagentModelOverridesAllowed,
+          "Hosted workspace read response hostedAssistantSubagentModelOverridesAllowed",
+        );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
@@ -6703,6 +6895,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
+    ...(hostedAssistantSubagentModelOverridesAllowed === null
+      ? {}
+      : { hostedAssistantSubagentModelOverridesAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
@@ -7758,7 +7953,13 @@ function parseHostedRuntimeRedactedValue(
       }
 
       return value.map((entry, index) =>
-        parseHostedRuntimeRedactedObject(entry, `${label}[${index}]`));
+        parseHostedRuntimeRedactedObject(
+          entry,
+          `${label}[${index}]`,
+          key === "deviceSyncJobTimingSummaries"
+            ? HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS
+            : HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS,
+        ));
     }
 
     return value.map((entry, index) =>
@@ -7829,15 +8030,16 @@ function parseHostedRuntimeRedactedReasoningEffort(
 function parseHostedRuntimeRedactedObject(
   value: unknown,
   label: string,
+  maxKeys = HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS,
 ): HostedRuntimeRedactedObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be a redacted object.`);
   }
 
   const entries = Object.entries(value);
-  if (entries.length > HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS) {
+  if (entries.length > maxKeys) {
     throw new TypeError(
-      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS} fields.`,
+      `${label} must contain at most ${maxKeys} fields.`,
     );
   }
 

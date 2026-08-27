@@ -27,13 +27,13 @@ describe('hosted domain dynamic tools', () => {
       'For an active deviceActivity schedule, confirm the persisted event trigger directly',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+      'occurrenceProjection.status=resolved with a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
+      'For time-based schedules, confirm an exact next occurrence only when occurrenceProjection.status=resolved',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'A save or patch result already includes one host-owned read-only timing readback.',
+      'A save or patch result already includes one host-owned occurrence projection.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Do not inspect again, retry the write, create a fallback automation',
@@ -42,7 +42,25 @@ describe('hosted domain dynamic tools', () => {
       'confirm that the write succeeded and report the returned stored schedule and status',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'occurrenceProjection.status=pending',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'no member action is needed',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot at schedule, say the saved edit may not affect the occurrence already in progress',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'stale_recurring_occurrence as an overdue recurrence whose scheduler projection has not advanced',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not describe the occurrence as current scheduler work, promise automatic recovery, or say that no member action is needed',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',
@@ -69,7 +87,16 @@ describe('hosted domain dynamic tools', () => {
       'raw exact ISO schedule.at is not accepted on generic save or patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Generic save is create-only',
+      'An ordinary save is create-only: omit slug',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Only when the current loaded skill defines an exact stable recipe key',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'never derive a slug from a title or invent one',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'patch never changes the recipe key',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
@@ -78,11 +105,32 @@ describe('hosted domain dynamic tools', () => {
       'pass expectedUpdatedAt from that readback',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+      'For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
+  })
+
+  it('admits the documented group newsletter stable recipe through the parser', () => {
+    expect(readToolRequest('automation', {
+      action: 'save',
+      continuityPolicy: 'fresh',
+      instructions: 'Open and follow the group newsletter skill.',
+      schedule: {
+        expression: '0 9 * * 0',
+        kind: 'cron',
+        timeZone: 'America/New_York',
+      },
+      slug: 'group-health-newsletter',
+      title: 'Weekly health',
+    })).toMatchObject({
+      kind: 'automation',
+      request: {
+        action: 'save',
+        slug: 'group-health-newsletter',
+      },
+    })
   })
 
   it('anchors relative one-shot days to accepted input across a named-zone midnight', () => {
@@ -186,18 +234,36 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'spring-reminder',
       title: 'Spring reminder',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     if (gapRequest?.kind !== 'invalid-automation-arguments') {
       throw new TypeError('Expected a daylight-saving gap failure.')
     }
     expect(gapRequest).toMatchObject({
-      localAtTargetLabel: 'Spring reminder (spring-reminder)',
+      localAtTargetLabel: 'Spring reminder',
       resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
     expect(gapRequest.localAtTargetKey).toMatch(/^[a-f0-9]{64}$/u)
+    const sameTitleGapRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send a different reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Spring reminder',
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    if (sameTitleGapRequest?.kind !== 'invalid-automation-arguments') {
+      throw new TypeError('Expected a second daylight-saving gap failure.')
+    }
+    expect(sameTitleGapRequest.localAtTargetKey).not.toBe(
+      gapRequest.localAtTargetKey,
+    )
     const gapResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
@@ -221,7 +287,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'spring-reminder',
       title: 'Spring reminder',
     }, {
       earliestAt: '2026-03-08T04:59:00.000Z',
@@ -253,7 +318,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'morning-meds',
       title: 'Morning meds',
     })
     expect(repeatedGapRequest).toMatchObject({
@@ -263,7 +327,7 @@ describe('hosted domain dynamic tools', () => {
         resolvedLocalDate: '2026-03-08',
       },
       localAtTargetKey: gapRequest.localAtTargetKey,
-      localAtTargetLabel: 'Morning meds (morning-meds)',
+      localAtTargetLabel: 'Morning meds',
       resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
@@ -521,13 +585,15 @@ describe('hosted domain dynamic tools', () => {
             created: false,
             effectiveTimeZone: 'America/New_York',
             lookupId: 'medication-reminder',
-            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            occurrenceProjection: {
+              nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+              status: 'resolved' as const,
+            },
             routeBinding: 'current_conversation',
             schedule: request.action === 'patch' && request.schedule
               ? request.schedule
               : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
             status: 'active',
-            timingVerified: true,
             updatedAt: '2026-03-08T05:01:00.000Z',
           }),
         },
@@ -540,11 +606,11 @@ describe('hosted domain dynamic tools', () => {
     expect(result.rpcResult.success).toBe(true)
   })
 
-  it('keeps recovery correlation private while patching and renaming', async () => {
+  it('keeps recovery correlation private while patching by id', async () => {
     const failedPatch = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: 'medication-reminder',
+      lookup: 'automation-medication-reminder',
       schedule: {
         kind: 'at',
         localAt: {
@@ -553,7 +619,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'morning-meds',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     const recovery = readToolRequest('automation', {
       action: 'patch',
@@ -561,7 +626,7 @@ describe('hosted domain dynamic tools', () => {
       localAtRecoveryKey: failedPatch?.kind === 'invalid-automation-arguments'
         ? failedPatch.localAtTargetKey
         : undefined,
-      lookup: 'medication-reminder',
+      lookup: 'automation-medication-reminder',
       schedule: {
         kind: 'at',
         localAt: {
@@ -570,7 +635,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'morning-meds',
     })
     if (
       failedPatch?.kind !== 'invalid-automation-arguments' ||
@@ -590,13 +654,15 @@ describe('hosted domain dynamic tools', () => {
             created: false,
             effectiveTimeZone: 'America/New_York',
             lookupId: 'morning-meds',
-            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            occurrenceProjection: {
+              nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+              status: 'resolved' as const,
+            },
             routeBinding: 'current_conversation',
             schedule: request.action === 'patch' && request.schedule
               ? request.schedule
               : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
             status: 'active',
-            timingVerified: true,
             updatedAt: '2026-03-08T05:01:00.000Z',
           }),
         },
@@ -624,7 +690,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
-      slug: 'medication-reminder',
       title: 'Medication reminder',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     const recoveryPatch = readToolRequest('automation', {
@@ -633,7 +698,7 @@ describe('hosted domain dynamic tools', () => {
       localAtRecoveryKey: failedSave?.kind === 'invalid-automation-arguments'
         ? failedSave.localAtTargetKey
         : undefined,
-      lookup: 'medication-reminder',
+      lookup: 'automation-medication-reminder',
       schedule: {
         kind: 'at',
         localAt: {
@@ -664,13 +729,15 @@ describe('hosted domain dynamic tools', () => {
             created: false,
             effectiveTimeZone: 'America/New_York',
             lookupId: 'medication-reminder',
-            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            occurrenceProjection: {
+              nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+              status: 'resolved' as const,
+            },
             routeBinding: 'current_conversation',
             schedule: request.action === 'patch' && request.schedule
               ? request.schedule
               : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
             status: 'active',
-            timingVerified: true,
             updatedAt: '2026-03-08T05:01:00.000Z',
           }),
         },
@@ -682,7 +749,7 @@ describe('hosted domain dynamic tools', () => {
     expect(result.rpcResult.success).toBe(true)
   })
 
-  it('contains local one-shot slug derivation failures for a recoverable retry', async () => {
+  it('accepts localized reminder titles without a separate slug', async () => {
     const localizedRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the reminder.',
@@ -697,39 +764,10 @@ describe('hosted domain dynamic tools', () => {
       title: '薬を飲む',
     })
     expect(localizedRequest).toMatchObject({
-      kind: 'invalid-automation-arguments',
-    })
-    if (localizedRequest?.kind !== 'invalid-automation-arguments') {
-      throw new TypeError('Expected a recoverable invalid automation request.')
-    }
-    const invalidResult = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({}),
-      nextUsageOrdinal: () => 0,
-      progressDelivery: null,
-      request: localizedRequest,
-    })
-    expect(invalidResult.rpcResult.success).toBe(false)
-
-    expect(readToolRequest('automation', {
-      action: 'save',
-      instructions: 'Send the reminder.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          date: '2026-03-08',
-          time: '03:30',
-          timeZone: 'America/New_York',
-        },
-      },
-      slug: 'take-medicine',
-      title: '薬を飲む',
-    })).toMatchObject({
       kind: 'automation',
       request: {
         action: 'save',
-        slug: 'take-medicine',
+        title: '薬を飲む',
       },
     })
   })
@@ -746,7 +784,7 @@ describe('hosted domain dynamic tools', () => {
       'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never invent schedule, update, or timezone fields outside the schema.',
+      'Never invent schedule, update, timezone, route, group, or member fields outside the schema.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
@@ -847,7 +885,7 @@ describe('hosted domain dynamic tools', () => {
     }
   })
 
-  it('returns schema-owned automation repair hints without calling the port', async () => {
+  it('returns complete automation validation reasons without calling the port', async () => {
     const privateMarker = 'synthetic-private-automation-marker'
     const request = readToolRequest('automation', {
       action: 'inspect',
@@ -875,13 +913,136 @@ describe('hosted domain dynamic tools', () => {
 
     expect(result.rpcResult.success).toBe(false)
     expect(feedback).toContain('"error":"invalid_automation_arguments"')
-    expect(feedback).toContain(
-      '"field":"lookup","code":"invalid_type","expected":"string"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_automation_arguments',
+      validationIssues: [expect.objectContaining({
+        code: 'invalid_type',
+        expected: 'string',
+        path: ['lookup'],
+      })],
+    })
     expect(feedback).not.toContain(privateMarker)
     expect(feedback).not.toContain('privateMarker')
     expect(feedback).not.toContain('"received"')
     expect(automationRequest).not.toHaveBeenCalled()
+  })
+
+  it('explains paired automation support fields without calling the port', async () => {
+    const request = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Ask how the weekly check-in went.',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      supportKind: 'check_in',
+      title: 'Weekly check-in',
+    })
+    expect(request).toMatchObject({ kind: 'invalid-automation-arguments' })
+    if (!request || request.kind !== 'invalid-automation-arguments') {
+      throw new Error('Expected invalid automation arguments.')
+    }
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('Automation port must not be called for invalid arguments.')
+    })
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: { request: automationRequest },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_automation_arguments',
+      validationIssues: [expect.objectContaining({
+        message: 'Plan-owned support requires supportKind and supportSeriesId together.',
+        path: ['supportSeriesId'],
+      })],
+    })
+    expect(automationRequest).not.toHaveBeenCalled()
+  })
+
+  it('saves an ordinary hosted weekly check-in without plan-owned support fields', async () => {
+    const request = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Ask how the weekly check-in went.',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active',
+      title: 'Weekly check-in',
+    })
+    expect(request).toMatchObject({ kind: 'automation' })
+    if (!request || request.kind !== 'automation') {
+      throw new Error('Expected a valid ordinary check-in automation request.')
+    }
+
+    const automationRequest = vi.fn(async () => ({
+      action: 'save' as const,
+      automationId: 'automation-weekly-check-in',
+      created: true,
+      contextReferences: [],
+      effectiveTimeZone: 'America/New_York',
+      lookupId: 'weekly-check-in',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-08-31T23:00:00.000Z',
+        status: 'resolved' as const,
+      },
+      path: '/internal/automations/weekly-check-in.md',
+      routeBinding: 'current_conversation' as const,
+      schedule: {
+        kind: 'cron' as const,
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active' as const,
+      updatedAt: '2026-08-24T00:00:00.000Z',
+    }))
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: { request: automationRequest },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(automationRequest).toHaveBeenCalledWith({
+      action: 'save',
+      instructions: 'Ask how the weekly check-in went.',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active',
+      title: 'Weekly check-in',
+    }, { signal: null })
+    expect(readResultPayload(result)).toMatchObject({
+      action: 'save',
+      effectiveTimeZone: 'America/New_York',
+      occurrenceProjection: {
+        status: 'resolved',
+      },
+      routeBinding: 'current_conversation',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active',
+    })
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -1224,6 +1385,15 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /current private member message/u,
+    )
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /Never call it from a group or scheduled turn or for another provider/u,
+    )
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /at most once for that message; after any result, do not retry/u,
+    )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',
@@ -1245,9 +1415,36 @@ describe('hosted domain dynamic tools', () => {
       provider: 'whoop',
       token: 'not-allowed',
     })).toMatchObject({ kind: 'invalid-device-arguments' })
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach',
+      afterDays: 10,
+      mode: 'after_days',
+      sourceProvider: 'garmin',
+    })).toEqual({
+      kind: 'device',
+      request: {
+        action: 'configure_no_data_outreach',
+        afterDays: 10,
+        mode: 'after_days',
+        sourceProvider: 'garmin',
+      },
+    })
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach',
+      mode: 'off',
+      sourceProvider: 'garmin',
+    })).toMatchObject({ kind: 'device' })
+    for (const afterDays of [4, 31]) {
+      expect(readToolRequest('device', {
+        action: 'configure_no_data_outreach',
+        afterDays,
+        mode: 'after_days',
+        sourceProvider: 'garmin',
+      })).toMatchObject({ kind: 'invalid-device-arguments' })
+    }
   })
 
-  it('executes automation through the injected port and returns verified timing fields', async () => {
+  it('passes a stable skill recipe key through the parser and injected port', async () => {
     const abortController = new AbortController()
     const automationTool = {
       request: vi.fn(async () => ({
@@ -1262,7 +1459,10 @@ describe('hosted domain dynamic tools', () => {
         ],
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         path: '/internal/automations/evening-wind-down.md',
         routeBinding: 'current_conversation' as const,
         schedule: {
@@ -1271,7 +1471,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/Chicago',
         },
         status: 'paused' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
@@ -1289,6 +1488,7 @@ describe('hosted domain dynamic tools', () => {
         localTime: '22:30',
         timeZone: 'America/Chicago',
       },
+      slug: 'experiment-session-support-evening-session-1',
       status: 'paused',
       title: 'Evening wind-down',
     })
@@ -1320,6 +1520,7 @@ describe('hosted domain dynamic tools', () => {
         localTime: '22:30',
         timeZone: 'America/Chicago',
       },
+      slug: 'experiment-session-support-evening-session-1',
       status: 'paused',
       title: 'Evening wind-down',
     }, { signal: abortController.signal })
@@ -1334,8 +1535,10 @@ describe('hosted domain dynamic tools', () => {
         },
       ],
       effectiveTimeZone: 'America/Chicago',
-      lookupId: 'evening-wind-down',
-      nextOccurrenceAt: null,
+      occurrenceProjection: {
+        nextOccurrenceAt: null,
+        status: 'resolved' as const,
+      },
       routeBinding: 'current_conversation',
       schedule: {
         kind: 'dailyLocal',
@@ -1343,8 +1546,6 @@ describe('hosted domain dynamic tools', () => {
         timeZone: 'America/Chicago',
       },
       status: 'paused',
-      timingVerified: true,
-      timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
     const mismatchedTool = {
@@ -1354,7 +1555,10 @@ describe('hosted domain dynamic tools', () => {
         created: false,
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextOccurrenceAt: '2026-08-10T03:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-08-10T03:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
@@ -1362,7 +1566,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/Chicago',
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:01:00.000Z',
       })),
     }
@@ -1394,7 +1597,10 @@ describe('hosted domain dynamic tools', () => {
         automationId: 'automation-1',
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
@@ -1402,7 +1608,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/Chicago',
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
@@ -1431,8 +1636,10 @@ describe('hosted domain dynamic tools', () => {
       action: 'inspect',
       automationId: 'automation-1',
       effectiveTimeZone: 'America/Chicago',
-      lookupId: 'evening-wind-down',
-      nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+        status: 'resolved' as const,
+      },
       routeBinding: 'preserved',
       schedule: {
         kind: 'dailyLocal',
@@ -1440,8 +1647,6 @@ describe('hosted domain dynamic tools', () => {
         timeZone: 'America/Chicago',
       },
       status: 'active',
-      timingVerified: true,
-      timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
   })
@@ -1729,6 +1934,82 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(unavailable.rpcResult).toMatchObject({ success: false })
   })
+
+  it('binds no-data outreach changes to accepted private member input', async () => {
+    const deviceTool = {
+      request: vi.fn(async () => ({
+        action: 'configure_no_data_outreach' as const,
+        effectiveAfterDays: 10,
+        setting: 'custom' as const,
+        sourceProvider: 'garmin',
+        status: 'saved' as const,
+      })),
+    }
+    const request = readToolRequest('device', {
+      action: 'configure_no_data_outreach',
+      afterDays: 10,
+      mode: 'after_days',
+      sourceProvider: 'garmin',
+    })
+    if (!request) {
+      throw new Error('Expected a device no-data outreach request.')
+    }
+    const acceptedInputId = 'ain_00000000000000000000000000000001'
+    const directResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: 'direct',
+          origin: {
+            assistantInputId: acceptedInputId,
+            kind: 'accepted_input',
+            sessionId: 'session-synthetic',
+          },
+        }),
+        deviceTool,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(deviceTool.request).toHaveBeenCalledWith({
+      action: 'configure_no_data_outreach',
+      afterDays: 10,
+      mode: 'after_days',
+      sourceProvider: 'garmin',
+    }, {
+      acceptedInputAuthority: { assistantInputId: acceptedInputId },
+      signal: null,
+    })
+    expect(readResultPayload(directResult)).toMatchObject({
+      effectiveAfterDays: 10,
+      setting: 'custom',
+    })
+
+    deviceTool.request.mockClear()
+    const groupResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: 'group',
+          origin: {
+            assistantInputId: acceptedInputId,
+            kind: 'accepted_input',
+            sessionId: 'session-synthetic',
+          },
+        }),
+        deviceTool,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    expect(groupResult.rpcResult.success).toBe(false)
+    expect(deviceTool.request).not.toHaveBeenCalled()
+  })
 })
 
 function readToolRequest(
@@ -1765,6 +2046,7 @@ function referenceWindow(at: string): {
 
 function createHostedToolContext(input: {
   automationTool?: AssistantHostedToolContext['automationTool']
+  currentInvocationScope?: AssistantHostedToolContext['currentInvocationScope']
   deviceTool?: AssistantHostedToolContext['deviceTool']
 }): AssistantHostedToolContext {
   return {
@@ -1772,6 +2054,7 @@ function createHostedToolContext(input: {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    currentInvocationScope: input.currentInvocationScope,
     deviceTool: input.deviceTool ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')

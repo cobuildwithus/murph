@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-19
+Last verified: 2026-08-24
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -23,11 +23,14 @@ Never combine local `deep-review` with the final ReviewGPT gate for the same
 completed change, including when the change is complex, sensitive, or the user
 asks for a final bug hunt.
 
-For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
-latest substantive round returns `ROUND_OUTCOME: PASS`, local triage has zero
-accepted findings, and PR CI is green on the final head. A completed anomaly
-retrospective may justify continuing the same PR, but it never substitutes for
-a later `PASS` on the resulting patch.
+For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until
+the latest substantive round is resolved, local triage has zero accepted
+findings, every required finding-disposition boundary is complete, and PR CI is green on the
+final head. A round is resolved by `ROUND_OUTCOME: PASS`, or by
+`ROUND_OUTCOME: FINDINGS` when the parent accepts none and records concrete
+disposition evidence. A completed anomaly retrospective may justify continuing
+the same PR, but it never substitutes for a later resolved result on the
+resulting patch.
 
 ## Outcome and Completion Bar
 
@@ -39,11 +42,11 @@ undeclared PRs re-send a fresh full snapshot regardless of size. Routine PRs do
 the same at 500 changed lines or 10 changed files; only routine PRs below both
 cutoffs send the remediation delta and its directly affected paths. An explicit
 `REVIEW_GPT_FULL_REVIEW_REASON` selects a new full-audit conversation. The gate
-completes when the exact patch receives `ROUND_OUTCOME: PASS`, local triage has
-zero accepted findings, and CI is green on the final head. Missing or stale
-evidence, an invalid model/response, unresolved accepted findings, a required
-retrospective, or a merge conflict is a stop condition rather than permission
-to infer the answer.
+completes when the exact patch has a resolved result, local triage has zero
+accepted findings, the finding-disposition boundary is complete, and CI is green
+on the final head. Missing or stale evidence, an invalid model/response,
+unresolved accepted findings, a required retrospective, or a merge conflict is
+a stop condition rather than permission to infer the answer.
 
 ## Managed Target Lifecycle
 
@@ -91,9 +94,9 @@ lane. The detached watcher owns the wait and resumes Codex only after the
 response is complete; the active agent does not remain in a progress-check
 loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
 every five minutes. Unless an explicit caller- or user-supplied per-run bound
-already applies, use `--poll-timeout 240m`; preserve any explicit bound. That
+already applies, use `--poll-timeout 260m`; preserve any explicit bound. That
 wake timeout is independent of the normal ReviewGPT response-capture timeout,
-which defaults to 180 minutes.
+which defaults to 250 minutes.
 
 Manual status polling is a fallback only when neither a completion-returning
 wait nor a completion watcher can notify the owning model and the task cannot
@@ -107,6 +110,71 @@ artifact, model, timeout, or response-marker validation. In particular, keep
 the preliminary coverage-patch download and application boundary in
 `agent-docs/operations/completion-workflow.md` § Preliminary ReviewGPT Packet;
 do not use a generic wake handoff as authority to apply an artifact.
+
+## Finding Disposition Boundary
+
+Every substantive preliminary specialist result and every final `FINDINGS`
+result uses this parent-owned disposition boundary. Validate the exact response
+first, then have the parent triage every finding. The user-visible report states
+the result and, for each finding, the parent's accepted or rejected disposition,
+concrete code or path evidence, current user or operational harm, and the
+smallest justified fix with its complexity cost.
+
+A preliminary specialist result does not end the active task turn. After the
+parent reports the result and dispositions as a progress update, it may inspect
+an attached coverage artifact and remediate accepted findings within the
+existing task authority without asking for separate user permission. This
+continuation does not authorize a scope expansion, destructive action, or
+external action that otherwise requires approval.
+
+A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
+and dispositions, then wait for the user to resume before mutating the
+candidate, downloading or applying an artifact, launching another review, or
+merging. If a concurrent final stage returns `FINDINGS`, that stricter pause
+also blocks pending specialist-driven mutation. A validated final
+`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
+the remaining parent review and merge checks without a user-resume pause.
+
+The parent owns disposition and may reject a finding as wrong, already handled,
+speculative, unproven, or not worth the complexity it would add. The user may
+override that judgment. A rejected finding requires neither a code change nor
+reviewer withdrawal. A `FINDINGS` result needs no review rerun
+when the parent accepts zero findings and records evidence-backed rejection
+reasons. Accepted findings remain unresolved until fixed and verified; the
+one-pass preliminary stage then resolves under its existing parent-revalidation
+rule, while the final gate requires a later resolved result.
+
+Two narrow exceptions let a final `FINDINGS` result complete its disposition
+boundary without ending the turn after the parent reports every finding and its
+evidence-backed disposition as a progress update:
+
+- `Complexity Collapse`: the substantive result contains exactly one finding,
+  ReviewGPT classifies it as `Complexity Collapse`, and the parent independently
+  accepts it after proving that the correction preserves every requested
+  behavior and invariant, stays within the current task's existing edit
+  authority, and yields net deletion or removes concrete concepts or owners
+  without replacement machinery.
+- `Non-Production Remediation`: every accepted finding in the result can be
+  corrected entirely in isolated tests, fixtures, or direct-proof scaffolding;
+  authored repository docs or process text that is not consumed at runtime; or
+  PR-body, review-comment, and review-evidence updates. The parent must prove the
+  complete correction changes no production source, user-visible or runtime
+  behavior, provider/tool/API/schema contract, runtime or deployment config,
+  runtime-consumed or generated artifact, persisted data, dependency,
+  deployment, external state, or destructive action. Rejected findings may
+  coexist because their evidence-backed disposition is terminal, but every
+  accepted finding must qualify.
+
+After either exception qualifies, remediate, verify, push when applicable, and
+continue the ReviewGPT loop without asking the user for separate permission.
+Use the ordinary turn-ending pause when an accepted finding does not qualify,
+the correction expands beyond the proven boundary, requested behavior or the
+intended outcome would change, scope or authority would expand, or a destructive
+or external action needs new approval. Neither exception bypasses an anomaly
+retrospective or the seven-round hard cap.
+
+`INVALID` and `RETROSPECTIVE_REQUIRED` retain their existing stop behavior
+rather than using this disposition path.
 
 ## Preliminary Specialist Pass
 
@@ -141,7 +209,7 @@ or advance the final gate's baseline.
 
 Run the preliminary preset with exact-head packaging:
 
-The repo config defaults response capture to 180 minutes. The workflow commands
+The repo config defaults response capture to 250 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
@@ -172,8 +240,7 @@ above. The completion-specialists preset delegates detailed lens criteria to
 the canonical files already inside `codebase.zip`; do not paste the PR body or
 those lens documents into the composer. The wrapper rejects an assembled
 completion-specialists prompt above 6,500 UTF-8 bytes, counting the preset plus
-every `--prompt` and `--prompt-file` value; both the canonical command and
-Frog's strict marker-bearing command must remain under that shared budget. Run
+every `--prompt` and `--prompt-file` value. Run
 completion-specialists as the only preset so another preset cannot escape the
 assembled-size check. If the ZIP tile is ready while Send remains disabled,
 treat that as composer validation, not a second hydration lifecycle: remove
@@ -205,12 +272,18 @@ turn, attachment, requested model selection, completion marker, and substantive
 lens coverage, then record the elapsed time and lane/model evidence.
 An `INVALID` result is a tooling/evidence failure: correct the gap and retry the
 same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
-specialist pass; do not split or rerun it by lens.
+specialist pass; do not split or rerun it by lens. Apply the parent-owned
+finding-disposition boundary, report the result and dispositions as a progress
+update, then continue with accepted remediation or artifact inspection without
+a user-resume pause. If a concurrent final stage has returned `FINDINGS`, obey
+its turn-ending pause before any candidate mutation.
 
-Triage every finding against the real code and tests. If the response attaches
-`reviewgpt-coverage.patch`, retain the exact review thread URL, artifact index,
-and selected lane. Download only that assistant-owned artifact from the same
-thread with the managed lane's CDP endpoint, for example:
+After the parent reports the preliminary dispositions, handle only accepted
+findings against the real code and tests. If the response attaches
+`reviewgpt-coverage.patch`,
+retain the exact review thread URL, artifact index, and selected lane. Download
+only that assistant-owned artifact from the same thread with the managed lane's
+CDP endpoint, for example:
 
 ```bash
 pnpm exec cobuild-review-gpt thread download \
@@ -446,12 +519,11 @@ the current user explicitly asks for it.
    Spotlight or scans unrelated filesystem roots for an app bundle.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through six lanes and defaults to four. A value supplied on the current
+   through six lanes and defaults to all six. A value supplied on the current
    command is authoritative; the local config is only a fallback preference and
-   cannot widen or replace that per-run pool cap. A host with provisioned
-   Vonneumann and Apollo profiles opts into all six by setting it in the local
-   `$XDG_CONFIG_HOME/murph/review-gpt.conf`, without committing machine-specific
-   preferences or account details.
+   cannot widen or replace that per-run pool cap. A host can narrow the pool by
+   setting the count in its local `$XDG_CONFIG_HOME/murph/review-gpt.conf`,
+   without committing machine-specific preferences or account details.
 
    A lane is considered usable when its managed profile is unlocked, or when its
    configured CDP endpoint is already alive. The default random path skips a
@@ -561,7 +633,7 @@ the current user explicitly asks for it.
    pre-existing or adjacent issue belongs outside this PR unless the stated
    outcome cannot ship without resolving it. A claimed correction that fails to
    resolve its prior accepted finding counts as review-induced and must be
-   corrected before `PASS`.
+   corrected before the stage resolves.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any
@@ -591,6 +663,16 @@ the current user explicitly asks for it.
    changing deployment order; do not add replay, backfill, repair paths,
    migrations, shims, dual writes, queues, capability negotiation, or
    reconciliation for a low-incidence temporary window.
+
+   Apply the parent-owned finding-disposition boundary after completing this
+   triage. Preliminary specialist remediation may proceed after the parent
+   reports every disposition as a progress update. A final `FINDINGS` result
+   pauses steps 5–7 until the user resumes, including any pending
+   specialist-driven mutation, except that a qualifying `Complexity Collapse`
+   or `Non-Production Remediation` exception may proceed immediately after the
+   report. Remediation remains limited to accepted findings and the proven task
+   or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
+   without that pause.
 
 5. Before another tactical fix, run the anomaly retrospective when any of these
    is true:
@@ -697,8 +779,11 @@ worktree active, and stop. Do not poll for a quiet base.
 
 ## Stop Condition
 
-- Stop when the exact current patch returns `ROUND_OUTCOME: PASS` and local
-  triage produces zero accepted findings.
+- Stop when the exact current patch has a resolved result, local triage produces
+  zero accepted findings, and every required finding-disposition boundary is
+  complete. A resolved result is `ROUND_OUTCOME: PASS`, which requires no
+  user-resume pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected
+  for an evidence-backed reason after its disposition boundary.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
@@ -712,7 +797,7 @@ worktree active, and stop. Do not poll for a quiet base.
   retrospective and obtain an explicit continuation decision before starting
   round eight; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
-  merge-ready without the required later `PASS`.
+  merge-ready without the required later resolved result.
 - Report a per-round summary at handoff: findings received, accepted, rejected
   with reasons, origin/mechanism, what landed, source-shape movement, and any
   retrospective decision. Report tooling retries separately.

@@ -637,6 +637,338 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
+  it("reports no active child as soon as an exact rejected invocation settles", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_wake_after_shutdown_settles");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    let wakeSettled = false;
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    }).finally(() => {
+      wakeSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    expect(wakeSettled).toBe(false);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+    await expect(wake).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation/abort")
+    )).toBe(false);
+  });
+
+  it("keeps a rejected wake unconfirmed when lifecycle stop ownership follows settlement", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const lifecycleDestroyStarted = createDeferred<void>();
+    const releaseLifecycleDestroy = createDeferred<void>();
+    const request = createRunnerRequest("evt_rejected_wake_before_lifecycle_stop");
+    let containerRef: RunnerContainer | null = null;
+    let destroyCallCount = 0;
+    const destroy = vi.fn(async () => {
+      destroyCallCount += 1;
+      if (destroyCallCount === 2) {
+        lifecycleDestroyStarted.resolve(undefined);
+        await releaseLifecycleDestroy.promise;
+      }
+      containerRef?.onStop({ exitCode: 0, reason: "exit" });
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState: vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      })),
+      initialStatus: "running",
+    });
+    containerRef = container;
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    const invocationFailure = expect(invocation).rejects.toThrow(
+      "workspace invocation container destroyed",
+    );
+    await runnerRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    const destroyResult = container.destroyInstance();
+    await lifecycleDestroyStarted.promise;
+
+    await invocationFailure;
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+
+    releaseLifecycleDestroy.resolve(undefined);
+    await expect(destroyResult).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a rejected wake unconfirmed when a successor invocation is queued", async () => {
+    const activeRequestStarted = createDeferred<void>();
+    const activeResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_rejected_wake_before_successor");
+    let executeCallCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        executeCallCount += 1;
+        if (executeCallCount === 1) {
+          activeRequestStarted.resolve(undefined);
+          return await activeResponse.promise;
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const activeInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await activeRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    const queuedInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_successor_after_rejected_wake"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    activeResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(activeInvocation).resolves.toEqual(createRunnerResult());
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    await expect(queuedInvocation).resolves.toEqual(createRunnerResult());
+    expect(executeCallCount).toBe(2);
+  });
+
+  it("keeps a rejected wake fail-closed after invocation transport uncertainty", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_rejected_wake_transport_uncertain");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "0",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            "Hosted execution container runtime wake was not accepted by a verified active child.",
+        }),
+      );
+    });
+    const invocationFailure = expect(invocation).rejects.toThrow(
+      "Network connection lost",
+    );
+    runnerResponse.reject(new Error("Network connection lost"));
+
+    await invocationFailure;
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    await expect(container.readActiveRuntimeUserFence()).resolves.toMatchObject({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+    });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("posts an exact runtime wake when the outer active-operation pointer is missing", async () => {
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -1602,7 +1934,7 @@ describe("RunnerContainer", () => {
     timeout.mockRestore();
   });
 
-  it("waits for in-lock fail-closed cleanup after readiness aborts", async () => {
+  it("waits for in-lock fail-closed cleanup after stale readiness aborts", async () => {
     const readinessDeadline = new AbortController();
     const originalAbortSignalTimeout = AbortSignal.timeout;
     const timeout = vi.spyOn(AbortSignal, "timeout")
@@ -1627,7 +1959,7 @@ describe("RunnerContainer", () => {
       status = "stopped";
     });
     const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
+      lastChange: status === "running" ? Date.now() - 20_001 : Date.now(),
       status,
     }));
     const { container } = createContainerDouble({
@@ -1646,6 +1978,10 @@ describe("RunnerContainer", () => {
       settled = true;
     }).catch(() => undefined);
     await startObserved.promise;
+    Object.assign(Reflect.get(container, "currentContainerStart"), {
+      pendingUntilMs: null,
+      readyObservedBy: "cold-start-ready",
+    });
     readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
     await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
     expect(settled).toBe(false);
@@ -1654,6 +1990,743 @@ describe("RunnerContainer", () => {
     await expect(readiness).rejects.toMatchObject({ name: "TimeoutError" });
     expect(settled).toBe(true);
     timeout.mockRestore();
+  });
+
+  it("preserves an eight-second timeout when the same start is healthy at nine seconds", async () => {
+    const timeoutControllers: AbortController[] = [];
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => {
+        const controller = new AbortController();
+        timeoutControllers.push(controller);
+        return controller.signal;
+      });
+    const fixedNowMs = Date.parse("2026-08-20T16:32:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    const healthStarted = createDeferred<void>();
+    let healthChecks = 0;
+    let startCalls = 0;
+    let status: "running" | "stopped" = "stopped";
+    let lastChange = fixedNowMs;
+    let destroyedStart: unknown = null;
+    let issuedStart: unknown = null;
+    let container: RunnerContainer;
+    const startAndWaitForPorts = vi.fn(async () => {
+      startCalls += 1;
+      status = "running";
+      if (startCalls === 1) {
+        issuedStart = Reflect.get(container, "currentContainerStart");
+        nowMs = fixedNowMs + 100;
+      } else {
+        nowMs += 100;
+      }
+      lastChange = Date.now();
+      container.onStart();
+      if (startCalls === 1) {
+        nowMs = fixedNowMs + 7_900;
+      }
+    });
+    const containerFetch = vi.fn(async (
+      url: string,
+      init?: { signal?: AbortSignal },
+    ) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      if (healthChecks === 1) {
+        const signal = init?.signal;
+        if (!(signal instanceof AbortSignal)) {
+          throw new Error("Expected cold health to receive an abort signal.");
+        }
+        healthStarted.resolve(undefined);
+        await new Promise<never>((_resolve, reject) => {
+          const rejectWithAbort = () => reject(signal.reason);
+          if (signal.aborted) {
+            rejectWithAbort();
+            return;
+          }
+          signal.addEventListener("abort", rejectWithAbort, { once: true });
+        });
+      }
+      if (healthChecks === 3) {
+        return new Response(JSON.stringify({ error: "ready start became unhealthy" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+      return new Response(JSON.stringify(createRunnerHealthResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const destroy = vi.fn(async () => {
+      destroyedStart = Reflect.get(container, "currentContainerStart");
+      status = "stopped";
+      lastChange = Date.now();
+    });
+    const getState = vi.fn(async () => ({ lastChange, status }));
+    ({ container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState,
+      initialStatus: "stopped",
+      startAndWaitForPorts,
+    }));
+
+    try {
+      const first = container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      });
+      await healthStarted.promise;
+      nowMs = fixedNowMs + 8_000;
+      timeoutControllers[0]?.abort(new DOMException("Timed out", "TimeoutError"));
+      await expect(first).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(issuedStart);
+
+      nowMs = fixedNowMs + 9_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(containerFetch).toHaveBeenCalledTimes(2);
+      expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(issuedStart);
+      const pendingLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([input]) => input)
+        .filter((input) =>
+          input.message
+            === "Hosted execution container cold start is still pending after the caller readiness budget."
+        );
+      expect(pendingLogs).toEqual([
+        expect.objectContaining({ level: "warn" }),
+      ]);
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted execution container failed to start or listen.",
+        }),
+      );
+
+      nowMs = fixedNowMs + 10_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_456",
+      })).resolves.toEqual({
+        action: "started",
+        kind: "ready",
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(destroyedStart).toBe(issuedStart);
+      expect(destroyedStart).toMatchObject({
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: fixedNowMs + 100,
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(containerFetch).toHaveBeenCalledTimes(4);
+    } finally {
+      now.mockRestore();
+      timeout.mockRestore();
+    }
+  });
+
+  it("does not attach status-settled warm readiness to a slow replacement start", async () => {
+    const fixedNowMs = Date.parse("2026-08-20T16:32:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let healthChecks = 0;
+    let status: "running" | "stopped" = "running";
+    let lastChange = fixedNowMs;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      if (healthChecks === 2) {
+        return new Response(JSON.stringify({ error: "stale warm shell" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+      if (healthChecks === 3) {
+        return new Response("Failed to connect to local container transport", {
+          headers: {
+            "content-type": "text/plain; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+      return new Response(JSON.stringify(createRunnerHealthResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    let containerOptions: CreateContainerDoubleInput;
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+      lastChange = Date.now();
+      containerOptions.platformRunning = false;
+    });
+    let container: RunnerContainer;
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+      lastChange = Date.now();
+      containerOptions.platformRunning = true;
+      container.onStart();
+      throw new DOMException("Timed out", "TimeoutError");
+    });
+    containerOptions = {
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState: vi.fn(async () => ({ lastChange, status })),
+      initialStatus: "running",
+      platformRunning: true,
+      startAndWaitForPorts,
+    };
+    ({ container } = createContainerDouble(containerOptions));
+
+    try {
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toMatchObject({ kind: "ready" });
+
+      nowMs += 6_000;
+      const firstReplacementWait = container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      });
+      await expect(firstReplacementWait).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(destroy).toHaveBeenCalledOnce();
+
+      container.onStop({ exitCode: 0, reason: "exit" });
+      nowMs += 8_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).rejects.toMatchObject({
+        name: "HostedRunnerContainerMetadataResponseError",
+        statusCode: 503,
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+
+      nowMs = fixedNowMs + 15_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(healthChecks).toBe(4);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it.each(["success", "failure"] as const)(
+    "does not apply a stale warm-health %s to a platform-started replacement",
+    async (staleHealthOutcome) => {
+      const fixedNowMs = Date.parse("2026-08-20T18:00:00.000Z");
+      let nowMs = fixedNowMs;
+      const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+      let healthChecks = 0;
+      let status: "running" | "stopped" = "running";
+      let lastChange = fixedNowMs;
+      const staleHealth = createDeferred<Response>();
+      const containerFetch = vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        if (healthChecks === 2) {
+          return await staleHealth.promise;
+        }
+        if (healthChecks === 3) {
+          return new Response("Failed to connect to local container transport", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      let containerOptions: CreateContainerDoubleInput;
+      const destroy = vi.fn(async () => {
+        status = "stopped";
+        containerOptions.platformRunning = false;
+      });
+      containerOptions = {
+        containerFetch,
+        destroy,
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+        getState: vi.fn(async () => ({ lastChange, status })),
+        initialStatus: "running",
+        platformRunning: true,
+      };
+      const { container, startAndWaitForPorts } = createContainerDouble(containerOptions);
+
+      try {
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toMatchObject({ kind: "ready" });
+
+        nowMs += 6_000;
+        const staleReadiness = container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        });
+        await vi.waitFor(() => expect(healthChecks).toBe(2));
+
+        nowMs += 1_000;
+        const replacementStartedAtMs = nowMs;
+        lastChange = replacementStartedAtMs;
+        container.onStart();
+        container.onStop({ exitCode: 0, reason: "exit" });
+        staleHealth.resolve(new Response(JSON.stringify(
+          staleHealthOutcome === "success"
+            ? createRunnerHealthResult()
+            : { error: "old shell failed" },
+        ), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: staleHealthOutcome === "success" ? 200 : 503,
+        }));
+
+        await expect(staleReadiness).rejects.toBeDefined();
+        expect(destroy).not.toHaveBeenCalled();
+
+        nowMs = replacementStartedAtMs + 8_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).rejects.toMatchObject({
+          name: "HostedRunnerContainerMetadataResponseError",
+          statusCode: 503,
+        });
+        expect(destroy).not.toHaveBeenCalled();
+
+        nowMs = replacementStartedAtMs + 9_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toEqual({
+          action: "already_warm",
+          kind: "ready",
+        });
+
+        expect(startAndWaitForPorts).not.toHaveBeenCalled();
+        expect(destroy).not.toHaveBeenCalled();
+        expect(healthChecks).toBe(4);
+      } finally {
+        now.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    { expectedDestroyCalls: 0, gatedStatusRead: 3, timing: "before destroy" },
+    { expectedDestroyCalls: 1, gatedStatusRead: 4, timing: "during destroy settlement" },
+  ] as const)(
+    "preserves a replacement that starts $timing for its old shell",
+    async ({ expectedDestroyCalls, gatedStatusRead }) => {
+      const fixedNowMs = Date.parse("2026-08-20T19:00:00.000Z");
+      let nowMs = fixedNowMs;
+      const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+      let healthChecks = 0;
+      let statusReads = 0;
+      let lastChange = fixedNowMs;
+      const gatedStateRead = createDeferred<void>();
+      const destroyIssued = createDeferred<void>();
+      const destroyResolved = createDeferred<void>();
+      const getState = vi.fn(async () => {
+        statusReads += 1;
+        if (statusReads === gatedStatusRead) {
+          await gatedStateRead.promise;
+        }
+        return { lastChange, status: "running" as const };
+      });
+      const containerFetch = vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        if (healthChecks === 2) {
+          return new Response(JSON.stringify({ error: "old shell failed" }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        if (healthChecks === 3) {
+          return new Response("Failed to connect to local container transport", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const destroy = vi.fn(async () => {
+        destroyIssued.resolve(undefined);
+        await destroyResolved.promise;
+      });
+      const startAndWaitForPorts = vi.fn(async () => {
+        throw new DOMException("Timed out", "TimeoutError");
+      });
+      const containerOptions: CreateContainerDoubleInput = {
+        containerFetch,
+        destroy,
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+        getState,
+        initialStatus: "running",
+        platformRunning: true,
+        startAndWaitForPorts,
+      };
+      const { container } = createContainerDouble(containerOptions);
+
+      try {
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toMatchObject({ kind: "ready" });
+
+        nowMs += 6_000;
+        const oldShellReadiness = container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        });
+        if (expectedDestroyCalls === 1) {
+          await destroyIssued.promise;
+        }
+        await vi.waitFor(() => expect(statusReads).toBe(gatedStatusRead));
+
+        nowMs += 1_000;
+        const replacementStartedAtMs = nowMs;
+        lastChange = replacementStartedAtMs;
+        container.onStart();
+        if (expectedDestroyCalls === 1) {
+          container.onStop({ exitCode: 0, reason: "exit" });
+          destroyResolved.resolve(undefined);
+        }
+        gatedStateRead.resolve(undefined);
+
+        await expect(oldShellReadiness).rejects.toMatchObject({ name: "TimeoutError" });
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
+
+        nowMs = replacementStartedAtMs + 8_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).rejects.toMatchObject({
+          name: "HostedRunnerContainerMetadataResponseError",
+          statusCode: 503,
+        });
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+
+        nowMs = replacementStartedAtMs + 9_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toEqual({
+          action: "already_warm",
+          kind: "ready",
+        });
+
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(healthChecks).toBe(4);
+      } finally {
+        now.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    { completion: "status read rejects", expectedDestroyCalls: 0 },
+    { completion: "destroy rejects", expectedDestroyCalls: 1 },
+  ] as const)(
+    "does not let old cleanup invalidate a replacement when its $completion",
+    async ({ completion, expectedDestroyCalls }) => {
+      const fixedNowMs = Date.parse("2026-08-20T19:30:00.000Z");
+      let nowMs = fixedNowMs;
+      const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+      let healthChecks = 0;
+      let statusReads = 0;
+      let lastChange = fixedNowMs;
+      const oldCleanupStarted = createDeferred<void>();
+      const releaseOldCleanup = createDeferred<void>();
+      const getState = vi.fn(async () => {
+        statusReads += 1;
+        const capturedState = { lastChange, status: "running" as const };
+        if (completion === "status read rejects" && statusReads === 3) {
+          oldCleanupStarted.resolve(undefined);
+          await releaseOldCleanup.promise;
+          throw new Error("old status read failed");
+        }
+        return capturedState;
+      });
+      const containerFetch = vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        if (healthChecks === 2 || healthChecks === 3) {
+          return new Response(JSON.stringify({ error: "not ready" }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const destroy = vi.fn(async () => {
+        if (completion !== "destroy rejects") {
+          throw new Error("replacement should supersede cleanup before destroy");
+        }
+        oldCleanupStarted.resolve(undefined);
+        await releaseOldCleanup.promise;
+        throw new Error("old destroy failed");
+      });
+      const startAndWaitForPorts = vi.fn(async () => {
+        throw new DOMException("Timed out", "TimeoutError");
+      });
+      const { container } = createContainerDouble({
+        containerFetch,
+        destroy,
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+        getState,
+        initialStatus: "running",
+        platformRunning: true,
+        startAndWaitForPorts,
+      });
+
+      try {
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toMatchObject({ kind: "ready" });
+
+        nowMs += 6_000;
+        const oldShellReadiness = container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        });
+        await oldCleanupStarted.promise;
+
+        nowMs += 1_000;
+        const replacementStartedAtMs = nowMs;
+        lastChange = replacementStartedAtMs;
+        container.onStart();
+        releaseOldCleanup.resolve(undefined);
+
+        await expect(oldShellReadiness).rejects.toMatchObject({ name: "TimeoutError" });
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
+
+        nowMs = replacementStartedAtMs + 8_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+
+        nowMs = replacementStartedAtMs + 9_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toEqual({
+          action: "already_warm",
+          kind: "ready",
+        });
+
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(healthChecks).toBe(4);
+      } finally {
+        now.mockRestore();
+      }
+    },
+  );
+
+  it("does not carry an unsettled cold-start cleanup into a later start", async () => {
+    const fixedNowMs = Date.parse("2026-08-20T20:00:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let healthChecks = 0;
+    let lastChange = fixedNowMs;
+    let status: "running" | "stopped" = "stopped";
+    let container: RunnerContainer;
+    const getState = vi.fn(async () => ({ lastChange, status }));
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      return new Response(JSON.stringify(
+        healthChecks === 1
+          ? {
+            ...createRunnerHealthResult(),
+            hostedRuntimeArchitectureVersion: "stale-architecture",
+          }
+          : createRunnerHealthResult()
+      ), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const destroy = vi.fn(async () => {
+      throw new Error("old destroy failed");
+    });
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+      nowMs += 100;
+      lastChange = Date.now();
+      container.onStart();
+    });
+    ({ container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState,
+      initialStatus: "stopped",
+      platformRunning: true,
+      startAndWaitForPorts,
+    }));
+
+    try {
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      })).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(true);
+
+      nowMs += 1_000;
+      const replacementStartedAtMs = nowMs;
+      lastChange = replacementStartedAtMs;
+      container.onStart();
+
+      expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
+      expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+        startedAtMs: replacementStartedAtMs,
+      });
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(healthChecks).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("restarts an unobserved container after the readiness window elapses", async () => {
+    const timeoutControllers: AbortController[] = [];
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => {
+        const controller = new AbortController();
+        timeoutControllers.push(controller);
+        return controller.signal;
+      });
+    const staleLastChangeMs = Date.now() - 20_001;
+    let status: "running" | "stopped" = "running";
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (
+        url: string,
+        _init?: { signal?: AbortSignal },
+      ) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        timeoutControllers[0]?.abort(new DOMException("Timed out", "TimeoutError"));
+        throw timeoutControllers[0]?.signal.reason;
+      }),
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState: vi.fn(async () => ({
+        lastChange: staleLastChangeMs,
+        status,
+      })),
+      initialStatus: "running",
+    });
+
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      });
+      await expect(readiness).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it("reports unsettled warm-invalidated cleanup to readiness callers", async () => {
@@ -1699,6 +2772,13 @@ describe("RunnerContainer", () => {
       destroy,
       initialStatus: "running",
     });
+    Object.assign(container, {
+      currentContainerStart: {
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: Date.now(),
+      },
+    });
 
     try {
       const readiness = container.ensureReadyForProcessing({
@@ -1732,6 +2812,7 @@ describe("RunnerContainer", () => {
     }>();
     let secondDestroyRequested = false;
     let stateReads = 0;
+    let runningLastChange = Date.now();
     const getState = vi.fn(() => {
       stateReads += 1;
       if (secondDestroyRequested) {
@@ -1750,7 +2831,7 @@ describe("RunnerContainer", () => {
         return cleanupStatus.promise;
       }
       return Promise.resolve({
-        lastChange: Date.now(),
+        lastChange: runningLastChange,
         status: "running" as const,
       });
     });
@@ -1804,6 +2885,10 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       });
       await startObserved.promise;
+      Object.assign(Reflect.get(container, "currentContainerStart"), {
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+      });
       readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
       await Promise.resolve();
       await Promise.resolve();
@@ -1823,8 +2908,9 @@ describe("RunnerContainer", () => {
       );
 
       await vi.advanceTimersByTimeAsync(4_000);
+      runningLastChange = Date.now() - 20_001;
       cleanupStatus.resolve({
-        lastChange: Date.now(),
+        lastChange: runningLastChange,
         status: "running",
       });
       await vi.advanceTimersByTimeAsync(0);
@@ -2504,6 +3590,124 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
+  it("does not let a delayed lifecycle error clear a replacement start's pending window", async () => {
+    const fixedNowMs = Date.parse("2026-08-22T05:00:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let healthChecks = 0;
+    let lastChange = fixedNowMs;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      return new Response(JSON.stringify(
+        healthChecks === 1
+          ? { error: "replacement is still starting" }
+          : createRunnerHealthResult(),
+      ), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: healthChecks === 1 ? 503 : 200,
+      });
+    });
+    const destroy = vi.fn(async () => undefined);
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState: vi.fn(async () => ({
+        lastChange,
+        status: "running" as const,
+      })),
+      initialStatus: "running",
+      platformRunning: true,
+    });
+
+    try {
+      container.onStart();
+      const oldStart = Reflect.get(container, "currentContainerStart");
+
+      nowMs += 1_000;
+      lastChange = nowMs;
+      const replacementStartedAtMs = nowMs;
+      container.onStart();
+      const replacementStart = Reflect.get(container, "currentContainerStart");
+      expect(replacementStart).not.toBe(oldStart);
+
+      expect(() => container.onError(new Error("old start failed late"))).toThrow(
+        "old start failed late",
+      );
+      expect(Reflect.get(container, "currentContainerStart")).toBe(replacementStart);
+      expect(replacementStart).toMatchObject({
+        pendingUntilMs: replacementStartedAtMs + 20_000,
+        readyObservedBy: null,
+        startedAtMs: replacementStartedAtMs,
+      });
+
+      nowMs = replacementStartedAtMs + 8_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).rejects.toThrow(
+        "Hosted runner container health check returned HTTP 503.",
+      );
+      expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(replacementStart);
+
+      nowMs = replacementStartedAtMs + 9_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(replacementStart);
+      expect(replacementStart).toMatchObject({
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: replacementStartedAtMs,
+      });
+      expect(healthChecks).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("does not let an old stop clear a replacement before its start hook", async () => {
+    let container: RunnerContainer;
+    const startAndWaitForPorts = vi.fn(async () => {
+      container.onStop({ exitCode: 137, reason: "exit" });
+      container.onStart();
+    });
+    ({ container } = createContainerDouble({
+      initialStatus: "stopped",
+      platformRunning: false,
+      startAndWaitForPorts,
+    }));
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingOnStartObservation: false,
+      pendingUntilMs: null,
+      readyObservedBy: "cold-start-ready",
+    });
+  });
+
   it("falls back to warm health after a container stop invalidates startup readiness proof", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
@@ -2843,7 +4047,8 @@ describe("RunnerContainer", () => {
             buildSkipped: false,
             bundleFingerprint: "bundle-fingerprint",
             generatedAt: "2026-04-24T00:00:00.000Z",
-            schemaVersion: 2,
+            releaseSha: "0123456789abcdef0123456789abcdef01234567",
+            schemaVersion: 3,
             sourceFingerprint: "source-fingerprint",
           },
           service: "cloudflare-hosted-runner-node",
@@ -2865,7 +4070,8 @@ describe("RunnerContainer", () => {
         buildSkipped: false,
         bundleFingerprint: "bundle-fingerprint",
         generatedAt: "2026-04-24T00:00:00.000Z",
-        schemaVersion: 2,
+        releaseSha: "0123456789abcdef0123456789abcdef01234567",
+        schemaVersion: 3,
         sourceFingerprint: "source-fingerprint",
       },
       service: "cloudflare-hosted-runner-node",
@@ -4064,6 +5270,7 @@ describe("RunnerContainer", () => {
     vi.useFakeTimers();
 
     try {
+      vi.setSystemTime(new Date("2026-06-04T03:51:50.000Z"));
       const renewActivityTimeout = vi.fn();
       const { container } = createContainerDouble({
         initialStatus: "running",
@@ -4071,7 +5278,6 @@ describe("RunnerContainer", () => {
       Object.assign(container, {
         renewActivityTimeout,
       });
-      vi.setSystemTime(new Date("2026-06-04T03:51:50.000Z"));
       container.onStart();
       vi.clearAllMocks();
 
@@ -4573,7 +5779,7 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("destroys a cold shell when post-start health fails", async () => {
+  it("preserves a recent cold shell when post-start health is not ready", async () => {
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ error: "not ready" }), {
@@ -4604,7 +5810,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
 
-    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
     expect(containerFetch.mock.calls.some(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     )).toBe(false);
@@ -4613,12 +5819,15 @@ describe("RunnerContainer", () => {
   it("aborts a preempted workspace invocation while cold-starting", async () => {
     const startAbortSignal = createDeferred<AbortSignal>();
     let status: "running" | "stopped" = "stopped";
+    let lastChange = Date.now();
+    let container: RunnerContainer;
     const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
+      lastChange,
       status,
     }));
     const destroy = vi.fn(async () => {
       status = "stopped";
+      lastChange = Date.now();
     });
     const startAndWaitForPorts = vi.fn(async (options?: {
       cancellationOptions?: {
@@ -4626,6 +5835,8 @@ describe("RunnerContainer", () => {
       };
     }) => {
       status = "running";
+      lastChange = Date.now();
+      container.onStart();
       const signal = options?.cancellationOptions?.abort;
       if (!(signal instanceof AbortSignal)) {
         throw new Error("Expected cold start to receive an abort signal.");
@@ -4639,11 +5850,11 @@ describe("RunnerContainer", () => {
         }, { once: true });
       });
     });
-    const { container } = createContainerDouble({
+    ({ container } = createContainerDouble({
       destroy,
       getState,
       startAndWaitForPorts,
-    });
+    }));
     const request = createRunnerRequest("evt_preempt_during_cold_start");
 
     const invokeResultPromise = container.invoke({
@@ -4670,15 +5881,14 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("destroys a warm shell after preempting an active workspace invocation", async () => {
+  async function proveAcknowledgedChildAbortSettlement(
+    abortStatus: "accepted" | "queued",
+  ): Promise<void> {
     const runnerRequestSignal = createDeferred<AbortSignal>();
-    const destroyStarted = createDeferred<void>();
-    const allowDestroyToSettle = createDeferred<void>();
+    const releaseAdmittedBoundary = createDeferred<void>();
     let status: "running" | "stopped" = "running";
     let executeCallCount = 0;
     const destroy = vi.fn(async () => {
-      destroyStarted.resolve();
-      await allowDestroyToSettle.promise;
       status = "stopped";
     });
     const getState = vi.fn(async () => ({
@@ -4701,7 +5911,12 @@ describe("RunnerContainer", () => {
           leaseGeneration: request.leaseGeneration,
           userId: "member_123",
         });
-        return new Response(null, { status: 204 });
+        return new Response(null, {
+          headers: {
+            "x-workspace-invocation-abort-status": abortStatus,
+          },
+          status: 204,
+        });
       }
 
       if (!url.endsWith("/internal/workspace-invocation")) {
@@ -4722,13 +5937,8 @@ describe("RunnerContainer", () => {
         throw new Error("Expected active invocation request to receive an abort signal.");
       }
       runnerRequestSignal.resolve(signal);
-      await new Promise<never>((_resolve, reject) => {
-        signal.addEventListener("abort", () => {
-          reject(signal.reason instanceof Error
-            ? signal.reason
-            : new Error("workspace invocation request aborted"));
-        }, { once: true });
-      });
+      await releaseAdmittedBoundary.promise;
+      return createInvalidRunnerRequestResponse();
     });
     const { container, startAndWaitForPorts } = createContainerDouble({
       containerFetch,
@@ -4776,9 +5986,17 @@ describe("RunnerContainer", () => {
       },
     );
 
-    await destroyStarted.promise;
+    await vi.waitFor(() => {
+      expect(containerFetch.mock.calls.some(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation/abort")
+      )).toBe(true);
+    });
     expect(abortSettled).toBe(false);
-    allowDestroyToSettle.resolve();
+    expect(signal.aborted).toBe(false);
+    expect(executeCallCount).toBe(1);
+    expect(destroy).not.toHaveBeenCalled();
+
+    releaseAdmittedBoundary.resolve();
     await expect(abortResult).resolves.toBe("accepted");
 
     const replacementResult = container.invoke({
@@ -4789,9 +6007,7 @@ describe("RunnerContainer", () => {
       timeoutMs: 30_000,
       userId: "member_123",
     });
-    await expect(invokeResultPromise).resolves.toMatchObject({
-      message: "workspace invocation preempted",
-    });
+    await expect(invokeResultPromise).resolves.toBeInstanceOf(Error);
     for (const queuedInvokeResult of queuedInvokeResults) {
       await expect(queuedInvokeResult).resolves.toMatchObject({
         message: "workspace invocation preempted",
@@ -4805,8 +6021,13 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/workspace-invocation")
     )).toHaveLength(2);
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
+    expect(destroy).toHaveBeenCalledOnce();
+  }
+
+  it.each(["accepted", "queued"] as const)(
+    "waits for a %s child abort to settle before admitting a replacement",
+    proveAcknowledgedChildAbortSettlement,
+  );
 
   it("coalesces concurrent exact aborts until their child request settles", async () => {
     const runnerRequestStarted = createDeferred<void>();
@@ -4955,7 +6176,9 @@ describe("RunnerContainer", () => {
     expect(executeCallCount).toBe(2);
   });
 
-  it("preserves failed preemption until platform stop is observed", async () => {
+  async function proveFailClosedChildAbortFallback(
+    abortStatus: "failed" | "stale",
+  ): Promise<void> {
     const runnerRequestSignal = createDeferred<AbortSignal>();
     let status: "running" | "stopped" = "running";
     const destroy = vi.fn(async () => {
@@ -4976,7 +6199,14 @@ describe("RunnerContainer", () => {
       }
 
       if (url.endsWith("/internal/workspace-invocation/abort")) {
-        return new Response(null, { status: 204 });
+        return abortStatus === "failed"
+          ? new Response(null, { status: 503 })
+          : new Response(null, {
+            headers: {
+              "x-workspace-invocation-abort-status": "stale",
+            },
+            status: 204,
+          });
       }
 
       if (!url.endsWith("/internal/workspace-invocation")) {
@@ -5045,9 +6275,14 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBe("accepted");
+    })).resolves.toBe(abortStatus === "failed" ? "accepted" : "stale");
     expect(destroy).toHaveBeenCalledOnce();
-  });
+  }
+
+  it.each(["failed", "stale"] as const)(
+    "preserves %s preemption until platform stop is observed",
+    proveFailClosedChildAbortFallback,
+  );
 
   it("retries failed invocation cleanup from the next exact wake", async () => {
     let destroyAttempts = 0;
@@ -6735,6 +7970,13 @@ describe("RunnerContainer", () => {
           });
         }),
       });
+      Object.assign(container, {
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
+      });
       await container.invoke({
         job: {
           kind: "workspace-invocation",
@@ -6812,6 +8054,13 @@ describe("RunnerContainer", () => {
           });
         }),
       });
+      Object.assign(container, {
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
+      });
 
       const invokePromise = container.invoke({
         job: {
@@ -6851,7 +8100,7 @@ describe("RunnerContainer", () => {
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           healthChecks += 1;
-          if (healthChecks === 1) {
+          if (healthChecks === 2) {
             return new Response("Failed to connect to local container transport", {
               headers: {
                 "content-type": "text/plain; charset=utf-8",
@@ -6877,6 +8126,22 @@ describe("RunnerContainer", () => {
       }),
     });
 
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_establish_ready_warm_health"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
     await expect(container.invoke({
       job: {
         kind: "workspace-invocation",
@@ -6886,7 +8151,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
-    expect(healthChecks).toBe(2);
+    expect(healthChecks).toBe(3);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     const warmFailureLog = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([log]) => log)
@@ -8150,6 +9415,13 @@ describe("RunnerContainer", () => {
       destroy,
       initialStatus: "running",
     });
+    Object.assign(container, {
+      currentContainerStart: {
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: Date.now(),
+      },
+    });
 
     vi.useFakeTimers();
     try {
@@ -8222,6 +9494,13 @@ describe("RunnerContainer", () => {
         destroy,
         getState,
         startAndWaitForPorts: startAndWaitForPortsMock,
+      });
+      Object.assign(container, {
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
       });
       const invokePromise = container.invoke({
         job: {
@@ -8738,27 +10017,32 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("uses the configured readiness timeout when cold-starting the container shell", async () => {
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      env: {
-        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "45000",
-      },
-    });
+  it("uses the canonical and configured readiness timeouts for cold starts", async () => {
+    for (const [configuredTimeoutMs, expectedTimeoutMs] of [
+      [undefined, 20_000],
+      ["45000", 45_000],
+    ] as const) {
+      const { container, startAndWaitForPorts } = createContainerDouble({
+        env: configuredTimeoutMs === undefined
+          ? {}
+          : { HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: configuredTimeoutMs },
+      });
 
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_ready_timeout"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest(`evt_ready_timeout_${expectedTimeoutMs}`),
+        },
+        timeoutMs: 120_000,
+        userId: "member_123",
+      });
 
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions).toMatchObject({
-      instanceGetTimeoutMS: 45_000,
-      portReadyTimeoutMS: 45_000,
-    });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions).toMatchObject({
+        instanceGetTimeoutMS: expectedTimeoutMs,
+        portReadyTimeoutMS: expectedTimeoutMs,
+      });
+    }
   });
 
   it("destroys running containers but skips stopped ones", async () => {
@@ -9374,6 +10658,7 @@ interface CreateContainerDoubleInput {
 
 function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
+  let currentLastChange = Date.now();
   const platformContainer = input.platformRunning === undefined
     ? undefined
     : {
@@ -9421,16 +10706,21 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   });
   const destroy = input.destroy ?? vi.fn(async () => {
     currentStatus = "stopped";
+    currentLastChange = Date.now();
   });
   const getState = input.getState ?? vi.fn(async () => ({
-    lastChange: Date.now(),
+    lastChange: currentLastChange,
     status: currentStatus,
   }));
   const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {
     currentStatus = "running";
+    currentLastChange = Date.now();
+    container.onStart();
   });
   const start = input.start ?? vi.fn(async () => {
     currentStatus = "running";
+    currentLastChange = Date.now();
+    container.onStart();
   });
 
   Object.assign(container, {

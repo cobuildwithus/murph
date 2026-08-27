@@ -101,6 +101,7 @@ import type {
   DiscardUnconsumedOAuthStateResult,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
+  DeviceSyncCanonicalImportReceipt,
   DeviceSyncJobFailureTransition,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -721,6 +722,7 @@ export class SqliteDeviceSyncStore {
 
   completeJobsMarkSyncSucceededAndEnqueueJobs(input: {
     accountId: string;
+    canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
     completedAt: string;
     disconnectGeneration: number | null;
     jobIds: readonly string[];
@@ -738,6 +740,7 @@ export class SqliteDeviceSyncStore {
     try {
       return withImmediateTransaction(this.database, () => {
         const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
+          canonicalImportReceipts: input.canonicalImportReceipts ?? [],
           jobIds: input.jobIds,
           now: input.completedAt,
           workerId: input.workerId,

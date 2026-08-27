@@ -9,12 +9,28 @@ function normalizedString(value: unknown): string | null {
   return typeof value === "string" ? value.trim().toLowerCase() : null;
 }
 
-function isDisplayGradeObservation(attributes: Record<string, unknown>): boolean {
+export function isDisplayGradeObservation(attributes: Record<string, unknown>): boolean {
   return (
     normalizedString(attributes.visibility) === "display" ||
     normalizedString(attributes.queryVisibility) === "default" ||
     attributes.canonicalFact === true
   );
+}
+
+export function isDefaultProjectedEventRecord(input: {
+  attributes: Record<string, unknown>;
+  kind: string;
+}): boolean {
+  if (input.kind !== "observation") {
+    return true;
+  }
+
+  const isMetricObservation =
+    typeof input.attributes.metric === "string" &&
+    typeof input.attributes.value === "number" &&
+    Number.isFinite(input.attributes.value);
+
+  return !isMetricObservation || isDisplayGradeObservation(input.attributes);
 }
 
 function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolean {
@@ -23,12 +39,7 @@ function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolea
   }
 
   const attributes = isRecord(entity.attributes) ? entity.attributes : {};
-  const isMetricObservation =
-    typeof attributes.metric === "string" &&
-    typeof attributes.value === "number" &&
-    Number.isFinite(attributes.value);
-
-  return isMetricObservation && !isDisplayGradeObservation(attributes);
+  return !isDefaultProjectedEventRecord({ attributes, kind: entity.kind });
 }
 
 export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean {

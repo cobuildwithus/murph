@@ -9,6 +9,9 @@ import {
   preferencesDocumentRelativePath,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
 } from '@murphai/contracts'
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   normalizeAssistantProviderConfig,
@@ -62,6 +65,7 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
 }))
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
+  resolveCodexAssistantLabel: () => 'Codex',
   resolveCodexAssistantTargetCapabilities:
     planningMocks.resolveCodexAssistantTargetCapabilities,
 }))
@@ -117,6 +121,10 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
+  MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+  MURPH_AUTOMATION_TOOL,
+} from '../src/assistant-codex/dynamic-tools/automation.js'
+import {
   MURPH_GENERATE_SONG_TOOL,
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
 import {
@@ -134,7 +142,18 @@ import {
 import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
-import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
+import {
+  appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
+  saveAssistantSession,
+} from '../src/assistant/store.js'
+import {
+  createAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.js'
+import {
+  reconcileAssistantPrivateCompletionContinuityForSession,
+} from '../src/assistant/private-completion-continuity.js'
 import {
   buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
 } from '../src/assistant/response-media.js'
@@ -147,16 +166,21 @@ import {
   applyAssistantSessionCodexResumeStateAction,
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+  persistAssistantTurnAndSession,
 } from '../src/assistant/turn-finalizer.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
+  ExecutedAssistantProviderTurnResult,
 } from '../src/assistant/service-contracts.js'
 import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
-import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantChannelDeliverySchema,
+  type AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
 afterEach(() => {
@@ -279,11 +303,14 @@ describe('assistant Codex turn planning', () => {
     }
     const route = createRoute()
     const resolvePlan = async (input: {
+      channel?: 'email' | 'telegram'
       configured: boolean
       group?: boolean
+      progressAvailable?: boolean
       scheduled?: boolean
     }) => {
       const group = input.group ?? false
+      const channel = input.channel ?? 'telegram'
       return await resolveAssistantRouteTurnPlan({
         executionContext: group
           ? {
@@ -296,7 +323,7 @@ describe('assistant Codex turn planning', () => {
           : null,
         input: {
           ...createMessageInput(),
-          channel: 'telegram',
+          channel,
           threadIsDirect: !group,
           ...(input.scheduled
             ? {
@@ -312,6 +339,11 @@ describe('assistant Codex turn planning', () => {
         preferenceContext,
         profile,
         promptTimeContext,
+        progressDelivery: input.progressAvailable
+          ? {
+              send: async () => ({ kind: 'sent', source: 'model' }),
+            }
+          : null,
         route,
         session: createSession(),
         sharedPlan: createSharedPlan({
@@ -321,7 +353,7 @@ describe('assistant Codex turn planning', () => {
             setupCommand: 'murph',
           },
         }, {
-          channel: 'telegram',
+          channel,
           effectiveThreadIsDirect: !group,
           threadId: 'thread-test',
           threadIsDirect: !group,
@@ -350,6 +382,63 @@ describe('assistant Codex turn planning', () => {
         'never send a mode-less single-scout request',
       )
     }
+
+    const directProgressPlan = await resolvePlan({
+      configured: true,
+      progressAvailable: true,
+    })
+    const groupProgressPlan = await resolvePlan({
+      configured: true,
+      group: true,
+      progressAvailable: true,
+    })
+    const emailWithoutProgressPlan = await resolvePlan({
+      channel: 'email',
+      configured: true,
+    })
+    const directProgressPrompt = directProgressPlan.systemPrompt
+    const groupProgressPrompt = groupProgressPlan.systemPrompt
+    if (!directProgressPrompt || !groupProgressPrompt) {
+      throw new Error('Expected progress-capable conversation prompts.')
+    }
+
+    expect(directProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
+      'send_progress_update',
+    )
+    expect(directProgressPrompt.match(
+      /Use `murph\.send_progress_update` for interim updates/gu,
+    )).toHaveLength(1)
+    expect(groupProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
+      'send_progress_update',
+    )
+    expect(groupProgressPrompt.match(
+      /use `murph\.send_progress_update` much more sparingly/gu,
+    )).toHaveLength(1)
+    for (const plan of [directProgressPlan, groupProgressPlan]) {
+      expect(plan.systemPrompt).not.toContain(
+        'Before a noticeable foreground pass',
+      )
+      expect(plan.systemPrompt).not.toContain(
+        'a research lookup alone does not justify a status message',
+      )
+      expect(plan.systemPrompt).not.toContain(
+        'call `send_progress_update` before bounded local media tools',
+      )
+    }
+
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'Configured Exa research:',
+    )
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'For voice memos and audio/video, use transcript fragments directly',
+    )
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'Member-visible interim progress is unavailable on this route',
+    )
+    expect(emailWithoutProgressPlan.dynamicTools.map((tool) => tool.name))
+      .not.toContain('send_progress_update')
+    expect(emailWithoutProgressPlan.systemPrompt)
+      .not.toContain('send_progress_update')
 
     for (const unavailablePlan of await Promise.all([
       resolvePlan({ configured: false }),
@@ -2312,13 +2401,13 @@ describe('assistant Codex turn planning', () => {
         expect.arrayContaining([
           'assistant_style',
           'generate_image',
-          'group',
+          'group_chat',
           'personalization',
           'submit_product_feedback',
         ]),
       )
       expect(
-        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group'),
+        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group_chat'),
       ).toMatchObject({ deferLoading: true })
 
       const foregroundSession = await applyAssistantSessionCodexResumeStateAction({
@@ -2573,6 +2662,115 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
   })
+
+  it.each([
+    { label: 'direct', threadIsDirect: true },
+    { label: 'group', threadIsDirect: false },
+  ] as const)(
+    'rotates an eligible pre-existing $label group-tool thread once with bounded history',
+    async ({ label, threadIsDirect }) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: true,
+      })
+      const vault = await mkdtemp(
+        path.join(os.tmpdir(), `assistant-group-contract-rotation-${label}-`),
+      )
+      const route = createRoute()
+      const threadId = `thread-contract-rotation-${label}`
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+      }
+      const sharedPlan = createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: threadIsDirect,
+        threadId,
+        threadIsDirect,
+      })
+      const common = {
+        executionContext: {
+          hosted: {
+            memberId: `member-contract-rotation-${label}`,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          deliverResponse: true,
+          threadId,
+          threadIsDirect,
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation' as const,
+          threadScope: 'session-thread' as const,
+          toolProfile: 'provider-turn' as const,
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+        },
+        route,
+        sharedPlan,
+      }
+
+      try {
+        await appendAssistantTranscriptEntries(vault, 'session-test', [
+          { kind: 'user', text: 'Keep the earlier constraint in mind.' },
+          { kind: 'assistant', text: 'I will preserve that constraint.' },
+        ])
+        const firstPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint: '0'.repeat(64),
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: `provider-thread-before-${label}`,
+            },
+            turnCount: 2,
+          }),
+        })
+
+        expect(firstPostDeployPlan.resume).toBeNull()
+        expect(firstPostDeployPlan.dynamicTools).toContainEqual(
+          expect.objectContaining({ name: 'group_consult', namespace: 'murph' }),
+        )
+        expect(firstPostDeployPlan.conversationHistoryMessages).toEqual([
+          { content: 'Keep the earlier constraint in mind.', role: 'user' },
+          { content: 'I will preserve that constraint.', role: 'assistant' },
+        ])
+        expect(firstPostDeployPlan.developerInstructions).not.toBeNull()
+
+        const replacementThreadId = `provider-thread-after-${label}`
+        const secondPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint:
+                firstPostDeployPlan.assistantContractFingerprint,
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: replacementThreadId,
+            },
+            turnCount: 3,
+          }),
+        })
+
+        expect(secondPostDeployPlan.resume?.codexThreadId).toBe(
+          replacementThreadId,
+        )
+        expect(secondPostDeployPlan.conversationHistoryMessages).toBeUndefined()
+        expect(secondPostDeployPlan.developerInstructions).toBeNull()
+      } finally {
+        await rm(vault, { force: true, recursive: true })
+      }
+    },
+  )
 
   it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
@@ -3196,6 +3394,100 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
+  it('plans murph.analyze_video for accepted direct and authenticated group turns with the Gemini key', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const acceptedInputId = 'ain_11111111111111111111111111111111'
+    const planToolNamesFor = async (options: {
+      acceptedInputItems?: NonNullable<
+        AssistantMessageInput['acceptedTurnInput']
+      >['initialInputs']
+      conversationScope?: 'direct' | 'group'
+      env: NodeJS.ProcessEnv
+    }) => {
+      const conversationScope = options.conversationScope ?? 'direct'
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: options.acceptedInputItems ?? [],
+        executionContext: conversationScope === 'group'
+          ? {
+              hosted: {
+                memberId: 'member-analyze-video-group',
+                userEnvKeys: [],
+              },
+            }
+          : null,
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          currentAnalyzeVideoAttachmentAuthorities: () => [],
+        },
+        input: {
+          ...createMessageInput(),
+          threadIsDirect: conversationScope === 'direct',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-20',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env: options.env,
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }, conversationScope === 'group'
+          ? {
+              channel: 'telegram',
+              effectiveThreadIsDirect: false,
+              threadId: 'group-analyze-video',
+              threadIsDirect: false,
+            }
+          : {}),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    const acceptedInputItems = [{
+      id: acceptedInputId,
+      source: 'assistant-input' as const,
+    }]
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      env: {},
+    })).not.toContain('analyze_video')
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      env: { GEMINI_API_KEY: '   ' },
+    }))
+      .not.toContain('analyze_video')
+    expect(await planToolNamesFor({
+      env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
+    }))
+      .not.toContain('analyze_video')
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
+    }))
+      .toContain('analyze_video')
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      conversationScope: 'group',
+      env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
+    }))
+      .toContain('analyze_video')
+  })
+
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -3640,6 +3932,14 @@ describe('assistant Codex turn planning', () => {
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    for (const plan of [attendedPlan, scheduledPlan]) {
+      expect(plan.systemPrompt).toContain(
+        '`murph.group action="read_shared"`',
+      )
+      expect(plan.systemPrompt).not.toContain('`murph.group_data')
+      expect(plan.systemPrompt).not.toContain('`murph.group_membership')
+      expect(plan.systemPrompt).not.toContain('`murph.group_email')
+    }
     expect(attendedPlan.dynamicTools).toContainEqual(
       expect.objectContaining({
         namespace: 'murph',
@@ -3664,8 +3964,8 @@ describe('assistant Codex turn planning', () => {
     expect(attendedPlan.systemPrompt).toContain(
       '`murph.select_reply_target` annotates the one eventual group response',
     )
-    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 8`')
-    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 8')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 6')
     expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
@@ -3825,7 +4125,10 @@ describe('assistant Codex turn planning', () => {
       'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(plan.developerInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(plan.developerInstructions).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -3888,12 +4191,26 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_search',
         'connected_apps_execute',
         'automation',
-        'group',
+        'group_consult',
+        'group_data',
+        'group_membership',
+        'group_usage',
+        'group_chat',
+        'group_email',
         'assistant_configuration',
         'assistant_style',
         'personalization',
         'create_phone_call',
       ]),
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_data action="read_shared"`',
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_email action="send_email"`',
+    )
+    expect(plan.systemPrompt).not.toContain(
+      '`murph.group action="read_shared"`',
     )
     const groupAssistantConfigurationTool = plan.dynamicTools.find(
       (tool) => tool.name === 'assistant_configuration',
@@ -4396,6 +4713,8 @@ describe('assistant Codex turn planning', () => {
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
       expect(toolNames).not.toContain('submit_product_feedback')
+      expect(toolNames).not.toContain('send_progress_update')
+      expect(plan.systemPrompt).not.toContain('murph.send_progress_update')
       if (expectedAvailable) {
         expect(toolNames).toEqual(expect.arrayContaining([
           'assistant_style',
@@ -4404,7 +4723,6 @@ describe('assistant Codex turn planning', () => {
           'personalization',
           'send_physical_note',
         ]))
-        expect(toolNames).not.toContain('send_progress_update')
       }
       if (channel === 'email') {
         expect(toolNames).not.toContain('assistant_style')
@@ -4937,6 +5255,260 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
+  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-automation-schema-transition-',
+    ))
+    const route = createRoute()
+    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      automationTool: { request: vi.fn() },
+    }
+    const buildPlan = async (session: AssistantSession) =>
+      await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          prompt:
+            'Use the automation decision from my first message. What did I decide?',
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'America/Chicago',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+    const baseSession = createSession({ turnCount: 1 })
+
+    try {
+      await appendAssistantTranscriptEntries(
+        vault,
+        baseSession.sessionId,
+        Array.from({ length: 50 }, (_, index) => ([
+          {
+            kind: 'user' as const,
+            text:
+              `Member automation decision ${index + 1}: ${'x'.repeat(300)}`,
+          },
+          {
+            kind: 'assistant' as const,
+            text:
+              `Assistant acknowledged automation decision ${index + 1}: ${'y'.repeat(300)}`,
+          },
+        ])).flat(),
+      )
+
+      const currentPlan = await buildPlan(baseSession)
+      expect(currentPlan.dynamicTools).toContainEqual(MURPH_AUTOMATION_TOOL)
+      const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+        tool.name === MURPH_AUTOMATION_TOOL.name
+          ? {
+              ...tool,
+              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+            }
+          : tool)
+      const oldContractFingerprint = buildAssistantCodexContractFingerprint({
+        developerInstructions: currentPlan.developerInstructions,
+        dynamicTools: oldDynamicTools,
+        routeFingerprint,
+      })
+      const transitionSession = createSession({
+        resumeState: {
+          assistantContractFingerprint: oldContractFingerprint,
+          routeFingerprint,
+          threadId: 'thread-full-automation-schema',
+        },
+        turnCount: 1,
+      })
+
+      const transitionPlan = await buildPlan(transitionSession)
+      expect(transitionPlan.resume).toBeNull()
+      expect(transitionPlan.assistantContractFingerprint)
+        .not.toBe(oldContractFingerprint)
+      expect(transitionPlan.conversationHistoryMessages?.[0]).toEqual({
+        content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+        role: 'assistant',
+      })
+      expect(transitionPlan.conversationHistoryMessages?.[0]?.content)
+        .toContain('ask a useful clarification instead of guessing')
+      expect(transitionPlan.conversationHistoryMessages?.length)
+        .toBeGreaterThan(1)
+      expect(transitionPlan.conversationHistoryMessages?.length)
+        .toBeLessThanOrEqual(72)
+      expect(transitionPlan.conversationHistoryMessages?.[1]?.role).toBe('user')
+      expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
+        .not.toContain('Member automation decision 1:')
+      expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
+        .toContain('Assistant acknowledged automation decision 50:')
+      const replayedHistory = transitionPlan.conversationHistoryMessages?.slice(1)
+        ?? []
+      for (const [index, message] of replayedHistory.entries()) {
+        if (message.role === 'assistant') {
+          expect(replayedHistory[index - 1]?.role).toBe('user')
+        }
+      }
+
+      const transitionedSession =
+        await applyAssistantSessionCodexResumeStateAction({
+          action: 'persist-from-provider-turn',
+          assistantContractFingerprint:
+            transitionPlan.assistantContractFingerprint,
+          codexRolloutRelativePath: null,
+          codexThreadId: 'thread-compact-automation-schema',
+          routeFingerprint,
+          session: transitionSession,
+          vault,
+        })
+      const resumedPlan = await buildPlan(transitionedSession)
+      expect(resumedPlan.resume?.codexThreadId)
+        .toBe('thread-compact-automation-schema')
+      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(resumedPlan.assistantContractFingerprint)
+        .toBe(transitionPlan.assistantContractFingerprint)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not replay retained assistant output after automation transition history expires', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-expired-automation-transition-',
+    ))
+    const route = createRoute()
+    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      automationTool: { request: vi.fn() },
+    }
+    const baseSession = createSession({ turnCount: 1 })
+    const buildPlan = async (session: AssistantSession) =>
+      await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Use the automation decision from my earlier message.',
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'America/Chicago',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, baseSession.sessionId, [
+        {
+          contentReceivedAt: '2026-07-01T10:00:00.000Z',
+          createdAt: '2026-07-01T10:00:00.000Z',
+          kind: 'user',
+          text: 'Keep the existing automation schedule.',
+        },
+        {
+          createdAt: '2026-07-01T10:01:00.000Z',
+          kind: 'assistant',
+          text: 'I will keep that automation schedule.',
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-08-21T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const currentPlan = await buildPlan(baseSession)
+      expect(currentPlan.dynamicTools).toContainEqual(MURPH_AUTOMATION_TOOL)
+      const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+        tool.name === MURPH_AUTOMATION_TOOL.name
+          ? {
+              ...tool,
+              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+            }
+          : tool)
+      const oldContractFingerprint = buildAssistantCodexContractFingerprint({
+        developerInstructions: currentPlan.developerInstructions,
+        dynamicTools: oldDynamicTools,
+        routeFingerprint,
+      })
+      const transitionSession = createSession({
+        resumeState: {
+          assistantContractFingerprint: oldContractFingerprint,
+          routeFingerprint,
+          threadId: 'thread-expired-full-automation-schema',
+        },
+        turnCount: 1,
+      })
+
+      const transitionPlan = await buildPlan(transitionSession)
+      expect(transitionPlan.resume).toBeNull()
+      expect(transitionPlan.assistantContractFingerprint)
+        .not.toBe(oldContractFingerprint)
+      expect(transitionPlan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+      ])
+
+      const transitionedSession =
+        await applyAssistantSessionCodexResumeStateAction({
+          action: 'persist-from-provider-turn',
+          assistantContractFingerprint:
+            transitionPlan.assistantContractFingerprint,
+          codexRolloutRelativePath: null,
+          codexThreadId: 'thread-expired-compact-automation-schema',
+          routeFingerprint,
+          session: transitionSession,
+          vault,
+        })
+      const resumedPlan = await buildPlan(transitionedSession)
+      expect(resumedPlan.resume?.codexThreadId)
+        .toBe('thread-expired-compact-automation-schema')
+      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(resumedPlan.assistantContractFingerprint)
+        .toBe(transitionPlan.assistantContractFingerprint)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('reads current assistant context snapshot on sensitive native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
@@ -5116,6 +5688,71 @@ describe('assistant Codex turn planning', () => {
           role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
         })),
       ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('replays sixty short committed messages after a cold thread transition', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-deep-transcript-',
+    ))
+    const session = createSession({ turnCount: 1 })
+    const expectedHistory = Array.from({ length: 30 }, (_, index) => ([
+      {
+        content:
+          `Member context ${index + 1}: ${'member detail '.repeat(10)}`.trimEnd(),
+        role: 'user' as const,
+      },
+      {
+        content:
+          `Assistant response ${index + 1}: ${'assistant detail '.repeat(10)}`.trimEnd(),
+        role: 'assistant' as const,
+      },
+    ])).flat()
+
+    try {
+      await appendAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+        expectedHistory.map((message) => ({
+          kind: message.role,
+          text: message.content,
+        })),
+      )
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Continue the first context we discussed.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual(expectedHistory)
+      expect(expectedHistory.reduce((total, message) =>
+        total + Buffer.byteLength(message.content, 'utf8'), 0))
+        .toBeLessThanOrEqual(12_000)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -5370,7 +6007,6 @@ describe('assistant Codex turn planning', () => {
             content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
             role: 'assistant',
           },
-          { content: cadenceQuestion, role: 'assistant' },
         ],
       })
       await expect(buildPlan(unansweredSession)).resolves.toMatchObject({
@@ -5383,7 +6019,475 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('marks cold conversation history incomplete when the message-count bound omits details', async () => {
+  it('preserves an imported private completion when older member text has retired', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-private-completion-history-',
+    ))
+    const sessionId = 'session-private-completion-history'
+    const threadId = 'h1_111111111111111111111111'
+    const actorId = 'h1_222222222222222222222222'
+    const identityId = 'h1_333333333333333333333333'
+    const exactCompletion = 'Use the lower-impact option for the next step.'
+    const ordinaryAssistantText = 'I saved the older conversation choice.'
+    const route = createRoute()
+    const session = await saveAssistantSession(vault, {
+      ...createSession({
+        resumeState: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          routeFingerprint: 'b'.repeat(64),
+          threadId: 'thread-before-private-completion',
+        },
+        turnCount: 1,
+      }),
+      binding: {
+        actorId,
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: threadId,
+        },
+        identityId,
+        threadId,
+        threadIsDirect: true,
+      },
+      conversationId: sessionId,
+      sessionId,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          contentReceivedAt: '2026-07-01T10:00:00.000Z',
+          createdAt: '2026-07-01T10:00:00.000Z',
+          kind: 'user',
+          text: 'Use the older option.',
+        },
+        {
+          createdAt: '2026-07-01T10:01:00.000Z',
+          kind: 'assistant',
+          text: ordinaryAssistantText,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-08-21T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const completionId = 'aask_done_private_completion_history'
+      const deliveryKey =
+        createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+          completionId,
+        )
+      const pending = await createAssistantOutboxIntent({
+        actorId,
+        answeredMailboxItemIds: [completionId],
+        bindingDelivery: {
+          kind: 'thread',
+          target: threadId,
+        },
+        channel: 'linq',
+        deliveryIdempotencyKey: deliveryKey,
+        deliveryTransportIdempotent: true,
+        identityId,
+        message: exactCompletion,
+        privateCompletionContinuitySessionId: session.sessionId,
+        reviewedAssistantAskCompletionExpiresAt:
+          '2099-08-21T10:00:00.000Z',
+        sessionId: session.sessionId,
+        threadId,
+        threadIsDirect: true,
+        turnId: 'turn-private-completion-history',
+        vault,
+      })
+      const sentAt = '2026-08-21T10:01:00.000Z'
+      await saveAssistantOutboxIntent(vault, {
+        ...pending,
+        delivery: assistantChannelDeliverySchema.parse({
+          channel: 'linq',
+          idempotencyKey: pending.deliveryIdempotencyKey,
+          kind: 'message',
+          messageLength: exactCompletion.length,
+          providerMessageId: 'provider-private-completion-history',
+          providerThreadId: threadId,
+          sentAt,
+          target: threadId,
+          targetKind: 'thread',
+        }),
+        deliveryConfirmationPending: false,
+        sentAt,
+        status: 'sent',
+      })
+
+      const reconciledSession =
+        await reconcileAssistantPrivateCompletionContinuityForSession({
+          allowUnbound: false,
+          sessionId: session.sessionId,
+          vault,
+        })
+      expect(reconciledSession.resumeState).toBeNull()
+      await expect(listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )).resolves.toEqual([
+        expect.objectContaining({ text: '' }),
+        expect.objectContaining({ text: ordinaryAssistantText }),
+        expect.objectContaining({
+          sourceOutboxIntentId: pending.intentId,
+          standaloneAssistantContext: true,
+          text: exactCompletion,
+        }),
+      ])
+      const importedTranscript = await listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )
+      const retiredMember = importedTranscript[0]
+      const ordinaryAssistant = importedTranscript[1]
+      const importedCompletion = importedTranscript[2]
+      if (!retiredMember || !ordinaryAssistant || !importedCompletion) {
+        throw new Error('Expected the complete private-completion transcript fixture.')
+      }
+      const {
+        standaloneAssistantContext: _newStandaloneContext,
+        ...legacyImportedCompletion
+      } = importedCompletion
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        session.sessionId,
+        [retiredMember, ordinaryAssistant, legacyImportedCompletion],
+      )
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Why?',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        session: reconciledSession,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
+          content: exactCompletion,
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('retains a scheduled reminder but drops its retired ordinary predecessor', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-standalone-reminder-history-',
+    ))
+    const sessionId = 'session-standalone-reminder-history'
+    const ordinaryAssistantText = 'I saved the older member choice.'
+    const reminderText = 'Time for the scheduled mobility reset.'
+    const session = await saveAssistantSession(vault, {
+      ...createSession({
+        resumeState: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          routeFingerprint: 'route-before-reminder',
+          threadId: 'thread-before-reminder',
+        },
+        turnCount: 2,
+      }),
+      conversationId: sessionId,
+      sessionId,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          contentReceivedAt: '2026-07-01T10:00:00.000Z',
+          createdAt: '2026-07-01T10:00:00.000Z',
+          kind: 'user',
+          text: 'Keep the earlier plan.',
+        },
+        {
+          createdAt: '2026-07-01T10:01:00.000Z',
+          kind: 'assistant',
+          text: ordinaryAssistantText,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-08-21T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const automationRoute = createRoute({
+        routeFingerprint: 'route-custom-reminder-model',
+      })
+      const automationInput: AssistantMessageInput = {
+        ...createMessageInput(),
+        assistantTargetOverride: {
+          model: 'custom-reminder-model',
+          reasoningEffort: 'low',
+        },
+        prompt: 'Send the scheduled reminder.',
+        turnTrigger: 'automation-cron',
+        vault,
+      }
+      const providerResult: ExecutedAssistantProviderTurnResult = {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint: 'b'.repeat(64),
+        attemptCount: 1,
+        codexContinuation: {
+          kind: 'provider-state-optimization',
+        },
+        codexRolloutRelativePath: null,
+        codexThreadId: 'thread-custom-reminder-model',
+        provider: 'codex-cli',
+        providerOptions: automationRoute.providerOptions,
+        rawEvents: [],
+        response: reminderText,
+        responseCard: null,
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [],
+        route: automationRoute,
+        session,
+        stderr: '',
+        stdout: '',
+        transcriptResponse: reminderText,
+        usage: null,
+        workingDirectory: '/work',
+      }
+      const saved = await persistAssistantTurnAndSession({
+        assistantTranscriptStandaloneContext: true,
+        assistantTranscriptText: reminderText,
+        input: automationInput,
+        persistUserPromptToTranscript: false,
+        plan: createPrivateSharedPlan(),
+        providerResult,
+        providerResumeStateAction: 'persist-from-provider-turn',
+        session,
+        turnCreatedAt: '2026-08-21T10:01:00.000Z',
+        turnId: 'turn-custom-reminder-model',
+      })
+
+      expect(saved.resumeState).toBeNull()
+      await expect(listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )).resolves.toEqual([
+        expect.objectContaining({ text: '' }),
+        expect.objectContaining({ text: ordinaryAssistantText }),
+        expect.objectContaining({
+          standaloneAssistantContext: true,
+          text: reminderText,
+        }),
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Done.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session: saved,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
+          content: reminderText,
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('rebuilds reconsidered group history without the provisional provider thread', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-group-reconsideration-',
+    ))
+    const routeFingerprint = 'route-group-reconsideration'
+    const route = createRoute({ routeFingerprint })
+    const initialSession = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'a'.repeat(64),
+        routeFingerprint,
+        threadId: 'provider-thread-provisional',
+      },
+    })
+    const session = await saveAssistantSession(vault, initialSession)
+    const firstRequest = 'List the morning hours.'
+    const secondRequest = 'Also list the afternoon hours.'
+    const selectedFinal = 'Morning: 9–11. Afternoon: 2–4.'
+    const provisionalDraft = 'INTERNAL_PROVISIONAL_DRAFT'
+    const reconsiderationMarker = 'INTERNAL_RECONSIDERATION_INSTRUCTION'
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: firstRequest },
+        { kind: 'user', text: secondRequest },
+      ])
+      const providerResult: ExecutedAssistantProviderTurnResult = {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint: 'b'.repeat(64),
+        attemptCount: 1,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexRolloutRelativePath: null,
+        codexThreadId: 'provider-thread-reconsidered',
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          media: [],
+          response: provisionalDraft,
+          transcriptResponse: provisionalDraft,
+        }],
+        provider: 'codex-cli',
+        providerOptions: route.providerOptions,
+        rawEvents: [],
+        response: selectedFinal,
+        responseCard: null,
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [],
+        route,
+        session,
+        stderr: '',
+        stdout: '',
+        transcriptResponse: selectedFinal,
+        usage: null,
+        workingDirectory: '/work',
+      }
+      const saved = await persistAssistantTurnAndSession({
+        assistantTranscriptText: selectedFinal,
+        input: {
+          ...createMessageInput(),
+          prompt: `${firstRequest}\n\n${secondRequest}`,
+          turnContext: reconsiderationMarker,
+          vault,
+        },
+        persistUserPromptToTranscript: false,
+        plan: createPrivateSharedPlan(),
+        precedingAssistantTranscriptTexts: [],
+        providerResult,
+        providerResumeStateAction: 'clear',
+        session,
+        turnCreatedAt: '2026-08-25T16:40:00.000Z',
+        turnId: 'turn-group-reconsideration',
+      })
+
+      expect(saved.resumeState).toBeNull()
+      expect(saved.codexResume).toBeNull()
+      const transcript = await listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )
+      expect(transcript.map(({ kind, text }) => ({ kind, text }))).toEqual([
+        { kind: 'user', text: firstRequest },
+        { kind: 'user', text: secondRequest },
+        { kind: 'assistant', text: selectedFinal },
+      ])
+      expect(JSON.stringify(transcript)).not.toContain(provisionalDraft)
+      expect(JSON.stringify(transcript)).not.toContain(reconsiderationMarker)
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Summarize the visible conversation.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-25',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        session: saved,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: firstRequest, role: 'user' },
+        { content: secondRequest, role: 'user' },
+        { content: selectedFinal, role: 'assistant' },
+      ])
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        provisionalDraft,
+      )
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        reconsiderationMarker,
+      )
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('drops an assistant-only suffix when marker reservation removes the sole member message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5424,23 +6528,28 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(
         vault,
         countBoundSession.sessionId,
-        Array.from({ length: 30 }, (_, index) => ({
-          kind: 'assistant' as const,
-          text: `Committed message ${index + 1}`,
-        })),
+        [
+          {
+            kind: 'assistant' as const,
+            text: 'Omitted earlier assistant message',
+          },
+          {
+            kind: 'user' as const,
+            text: 'Sole retained member message',
+          },
+          ...Array.from({ length: 71 }, (_, index) => ({
+            kind: 'assistant' as const,
+            text: `Retained assistant suffix ${index + 1}`,
+          })),
+        ],
       )
 
       const countBoundPlan = await buildPlan(countBoundSession)
-      expect(countBoundPlan.conversationHistoryMessages).toHaveLength(24)
       expect(countBoundPlan.conversationHistoryMessages).toEqual([
         {
           content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
           role: 'assistant',
         },
-        ...Array.from({ length: 23 }, (_, index) => ({
-          content: `Committed message ${index + 8}`,
-          role: 'assistant' as const,
-        })),
       ])
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -5520,7 +6629,7 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(
         vault,
         session.sessionId,
-        Array.from({ length: 5 }, (_, index) => ({
+        Array.from({ length: 11 }, (_, index) => ({
           kind: 'user',
           text: `message-${index}: ${'x'.repeat(6_000)}`,
         })),
@@ -5551,8 +6660,8 @@ describe('assistant Codex turn planning', () => {
       expect(history[0]?.content).toBe(
         ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
       )
-      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-3:/u))
-      expect(history[2]?.content).toEqual(expect.stringMatching(/^message-4:/u))
+      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-9:/u))
+      expect(history[2]?.content).toEqual(expect.stringMatching(/^message-10:/u))
       let totalBytes = 0
       for (const message of history) {
         const content = message.content
@@ -5586,6 +6695,10 @@ describe('assistant Codex turn planning', () => {
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
+          kind: 'user',
+          text: 'Show me the generated image.',
+        },
+        {
           kind: 'assistant',
           text: `${imagePresence}\n\n${'x'.repeat(6_000)}`,
         },
@@ -5617,13 +6730,17 @@ describe('assistant Codex turn planning', () => {
           role: 'assistant',
         },
         {
+          content: 'Show me the generated image.',
+          role: 'user',
+        },
+        {
           content: expect.stringMatching(
             /^\[This response included an image attachment\.\]/u,
           ),
           role: 'assistant',
         },
       ])
-      const content = plan.conversationHistoryMessages?.[1]?.content
+      const content = plan.conversationHistoryMessages?.[2]?.content
       const contentBytes =
         typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : 0
       expect(contentBytes).toBeLessThanOrEqual(4_000)
@@ -6214,10 +7331,13 @@ describe('assistant Codex turn planning', () => {
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
+          contentReceivedAt: '2026-07-12T12:54:00.000Z',
+          createdAt: '2026-07-12T12:55:00.000Z',
           kind: 'user',
           text: 'I want to make weekday lunches easier.',
         },
         {
+          createdAt: '2026-07-12T12:56:00.000Z',
           kind: 'assistant',
           text: 'We can keep that practical and low pressure.',
         },
@@ -6256,10 +7376,12 @@ describe('assistant Codex turn planning', () => {
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'I want to make weekday lunches easier.',
+          occurredAt: '2026-07-12T12:54:00.000Z',
           role: 'user',
         },
         {
           content: 'We can keep that practical and low pressure.',
+          occurredAt: '2026-07-12T12:56:00.000Z',
           role: 'assistant',
         },
       ])

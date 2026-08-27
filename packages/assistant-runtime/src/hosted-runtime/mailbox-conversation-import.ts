@@ -46,6 +46,9 @@ import {
   notifyAssistantActiveTurnInputAvailableForInputIds,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
+import type {
+  AssistantModelTarget,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import {
   inferDirectEmailThreadFromParticipants,
@@ -72,9 +75,13 @@ import type {
 import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
+  isHostedAssistantInputAttachmentEvidenceSettled,
+  requiresHostedAssistantInputAttachmentEvidence,
+  suppressHostedPendingLinqInputAnsweredByExternalReply,
 } from "./pending-input-index.ts";
 import {
   prepareHostedAssistantAutoReplyForWake,
+  readHostedAssistantExecutionDefaultTarget,
   requireHostedBootstrapForWake,
   type HostedAssistantAutoReplyReadinessState,
 } from "./context.ts";
@@ -182,6 +189,8 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   attachmentDescriptorCount?: number;
+  attachmentEvidenceRequired: boolean;
+  enqueuePendingReply(): Promise<void>;
   inputId: string;
   recordAttachmentEvidence?(
     attachmentEvidence: AssistantInputAttachmentEvidence,
@@ -192,8 +201,8 @@ export interface HostedConversationMailboxAssistantInputStageResult {
 }
 
 export type HostedConversationMailboxAssistantInputStager = (input: {
+  assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
-  pendingReplyEligible: boolean;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxAssistantInputStageResult>;
@@ -242,6 +251,7 @@ export type HostedConversationMailboxImportOutcome =
     };
 
 export function createHostedConversationMailboxImportItem(input: {
+  assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
@@ -275,6 +285,7 @@ export function createHostedConversationMailboxImportItem(input: {
 }
 
 export async function importHostedConversationMailboxItem(input: {
+  assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
@@ -372,6 +383,26 @@ export async function importHostedConversationMailboxItem(input: {
       wake: decoded.wake,
     });
   }
+  if (
+    isHostedLinqConversationMessageWake(decoded.wake)
+    && decoded.wake.message.linqMessage.isFromMe === true
+  ) {
+    pendingReplyEligible = false;
+  }
+
+  const assistantTarget = isHostedLinqConversationMessageWake(decoded.wake)
+      && decoded.wake.message.linqMessage.isFromMe === true
+      && normalizeHostedAssistantInputSourceMetadataToken(
+        decoded.wake.message.linqMessage.replyToMessageId ?? null,
+      )
+    ? input.assistantTarget
+      ?? await readHostedAssistantExecutionDefaultTarget({
+        runtimeEnv: {
+          ...input.runtime.forwardedEnv,
+          ...input.runtime.userEnv,
+        },
+      })
+    : null;
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!pendingReplyEligible) {
@@ -383,8 +414,8 @@ export async function importHostedConversationMailboxItem(input: {
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const stagedInput = await stageAssistantInputEvent({
+    assistantTarget,
     item: input.item,
-    pendingReplyEligible,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
@@ -392,6 +423,27 @@ export async function importHostedConversationMailboxItem(input: {
     pendingReplyEligible && input.item.durablyConsumed !== true
       ? stagedInput.inputId
       : null;
+  const inboxProjectionRequired = requiresHostedConversationInboxProjection({
+    attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
+    wake: decoded.wake,
+  });
+  const attachmentAdmissionDeferred = stagedInput.attachmentEvidenceRequired;
+  const notifyActiveTurnInputAvailable = async (): Promise<void> => {
+    if (!foregroundAssistantInputId) {
+      return;
+    }
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [foregroundAssistantInputId],
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vaultRoot,
+    });
+  };
+  const enqueuePendingReply = async (): Promise<void> => {
+    if (!foregroundAssistantInputId) {
+      return;
+    }
+    await stagedInput.enqueuePendingReply();
+  };
   if (input.item.durablyConsumed !== true) {
     const latencyMilestones = withHostedConversationImportLatencyMilestones({
       autoReplyPreparedAtEpochMs,
@@ -424,21 +476,15 @@ export async function importHostedConversationMailboxItem(input: {
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       wake: decoded.wake,
     });
-    if (foregroundAssistantInputId) {
-      await notifyAssistantActiveTurnInputAvailableForInputIds({
-        inputIds: [foregroundAssistantInputId],
-        ...(input.signal ? { signal: input.signal } : {}),
-        vault: input.vaultRoot,
-      });
-    }
   }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
-  if (!requiresHostedConversationInboxProjection({
-    attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
-    wake: decoded.wake,
-  })) {
+  if (!attachmentAdmissionDeferred) {
+    await enqueuePendingReply();
+    await notifyActiveTurnInputAvailable();
+  }
+  if (!inboxProjectionRequired) {
     return {
       ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
       captureId: null,
@@ -458,12 +504,35 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  if (attachmentAdmissionDeferred) {
+    assertHostedConversationMailboxImportLive(input.signal ?? null);
+  }
   if (projectionEffect.parserRetry) {
     return {
       reasonCode: CONVERSATION_PARSER_RETRY_REASON,
       retryable: true,
       status: "blocked",
     };
+  }
+  if (
+    attachmentAdmissionDeferred
+    && !await hasSettledHostedConversationAttachmentEvidence({
+      effect: projectionEffect.effect,
+      stagedInput,
+      vaultRoot: input.vaultRoot,
+    })
+  ) {
+    return {
+      reasonCode:
+        projectionEffect.effect.reasonCode
+        ?? CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON,
+      retryable: true,
+      status: "blocked",
+    };
+  }
+  if (attachmentAdmissionDeferred) {
+    await enqueuePendingReply();
+    await notifyActiveTurnInputAvailable();
   }
   return {
     ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
@@ -672,11 +741,12 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       vaultRoot: input.vaultRoot,
       wake: input.wake,
     });
+    assertHostedConversationMailboxImportLive(input.signal ?? null);
     timing.projectionImportMs = elapsedHostedConversationImportMs(importStartedAt);
   } catch (error) {
-    // Staging is the durable mailbox-import boundary. Cancellation may stop
-    // the optional inbox projection, but it must not replay already-staged
-    // assistant input by withholding the mailbox watermark.
+    if (shouldRecordHostedConversationAttachmentEvidence(input.stagedInput)) {
+      assertHostedConversationMailboxImportLive(input.signal ?? null);
+    }
     if (timing.projectionPrepareMs === undefined && prepareStartedAt !== null) {
       timing.projectionPrepareMs = elapsedHostedConversationImportMs(prepareStartedAt);
     }
@@ -711,6 +781,21 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     };
   }
 
+  if (hasHostedConversationParserRetry(imported.metrics)) {
+    timing.projectionTotalMs = elapsedHostedConversationImportMs(projectionStartedAt);
+    return {
+      effect: {
+        attachmentEvidenceUpdated: null,
+        kind: "inbox_projection",
+        projectionUpdated: null,
+        reasonCode: null,
+        status: "succeeded",
+      },
+      parserRetry: true,
+      timing,
+    };
+  }
+
   if (!imported.captureId) {
     timing.projectionTotalMs = elapsedHostedConversationImportMs(projectionStartedAt);
     return {
@@ -721,7 +806,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         reasonCode: null,
         status: "succeeded",
       },
-      parserRetry: hasHostedConversationParserRetry(imported.metrics),
+      parserRetry: false,
       timing,
     };
   }
@@ -746,7 +831,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       attachmentEvidenceResult,
       projectionUpdated,
     }),
-    parserRetry: hasHostedConversationParserRetry(imported.metrics),
+    parserRetry: false,
     timing,
   };
 }
@@ -901,8 +986,8 @@ function loadHostedConversationEventsModule(): Promise<HostedConversationEventsM
 }
 
 async function stageHostedConversationAssistantInputEvent(input: {
+  assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
-  pendingReplyEligible: boolean;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
@@ -934,6 +1019,30 @@ async function stageHostedConversationAssistantInputEvent(input: {
     }),
     vault: input.vaultRoot,
   });
+  const replyToMessageId = linqWake?.message.linqMessage.isFromMe === true
+    ? normalizeHostedAssistantInputSourceMetadataToken(
+        linqWake.message.linqMessage.replyToMessageId ?? null,
+      )
+    : null;
+  if (
+    replyToMessageId
+    && event.conversation?.source === "linq"
+    && event.conversation.threadId
+  ) {
+    if (!input.assistantTarget) {
+      throw new Error(
+        "Hosted assistant target is required to preserve an imported Linq reply.",
+      );
+    }
+    await suppressHostedPendingLinqInputAnsweredByExternalReply({
+      accountId: event.conversation.accountId,
+      assistantReplyEvent: event,
+      replyToMessageId,
+      target: input.assistantTarget,
+      threadId: event.conversation.threadId,
+      vaultRoot: input.vaultRoot,
+    });
+  }
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
@@ -951,36 +1060,45 @@ async function stageHostedConversationAssistantInputEvent(input: {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
     wake: input.wake,
   });
+  let projectionStatus = event.projection.status;
   if (
     projectionRequired
     && event.projection.status === "not_attempted"
   ) {
-    await updateAssistantInputProjection({
+    const updated = await updateAssistantInputProjection({
       inputId: event.inputId,
       projection: {
         status: "pending",
       },
       vault: input.vaultRoot,
     });
+    projectionStatus = updated.projection.status;
   }
   if (!projectionRequired && event.projection.status === "pending") {
-    await updateAssistantInputProjection({
+    const updated = await updateAssistantInputProjection({
       inputId: event.inputId,
       projection: {
         status: "not_attempted",
       },
       vault: input.vaultRoot,
     });
+    projectionStatus = updated.projection.status;
   }
-  if (input.pendingReplyEligible && event.replyTarget) {
-    await enqueueHostedPendingAssistantInputId({
-      inputId: event.inputId,
-      vaultRoot: input.vaultRoot,
-    });
-  }
-
   return {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+    attachmentEvidenceRequired: requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+      projectionStatus,
+    }),
+    async enqueuePendingReply() {
+      if (!event.replyTarget) {
+        return;
+      }
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot: input.vaultRoot,
+      });
+    },
     inputId: event.inputId,
     async recordAttachmentEvidence(attachmentEvidence) {
       if (attachmentEvidence.status === "failed") {
@@ -1006,7 +1124,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
         preserveUsefulEvidenceOnFailure: true,
         vault: input.vaultRoot,
       });
-      return !(
+      return isHostedAssistantInputAttachmentEvidenceSettled(
+        updated.attachmentEvidence,
+      ) && !(
         attachmentEvidence.status === "failed" &&
         isUsefulHostedAttachmentEvidence(updated.attachmentEvidence)
       );
@@ -1867,6 +1987,29 @@ async function recordHostedConversationAttachmentEvidenceFailureBestEffort(input
     },
     stagedInput: input.stagedInput,
   });
+}
+
+async function hasSettledHostedConversationAttachmentEvidence(input: {
+  effect: HostedMailboxPostCheckpointEffectResult;
+  stagedInput: HostedConversationMailboxAssistantInputStageResult;
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.effect.attachmentEvidenceUpdated === true) {
+    return true;
+  }
+
+  try {
+    const event = await readAssistantInputEvent({
+      inputId: input.stagedInput.inputId,
+      vault: input.vaultRoot,
+    });
+    return event !== null
+      && isHostedAssistantInputAttachmentEvidenceSettled(
+        event.attachmentEvidence,
+      );
+  } catch {
+    return false;
+  }
 }
 
 function shouldRecordHostedConversationAttachmentEvidence(

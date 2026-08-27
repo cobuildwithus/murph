@@ -2,6 +2,7 @@ name: Repo Hygiene
 
 on:
   pull_request:
+    types: [opened, reopened, ready_for_review]
   push:
     branches:
       - main
@@ -16,18 +17,116 @@ permissions:
   contents: read
 
 jobs:
-  tracked-artifacts:
-    name: Tracked private/build artifacts
+  markdown-docs-scope:
+    name: Classify repo-hygiene documentation scope
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    outputs:
+      markdown_only: ${{ steps.scope-result.outputs.markdown_only }}
+    steps:
+      - name: Check out trusted base classifier
+        id: checkout-base
+        continue-on-error: true
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci-markdown-docs-scope.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Run trusted exact-PR classifier
+        id: classify
+        if: ${{ steps.checkout-base.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
+          if [[ ! -f scripts/ci-markdown-docs-scope.mjs ]]; then
+            echo "markdown_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/ci-markdown-docs-scope.mjs
+
+      - name: Publish fail-closed scope result
+        id: scope-result
+        if: ${{ always() }}
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout-base.outcome }}
+          CLASSIFIER_OUTCOME: ${{ steps.classify.outcome }}
+          CLASSIFIER_MARKDOWN_ONLY: ${{ steps.classify.outputs.markdown_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          markdown_only=false
+          if [[ "$CHECKOUT_OUTCOME" == "success" && "$CLASSIFIER_OUTCOME" == "success" && "$CLASSIFIER_MARKDOWN_ONLY" == "true" ]]; then
+            markdown_only=true
+          fi
+          echo "markdown_only=$markdown_only" >> "$GITHUB_OUTPUT"
+          echo "Repo-hygiene scope classified with trusted base policy: markdown_only=$markdown_only"
+
+  temporal-compatibility-producer:
+    name: Exact Temporal producer fixture
+    needs: markdown-docs-scope
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
+      - name: Check out exact public candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Execute exact production wire projection
+        run: >-
+          node scripts/temporal-compatibility-producer-fixtures.ts
+          --output temporal-compatibility-producer-fixtures.json
+
+      - name: Upload exact producer fixture
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: temporal-compatibility-producer-${{ github.event.pull_request.head.sha }}
+          path: temporal-compatibility-producer-fixtures.json
+          if-no-files-found: error
+          retention-days: 1
+
+  tracked-artifacts:
+    name: Tracked private/build artifacts
+    needs: markdown-docs-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - name: Record Markdown documentation receipt
+        if: ${{ github.event_name == 'pull_request' && needs.markdown-docs-scope.result == 'success' && needs.markdown-docs-scope.outputs.markdown_only == 'true' }}
+        run: echo "Repo Hygiene satisfied by exact-inventory Markdown documentation proof."
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         with:
           persist-credentials: false
 
       - name: Setup pnpm
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
@@ -36,13 +135,29 @@ jobs:
           cache: pnpm
 
       - name: Install deps
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Guard hosted Stripe billing CI boundary
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: pnpm hosted-billing:ci-guard
 
+      - name: Test pull-request exact-head CI contract
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
+        run: node --test scripts/ci-markdown-docs-scope.test.mjs scripts/pull-request-ci-policy.test.mjs
+
       - name: Test native iOS hosted E2E control contract
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: node --test scripts/native-ios-hosted-e2e.test.mjs
 
+      - name: Test native Android hosted E2E control contract
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
+        run: node --test scripts/native-android-hosted-e2e.test.mjs
+
+      - name: Test Temporal compatibility control contract
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
+        run: node --test scripts/hosted-orchestration-compatibility.test.mjs
+
       - name: Check tracked private/build artifacts
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: pnpm no-js

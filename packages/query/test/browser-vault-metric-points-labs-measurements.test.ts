@@ -20,7 +20,9 @@ import {
 } from "../src/browser.ts";
 import {
   buildMetricProjection,
+  listEntities,
   listCanonicalEntities,
+  readVault,
   rebuildQueryProjection,
 } from "../src/index.ts";
 
@@ -1162,6 +1164,31 @@ test("listCanonicalEntities applies projection-table family, kind, and date filt
       kinds: ["measurement"],
     });
     assert.deepEqual(staleMeasurements, []);
+
+    const readModel = await readVault(vaultRoot);
+    const bounds = [
+      { from: "2026-05-02" },
+      { to: "2026-05-01" },
+      { from: "2026-05-01", to: "2026-05-01" },
+      { from: "2026-05-02", to: "2026-05-02" },
+    ];
+    for (const bound of bounds) {
+      const projected = await listCanonicalEntities(vaultRoot, {
+        family: "event",
+        kinds: ["note"],
+        limit: null,
+        ...bound,
+      });
+      const modeled = listEntities(readModel, {
+        families: ["event"],
+        kinds: ["note"],
+        ...bound,
+      });
+      assert.deepEqual(
+        projected.map((entity) => entity.entityId),
+        modeled.map((entity) => entity.entityId),
+      );
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1286,6 +1313,26 @@ async function createMetricPointProjectionVault(): Promise<string> {
             value: 87,
           },
         ],
+      }),
+      JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_projection_canonical_may_01",
+        kind: "note",
+        occurredAt: "2026-05-02T00:30:00.000Z",
+        recordedAt: "2026-05-02T00:31:00.000Z",
+        dayKey: "2026-05-01",
+        source: "manual",
+        title: "Late evening May 1 note",
+      }),
+      JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_projection_canonical_may_02",
+        kind: "note",
+        occurredAt: "2026-05-01T23:30:00.000Z",
+        recordedAt: "2026-05-01T23:31:00.000Z",
+        dayKey: "2026-05-02",
+        source: "manual",
+        title: "Early morning May 2 note",
       }),
       "",
     ].join("\n"),

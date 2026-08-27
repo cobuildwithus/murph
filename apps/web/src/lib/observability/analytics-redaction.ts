@@ -2,11 +2,13 @@ import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/
 
 export const VERCEL_TELEMETRY_PATHNAMES = [
   "/",
+  "/about",
   "/biomarkers",
   "/changelog",
   "/clubs",
   "/connect",
   "/consumer-health-data-privacy-policy",
+  "/contact",
   "/design",
   "/device-sync/connect/complete",
   "/environment",
@@ -31,6 +33,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/ops/growth",
   "/ops/runtime-latency",
   "/ops/runtime-maintenance",
+  "/ops/tasks",
   "/ops/usage",
   "/overview",
   "/patterns",

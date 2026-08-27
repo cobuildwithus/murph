@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Image from "next/image";
 import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
 import { defaultAssistantVoiceOptionId } from "@murphai/contracts";
@@ -23,6 +24,37 @@ import type {
 } from "./connect-page-types";
 
 const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC = `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
+
+export function ConnectSourceDialog({
+  children,
+  inert = false,
+  onOpenChange,
+  source,
+}: {
+  children?: ReactNode;
+  inert?: boolean;
+  onOpenChange: (open: boolean) => void;
+  source: Pick<ConnectSource, "name"> | null;
+}) {
+  const sourceName = source?.name ?? "Health source";
+
+  return (
+    <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] max-w-md gap-0 overflow-y-auto p-6 md:p-7"
+        inert={inert || undefined}
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{sourceName} connection</DialogTitle>
+          <DialogDescription>
+            Review the current connection status and available actions for {sourceName}.
+          </DialogDescription>
+        </DialogHeader>
+        {source ? children : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function VitalConnectionDialog({
   onContinue,
@@ -278,6 +310,7 @@ export function ConnectIntentRecoveryDialog({
 }) {
   const resolvedContactAction =
     contactAction ?? buildConnectIntentRecoveryFallbackContactAction();
+  const usesPublicBootstrap = contactAction === null;
   const contactLabel = resolveConnectIntentRecoveryContactLabel(
     resolvedContactAction,
   );
@@ -302,6 +335,9 @@ export function ConnectIntentRecoveryDialog({
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               {request?.message ??
                 "This connection link is no longer available."}
+              {usesPublicBootstrap
+                ? " Email Murph to receive a private reply, then ask for a fresh connection link. If it does not arrive within a few minutes, resend the email."
+                : null}
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -342,8 +378,8 @@ export function ConnectIntentRecoveryDialog({
 function buildConnectIntentRecoveryFallbackContactAction(): MurphContactOption {
   return {
     href: buildMurphEmailHref({
-      body: "Can you send me a fresh device connection link?",
-      subject: "Fresh device connection link",
+      body: "Please send me a private Murph reply.",
+      subject: "Start a private Murph conversation",
     }),
     kind: "email",
     label: "Email",

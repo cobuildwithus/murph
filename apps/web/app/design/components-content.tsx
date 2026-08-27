@@ -72,6 +72,9 @@ import {
 } from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
+import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
+import { ABOUT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
+import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -174,6 +177,8 @@ import {
   EnvironmentEmptyState,
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
+import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
+import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
@@ -192,8 +197,6 @@ const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription:
-    "Two short topics, based on what Murph does not know yet.",
   idleTitle: "Only the missing details",
   topics: [
     {
@@ -604,6 +607,26 @@ const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
   },
 ];
 
+const DESIGN_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: Array.from({ length: 30 }, (_, index) => ({
+    conversions: index === 16 || index === 22
+      ? 1
+      : index === 28
+        ? 2
+        : 0,
+    date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
+const DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: DESIGN_GROUP_PRIVATE_CONVERSIONS.dailySeries.map(({ date }) => ({
+    conversions: 0,
+    date,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
@@ -647,12 +670,52 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div data-design-component="public-trust-page" id="public-trust-page">
+          <Section title="Public trust page">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production About-page content and responsive editorial hierarchy.
+              The Contact page uses the same component with support-specific copy.
+            </p>
+            <div className="overflow-hidden border border-[#c4a882]/35">
+              <PublicTrustPageContent content={ABOUT_MURPH_CONTENT} />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Dashboard primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Production dashboard destinations in their standard visual hierarchy.
           </p>
           <DashboardSidebarStudy />
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="growth-group-private-conversions"
+          id="growth-group-private-conversions"
+          inert
+        >
+          <Section title="Group-to-private growth conversions">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production ops component with synthetic populated and empty data.
+            </p>
+            <div className="flex flex-col gap-8">
+              <GroupPrivateConversions
+                conversions={DESIGN_GROUP_PRIVATE_CONVERSIONS}
+                titleId="design-growth-group-private-conversions-title"
+              />
+              <div id="growth-group-private-conversions-empty">
+                <GroupPrivateConversions
+                  conversions={DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS}
+                  titleId="design-growth-group-private-conversions-empty-title"
+                />
+              </div>
+            </div>
+          </Section>
+        </div>
 
         <Separator />
 
@@ -1007,19 +1070,27 @@ export function ComponentsContent() {
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "processing" }}
+                state={{ baselineValues: "{}", status: "processing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "refreshing" }}
+                state={{
+                  factsAdded: 3,
+                  factsChanged: true,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: true, status: "updated" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: false, status: "updated" }}
+                state={{
+                  factsAdded: 0,
+                  factsChanged: false,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
@@ -1711,7 +1782,7 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                initialSelectedMonthlyCapMinor={2_000}
+                initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,
@@ -1932,7 +2003,7 @@ export function ComponentsContent() {
                   </span>
                 </div>
                 <HostedEmailMurphContactDialog
-                  murphEmailAddress="murph@mail.withmurph.ai"
+                  murphEmailAddress={MURPH_CONTACT_EMAIL}
                   userEmailAddress={variant.userEmail}
                 />
               </div>

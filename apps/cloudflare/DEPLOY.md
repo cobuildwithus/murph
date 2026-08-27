@@ -24,9 +24,108 @@ The rendered deploy helper path is the canonical direct Wrangler deploy contract
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
+
+## Assistant Runtime Issue Provenance Rollout
+
+Apply the nullable `hosted_assistant_runtime_issue.runtime_attempt_id`
+migration and deploy the Web issue importer first. Then deploy the Worker and
+runner bundle through the canonical Murph Cloud workflow. During that bounded
+skew window, older runners continue to emit legacy issue records with null
+release, runtime, and attempt provenance; the new Web importer accepts those
+records, and no historical backfill is required. Require managed-container
+smoke to report the exact release SHA and bundle fingerprints, and wait for the
+normal rollout to converge and older containers to drain before using
+provenance completeness as an operational signal.
+
+Roll back the Cloudflare Worker/runner producer first, then Web if necessary;
+leave the additive nullable migration in place. After deployment, inspect only
+bounded aggregate counts of populated versus null provenance fields and
+redacted error/event codes. Do not expose attempt IDs or issue rows in deploy
+logs or durable artifacts.
+
+## Hosted Runtime Terminal-Event Rollout
+
+When the runner adds a strict hosted runtime event code, deploy Web's shared
+hosted-execution reader first. Next deploy the Cloudflare runner bundle with
+immediate convergence and let older containers drain. A new runner must not
+write the event to an older Web reader because the older strict registry can
+reject the bounded runtime-log batch.
+
+Roll back the runner writer first and let the newer event drain before rolling
+back Web. After deployment, use a bounded time window to compare aggregate
+empty `mailbox.imported` attempts with `runtime.invocation_finished` attempts
+and confirm the Web ingest-rejection aggregate remains zero. Keep the proof
+deidentified: report only aggregate counts, not attempt IDs or row payloads.
+
+## Gemini Video Analysis Rollout
+
+Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
+pricing first. Next, map the platform-owned `GEMINI_API_KEY` in the private
+Murph Cloud workflow and GitHub Environment without exposing its value to the
+public repository, only after vendor approval confirms that the exact hosted
+Gemini project has the applicable paid/no-training controls required by
+Murph's health-data policy. Key presence alone does not prove those controls.
+Finally, deploy the Worker and runner bundle together with
+immediate convergence. The runner receives only the normal injected-credential
+sentinel; the Worker owns the real key and substitutes it only after the exact
+Gemini request passes authorization and shape validation.
+
+Do not deploy the Cloudflare producer ahead of Web pricing: the Worker now
+withholds a successful Gemini response until Web accepts its usage row, so an
+older Web would turn every otherwise successful analysis into a 502. Missing
+key configuration is fail-closed and
+omits `murph.analyze_video`. During an immediate rollout, old instances omit
+the tool and new instances expose it for private-direct turns and authenticated
+Linq/Telegram group turns with accepted user-action input. Any authenticated
+group participant may request analysis of another participant's video in the
+same accepted group turn. Unverified external groups continue to omit it. An
+eligible turn may receive the schema before its accepted input has video
+authority because the provider tool set freezes at turn start; this lets the
+first live-steered video be frozen and authorized before tool execution in that
+same turn. There is no schema, backfill, dual-write, or stored compatibility
+state.
+
+Rollback the Worker/runner producer first, then remove the private secret
+mapping if desired; the Web reader and pricing branch are safe to leave in
+place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
+direct conversation to verify a single Gemini request, explicit 1 FPS
+metadata, bounded output, and one usage
+record. Then use one consented group video and verify one Gemini request plus
+one group-visible result when its uploader requests analysis. Have a different
+authenticated participant request analysis of a second consented group video
+and verify the same single-request result. Inspect only bounded status/error
+aggregates, never media, prompts, paths, response bodies, sender handles, or
+credential values.
+
+### Hosted inbox video transience rollout
+
+Deploy the snapshot-excluding Worker and runner bundle with immediate
+convergence, then prove older containers have drained before deploying Web with
+`20260824010000_rearm_hosted_inbox_video_retention`. The migration advances the
+CAS version and makes every snapshot-bearing workspace due on the existing
+indexed inbox-media-retention lane; it does not scan members or introduce a new
+scheduler. Do not apply the migration while an older runner can still publish a
+snapshot containing ordinary inbound video bytes.
+
+After the migration, invoke the existing authenticated retention cron
+serially—not concurrently—until an aggregate database check reports zero due
+workspace retention wakes. Each invocation retains the existing five-workspace
+admission bound; serial repetition accelerates this one-time privacy drain
+without widening runtime concurrency. Confirm replacement checkpoints are
+advancing, snapshot failures remain bounded, and replaced snapshot objects are
+entering the existing orphan-cleanup lifecycle. Inspect only aggregate counts
+and redacted event codes.
+
+Once the first re-armed workspace publishes an exclusion-capable snapshot, that
+runner is the rollback floor until the due queue is zero and old snapshot
+objects have drained. Prefer a forward fix. A rollback below the floor requires
+stopping retention admission and proving no replacement or restored workspace
+can be written by the older runner. The ordinary video-analysis behavior,
+image/audio retention windows, and explicitly durable raw references remain
+unchanged.
 
 ## Assistant Turn-Profile V2 Rollout
 
@@ -294,7 +393,7 @@ forward fix. Retaining the new runner while Web is rolled back is safety
 preserving but intentionally fail-closed for legacy connection-scoped hints and
 may reject old-Web apply parsing, so restore compatible Web promptly.
 
-## Device-Sync Failure Telemetry Rollout
+## Device-Sync Runtime Telemetry Rollout
 
 This cutover is Web-first. The shared `@murphai/device-syncd` and
 `@murphai/hosted-execution` packages are build inputs compiled into the Web and
@@ -306,7 +405,10 @@ compatibility reader. That Web release accepts
 and `assistant.device_activity_automation_failed`, persists canonical device
 failure state without translating it into another job-attempt event, and still
 accepts and ignores the legacy optional `failureDiagnostic` apply field from an
-older runner. Then deploy Cloudflare and the runner bundle with
+older runner. It also allowlists the bounded
+`deviceSyncJobTimingSummaries` object array on the existing
+`device-sync.pass_finished` event before any runner emits that field. Then deploy
+Cloudflare and the runner bundle with
 `container_rollout=immediate`. Require managed-container smoke to report the
 exact new bundle fingerprint and verify stale warm runners have been recycled
 before declaring convergence.
@@ -318,6 +420,24 @@ runner can still send `failureDiagnostic`, and remove it only in a later
 contracting release. During rollout, confirm a bounded failed-attempt sample
 produces one event per attempt, no duplicate Web-owned event, and no strict
 runtime-log parse failures.
+
+For job-timing changes, confirm `device-sync.pass_finished` reports the observed
+timing count, sample limit, truncation state, and slowest-job summaries. Verify
+the summaries contain only provider/job/resource classification, disposition,
+durable-progress presence, and bounded phase counts/durations. A timeout-yielded
+job must remain queued and report `durableProgressCommitted=false`; a completed
+job must report committed progress without exposing its identity or payload.
+
+The snapshot-import optimization expands each bounded timing summary with
+Junction inventory/resource request counts and durations, snapshot
+normalization/core/write durations, event-identity index duration, and cache-hit
+count. Deploy Web first so its runtime-log parser accepts the expanded bounded
+object, then deploy Cloudflare with `container_rollout=immediate`. After rollout,
+confirm the first event-bearing import in a drain reports a cache miss, later
+non-overlapping imports report hits, overlapping corrections report misses, and
+the job totals still reconcile to a nonnegative unattributed duration. A cache
+hit is an optimization signal only; correctness remains fenced by the live
+event-ledger fingerprint and overlapping identity scopes.
 
 If rollback is required, reverse the deploy order: roll back Cloudflare and the
 runner first, verify the exact old runner fingerprint across the fleet, and
@@ -611,6 +731,18 @@ that diagnostic consumer with `container_rollout=immediate`, prove the new
 runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
+
+The private-to-group context-handoff exact-replay transport is a paired
+Web/runner change. Deploy the Web replay validator first; old runners remain
+safe but do not recover a lost successful handoff response. Then deploy the
+Worker and runner bundle with `container_rollout=immediate`, require managed
+container smoke to report the new bundle fingerprint, and exercise one
+handoff whose first response body is lost so the byte-identical retry returns
+the already accepted mailbox item. New runners against the preceding Web
+version fail closed on that retry but do not provide the intended truthful
+recovery, so this is not a supported steady state. Roll back the runner bundle
+before Web; if Web must roll back first, treat handoff replay as degraded until
+the runner rollback converges. No mailbox schema or record migration is needed.
 
 ## Phone-Call Result Deployment
 
@@ -1130,6 +1262,14 @@ runner. Its entries are compatibility material only; the required
 key.
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The versioned Temporal worker must not register pollers until both signed,
+uncached owner checks succeed: Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and this
+Worker at `/internal/temporal-worker/binding-admission`. Deploy Web and
+Cloudflare first, configure the two exact production URLs on both inactive
+Render colors, then allow the private exact-SHA blue/green controller to ramp.
+Rollback the Temporal candidate before either owner route; keep both owner
+routes through the whole retained-color rollback window.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
 hosted Web; the Worker and runner carry only the normalized semantic
@@ -1206,7 +1346,9 @@ Core execution tuning:
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `45000` and must exceed
   `CF_WEB_CONTROL_TIMEOUT_MS` by at least 5 seconds
-- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
+- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`. A shorter caller deadline
+  does not cancel a recent platform cold start; later readiness checks rejoin
+  that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
@@ -1688,12 +1830,12 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.147.0`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.149.1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file` and `qpdf`, but no app bundle, worker secrets, or local speech models.
-The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
+The final app-layer image filters `codex debug models --bundled` to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI flex service-tier support to each, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. That image-owned catalog lets native Codex validation reject a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
 The runner bundle is root-owned and mode-normalized in an intermediate image
 stage, then copied once into a fresh final base stage. Keep that normalized-copy
 boundary instead of applying a recursive permission change after the final
@@ -1955,7 +2097,7 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
 - the managed-container runner smoke also proves the native
-  `murph-group-read` profile and thread-start attestation used by Assistant Ask:
+  `murph-group-read` profile enforcement used by Assistant Ask:
   intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
   files, other roots, inherited shell secrets, and tool network are denied
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
@@ -1979,6 +2121,16 @@ Optional smoke env:
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
 ## Container Operator Access
+
+## Operator task rollout
+
+Deploy shared runner/Worker code that accepts the additive `operator_task` ask
+target and `operator-message` prompt profile before deploying the Web migration
+and `/ops/tasks` admission UI. Old Web remains safe with the new reader because
+it cannot enqueue the new shapes. After Web deploy, prove one private
+diagnostic and one synthetic direct-message admission. For rollback, disable or
+roll back Web admission first, allow admitted mailbox work to drain, then roll
+back the runner/Worker reader.
 
 Wrangler SSH is intentionally disabled for both runner Container classes. The
 checked-in scaffold and generated deploy config must set `ssh.enabled` to

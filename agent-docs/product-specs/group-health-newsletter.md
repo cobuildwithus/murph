@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-08-10
+Last verified: 2026-08-27
 Status: Implemented
 
 ## Product
@@ -16,7 +16,7 @@ The newsletter is a skill recipe, not a runtime subsystem:
 ```text
 group-newsletter skill
         -> ordinary group-scoped automation
-        -> ordinary murph.group read_shared
+        -> ordinary murph.group_data read_shared
         -> current group outbox OR generic authorized group-email effect
 ```
 
@@ -77,7 +77,7 @@ authority.
 At a scheduled current-chat occurrence:
 
 1. The automation reopens the `group-newsletter` skill.
-2. The model calls `murph.group action="read_shared"` once with the exact saved
+2. The model calls `murph.group_data action="read_shared"` once with the exact saved
    projection scopes.
 3. It composes only from the returned current consent-aware facts.
 4. The normal scheduled response and conversation outbox deliver one update to
@@ -95,16 +95,16 @@ Email remains a two-phase effect because composition needs authorized facts
 before the body exists, while irreversible delivery must revalidate recipients
 and grants after composition.
 
-The model-facing surface is part of `murph.group`:
+The model-facing surface uses the ordinary group family tools:
 
 ```ts
-const prepared = await murph.group({
+const prepared = await murph.group_data({
   action: "read_shared",
   projectionScopes,
   audience: "group_email",
 });
 
-await murph.group({
+await murph.group_email({
   action: "send_email",
   subject,
   html,
@@ -201,6 +201,14 @@ content rules are:
 - use human units and keep broad movement separate from workout duration;
 - never turn a completed-day average into a weekly total;
 - find one recognizable group story instead of dumping every returned field;
+- treat each `read_shared` member row as the atomic presentation unit: a
+  usable, unambiguous display name labels only that row's projections, and
+  labeled participant-specific observations and comparisons use those labels
+  unless the group requested anonymization; never map unlabeled or ambiguous
+  rows from order, values, or conversation;
+- keep that association snapshot-specific: a later shared read may answer a
+  current-value question, but it must not remap different unlabeled figures
+  from an earlier update;
 - avoid lowest-performer, missing-data, body, diagnosis, and illness jokes;
 - use only the current tool result, never private one-to-one data or raw share
   files.

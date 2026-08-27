@@ -1,4 +1,5 @@
 import {
+  type HostedMemberBillingRef,
   HostedBillingStatus,
   Prisma,
   type PrismaClient,
@@ -16,14 +17,21 @@ import {
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  projectHostedMemberIdentityState,
   readHostedMemberIdentity,
+  readHostedMemberIdentityRecord,
   lookupHostedMemberIdentityByPhoneNumber,
+  type HostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
 } from "./hosted-member-identity-store";
 import {
-  readHostedMemberBillingSnapshot,
   readHostedMemberCoreState,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
+import {
+  projectHostedMemberStripeBillingRefSnapshot,
+  type HostedMemberStripeBillingRefSnapshot,
+} from "./hosted-member-billing-store";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "./linq-invite-signup-effect-id";
 import { acquireHostedLinqParticipantPhoneLockTx } from "./linq-participant-contact";
 import { normalizePhoneNumber } from "./phone";
@@ -74,6 +82,21 @@ export interface HostedPrivyPhoneTransferSourceRetirementProof {
     stripeSubscriptionId: string;
   } | null;
   sourceMemberId: string;
+}
+
+export interface PreparedHostedPrivyPhoneTransferSourceRetirement {
+  readonly rawFingerprint: string;
+  readonly sourceBillingRef: HostedMemberStripeBillingRefSnapshot | null;
+  readonly sourceIdentity: HostedMemberIdentityState | null;
+  readonly sourceMemberId: string;
+  readonly targetIdentity: HostedMemberIdentityState | null;
+  readonly targetMemberId: string;
+}
+
+interface HostedPrivyPhoneTransferSourceRetirementRawRows {
+  readonly sourceBillingRef: HostedMemberBillingRef | null;
+  readonly sourceIdentity: HostedMemberIdentityRecord | null;
+  readonly targetIdentity: HostedMemberIdentityRecord | null;
 }
 
 export async function acquireHostedPrivyPhoneTransferPhoneLocksTx(input: {
@@ -173,10 +196,88 @@ export async function readHostedPrivyPhoneTransferProof(input: {
   };
 }
 
+/**
+ * Projects the exact encrypted identity and billing rows before transaction
+ * checkout. The locked transaction re-reads the same raw rows and rejects any
+ * drift before using these provider-backed projections.
+ */
+export async function prepareHostedPrivyPhoneTransferSourceRetirement(input: {
+  prisma: PrismaClient;
+  sourceMemberId: string;
+  targetMemberId: string;
+}): Promise<PreparedHostedPrivyPhoneTransferSourceRetirement> {
+  const rawRows = await readHostedPrivyPhoneTransferSourceRetirementRawRows({
+    prisma: input.prisma,
+    sourceMemberId: input.sourceMemberId,
+    targetMemberId: input.targetMemberId,
+  });
+  const rawFingerprint =
+    buildHostedPrivyPhoneTransferSourceRetirementRawFingerprint(rawRows);
+  const [sourceBillingRef, sourceIdentity, targetIdentity] = await Promise.all([
+    rawRows.sourceBillingRef
+      ? projectHostedMemberStripeBillingRefSnapshot(
+          rawRows.sourceBillingRef,
+          input.prisma,
+        )
+      : null,
+    rawRows.sourceIdentity
+      ? projectHostedMemberIdentityState(rawRows.sourceIdentity, input.prisma)
+      : null,
+    rawRows.targetIdentity
+      ? projectHostedMemberIdentityState(rawRows.targetIdentity, input.prisma)
+      : null,
+  ]);
+
+  return {
+    rawFingerprint,
+    sourceBillingRef,
+    sourceIdentity,
+    sourceMemberId: input.sourceMemberId,
+    targetIdentity,
+    targetMemberId: input.targetMemberId,
+  };
+}
+
+async function readHostedPrivyPhoneTransferSourceRetirementRawRows(input: {
+  prisma: HostedOnboardingReadClient;
+  sourceMemberId: string;
+  targetMemberId: string;
+}): Promise<HostedPrivyPhoneTransferSourceRetirementRawRows> {
+  const [sourceBillingRef, sourceIdentity, targetIdentity] = await Promise.all([
+    input.prisma.hostedMemberBillingRef.findUnique({
+      where: { memberId: input.sourceMemberId },
+    }),
+    readHostedMemberIdentityRecord({
+      memberId: input.sourceMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberIdentityRecord({
+      memberId: input.targetMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  return {
+    sourceBillingRef,
+    sourceIdentity,
+    targetIdentity,
+  };
+}
+
+function buildHostedPrivyPhoneTransferSourceRetirementRawFingerprint(
+  rows: HostedPrivyPhoneTransferSourceRetirementRawRows,
+): string {
+  return JSON.stringify([
+    rows.sourceBillingRef,
+    rows.sourceIdentity,
+    rows.targetIdentity,
+  ]);
+}
+
 export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
   identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
   now: Date;
+  prepared: PreparedHostedPrivyPhoneTransferSourceRetirement;
   prisma: Prisma.TransactionClient;
   targetPhoneNumberBeforeTransfer: string | null;
   transfer: HostedPrivyPhoneTransferProof;
@@ -187,6 +288,8 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     || phoneNumber !== input.transfer.phoneNumber
     || input.member.id === input.transfer.sourceMemberId
     || input.identity.userId === input.transfer.sourcePrivyUserId
+    || input.prepared.sourceMemberId !== input.transfer.sourceMemberId
+    || input.prepared.targetMemberId !== input.member.id
   ) {
     throwHostedPrivyPhoneTransferChanged();
   }
@@ -203,6 +306,19 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     await lockHostedMemberRow(input.prisma, memberId);
   }
 
+  const rawRows =
+    await readHostedPrivyPhoneTransferSourceRetirementRawRows({
+      prisma: input.prisma,
+      sourceMemberId: input.transfer.sourceMemberId,
+      targetMemberId: input.member.id,
+    });
+  if (
+    buildHostedPrivyPhoneTransferSourceRetirementRawFingerprint(rawRows)
+      !== input.prepared.rawFingerprint
+  ) {
+    throwHostedPrivyPhoneTransferChanged();
+  }
+
   await Promise.all([
     assertHostedPrivyAccountDeletionNotPendingTx({
       prisma: input.prisma,
@@ -214,46 +330,46 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     }),
   ]);
 
-  const [currentMember, currentIdentity, sourceMember, sourceIdentity] =
-    await Promise.all([
-      readHostedMemberCoreState({
-        memberId: input.member.id,
-        prisma: input.prisma,
-      }),
-      readHostedMemberIdentity({
-        memberId: input.member.id,
-        prisma: input.prisma,
-      }),
-      readHostedMemberCoreState({
-        memberId: input.transfer.sourceMemberId,
-        prisma: input.prisma,
-      }),
-      readHostedMemberIdentity({
-        memberId: input.transfer.sourceMemberId,
-        prisma: input.prisma,
-      }),
-    ]);
+  const [currentMember, sourceMember] = await Promise.all([
+    readHostedMemberCoreState({
+      memberId: input.member.id,
+      prisma: input.prisma,
+    }),
+    readHostedMemberCoreState({
+      memberId: input.transfer.sourceMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
 
-  if (!currentMember || !sourceMember || !currentIdentity || !sourceIdentity) {
+  if (
+    !currentMember
+    || !sourceMember
+    || !input.prepared.targetIdentity
+    || !input.prepared.sourceIdentity
+  ) {
     throwHostedPrivyPhoneTransferChanged();
   }
   assertHostedMemberNotSuspended(currentMember);
   if (
-    currentIdentity.privyUserId !== input.identity.userId
-    || currentIdentity.phoneNumber !== input.targetPhoneNumberBeforeTransfer
-    || sourceIdentity.privyUserId !== input.transfer.sourcePrivyUserId
-    || sourceIdentity.phoneNumber !== phoneNumber
+    input.prepared.targetIdentity.privyUserId !== input.identity.userId
+    || input.prepared.targetIdentity.phoneNumber
+      !== input.targetPhoneNumberBeforeTransfer
+    || input.prepared.sourceIdentity.privyUserId
+      !== input.transfer.sourcePrivyUserId
+    || input.prepared.sourceIdentity.phoneNumber !== phoneNumber
   ) {
     throwHostedPrivyPhoneTransferChanged();
   }
 
   const autoTrialBilling =
     await classifyHostedPrivyPhoneTransferSourceScaffoldTx({
-      identity: sourceIdentity,
+      billingRef: input.prepared.sourceBillingRef,
+      identity: input.prepared.sourceIdentity,
       memberId: sourceMember.id,
       now: input.now,
       phoneNumber,
       prisma: input.prisma,
+      rawIdentity: rawRows.sourceIdentity,
       sourcePrivyUserId: input.transfer.sourcePrivyUserId,
     });
 
@@ -265,6 +381,7 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
         suspendedAt: null,
       },
       data: {
+        signupNotificationContextEncrypted: null,
         suspendedAt: input.now,
       },
     });
@@ -337,37 +454,18 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
 }
 
 async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
   identity: NonNullable<Awaited<ReturnType<typeof readHostedMemberIdentity>>>;
   memberId: string;
   now: Date;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
+  rawIdentity: HostedMemberIdentityRecord | null;
   sourcePrivyUserId: string;
 }): Promise<HostedPrivyPhoneTransferSourceRetirementProof["autoTrialBilling"]> {
-  const [source, rawIdentity, inviteCount, invalidInvite, webSessionCount, invalidWebSession] =
+  const [source, inviteCount, invalidInvite, webSessionCount, invalidWebSession] =
     await Promise.all([
       readHostedPrivyPhoneTransferSourceShapeTx(input),
-      input.prisma.hostedMemberIdentity.findUnique({
-        where: { memberId: input.memberId },
-        select: {
-          maskedPhoneNumberHint: true,
-          memberId: true,
-          phoneLookupKey: true,
-          phoneNumberEncrypted: true,
-          phoneNumberVerifiedAt: true,
-          privyUserIdEncrypted: true,
-          privyUserLookupKey: true,
-          signupPhoneCodeSendAttemptId: true,
-          signupPhoneCodeSendAttemptStartedAt: true,
-          signupPhoneCodeSentAt: true,
-          signupPhoneNumberEncrypted: true,
-          walletAddressEncrypted: true,
-          walletAddressLookupKey: true,
-          walletChainType: true,
-          walletCreatedAt: true,
-          walletProvider: true,
-        },
-      }),
       input.prisma.hostedInvite.count({
         where: { memberId: input.memberId },
       }),
@@ -404,7 +502,7 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     || !isExactHostedPrivyPhoneTransferSourceIdentity({
       decrypted: input.identity,
       phoneNumber: input.phoneNumber,
-      raw: rawIdentity,
+      raw: input.rawIdentity,
       sourcePrivyUserId: input.sourcePrivyUserId,
     })
     || inviteCount > 1
@@ -471,6 +569,8 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     }
 
     return assertHostedPrivyPhoneTransferAutoTrialScaffoldTx({
+      billingRef: input.billingRef,
+      billingStatus: source.billingStatus,
       memberId: input.memberId,
       prisma: input.prisma,
     });
@@ -776,27 +876,24 @@ async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
 }
 
 async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  billingStatus: HostedBillingStatus;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<NonNullable<
   HostedPrivyPhoneTransferSourceRetirementProof["autoTrialBilling"]
 >> {
-  const billing = await readHostedMemberBillingSnapshot({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const billingRef = billing?.billingRef;
+  const billingRef = input.billingRef;
   const hasExpectedTrialLifecycle =
-    billing?.core.billingStatus === HostedBillingStatus.active
+    input.billingStatus === HostedBillingStatus.active
       ? billingRef?.currentBillingPhase === "trial"
       : (
-        billing?.core.billingStatus === HostedBillingStatus.canceled
-        || billing?.core.billingStatus === HostedBillingStatus.incomplete
+        input.billingStatus === HostedBillingStatus.canceled
+        || input.billingStatus === HostedBillingStatus.incomplete
       )
         && billingRef?.currentBillingPhase === null;
   if (
-    !billing
-    || !billingRef
+    !billingRef
     || !hasExpectedTrialLifecycle
     || billingRef.currentBillingPlanCode !== "launch_monthly"
     || billingRef.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER

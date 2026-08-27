@@ -8,6 +8,7 @@ import {
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
   HABITAT_DOMAIN_IDS,
+  isStrictIsoDate,
   type HabitatCoverageCounts,
   type HabitatDomainCoverage,
   type HabitatIndicatorDefinition,
@@ -15,6 +16,7 @@ import {
   validateHabitatIndicatorValue,
 } from '@murphai/contracts'
 import {
+  isVaultError,
   listHabitatAspects,
   readHabitatAspect,
   upsertHabitatAspect,
@@ -45,6 +47,7 @@ const habitatRecordSchema = z.object({
   domain: z.string().min(1),
   status: z.string().min(1),
   indicators: z.record(z.string(), z.unknown()),
+  indicatorNotes: z.record(z.string(), z.string()).nullable(),
   indicatorRecordedAt: z.record(z.string(), z.string()).nullable(),
   note: z.string().nullable(),
   body: z.string(),
@@ -212,6 +215,47 @@ function parseIndicatorAssignments(
   return indicators
 }
 
+function parseIndicatorNoteAssignments(
+  aspectId: string,
+  assignments: string[] | undefined,
+): Record<string, string | null> | undefined {
+  if (!assignments || assignments.length === 0) {
+    return undefined
+  }
+
+  const notes: Record<string, string | null> = {}
+  for (const assignment of assignments) {
+    const separator = assignment.indexOf('=')
+    if (separator <= 0) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Indicator note "${assignment}" must use the form indicator_id=text.`,
+      )
+    }
+    const indicatorId = assignment.slice(0, separator).trim()
+    if (!getHabitatIndicatorDefinition(aspectId, indicatorId)) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Indicator "${indicatorId}" is not part of habitat aspect "${aspectId}".`,
+      )
+    }
+    const rawNote = assignment.slice(separator + 1).trim()
+    if (rawNote === 'null') {
+      notes[indicatorId] = null
+      continue
+    }
+    if (rawNote.length === 0 || rawNote.length > 400) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Indicator note "${indicatorId}" must contain 1-400 characters.`,
+      )
+    }
+    notes[indicatorId] = rawNote
+  }
+
+  return notes
+}
+
 function habitatRecordPayload(record: Awaited<ReturnType<typeof readHabitatAspect>>) {
   return {
     habitatId: record.habitatId,
@@ -220,10 +264,119 @@ function habitatRecordPayload(record: Awaited<ReturnType<typeof readHabitatAspec
     domain: record.domain,
     status: record.status,
     indicators: record.indicators,
+    indicatorNotes: record.indicatorNotes ?? null,
     indicatorRecordedAt: record.indicatorRecordedAt ?? null,
     note: record.note ?? null,
     body: record.body,
     path: record.relativePath,
+  }
+}
+
+function unknownHabitatAspectError(): VaultCliError {
+  return new VaultCliError(
+    'contract_invalid',
+    'The habitat aspect is not present in the catalog.',
+    {
+      issues: [{
+        code: 'invalid_value',
+        publicPath: ['aspect'],
+      }],
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
+function invalidRecordedAtError(): VaultCliError {
+  return new VaultCliError(
+    'contract_invalid',
+    'The recorded date must be a valid ISO calendar date in YYYY-MM-DD form.',
+    {
+      issues: [{
+        code: 'invalid_value',
+        publicPath: ['recordedAt'],
+      }],
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
+function mapHabitatCoreError(error: unknown): unknown {
+  if (!isVaultError(error)) {
+    return error
+  }
+
+  if (error.code === 'HABITAT_MISSING') {
+    return new VaultCliError(
+      'not_found',
+      'The requested habitat aspect was not found.',
+      {
+        issues: [{
+          code: 'custom',
+          publicPath: ['lookup'],
+        }],
+        retryable: false,
+        stage: 'read',
+      },
+    )
+  }
+
+  if (error.code === 'HABITAT_FRONTMATTER_INVALID') {
+    if (
+      typeof error.details.indicatorId === 'string' &&
+      error.details.indicatorId.trim().length > 0
+    ) {
+      return new VaultCliError(
+        'contract_invalid',
+        'Submitted habitat input was rejected by the habitat privacy or validation boundary.',
+        {
+          issues: [{
+            code: 'invalid_value',
+            publicPath: ['indicator'],
+          }],
+          retryable: false,
+          stage: 'validation',
+        },
+      )
+    }
+
+    if (
+      typeof error.details.relativePath === 'string' &&
+      error.details.relativePath.trim().length > 0
+    ) {
+      return new VaultCliError(
+        'contract_invalid',
+        'A saved habitat record has invalid frontmatter.',
+        {
+          issues: [{
+            code: 'custom',
+            publicPath: [],
+          }],
+          retryable: false,
+          stage: 'read',
+        },
+      )
+    }
+
+    return new VaultCliError(
+      'contract_invalid',
+      'Habitat data failed validation without a safely classifiable source.',
+      {
+        retryable: false,
+        stage: 'validation',
+      },
+    )
+  }
+
+  return error
+}
+
+async function runHabitatCore<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    throw mapHabitatCoreError(error)
   }
 }
 
@@ -246,6 +399,12 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         .describe(
           'Indicator assignment like night_temp_c=19 or co2_meter=declined. Repeat --indicator for multiple values.',
         ),
+      indicatorNote: z
+        .array(z.string().min(3))
+        .optional()
+        .describe(
+          'Concise context like sauna_type=Dry home sauna, up to 100°C, Harvia heater. Repeat --indicator-note for multiple values; use null to clear.',
+        ),
       recordedAt: z
         .string()
         .regex(/^\d{4}-\d{2}-\d{2}$/u)
@@ -256,14 +415,27 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatSaveResultSchema,
     async run({ args, options }) {
-      const result = await upsertHabitatAspect({
-        vaultRoot: options.vault,
-        aspect: args.aspect,
-        indicators: parseIndicatorAssignments(args.aspect, options.indicator),
-        recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
-        note: options.note,
-        body: options.body,
-      })
+      if (!getHabitatAspectDefinition(args.aspect)) {
+        throw unknownHabitatAspectError()
+      }
+      if (options.recordedAt !== undefined && !isStrictIsoDate(options.recordedAt)) {
+        throw invalidRecordedAtError()
+      }
+
+      const result = await runHabitatCore(() =>
+        upsertHabitatAspect({
+          vaultRoot: options.vault,
+          aspect: args.aspect,
+          indicators: parseIndicatorAssignments(args.aspect, options.indicator),
+          indicatorNotes: parseIndicatorNoteAssignments(
+            args.aspect,
+            options.indicatorNote,
+          ),
+          recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
+          note: options.note,
+          body: options.body,
+        })
+      )
 
       return {
         vault: options.vault,
@@ -285,10 +457,12 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     output: habitatShowResultSchema,
     async run({ args, options }) {
       const lookup = args.lookup.trim()
-      const record = await readHabitatAspect(
-        lookup.startsWith('hab_')
-          ? { vaultRoot: options.vault, habitatId: lookup }
-          : { vaultRoot: options.vault, slug: lookup },
+      const record = await runHabitatCore(() =>
+        readHabitatAspect(
+          lookup.startsWith('hab_')
+            ? { vaultRoot: options.vault, habitatId: lookup }
+            : { vaultRoot: options.vault, slug: lookup },
+        )
       )
 
       return {
@@ -306,7 +480,9 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatListResultSchema,
     async run({ options }) {
-      const records = (await listHabitatAspects(options.vault)).filter(
+      const records = (await runHabitatCore(() =>
+        listHabitatAspects(options.vault)
+      )).filter(
         (record) => !options.domain || record.domain === options.domain,
       )
 
@@ -333,7 +509,9 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatCoverageResultSchema,
     async run({ options }) {
-      const records = await listHabitatAspects(options.vault)
+      const records = await runHabitatCore(() =>
+        listHabitatAspects(options.vault)
+      )
       const coverage = computeHabitatCoverage(
         records.map((record) => ({
           aspect: record.aspect,
@@ -369,10 +547,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
       if (args.aspect) {
         const aspect = getHabitatAspectDefinition(args.aspect)
         if (!aspect) {
-          throw new VaultCliError(
-            'contract_invalid',
-            `Unknown habitat aspect "${args.aspect}".`,
-          )
+          throw unknownHabitatAspectError()
         }
 
         return {

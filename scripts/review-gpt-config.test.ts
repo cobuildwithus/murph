@@ -165,6 +165,20 @@ afterEach(() => {
 });
 
 describe("ReviewGPT repository config", () => {
+  it("includes every managed lane in the default automatic pool", () => {
+    const harness = createHarness();
+    const result = runConfig(harness, {
+      REVIEW_GPT_BROWSER_LANE: "auto",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("count=6\n");
+    expect(result.stdout).toContain(
+      "pool=eragon phlebas hercules mountain vonneumann apollo\n",
+    );
+    expect(existsSync(harness.mdfindMarker)).toBe(false);
+  });
+
   it("keeps an explicit per-run lane count above local preferences", () => {
     const harness = createHarness(
       "REVIEW_GPT_BROWSER_LANE_COUNT=6\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=5\n",

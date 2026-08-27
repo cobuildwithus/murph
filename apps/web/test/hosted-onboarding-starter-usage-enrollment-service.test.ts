@@ -23,9 +23,11 @@ const mocks = vi.hoisted(() => {
     prepareHostedCryptoDomainRootCandidates: vi.fn(),
     prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(),
     providerWork: vi.fn(),
+    readHostedFamilyBillingRecoveryForOwner: vi.fn(),
     readHostedStarterUsageGrantTx: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     runWithHostedDomainRootUnwrapCache: vi.fn(),
+    scheduleHostedSignupNotificationEmails: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
     unwrapHostedDomainRootForWeb: vi.fn(),
@@ -81,6 +83,11 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
     mocks.requireHostedInviteForBillingCheckout,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  readHostedFamilyBillingRecoveryForOwner:
+    mocks.readHostedFamilyBillingRecoveryForOwner,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-activation", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("@/src/lib/hosted-onboarding/member-activation")
@@ -99,17 +106,24 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", () => ({
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", () => ({
   ensureHostedStarterUsageGrantTx: mocks.ensureHostedStarterUsageGrantTx,
   readHostedStarterUsageGrantTx: mocks.readHostedStarterUsageGrantTx,
 }));
 
 import {
+  continueHostedJoinInviteAfterLaunchConsent,
   ensureHostedLinqInstantStartStarterUsageEnrollment,
   ensureHostedStarterUsageEnrollment,
   retryPendingHostedStarterUsageActivationRuntimeWake,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
 } from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const NOW = new Date("2026-08-09T14:00:00.000Z");
 
@@ -298,6 +312,7 @@ describe("Starter usage enrollment owner", () => {
       ledgerVersion: 0n,
     });
     mocks.readHostedStarterUsageGrantTx.mockImplementation(async () => grantState);
+    mocks.readHostedFamilyBillingRecoveryForOwner.mockResolvedValue(null);
     mocks.ensureHostedStarterUsageGrantTx.mockImplementation(async () => {
       if (!grantState) {
         stageTransactionWrites("grant");
@@ -390,6 +405,7 @@ describe("Starter usage enrollment owner", () => {
       .mockImplementation(async () => {
         await runProviderWork({ kind: "welcome-email" });
       });
+    mocks.scheduleHostedSignupNotificationEmails.mockReturnValue(undefined);
   });
 
   it("enrolls once across supported channels and emits activation effects once", async () => {
@@ -429,6 +445,17 @@ describe("Starter usage enrollment owner", () => {
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "mobile_app",
+      memberIds: [memberState.id],
+      prisma,
+    });
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mock
+        .invocationCallOrder[0],
+    );
   });
 
   it("keeps the Web signup email separate from companion conversation welcome", async () => {
@@ -450,6 +477,136 @@ describe("Starter usage enrollment owner", () => {
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .toHaveBeenCalledOnce();
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "website",
+      memberIds: [memberState.id],
+      prisma,
+    });
+  });
+
+  it("returns an enrolled join continuation only after Starter is durable", async () => {
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(continueHostedJoinInviteAfterLaunchConsent({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toEqual({
+      disposition: "enrolled",
+      enrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+
+    expect(createdGrantCount).toBe(1);
+    expect(activationWritten).toBe(true);
+  });
+
+  it("defers committed consent to messaging setup without starting enrollment", async () => {
+    mocks.assertHostedMemberBillingStartMessagingReady.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
+        httpStatus: 409,
+        message: "Set up messaging before continuing.",
+      }),
+    );
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(continueHostedJoinInviteAfterLaunchConsent({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toEqual({ disposition: "deferred" });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["available", "checkout", "syncing", "manage"] as const)(
+    "defers committed consent to the %s Family recovery owner under the member lock",
+    async (familyBillingRecovery) => {
+      mocks.readHostedFamilyBillingRecoveryForOwner.mockResolvedValueOnce(
+        familyBillingRecovery,
+      );
+      const prisma = buildPrisma(() => memberState);
+
+      await expect(continueHostedJoinInviteAfterLaunchConsent({
+        inviteCode: "invite_123",
+        member: { id: memberState.id, suspendedAt: null },
+        now: NOW,
+        prisma: prisma as never,
+        source: "web_onboarding",
+      })).resolves.toEqual({ disposition: "deferred" });
+
+      expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+      expect(
+        mocks.lockHostedUsageCreditBeneficiaryTx.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.readHostedFamilyBillingRecoveryForOwner.mock
+          .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+    },
+  );
+
+  it.each([
+    HostedBillingStatus.incomplete,
+    HostedBillingStatus.paused,
+    HostedBillingStatus.past_due,
+    HostedBillingStatus.canceled,
+    HostedBillingStatus.unpaid,
+  ])(
+    "defers committed consent to retained %s billing recovery",
+    async (billingStatus) => {
+      memberState = buildMemberState({
+        billingRef: {
+          currentBillingPhase: null,
+          currentCheckoutOffer: null,
+          stripeSubscriptionLookupKey: "subscription_lookup_recovery",
+        },
+        billingStatus,
+      });
+      const prisma = buildPrisma(() => memberState);
+
+      await expect(continueHostedJoinInviteAfterLaunchConsent({
+        inviteCode: "invite_123",
+        member: { id: memberState.id, suspendedAt: null },
+        now: NOW,
+        prisma: prisma as never,
+        source: "web_onboarding",
+      })).resolves.toEqual({ disposition: "deferred" });
+
+      expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps unexpected post-consent enrollment failures retryable", async () => {
+    mocks.assertHostedMemberBillingStartMessagingReady.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_STARTER_USAGE_ENROLLMENT_RETRYABLE",
+        httpStatus: 503,
+        message: "Starter setup is temporarily unavailable.",
+        retryable: true,
+      }),
+    );
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(continueHostedJoinInviteAfterLaunchConsent({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).rejects.toMatchObject({
+      code: "HOSTED_STARTER_USAGE_ENROLLMENT_RETRYABLE",
+      retryable: true,
+    });
   });
 
   it("re-signals a still-pending activation on repeated companion enrollment", async () => {
@@ -756,6 +913,11 @@ describe("Starter usage enrollment owner", () => {
         .not.toHaveBeenCalled();
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
         .not.toHaveBeenCalled();
+      expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+        activationSurface: "imessage",
+        memberIds: [memberState.id],
+        prisma,
+      });
 
       if (!result.deferredActivationWake) {
         throw new Error("Expected one deferred activation wake.");
@@ -920,6 +1082,31 @@ describe("Starter usage enrollment owner", () => {
       mocks.lockHostedUsageCreditBeneficiaryTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
       prisma.hostedAccountGroupMembership.findFirst.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("blocks a stale Starter request when Family recovery wins under the lock", async () => {
+    mocks.readHostedFamilyBillingRecoveryForOwner.mockResolvedValueOnce("available");
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).rejects.toMatchObject({
+      code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(
+      mocks.lockHostedUsageCreditBeneficiaryTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.readHostedFamilyBillingRecoveryForOwner.mock.invocationCallOrder[0]
         ?? Number.POSITIVE_INFINITY,
     );
   });

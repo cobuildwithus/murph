@@ -11,6 +11,13 @@ export {
 export { VaultError, isVaultError } from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
 export {
+  createDeviceBatchImportSession,
+  type DeviceBatchImportSession,
+  type DeviceBatchImportTiming,
+  type ImportDeviceBatchExecutionOptions,
+  type ImportDeviceBatchInput,
+} from "./mutations.ts";
+export {
   reconcileAutomationSupportSeries,
   reconcileAutomationSupportSeriesNamespace,
 } from "./automation.ts";
@@ -137,6 +144,7 @@ export {
   importDocument,
   importEventBatch,
   importSamples,
+  validateSampleImport,
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
@@ -178,6 +186,10 @@ export type {
   RepairExperimentMediaInput,
   RepairExperimentMediaResult,
 } from "./experiment-media-repair.ts";
+export {
+  readEvent,
+  readOwnedEvent,
+} from "./domains/events.ts";
 export {
   listHabitatAspects,
   readHabitatAspect,
@@ -244,6 +256,7 @@ export {
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
   listWriteOperationMetadataPathsWithStageDirectories,
+  persistHostedRuntimeStateAtCanonicalBoundary,
   pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
@@ -358,6 +371,9 @@ export type {
   FindEventsByRawRefsInput,
   PublicEventDraft,
   PublicWritableEventKind,
+  ReadEventInput,
+  ReadEventResult,
+  ReadOwnedEventInput,
   RemoveAutomaticMealPhotoInput,
   RemoveAutomaticMealPhotoResult,
   RunGeneratedImageCaptureRetentionInput,

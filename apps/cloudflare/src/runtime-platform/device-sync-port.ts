@@ -10,14 +10,17 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  type HostedExecutionDeviceSyncCompletedImport,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckResponse,
   parseHostedExecutionDeviceSyncDirtyPendingResponse,
   parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse,
+  parseHostedExecutionDeviceSyncNoDataOutreachResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDeviceSyncReconcileResponse,
@@ -33,6 +36,26 @@ export function createHostedWebDeviceSyncPort(input: {
   transport: HostedWebControlTransport;
 }): HostedRuntimeDeviceSyncPort {
   return {
+    async configureNoDataOutreach(runtimeInput) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {
+          assistantInputId: runtimeInput.assistantInputId,
+          ...(runtimeInput.mode === "after_days"
+            ? { afterDays: runtimeInput.afterDays }
+            : {}),
+          mode: runtimeInput.mode,
+          sourceProviderSlug: runtimeInput.sourceProviderSlug,
+        },
+        boundUserId: input.boundUserId,
+        description: "Hosted device no-data outreach preference",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
+        signal: runtimeInput.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      return parseHostedExecutionDeviceSyncNoDataOutreachResponse(payload);
+    },
     async completeFitbitMigration(runtimeInput: {
       connectionId: string;
       signal?: AbortSignal | null;
@@ -202,6 +225,7 @@ export function createHostedWebDeviceSyncPort(input: {
       return parseHostedExecutionDeviceSyncDirtyPendingResponse(payload);
     },
     async ackDirtyStateProcessed(runtimeInput: {
+      completedImports?: HostedExecutionDeviceSyncCompletedImport[];
       connectionId: string;
       processedDirtyPayloadIds?: string[];
       processedRevision: string;
@@ -214,6 +238,9 @@ export function createHostedWebDeviceSyncPort(input: {
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
+          ...(runtimeInput.completedImports
+            ? { completedImports: runtimeInput.completedImports }
+            : {}),
           connectionId: runtimeInput.connectionId,
           ...(runtimeInput.processedDirtyPayloadIds
             ? { processedDirtyPayloadIds: runtimeInput.processedDirtyPayloadIds }

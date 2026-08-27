@@ -37,6 +37,18 @@ export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
 export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
   "x-hosted-execution-signing-key-id";
 
+export const HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION = "bindings-v1";
+export const HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND =
+  "hosted_temporal_worker_binding_admission";
+
+export interface HostedTemporalWorkerBindingAdmission {
+  bindingContractRevision: typeof HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION;
+  environment: "production";
+  kind: typeof HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND;
+  owner: "cloudflare" | "web";
+  signingKeyId: string;
+}
+
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
   "runtime.pending-effects-reconcile-requested",
@@ -95,6 +107,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -187,6 +200,8 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
@@ -228,8 +243,10 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
   | "queue-only";
 
 export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
+  "context-handoff",
   "creative-response",
   "creative-response-text",
+  "operator-message",
 ] as const;
 
 export type HostedExecutionAssistantNotificationPromptProfile =
@@ -269,14 +286,26 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
   requestId: string;
 }
 
+export interface HostedExecutionGroupContextHandoffNotification {
+  membershipId: string;
+  originAssistantInputId: string;
+}
+
+export interface HostedExecutionOperatorTaskNotification {
+  expiresAt: string;
+  taskId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;
   externalThreadRouteAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
+  groupContextHandoff?: HostedExecutionGroupContextHandoffNotification;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  operatorTask?: HostedExecutionOperatorTaskNotification;
   privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;
@@ -313,6 +342,11 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   kind: "consented_member";
   membershipId: string;
   permissionDigest: string;
+}
+
+export interface HostedExecutionAssistantAskOperatorTaskTarget {
+  kind: "operator_task";
+  taskId: string;
 }
 
 /**
@@ -359,6 +393,7 @@ export type HostedExecutionAssistantAskResultDestination =
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskOperatorTaskTarget
   | HostedExecutionAssistantAskCurrentSenderTarget;
 
 export function isHostedExecutionAssistantAskCurrentSenderTarget(
@@ -410,6 +445,12 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
+export interface HostedExecutionAssistantAskOperatorTaskRequestedPayload {
+  expiresAt: string;
+  question: string;
+  target: HostedExecutionAssistantAskOperatorTaskTarget;
+}
+
 export interface HostedExecutionAssistantAskCurrentSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
@@ -428,6 +469,7 @@ export interface HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload {
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
+  | HostedExecutionAssistantAskOperatorTaskRequestedPayload
   | HostedExecutionAssistantAskCurrentSenderRequestedPayload
   | HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload;
 
@@ -779,6 +821,8 @@ export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseW
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
@@ -884,6 +928,28 @@ export interface HostedExecutionDailyMetricReportedWake
   kind: "health.daily-metric.reported";
 }
 
+export interface HostedExecutionEnvironmentInterviewTopicCompletion {
+  answers: Array<{
+    aspectId: string;
+    indicatorId: string;
+    note?: string | null;
+    value: string | number | boolean;
+  }>;
+  topicId: string;
+}
+
+export interface HostedExecutionEnvironmentInterviewCompletedPayload {
+  completedAt: string;
+  completionId: string;
+  topics: HostedExecutionEnvironmentInterviewTopicCompletion[];
+}
+
+export interface HostedExecutionEnvironmentInterviewCompletedWake
+  extends HostedExecutionBaseWake {
+  environmentInterview: HostedExecutionEnvironmentInterviewCompletedPayload;
+  kind: "environment-interview.completed";
+}
+
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
@@ -948,6 +1014,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake
@@ -1071,7 +1138,7 @@ export type HostedRuntimeTimerTriggerKind =
   (typeof HOSTED_RUNTIME_TIMER_TRIGGER_KINDS)[number];
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
-export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 10_000;
+export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 20_000;
 export const HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
 export const MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS =
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1;

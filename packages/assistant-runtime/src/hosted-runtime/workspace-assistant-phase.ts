@@ -33,6 +33,7 @@ import {
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+  AssistantActiveTurnInputUnavailableError,
   applyMurphManagedAutomations,
   getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
@@ -46,10 +47,11 @@ import {
   resolveAssistantCronDefaultTimeZoneProjection,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
-  type AssistantCronStatusOptions,
-  type AssistantAutomationTimingVerificationIssue,
-  type AssistantBeforeProviderAcceptedInputsHook,
+  type AssistantAutomationOccurrenceProjection,
+  type AssistantAutomationOccurrenceProjectionIssue,
   type AssistantAutomationOperationScope,
+  type AssistantBeforeProviderAcceptedInputsHook,
+  type AssistantCronStatusOptions,
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
@@ -74,7 +76,6 @@ import {
   AutomationAvailabilityConflictBlockError,
   patchAutomation,
   reconcileAutomationSupportSeries,
-  resolveAutomationUpsertSlug,
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
@@ -107,6 +108,7 @@ import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
 } from "./device-sync-snapshot-pagination.ts";
 import {
+  assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
@@ -141,6 +143,9 @@ import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
 } from "./device-sync-maintenance-import.ts";
+import {
+  HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
+} from "./device-sync-maintenance-limits.ts";
 import {
   buildHostedDeviceSyncStatusPrompt,
   type HostedDeviceSyncStatusPromptReconnectTarget,
@@ -217,6 +222,7 @@ import {
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import { assertNever } from "./utils.ts";
 
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
 const HOSTED_OUTBOX_DELIVERY_ERROR_LOG_LIMIT = 16;
@@ -313,9 +319,19 @@ const HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS = [
 ] as const;
 const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
+  "apply-member-action",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
+  "member.action.requested",
+] as const;
+const HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS = [
+  "apply-runtime-control-request",
+  "run-environment-interview",
+] as const;
+const HOSTED_ENVIRONMENT_INTERVIEW_WAKE_KINDS = [
+  "environment-interview.completed",
+  "runtime.browser-vault-refresh-requested",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS = [
   "dispatch-assistant-notification",
@@ -328,6 +344,7 @@ const HOSTED_PHONE_CALL_RESULT_MAILBOX_DEDUPE_KEY_PREFIX =
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   HOSTED_PHONE_CALL_RESULT_MAILBOX_DEDUPE_KEY_PREFIX,
   "assistant.notification.requested:usage-referral-reward:",
+  "assistant.notification.requested:group-context-handoff:",
   "aask_done_",
   "aask_private_",
 ] as const;
@@ -350,6 +367,10 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  runtimeIssueProvenance?: {
+    releaseSha: string | null;
+    runtimeName: string;
+  } | null;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
@@ -686,6 +707,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
+    case "handoff":
     case "record_current_sender_daily_metric":
     case "ask_member":
       return {
@@ -752,6 +774,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         },
       };
   }
+  return assertNever(request);
 }
 
 /**
@@ -946,6 +969,42 @@ function resolveHostedInitialLinqDeliveryContexts(
   return importResult.latestLinqDeliveryContext
     ? [importResult.latestLinqDeliveryContext]
     : [];
+}
+
+async function resolveHostedAssistantInputIdsTurnCommitLinqContexts(input: {
+  inputIds: readonly string[];
+  memberId: string;
+  vaultRoot: string;
+}): Promise<HostedAssistantLinqDeliveryContext[]> {
+  const contexts: HostedAssistantLinqDeliveryContext[] = [];
+  for (const inputId of input.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (!event) {
+      throw new AssistantActiveTurnInputUnavailableError(
+        "Accepted assistant input authority is temporarily unavailable.",
+      );
+    }
+    const sourceIsLinq = event.sourceMetadata?.kind === "linq"
+      || event.conversation?.source === "linq"
+      || event.replyTarget?.channel === "linq";
+    if (!sourceIsLinq) {
+      continue;
+    }
+    const context = readHostedAssistantInputLinqDeliveryContext({
+      event,
+      memberId: input.memberId,
+    });
+    if (!context) {
+      throw new AssistantActiveTurnInputUnavailableError(
+        "Accepted Linq input authority is temporarily unavailable.",
+      );
+    }
+    contexts.push(context);
+  }
+  return contexts;
 }
 
 function resolveHostedCurrentLinqDeliveryContexts(
@@ -1481,10 +1540,6 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
-        const requestedSlug = resolveAutomationUpsertSlug({
-          slug: request.slug,
-          title: request.title,
-        });
         const existingTarget = request.automationId
           ? await showAutomation({
               automationId: request.automationId,
@@ -1494,7 +1549,7 @@ function createHostedAssistantAutomationTool(input: {
         const targetsOnboardingFirstRead =
           request.automationId ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
-          || requestedSlug ===
+          || request.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
           || existingTarget?.slug ===
             MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG;
@@ -1690,7 +1745,7 @@ function stripHostedAssistantAvailabilityConflictBlock(
 
 function buildHostedAutomationTimingVerificationLogEntry(input: {
   action: "patch" | "save";
-  issues: readonly AssistantAutomationTimingVerificationIssue[];
+  issues: readonly AssistantAutomationOccurrenceProjectionIssue[];
   recovered: boolean;
   stage: "initial" | "readback";
 }): HostedExecutionRedactedLogEntry {
@@ -1784,9 +1839,11 @@ async function projectHostedAutomationResponseFields(input: {
       ? schedule.timeZone ?? null
       : null;
   let nextOccurrenceAt: string | null = null;
-  const timingVerificationIssues = new Set<
-    AssistantAutomationTimingVerificationIssue
+  const occurrenceProjectionIssues = new Set<
+    AssistantAutomationOccurrenceProjectionIssue
   >();
+  let occurrenceProjectionPending = false;
+  let occurrenceProjectionStale = false;
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1799,7 +1856,7 @@ async function projectHostedAutomationResponseFields(input: {
     ) {
       effectiveTimeZone = timeZoneProjection.timeZone;
       if (!timeZoneProjection.vaultTimeZoneVerified) {
-        timingVerificationIssues.add("default_timezone_unverified");
+        occurrenceProjectionIssues.add("default_timezone_unverified");
       }
     }
   }
@@ -1819,31 +1876,52 @@ async function projectHostedAutomationResponseFields(input: {
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        timingVerificationIssues.add(
-          projection.occurrenceUnverifiedReason ?? "projection_unavailable",
-        );
+        if (projection.occurrenceUnverifiedReason === "runtime_state_pending") {
+          occurrenceProjectionPending = true;
+        } else if (
+          projection.occurrenceUnverifiedReason === "stale_recurring_occurrence"
+        ) {
+          occurrenceProjectionStale = true;
+        } else {
+          occurrenceProjectionIssues.add("projection_unavailable");
+        }
       }
       if (
         job.updatedAt !== input.record.updatedAt
         || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
       ) {
-        timingVerificationIssues.add("record_readback_mismatch");
+        occurrenceProjectionIssues.add("record_readback_mismatch");
       }
     } catch {
-      timingVerificationIssues.add("projection_unavailable");
+      occurrenceProjectionIssues.add("projection_unavailable");
     }
   }
-  const timingVerificationIssueList = [...timingVerificationIssues];
+  if (occurrenceProjectionStale && occurrenceProjectionIssues.size === 0) {
+    occurrenceProjectionIssues.add("stale_recurring_occurrence");
+  }
+  const occurrenceProjectionIssueList = [...occurrenceProjectionIssues];
+  let occurrenceProjection: AssistantAutomationOccurrenceProjection;
+  if (occurrenceProjectionIssueList.length > 0) {
+    occurrenceProjection = {
+      issues: occurrenceProjectionIssueList,
+      status: "unavailable",
+    };
+  } else if (occurrenceProjectionPending) {
+    occurrenceProjection = { status: "pending" };
+  } else {
+    occurrenceProjection = {
+      nextOccurrenceAt,
+      status: "resolved",
+    };
+  }
   return {
     automationId: input.record.automationId,
     contextReferences: [...input.record.contextReferences],
     effectiveTimeZone,
     lookupId: input.record.slug,
-    nextOccurrenceAt,
+    occurrenceProjection,
     schedule,
     status: input.record.status,
-    timingVerificationIssues: timingVerificationIssueList,
-    timingVerified: timingVerificationIssueList.length === 0,
     updatedAt: input.record.updatedAt,
   };
 }
@@ -1870,13 +1948,13 @@ async function buildHostedAutomationToolResponse(
     created: input.result.created,
     routeBinding: input.routeBinding,
   };
-  if (response.timingVerified) {
+  if (response.occurrenceProjection.status !== "unavailable") {
     return response;
   }
   input.redactedLogEntries.push(
     buildHostedAutomationTimingVerificationLogEntry({
       action: input.action,
-      issues: response.timingVerificationIssues ?? [],
+      issues: response.occurrenceProjection.issues,
       recovered: false,
       stage: "initial",
     }),
@@ -1889,7 +1967,7 @@ async function buildHostedAutomationToolResponse(
       vaultRoot: input.vaultRoot,
     });
     if (!readbackRecord) {
-      readbackResponse = markHostedAutomationTimingUnverified(
+      readbackResponse = markHostedAutomationOccurrenceProjectionUnavailable(
         response,
         "record_readback_mismatch",
       );
@@ -1909,14 +1987,14 @@ async function buildHostedAutomationToolResponse(
         || JSON.stringify(readbackRecord.schedule)
           !== JSON.stringify(record.schedule);
       readbackResponse = recordChanged
-        ? markHostedAutomationTimingUnverified(
+        ? markHostedAutomationOccurrenceProjectionUnavailable(
             projectedReadback,
             "record_readback_mismatch",
           )
         : projectedReadback;
     }
   } catch {
-    readbackResponse = markHostedAutomationTimingUnverified(
+    readbackResponse = markHostedAutomationOccurrenceProjectionUnavailable(
       response,
       "projection_unavailable",
     );
@@ -1924,8 +2002,10 @@ async function buildHostedAutomationToolResponse(
   input.redactedLogEntries.push(
     buildHostedAutomationTimingVerificationLogEntry({
       action: input.action,
-      issues: readbackResponse.timingVerificationIssues ?? [],
-      recovered: readbackResponse.timingVerified,
+      issues: readbackResponse.occurrenceProjection.status === "unavailable"
+        ? readbackResponse.occurrenceProjection.issues
+        : [],
+      recovered: readbackResponse.occurrenceProjection.status !== "unavailable",
       stage: "readback",
     }),
   );
@@ -1937,18 +2017,19 @@ type HostedAssistantAutomationWriteResponse = Extract<
   { action: "patch" | "save" }
 >;
 
-function markHostedAutomationTimingUnverified(
+function markHostedAutomationOccurrenceProjectionUnavailable(
   response: HostedAssistantAutomationWriteResponse,
-  issue: AssistantAutomationTimingVerificationIssue,
+  issue: AssistantAutomationOccurrenceProjectionIssue,
 ): HostedAssistantAutomationWriteResponse {
+  const existingIssues = response.occurrenceProjection.status === "unavailable"
+    ? response.occurrenceProjection.issues
+    : [];
   return {
     ...response,
-    nextOccurrenceAt: null,
-    timingVerificationIssues: [...new Set([
-      ...(response.timingVerificationIssues ?? []),
-      issue,
-    ])],
-    timingVerified: false,
+    occurrenceProjection: {
+      issues: [...new Set([...existingIssues, issue])],
+      status: "unavailable",
+    },
   };
 }
 
@@ -1974,13 +2055,11 @@ export async function runHostedWorkspaceAssistantPhase(
   const recordDeferredUsage = (
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ): Promise<void> => {
+  ): Promise<void> =>
     input.recordDeferredUsage?.(
       record,
       providerRequestAcceptedInputIds,
-    );
-    return Promise.resolve();
-  };
+    ) ?? Promise.resolve();
   const usageRecorder =
     input.runtime.platform.usageRecordPort && input.recordDeferredUsage
       ? { recordUsage: recordDeferredUsage }
@@ -1991,6 +2070,9 @@ export async function runHostedWorkspaceAssistantPhase(
         executionContext: {
           hosted: {
             memberId: input.request.userId,
+            releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+            runtimeAttemptId: input.request.attemptId,
+            runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
             ...(usageRecorder ? { usageRecorder } : {}),
             userEnvKeys: Object.keys(input.runtime.userEnv),
           },
@@ -2048,6 +2130,23 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        async assertTurnCommitAuthority({ acceptedInputs }) {
+          const linqDeliveryContexts =
+            await resolveHostedAssistantInputIdsTurnCommitLinqContexts({
+              inputIds: acceptedInputs
+                .filter((acceptedInput) =>
+                  acceptedInput.source === "assistant-input"
+                )
+                .map((acceptedInput) => acceptedInput.id),
+              memberId: input.request.userId,
+              vaultRoot: input.restored.vaultRoot,
+            });
+          await assertHostedAssistantLinqTurnCommitAuthority({
+            effectsPort: input.runtime.platform.effectsPort,
+            linqDeliveryContexts,
+            signal: channelAbortController.signal,
+          });
+        },
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,
@@ -2157,6 +2256,9 @@ export async function runHostedWorkspaceAssistantPhase(
             }
           : {}),
         memberId: input.request.userId,
+        releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+        runtimeAttemptId: input.request.attemptId,
+        runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
         createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
           createHostedScheduledGroupTools({
             channel,
@@ -4432,6 +4534,15 @@ function isBrowserVaultReplicaRefreshSystemMailboxPreparation(
     && systemMailboxPreparation.item.wake.kind === "runtime.browser-vault-refresh-requested";
 }
 
+function isEnvironmentInterviewSystemMailboxPreparation(
+  systemMailboxPreparation: HostedSystemMailboxPreparation,
+): boolean {
+  return "item" in systemMailboxPreparation
+    && systemMailboxPreparation.status === "processed"
+    && systemMailboxPreparation.item.routeAction === "run-environment-interview"
+    && systemMailboxPreparation.item.wake.kind === "environment-interview.completed";
+}
+
 function mergeHostedDeviceSyncStagedDirtyAcks(
   ...groups: readonly (readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined)[]
 ): HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] {
@@ -4729,7 +4840,10 @@ function shouldRunIdleDeviceSyncMaintenance(input: {
   }
 
   const preparation = input.systemMailboxPreparation;
-  if (preparation?.status === "retryable_failed") {
+  if (
+    preparation?.status === "retryable_failed"
+    || (preparation && isCausalPendingEffectsReconciliation(preparation))
+  ) {
     return false;
   }
 
@@ -4768,7 +4882,7 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       signal: input.phaseInput.signal ?? null,
       skipDirtyPendingFetch: input.phaseInput.suppressDirtyPendingFetch ?? false,
       stagedDirtyAcks: input.phaseInput.stagedDirtyAcks ?? null,
-      timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
+      timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
       vaultRoot: input.phaseInput.restored.vaultRoot,
       wake: input.wake,
     });
@@ -5505,6 +5619,8 @@ async function runSystemMailboxMaintenancePhase(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   const phaseInput = input.input;
+  const environmentInterviewOnly =
+    phaseInput.request.processingMode === "environment_interview";
   const hasPendingAssistantInputWakeOverride = Object.hasOwn(
     input,
     "pendingAssistantInputWakeAt",
@@ -5548,10 +5664,14 @@ async function runSystemMailboxMaintenancePhase(input: {
       || phaseInput.foregroundCausalOnly === true
     )
       ? await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: phaseInput.foregroundCausalOnly === true
+          allowedRouteActions: environmentInterviewOnly
+            ? HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS
+            : phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS
             : HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
-          allowedWakeKinds: phaseInput.foregroundCausalOnly === true
+          allowedWakeKinds: environmentInterviewOnly
+            ? HOSTED_ENVIRONMENT_INTERVIEW_WAKE_KINDS
+            : phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS
             : HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS,
           ...(assistantAskCompletionOccurredBefore === undefined
@@ -5579,6 +5699,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   if (
     phaseInput.foregroundCausalOnly === true
+    && !environmentInterviewOnly
     && foregroundCausalPreparation === null
   ) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(
@@ -5616,6 +5737,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   if (
     phaseInput.foregroundCausalOnly === true
+    && !environmentInterviewOnly
     && foregroundCausalPreparation === null
     && pendingAssistantInputWakeAt === null
   ) {
@@ -6095,7 +6217,8 @@ async function runSystemMailboxMaintenancePhase(input: {
   const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
     || systemMailboxPreparation.status === "recording";
   const browserVaultReplicaRefreshRequested =
-    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
+    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation)
+    || isEnvironmentInterviewSystemMailboxPreparation(systemMailboxPreparation);
   const foregroundPrioritySystemCompletionProcessed =
     isForegroundPrioritySystemCompletionProcessed(systemMailboxPreparation);
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox
@@ -9167,14 +9290,10 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-type HostedAssistantDeviceTool = NonNullable<
-  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
->;
-
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): HostedAssistantDeviceTool | undefined {
+}): NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"] | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
   if (!deviceSyncPort) {
     return undefined;
@@ -9223,6 +9342,40 @@ function resolveHostedWorkspaceDeviceTool(input: {
           accountId: result.connectionId,
           action: request.action,
           occurredAt: result.occurredAt,
+          status: result.status,
+        };
+      }
+
+      if (request.action === "configure_no_data_outreach") {
+        if (
+          !deviceSyncPort.configureNoDataOutreach
+          || !context?.acceptedInputAuthority
+        ) {
+          throw new VaultCliError(
+            "device_no_data_outreach_unavailable",
+            "No-data outreach can only be changed from current private member input.",
+          );
+        }
+        const common = {
+          assistantInputId: context.acceptedInputAuthority.assistantInputId,
+          signal: context.signal ?? null,
+          sourceProviderSlug: request.sourceProvider,
+        };
+        const result = request.mode === "after_days"
+          ? await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              afterDays: request.afterDays,
+              mode: request.mode,
+            })
+          : await deviceSyncPort.configureNoDataOutreach({
+              ...common,
+              mode: request.mode,
+            });
+        return {
+          action: request.action,
+          effectiveAfterDays: result.effectiveAfterDays,
+          setting: result.setting,
+          sourceProvider: result.sourceProviderSlug,
           status: result.status,
         };
       }

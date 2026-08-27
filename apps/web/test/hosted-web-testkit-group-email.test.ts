@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => {
       return { id: "group_test" };
     }),
     ensureHostedWorkspace: vi.fn(),
-    findActiveHostedVaultShares: vi.fn(),
+    findActiveHostedVaultSharePage: vi.fn(),
     findWorkspace: vi.fn(async () => ({ version: 1n })),
     grantHostedVaultShareTx: vi.fn(async () => {}),
     observedAuthorizationCryptoEnvironments: [] as Array<string | undefined>,
@@ -44,6 +44,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   advanceHostedMailboxConsumedSeqByLane: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -67,7 +68,7 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
-  findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
+  findActiveHostedVaultSharePage: mocks.findActiveHostedVaultSharePage,
   replaceHostedVaultShareProjectionSnapshot:
     mocks.replaceHostedVaultShareProjectionSnapshot,
 }));

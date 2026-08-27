@@ -67,7 +67,10 @@ describe("database health monitor", () => {
   it("persists samples and sends no Linq page for healthy database metrics", async () => {
     const harness = createMonitorHarness();
 
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+    await expect(harness.runScheduledCheck(
+      FIVE_MINUTES_MS,
+      FIVE_MINUTES_MS + 15_000,
+    )).resolves.toEqual({
       conditions: [],
       outcome: "healthy",
       sampleStatus: "ok",
@@ -75,6 +78,7 @@ describe("database health monitor", () => {
 
     expect(harness.monitor.readRecentSamples()).toEqual([
       expect.objectContaining({
+        checkedAtMs: FIVE_MINUTES_MS + 15_000,
         clientWaitSeconds: 0,
         connectionErrorDelta: 0,
         observedAtMs: FIVE_MINUTES_MS,
@@ -947,6 +951,8 @@ describe("database health monitor", () => {
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
       .toMatchObject({ outcome: "alert_failed" });
     const pendingAlert = harness.monitor.readAlertState();
+    expect(pendingAlert.pendingAlertMessage)
+      .toContain("PlanetScale PgBouncer server pool");
     harness.restartMonitor();
     expect(harness.monitor.readAlertState()).toMatchObject({
       pendingAlertIdempotencyKey: pendingAlert.pendingAlertIdempotencyKey,
@@ -4647,7 +4653,7 @@ function createMonitorHarness(input: {
         && query.trimStart().startsWith(
           "INSERT INTO database_health_samples",
         )
-        && query.includes("VALUES (?, 'ok'")
+        && query.includes("VALUES (?, ?, 'ok'")
       ) {
         failBeforeSuccessfulSamplePersist = false;
         throw new Error("Injected successful sample persistence failure.");

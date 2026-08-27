@@ -32,6 +32,7 @@ import {
 import {
   normalizeMetricSlug,
 } from './measurement.js'
+import { readExactEventRecord } from './exact-event-record.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_MEASUREMENT_EVENT_KINDS = ['measurement', 'body_measurement'] as const
@@ -111,25 +112,13 @@ async function resolveManifestFile(
   return resolveRawImportManifestFile(vault, directories[0]!)
 }
 
-async function loadTrackedMeasurementRecord(
-  vault: string,
-  lookup: string,
-  allowedKinds: readonly TrackedMeasurementEventKind[],
-  label: string,
-): Promise<QueryRecord> {
-  const query = await loadQueryRuntime(`${label} query reads`)
-  const readModel = await query.readVault(vault)
-  const record = query.lookupEntityById(readModel, lookup)
-
-  if (!record || record.family !== 'event' || !allowedKinds.includes(record.kind as TrackedMeasurementEventKind)) {
-    throw new VaultCliError('not_found', `No ${label} found for "${lookup}".`)
-  }
-
-  return record
-}
-
 export async function showMeasurementRecord(vault: string, lookup: string) {
-  const record = await loadTrackedMeasurementRecord(vault, lookup, TRACKED_MEASUREMENT_EVENT_KINDS, 'measurement')
+  const { record } = await readExactEventRecord({
+    vault,
+    lookup,
+    entityLabel: 'measurement',
+    expectedKinds: TRACKED_MEASUREMENT_EVENT_KINDS,
+  })
 
   return {
     vault,
@@ -305,7 +294,12 @@ export async function listMeasurementEntries(input: {
 }
 
 export async function showMeasurementManifest(vault: string, lookup: string) {
-  const record = await loadTrackedMeasurementRecord(vault, lookup, TRACKED_MEASUREMENT_EVENT_KINDS, 'measurement')
+  const { record } = await readExactEventRecord({
+    vault,
+    lookup,
+    entityLabel: 'measurement',
+    expectedKinds: TRACKED_MEASUREMENT_EVENT_KINDS,
+  })
   const manifestFile = await resolveManifestFile(vault, record)
   const manifest = await readRawImportManifest(vault, manifestFile)
 

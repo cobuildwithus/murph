@@ -344,10 +344,17 @@ type HealthCommonsProtocolActivationRecord = {
     }
   }
 }
+type HealthCommonsProtocolArtifactFailure = {
+  artifact: 'protocol_family_graph' | 'protocol_index' | 'protocol_run_specs'
+  category: 'invalid' | 'unavailable'
+}
 type HealthCommonsProtocolActivationRuntime = {
   getGeneratedHealthCommonsProtocolRunSpecReader(): {
     findByLookup(lookup: string): HealthCommonsProtocolActivationRecord | null
   }
+  isHealthCommonsProtocolArtifactError(
+    error: unknown,
+  ): error is HealthCommonsProtocolArtifactFailure
 }
 
 const healthCommonsSafetyDispositionRank: Record<
@@ -1188,7 +1195,6 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       throw new VaultCliError(
         'invalid_payload',
         'Experiment plan does not produce valid experiment frontmatter.',
-        { errors: preflight.errors },
       )
     }
 
@@ -1230,6 +1236,22 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
         updated: true as const,
       },
     }
+  }).catch((error: unknown) => {
+    throw toVaultCliError(error, {
+      VAULT_EXPERIMENT_CONFLICT: {
+        code: 'conflict',
+        message: 'An experiment with this slug already exists with different plan data.',
+        preserveDetails: false,
+        details: {
+          issues: [{
+            code: 'custom',
+            publicPath: ['experiment', 'slug'],
+          }],
+          retryable: false,
+          stage: 'write',
+        },
+      },
+    })
   })
 }
 
@@ -2650,8 +2672,20 @@ export async function listJournalRecords(input: {
 }
 
 export async function showVaultSummary(vault: string) {
-  const readModel = await readExperimentJournalVault(vault)
-  const metadata = readModel.metadata
+  const query = await loadExperimentJournalVaultQueryRuntime()
+  let metadata: Record<string, unknown> | null
+  let coreDocument: QueryCanonicalEntity | null
+
+  try {
+    const [metadataSource, coreEntities] = await Promise.all([
+      query.readVaultMetadataSource(vault),
+      query.readCanonicalEntityFamilySource(vault, 'core'),
+    ])
+    metadata = metadataSource
+    coreDocument = coreEntities[0] ?? null
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
 
   return {
     vault,
@@ -2660,9 +2694,9 @@ export async function showVaultSummary(vault: string) {
     title: stringOrNull(metadata?.title),
     timezone: stringOrNull(metadata?.timezone),
     createdAt: normalizeIsoTimestamp(stringOrNull(metadata?.createdAt)),
-    corePath: readModel.coreDocument?.path ?? null,
-    coreTitle: readModel.coreDocument?.title ?? null,
-    coreUpdatedAt: normalizeIsoTimestamp(readModel.coreDocument?.occurredAt),
+    corePath: coreDocument?.path ?? null,
+    coreTitle: coreDocument?.title ?? null,
+    coreUpdatedAt: normalizeIsoTimestamp(coreDocument?.occurredAt),
   }
 }
 
@@ -2822,10 +2856,15 @@ async function requireEntityFamily(
   family: EntityFamily,
 ) {
   const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await readExperimentJournalVault(vault)
-  const entity = query.lookupEntityById(readModel, lookup)
+  let entity: QueryCanonicalEntity | null
 
-  if (!entity || entity.family !== family) {
+  try {
+    entity = await query.resolveCanonicalEntityInFamily(vault, family, lookup)
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
+
+  if (!entity) {
     throw new VaultCliError('not_found', `No ${family} found for "${lookup}".`, {
       family,
       lookup,

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -2064,9 +2064,32 @@ async function prepareIsolatedDockerConfig(input: {
   sourceEnv: NodeJS.ProcessEnv;
 }): Promise<void> {
   await mkdir(input.configDir, { mode: 0o700, recursive: true });
+  const context = await resolveIsolatedDockerContext({
+    sourceEnv: input.sourceEnv,
+    targetConfigDir: input.configDir,
+  });
+  if (context !== null) {
+    await copyIsolatedDockerContextDirectory({
+      contextId: context.id,
+      kind: "meta",
+      required: true,
+      sourceConfigDir: context.sourceConfigDir,
+      targetConfigDir: input.configDir,
+    });
+    await copyIsolatedDockerContextDirectory({
+      contextId: context.id,
+      kind: "tls",
+      required: false,
+      sourceConfigDir: context.sourceConfigDir,
+      targetConfigDir: input.configDir,
+    });
+  }
   await writeFile(
     path.join(input.configDir, "config.json"),
-    '{"auths":{}}\n',
+    `${JSON.stringify({
+      auths: {},
+      ...(context !== null ? { currentContext: context.name } : {}),
+    })}\n`,
     {
       encoding: "utf8",
       mode: 0o600,
@@ -2076,6 +2099,86 @@ async function prepareIsolatedDockerConfig(input: {
     targetConfigDir: input.configDir,
     sourceEnv: input.sourceEnv,
   });
+}
+
+async function resolveIsolatedDockerContext(input: {
+  sourceEnv: NodeJS.ProcessEnv;
+  targetConfigDir: string;
+}): Promise<{
+  id: string;
+  name: string;
+  sourceConfigDir: string;
+} | null> {
+  const configuredSourceDir = input.sourceEnv.DOCKER_CONFIG?.trim();
+  const defaultSourceDir = path.join(os.homedir(), ".docker");
+  const sourceConfigDir = path.resolve(
+    configuredSourceDir
+      && path.resolve(configuredSourceDir) !== path.resolve(input.targetConfigDir)
+      ? configuredSourceDir
+      : defaultSourceDir,
+  );
+  const sourceConfigText = await readOptionalTextFile(
+    path.join(sourceConfigDir, "config.json"),
+  );
+  let storedCurrentContext: unknown;
+  if (sourceConfigText !== null) {
+    try {
+      const sourceConfig: unknown = JSON.parse(sourceConfigText);
+      if (isRecord(sourceConfig)) {
+        storedCurrentContext = sourceConfig.currentContext;
+      }
+    } catch {
+      storedCurrentContext = undefined;
+    }
+  }
+  const currentContext = input.sourceEnv.DOCKER_CONTEXT?.trim()
+    || storedCurrentContext;
+  if (
+    typeof currentContext !== "string"
+    || currentContext.trim().length === 0
+    || currentContext === "default"
+  ) {
+    return null;
+  }
+
+  return {
+    id: createHash("sha256").update(currentContext).digest("hex"),
+    name: currentContext,
+    sourceConfigDir,
+  };
+}
+
+async function copyIsolatedDockerContextDirectory(input: {
+  contextId: string;
+  kind: "meta" | "tls";
+  required: boolean;
+  sourceConfigDir: string;
+  targetConfigDir: string;
+}): Promise<void> {
+  const sourceDir = path.join(
+    input.sourceConfigDir,
+    "contexts",
+    input.kind,
+    input.contextId,
+  );
+  const targetDir = path.join(
+    input.targetConfigDir,
+    "contexts",
+    input.kind,
+    input.contextId,
+  );
+  await mkdir(path.dirname(targetDir), { mode: 0o700, recursive: true });
+  try {
+    await cp(sourceDir, targetDir, { recursive: true });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      if (input.required) {
+        throw new Error("Selected Docker context metadata is unavailable.");
+      }
+      return;
+    }
+    throw error;
+  }
 }
 
 async function symlinkDockerCliPluginsIfPresent(input: {
@@ -2115,13 +2218,20 @@ async function findDockerCliPluginSourceDir(input: {
   return null;
 }
 
-function resolveDockerCliPluginSourceDirs(env: NodeJS.ProcessEnv): string[] {
+export function resolveDockerCliPluginSourceDirs(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  homeDir: string = os.homedir(),
+): string[] {
   const dockerConfig = env.DOCKER_CONFIG?.trim();
   const candidates = [
     ...(dockerConfig ? [path.join(dockerConfig, "cli-plugins")] : []),
-    path.join(os.homedir(), ".docker", "cli-plugins"),
-    ...(process.platform === "darwin"
-      ? ["/Applications/Docker.app/Contents/Resources/cli-plugins"]
+    path.join(homeDir, ".docker", "cli-plugins"),
+    ...(platform === "darwin"
+      ? [
+        "/Applications/Docker.app/Contents/Resources/cli-plugins",
+        "/opt/homebrew/lib/docker/cli-plugins",
+      ]
       : []),
     "/usr/local/lib/docker/cli-plugins",
     "/usr/libexec/docker/cli-plugins",
@@ -2255,7 +2365,6 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "CODEX_MANAGED_BY_NPM",
   "CODEX_THREAD_ID",
   "DEEPSEEK_API_KEY",
-  "GEMINI_API_KEY",
   "GOOGLE_AI_API_KEY",
   "GOOGLE_API_KEY",
   // Harness-derived only; inherited shell/env-file values are never trusted.

@@ -47,7 +47,7 @@ Four facts remain separate:
    the one nullable encrypted projection snapshot on each existing
    `HostedVaultShare` row. An active grant authorizes only its exact canonical
    scope; it does not prove that data is available.
-3. `murph.group action="read_shared"` is the only hosted assistant read for
+3. `murph.group_data action="read_shared"` is the only ordinary hosted assistant read for
    shared group facts. Web captures the current roster and exact active grants,
    decrypts the bounded snapshots owned by those rows, and returns the complete
    consent/data matrix. No shared copy is landed in a member or group workspace.
@@ -401,10 +401,13 @@ inside the current send attempt adds `offeredAt` evidence. This matches Linq's
 accepted whole-second timestamp precision. An idempotent replay
 retains its original provider time, is still durably bound, and returns
 unavailable recency evidence instead of claiming a new adjacent message or
-minting a fresh window. When Web finds a covering active native offer instead
-of posting another card, assistant-engine exposes the returned first-party URL
-as `presentation="link"` so the model never claims another native message
-appeared. Standalone and scheduled links use the same presentation. Murph
+minting a fresh window. An explicit current-message repost resends the locked
+current permission snapshot; it never changes the challenge's requested scope.
+Absent such a repost request, when Web finds a covering active native offer
+instead of posting another card,
+assistant-engine exposes the returned first-party URL as `presentation="link"`
+so the model never claims another native message appeared. Standalone and
+scheduled links use the same presentation. Murph
 includes a returned `joinUrl` once in the substantive response, but link
 delivery has no canonical presentation receipt and therefore returns
 unavailable recency evidence. Neither presentation proves acceptance.
@@ -474,6 +477,19 @@ This is a consumer-first hard cut:
 3. Verify complete member/scope matrices, empty-snapshot behavior, stale-writer
    rejection, revoke/regrant clearing, device privacy, and the challenge output
    against the deployed route.
+
+The destination-cardinality extension is also consumer first. Deploy the
+Cloudflare continuation consumer before Web can emit a delivery
+`continuation`. Then apply the nullable
+`HostedVaultShare.projectionSourceWorkspaceVersion` column and active
+grantor/scope/destination cursor index before deploying Web's paged producer
+and removing grant admission by destination count. Each Web request remains
+bounded to 25 sequential replacements; successful rows persist the exact
+source version so a retry without a cursor advances unfinished work, while a
+new checkpoint makes those markers stale. Revoke, regrant, and generation
+backfill clear the marker. After any exact scope admits more than 25 active
+destinations, the older capped Web producer is no longer a safe rollback
+target; forward-fix the producer and verify a later page instead.
 
 Once Web can write the encrypted snapshot column or serve `read_shared`, the
 new Cloudflare consumer is the hard rollback floor. Do not roll Cloudflare back

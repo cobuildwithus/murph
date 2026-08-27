@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
+  resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   hostedOnboardingError,
@@ -26,6 +27,9 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import {
+  isHostedSourceDeliveryStallEpisodeCurrentTx,
+} from "@/src/lib/device-sync/source-delivery-stall-episode";
 import type {
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
@@ -135,6 +139,46 @@ export const POST = withJsonError(async (request: Request) => {
         message: "Hosted Linq send-time route authority changed before provider entry.",
         retryable: false,
       });
+    }
+
+    const sourceEpisode = await isHostedSourceDeliveryStallEpisodeCurrentTx({
+      deliveryIdempotencyKey: idempotencyKey,
+      memberId: userId,
+      now: new Date().toISOString(),
+      tx,
+    });
+    if (sourceEpisode === "superseded") {
+      throw hostedOnboardingError({
+        code: "HOSTED_DEVICE_DELIVERY_STALL_EPISODE_SUPERSEDED",
+        httpStatus: 409,
+        message: "The queued wearable recovery check is no longer current.",
+        retryable: false,
+      });
+    }
+
+    if (
+      finalAuthority.sourceEventId
+      && finalAuthority.resolvedRoute.targetKind === "thread"
+      && finalAuthority.resolvedRoute.threadIsDirect
+    ) {
+      const instantFirstTurn =
+        await resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+          eventId: finalAuthority.sourceEventId,
+          linqChatId: finalAuthority.resolvedRoute.target,
+          prisma: tx,
+        });
+      if (instantFirstTurn !== "available") {
+        throw hostedOnboardingError({
+          code: instantFirstTurn === "already_answered"
+            ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
+            : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
+          httpStatus: instantFirstTurn === "already_answered" ? 409 : 503,
+          message: instantFirstTurn === "already_answered"
+            ? "The exact inbound already has a Web-owned reply."
+            : "The exact inbound remains owned by its Web reply.",
+          retryable: instantFirstTurn !== "already_answered",
+        });
+      }
     }
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({

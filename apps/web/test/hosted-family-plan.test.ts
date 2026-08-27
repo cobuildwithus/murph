@@ -51,6 +51,9 @@ const activationWakeMocks = vi.hoisted(() => ({
 const groupJoinConfirmationMocks = vi.hoisted(() => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
 }));
+const signupNotificationMocks = vi.hoisted(() => ({
+  scheduleHostedSignupNotificationEmails: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
   decryptHostedWebNullableFields: encryptionMocks.decryptHostedWebNullableFields,
@@ -96,6 +99,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     groupJoinConfirmationMocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  scheduleHostedSignupNotificationEmails:
+    signupNotificationMocks.scheduleHostedSignupNotificationEmails,
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
@@ -4123,6 +4130,19 @@ describe("hosted Family plan", () => {
         source: "family-invite-web-accept",
         timeoutMs: 5_000,
       });
+    expect(signupNotificationMocks.scheduleHostedSignupNotificationEmails)
+      .toHaveBeenCalledWith({
+        activationSurface: "website",
+        memberIds: ["member_mom"],
+        prisma,
+      });
+    expect(
+      signupNotificationMocks.scheduleHostedSignupNotificationEmails.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+        .mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
       prisma,
       userId: "member_mom",
@@ -4133,6 +4153,52 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledWith(
       expect.objectContaining({
         preparedCryptoDomainRoots,
+      }),
+    );
+  });
+
+  it("keeps established-member Family access recoverable when its first signal fails", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    activationMocks.activateHostedMemberForFamilySponsorshipTx.mockResolvedValueOnce({
+      activated: false,
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
+      memberId: "member_mom",
+    });
+    activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+      .mockResolvedValueOnce({
+        accepted: false,
+        configured: true,
+        errorCode: "TEMPORAL_SIGNAL_FAILED",
+        mailboxItemIdPresent: true,
+        signalAccepted: false,
+        workflowIdPresent: true,
+      });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ memberId: "member_mom" });
+
+    expect(
+      activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    ).toHaveBeenCalledWith({
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      mailboxItemId: "mailbox_access_restored",
+      memberId: "member_mom",
+      prisma,
+      source: "family-invite-web-accept",
+      timeoutMs: 5_000,
+    });
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        accessRestorationSourceEventId: "family-invite:hbagi_invite",
       }),
     );
   });
@@ -4262,6 +4328,9 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
     expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      signupNotificationMocks.scheduleHostedSignupNotificationEmails,
+    ).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -5766,6 +5835,36 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("commits handoffs for every sponsored runtime when Family billing restores access", async () => {
+    const tx = createTxMock({
+      group: {
+        billingStatus: HostedBillingStatus.unpaid,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-08-22T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toMatchObject({
+      accessRestoredMemberIds: ["member_owner", "member_mom"],
+      groupId: "hbag_family",
+      runtimeRecheckMemberIds: [],
+    });
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledTimes(2);
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls
+        .every(([input]) => input.accessRestorationSourceEventId
+          === "family-subscription:sub_family:2026-08-22T12:30:00.000Z"),
+    ).toBe(true);
+  });
+
   it("prepares at most six Family members sequentially before reconciliation", async () => {
     const tx = createTxMock();
     const memberships = Array.from(
@@ -6066,7 +6165,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("replays the exact active Family owner wake after the direct binding is cleared", async () => {
+  it("replays the exact active Family owner handoff after the direct binding is cleared", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
     const billingRef = createBillingRefMock({
@@ -6081,12 +6180,19 @@ describe("hosted Family plan", () => {
       subscription: makeFamilyStripeSubscription(),
       tx,
     })).resolves.toMatchObject({
+      activations: [{ memberId: "member_owner" }],
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner"],
+      runtimeRecheckMemberIds: [],
     });
 
     expect(tx.hostedMember.update).not.toHaveBeenCalled();
     expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        accessRestorationSourceEventId:
+          "family-subscription:sub_family:2026-07-15T12:30:00.000Z",
+        memberId: "member_owner",
+      }));
   });
 
   it("replays the current active Family owner wake after a newer event", async () => {
@@ -6096,7 +6202,10 @@ describe("hosted Family plan", () => {
       lastStripeEventCreatedAt: new Date("2026-07-15T12:31:00.000Z"),
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
-    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([]);
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner" },
+      { memberId: "member_mom" },
+    ]);
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(null);
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
@@ -6105,7 +6214,7 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toMatchObject({
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner"],
+      runtimeRecheckMemberIds: ["member_owner", "member_mom"],
     });
 
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
@@ -9470,6 +9579,7 @@ describe("hosted Family plan", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -9510,6 +9620,7 @@ describe("hosted Family plan", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 

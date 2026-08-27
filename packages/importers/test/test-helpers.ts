@@ -22,6 +22,7 @@ export async function createTempFile(
 export interface CorePortSpyCalls {
   documents: DocumentImportPayload[];
   meals: MealImportPayload[];
+  sampleValidations: SampleImportPayload[];
   samples: SampleImportPayload[];
 }
 
@@ -29,6 +30,7 @@ export function createCorePortSpy() {
   const calls: CorePortSpyCalls = {
     documents: [],
     meals: [],
+    sampleValidations: [],
     samples: [],
   };
 
@@ -42,6 +44,9 @@ export function createCorePortSpy() {
       async addMeal(payload: MealImportPayload) {
         calls.meals.push(payload);
         return { ok: true, kind: "meal" as const };
+      },
+      async validateSampleImport(payload: SampleImportPayload) {
+        calls.sampleValidations.push(payload);
       },
       async importSamples(payload: SampleImportPayload) {
         calls.samples.push(payload);

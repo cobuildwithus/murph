@@ -1,6 +1,10 @@
 import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
+  projectHostedRuntimeReconciliationFactsWireResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -38,9 +42,15 @@ export const GET = withJsonError(async (
     userId: routeUserId,
   });
 
-  return jsonOk(
-    await readHostedRuntimeReconciliationFactsWithVisibleAccess(factsRequest),
+  const facts = await readHostedRuntimeReconciliationFactsWithVisibleAccess(
+    factsRequest,
   );
+
+  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(
+    facts,
+    new URL(request.url).search
+      === HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
+  ));
 });
 
 function assertHostedOrchestrationUserMatches(input: {

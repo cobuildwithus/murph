@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +9,17 @@ const workflowUrl = new URL(
   "../.github/workflows/host-support.yml",
   import.meta.url,
 );
+const vaultCliBundleRelativePath = path.join(
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+  "node_modules",
+  "@murphai",
+  "murph",
+  ".bundle",
+);
+const minimumGrowthAllowanceBytes = 96 * 1024;
 
 function extractJob(source, jobName) {
   const lines = source.split("\n");
@@ -32,9 +44,9 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
 
   requireText(
     source,
-    "missing-unfiltered-pull-request-trigger",
-    "on:\n  pull_request:\n  push:\n    branches:\n      - main\n",
-    "The host-support workflow must run for every pull request and main push.",
+    "missing-ready-only-pull-request-trigger",
+    "on:\n  pull_request:\n    types: [opened, reopened, ready_for_review]\n  push:\n    branches:\n      - main\n",
+    "The host-support workflow must run for ready pull request candidates and main pushes.",
   );
   if (source.includes("pull_request_target")) {
     issues.push({
@@ -61,6 +73,18 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     );
     requireText(
       budgetJob,
+      "missing-budget-needs",
+      "needs: markdown-docs-scope",
+      "The bundle budget must retain its documentation-scope dependency.",
+    );
+    requireText(
+      budgetJob,
+      "missing-budget-if",
+      "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}",
+      "The bundle budget must retain the Markdown-only fast-path contract.",
+    );
+    requireText(
+      budgetJob,
       "wrong-budget-platform",
       "runs-on: ubuntu-24.04",
       "The authoritative runner-bundle budget must run on deployment Linux.",
@@ -79,77 +103,99 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     );
     requireText(
       budgetJob,
-      "missing-exact-merge-ref",
-      "ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}",
-      "Pull requests must measure the exact head merged onto the current base candidate.",
+      "missing-exact-candidate-ref",
+      "ref: ${{ github.sha }}",
+      "The checkout must use GitHub's exact event candidate SHA.",
     );
     requireText(
       budgetJob,
-      "missing-merge-parent-history",
+      "missing-candidate-path",
+      "path: candidate",
+      "The exact candidate must use an isolated checkout path.",
+    );
+    requireText(
+      budgetJob,
+      "missing-parent-depth",
       "fetch-depth: 2",
-      "The checkout must include both merge parents for exact-head validation.",
+      "The candidate checkout must include its first parent for direct proof.",
+    );
+    requireText(
+      budgetJob,
+      "missing-candidate-proof",
+      'test "$candidate_sha" = "$EXPECTED_CANDIDATE_SHA"',
+      "The workflow must prove the checked-out candidate matches GitHub event data.",
+    );
+    requireText(
+      budgetJob,
+      "missing-first-parent-proof",
+      'base_sha="$(git -C candidate rev-parse HEAD^1)"',
+      "The workflow must derive the exact first parent directly from the candidate.",
+    );
+    if (
+      budgetJob.includes("EXPECTED_PR_BASE_SHA") ||
+      budgetJob.includes("github.event.pull_request.base.sha")
+    ) {
+      issues.push({
+        code: "stale-event-base-comparison",
+        message:
+          "The exact candidate's first parent must own the bundle baseline; the pull-request event base can lag GitHub's candidate merge commit.",
+      });
+    }
+    requireText(
+      budgetJob,
+      "missing-base-checkout",
+      "ref: ${{ steps.revisions.outputs.base_sha }}",
+      "The base checkout must use the candidate's proven first parent.",
+    );
+    requireText(
+      budgetJob,
+      "missing-base-path",
+      "path: base",
+      "The exact first parent must use an isolated sibling checkout path.",
     );
     requireText(
       budgetJob,
       "checkout-persists-credentials",
       "persist-credentials: false",
-      "The bundle-budget checkout must not persist repository credentials.",
+      "The bundle-budget checkouts must not persist repository credentials.",
     );
     requireText(
       budgetJob,
-      "missing-live-base-read",
-      'git ls-remote --exit-code --refs origin "refs/heads/${PR_BASE_REF}"',
-      "The job must read the base branch directly from origin instead of a stale local ref.",
+      "missing-base-frozen-install",
+      "working-directory: base\n        run: pnpm install --frozen-lockfile",
+      "The base must install from its own frozen lockfile.",
     );
     requireText(
       budgetJob,
-      "missing-exact-head-parent-proof",
-      'candidate_head="$(git rev-parse HEAD^2)"',
-      "The merge candidate must prove its second parent is the event's exact PR head.",
+      "missing-candidate-frozen-install",
+      "working-directory: candidate\n        run: pnpm install --frozen-lockfile",
+      "The candidate must install from its own frozen lockfile.",
     );
     requireText(
       budgetJob,
-      "missing-current-base-parent-proof",
-      'candidate_base="$(git rev-parse HEAD^1)"',
-      "The merge candidate must prove its first parent is the live base branch.",
+      "missing-base-production-assembly",
+      "working-directory: base\n        run: pnpm --dir apps/cloudflare runner:bundle\n",
+      "The base must assemble the full production runner artifact.",
     );
     requireText(
       budgetJob,
-      "missing-head-comparison",
-      '[[ "$candidate_head" == "$PR_HEAD_SHA" ]]',
-      "The exact PR head comparison is missing.",
+      "missing-candidate-production-assembly",
+      "working-directory: candidate\n        run: pnpm --dir apps/cloudflare runner:bundle\n",
+      "The candidate must assemble the full production runner artifact.",
     );
     requireText(
       budgetJob,
-      "missing-base-comparison",
-      '[[ "$candidate_base" == "$current_base" ]]',
-      "The current-base comparison is missing.",
-    );
-    requireText(
-      budgetJob,
-      "missing-base-output",
-      'echo "base_sha=${current_base}" >> "$GITHUB_OUTPUT"',
-      "The measured base must be bound to the post-assembly freshness check.",
-    );
-    requireText(
-      budgetJob,
-      "missing-post-assembly-base-check",
-      '[[ "$current_base" == "$MEASURED_BASE_SHA" ]]',
-      "The job must fail when main moves while the bundle is being measured.",
-    );
-    requireText(
-      budgetJob,
-      "missing-frozen-install",
-      "pnpm install --frozen-lockfile",
-      "The deployment closure must be installed from the locked dependency graph.",
-    );
-    requireText(
-      budgetJob,
-      "missing-production-assembly",
-      "run: pnpm --dir apps/cloudflare runner:bundle\n",
-      "The job must assemble the full production runner artifact.",
+      "missing-relative-comparison",
+      "node candidate/scripts/check-runner-bundle-budget-ci.mjs compare base candidate",
+      "The existing CI owner must compare exact base and candidate bundle output.",
     );
 
+    if (budgetJob.includes("git worktree") || budgetJob.includes("git clone")) {
+      issues.push({
+        code: "manual-git-isolation",
+        message: "Use pinned checkout action paths instead of raw Git worktree or clone isolation.",
+      });
+    }
     if (budgetJob.includes("runner:bundle:assemble-only")) {
       issues.push({
         code: "non-production-assembly",
@@ -181,10 +227,130 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     aggregateJob,
     "missing-aggregate-result-check",
     '${{ needs.production-runner-bundle-budget-linux.result }}',
-    "The release aggregate must fail when the bundle budget job is skipped or unsuccessful.",
+    "The release aggregate must inspect the bundle result so full proof requires success and docs proof requires a skip.",
   );
 
   return issues;
+}
+
+export function resolveRunnerBundleGrowthAllowance(baseBytes) {
+  if (!Number.isSafeInteger(baseBytes) || baseBytes < 0) {
+    throw new Error("Runner bundle base bytes must be a non-negative safe integer.");
+  }
+  return Math.max(minimumGrowthAllowanceBytes, Math.floor(baseBytes / 100));
+}
+
+function validateRunnerBundleMeasurement(measurement, label) {
+  if (
+    !measurement ||
+    !Number.isSafeInteger(measurement.totalBytes) ||
+    measurement.totalBytes < 0 ||
+    !Array.isArray(measurement.outputs) ||
+    measurement.outputs.length === 0 ||
+    measurement.outputs.some(
+      (output) =>
+        !output ||
+        typeof output.path !== "string" ||
+        output.path.length === 0 ||
+        !Number.isSafeInteger(output.bytes) ||
+        output.bytes < 0,
+    )
+  ) {
+    throw new Error(`Missing or malformed ${label} runner bundle measurement.`);
+  }
+
+  const measuredTotal = measurement.outputs.reduce(
+    (sum, output) => sum + output.bytes,
+    0,
+  );
+  if (measuredTotal !== measurement.totalBytes) {
+    throw new Error(`Missing or malformed ${label} runner bundle measurement.`);
+  }
+  return measurement;
+}
+
+export function compareRunnerBundleMeasurements(baseMeasurement, candidateMeasurement) {
+  const base = validateRunnerBundleMeasurement(baseMeasurement, "base");
+  const candidate = validateRunnerBundleMeasurement(candidateMeasurement, "candidate");
+  const allowanceBytes = resolveRunnerBundleGrowthAllowance(base.totalBytes);
+  const deltaBytes = candidate.totalBytes - base.totalBytes;
+  const excessBytes = Math.max(0, deltaBytes - allowanceBytes);
+
+  return {
+    allowanceBytes,
+    baseBytes: base.totalBytes,
+    candidateBytes: candidate.totalBytes,
+    deltaBytes,
+    excessBytes,
+    passed: excessBytes === 0,
+  };
+}
+
+export async function measureRunnerBundleOutput(repoRoot) {
+  const bundleRoot = path.join(repoRoot, vaultCliBundleRelativePath);
+  let entries;
+  try {
+    entries = await readdir(bundleRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      throw new Error(`Missing runner bundle measurement at ${bundleRoot}.`);
+    }
+    throw error;
+  }
+
+  const outputs = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const outputPath = path.join(bundleRoot, entry.name);
+    const outputStat = await stat(outputPath);
+    outputs.push({ bytes: outputStat.size, path: entry.name });
+  }
+  outputs.sort((left, right) => right.bytes - left.bytes || left.path.localeCompare(right.path));
+
+  return validateRunnerBundleMeasurement(
+    {
+      outputs,
+      totalBytes: outputs.reduce((sum, output) => sum + output.bytes, 0),
+    },
+    path.basename(repoRoot),
+  );
+}
+
+function formatSignedBytes(bytes) {
+  return `${bytes >= 0 ? "+" : ""}${bytes}B`;
+}
+
+export function formatRunnerBundleGrowthDiagnostics(result, candidateMeasurement) {
+  const lines = [
+    `base bytes: ${result.baseBytes}B`,
+    `candidate bytes: ${result.candidateBytes}B`,
+    `delta: ${formatSignedBytes(result.deltaBytes)}`,
+    `allowance: ${result.allowanceBytes}B`,
+    `excess: ${result.excessBytes}B`,
+  ];
+  if (!result.passed) {
+    lines.push(
+      "largest candidate outputs:",
+      ...candidateMeasurement.outputs
+        .slice(0, 10)
+        .map((output) => `  ${output.bytes}B ${output.path}`),
+    );
+  }
+  return lines.join("\n");
+}
+
+export async function compareRunnerBundleCheckouts(baseRoot, candidateRoot) {
+  const [base, candidate] = await Promise.all([
+    measureRunnerBundleOutput(baseRoot),
+    measureRunnerBundleOutput(candidateRoot),
+  ]);
+  const result = compareRunnerBundleMeasurements(base, candidate);
+  const diagnostics = formatRunnerBundleGrowthDiagnostics(result, candidate);
+
+  if (!result.passed) {
+    throw new Error(`vault-cli total output growth exceeds the relative CI allowance.\n${diagnostics}`);
+  }
+  process.stdout.write(`Runner bundle total output comparison passed.\n${diagnostics}\n`);
 }
 
 export async function checkRunnerBundleBudgetWorkflow() {
@@ -193,6 +359,16 @@ export async function checkRunnerBundleBudgetWorkflow() {
 }
 
 async function main() {
+  if (process.argv[2] === "compare") {
+    if (!process.argv[3] || !process.argv[4] || process.argv[5]) {
+      throw new Error(
+        "Usage: check-runner-bundle-budget-ci.mjs compare <base-checkout> <candidate-checkout>",
+      );
+    }
+    await compareRunnerBundleCheckouts(process.argv[3], process.argv[4]);
+    return;
+  }
+
   const issues = await checkRunnerBundleBudgetWorkflow();
   if (issues.length === 0) {
     process.stdout.write("Runner bundle budget CI contract is valid.\n");
@@ -206,5 +382,10 @@ async function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
 }

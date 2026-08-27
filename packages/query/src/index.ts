@@ -36,6 +36,7 @@ export {
   listExperiments,
   listJournalEntries,
   listProtocols,
+  lookupCanonicalEntityById,
   lookupEntityById,
 } from "./model.ts";
 export {
@@ -47,6 +48,9 @@ export {
   hashCanonicalQuerySources,
   isCanonicalQuerySourcePath,
   listCanonicalSourceManifest,
+  readCanonicalEntityFamilySource,
+  readVaultMetadataSource,
+  resolveCanonicalEntityInFamily,
 } from "./vault-source.ts";
 export {
   listCanonicalObservationMetricEntries,
@@ -57,6 +61,12 @@ export type {
   CanonicalQuerySourceHash,
   QuerySourceManifestEntry,
 } from "./vault-source.ts";
+export {
+  QUERY_SOURCE_INVALID_CODE,
+  QueryVaultSourceError,
+  type QuerySourceIssue,
+  type QueryVaultSourceErrorDetails,
+} from "./source-errors.ts";
 export type {
   EntityFilter,
   ExperimentFilter,
@@ -98,11 +108,18 @@ export type {
   AutomationQueryRecord,
 } from "./automation.ts";
 export {
+  deriveVaultRecordIdentity,
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,
   inferIdEntityKind,
   isQueryableLookupId,
 } from "./id-families.ts";
+export {
+  isDefaultProjectedEventRecord,
+  isDefaultProjectedQueryEntity,
+  isDisplayGradeObservation,
+  isSearchIndexedQueryEntity,
+} from "./query-visibility.ts";
 export {
   buildOverviewMetrics,
   isActiveOverviewExperimentStatus,

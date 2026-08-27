@@ -47,10 +47,14 @@ import type {
 import type {
   HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import type { AutomationContextReference } from '@murphai/contracts'
 import type {
   AssistantProviderStartCriticalPathContext,
   AssistantProviderStartCriticalPathTiming,
 } from '../provider-start-critical-path.js'
+import type {
+  AnalyzeVideoTurnState,
+} from '../../assistant-codex/analyze-video-tool.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -86,6 +90,8 @@ export interface AssistantProviderCapabilities {
 
 export interface AssistantProviderConversationMessage {
   content: string | AssistantUserMessageContentPart[]
+  /** Trusted occurrence instant, supplied when a turn needs temporal evidence. */
+  occurredAt?: string
   role: 'assistant' | 'user'
 }
 
@@ -138,6 +144,7 @@ export interface AssistantProviderTurn {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
@@ -159,6 +166,7 @@ export interface AssistantProviderTurn {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
+  onAdditionalUsage?: ((usage: AssistantProviderUsageDraft) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerFetch?: typeof fetch | null
@@ -184,6 +192,8 @@ export interface AssistantProviderTurn {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   turnContextPrompt?: string | null
+  /** Runtime-attested entity context for this turn; never model supplied. */
+  trustedContextReferences?: readonly AutomationContextReference[] | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
@@ -274,6 +284,11 @@ export interface AssistantProviderTurnExecutionResult {
   productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
   /** Accepted-input ordinal whose delivery context owns the final response presentation. */
   responseDeliveryContextOrdinal: number
+  /**
+   * Per-response override: undefined inherits its ordinal; null/empty clears;
+   * non-empty replaces.
+   */
+  responseContextReferences?: readonly AutomationContextReference[] | null
   /** Accepted input selected as the native target for this response, if any. */
   targetInputId?: string | null
   responseMedia?: readonly AssistantResponseMedia[] | null
@@ -284,6 +299,11 @@ export interface AssistantProviderTurnExecutionResult {
 }
 
 export interface AssistantProviderResponseSegment {
+  /**
+   * Per-response override: undefined inherits its ordinal; null/empty clears;
+   * non-empty replaces.
+   */
+  contextReferences?: readonly AutomationContextReference[] | null
   deliveryContextOrdinal: number
   media?: readonly AssistantResponseMedia[] | null
   /** Capability-free semantic text persisted into model-visible history. */

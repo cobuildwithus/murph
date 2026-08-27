@@ -420,6 +420,97 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it("uses the ready approved continuation as the default item and wake authority", async () => {
+    const codexRetry = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_codex_retry",
+      mailboxDedupeKey: "runtime-control:codex-auth:retry",
+      mailboxLaneSeq: "1",
+      nextAttemptAt: "2026-04-27T00:01:00.000Z",
+      postCheckpointRecord: {
+        attemptId: "hca_abcdefghijklmnop",
+        kind: "codex-auth.updated",
+        phase: "connected",
+      },
+      wakeKind: "runtime.codex-auth-requested",
+    });
+    const deviceWake = buildPendingDeviceSyncMailboxItem({
+      itemId: "pending_device_sync",
+      mailboxLaneSeq: "2",
+    });
+    const approvedContinuationA = buildPendingApprovalContinuationMailboxItem({
+      effectId: "effect_approved_export_a",
+      itemId: "pending_approved_continuation_a",
+      mailboxLaneSeq: "3",
+    });
+    const approvedContinuationB = buildPendingApprovalContinuationMailboxItem({
+      effectId: "effect_approved_export_b",
+      itemId: "pending_approved_continuation_b",
+      mailboxLaneSeq: "4",
+    });
+    const state = {
+      pending: [
+        codexRetry,
+        deviceWake,
+        approvedContinuationA,
+        approvedContinuationB,
+      ],
+    };
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: null,
+      now: "2026-04-27T00:00:00.000Z",
+      state,
+    })).toEqual(approvedContinuationA);
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: null,
+      now: "2026-04-27T00:00:00.000Z",
+      state: {
+        pending: state.pending.filter((item) =>
+          item.itemId !== approvedContinuationA.itemId
+        ),
+      },
+    })).toEqual(approvedContinuationB);
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["run-device-sync-wake", "apply-runtime-control-request"],
+      now: "2026-04-27T00:00:00.000Z",
+      state,
+    })).toEqual(deviceWake);
+
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => state);
+
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "assistant",
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        allowedRouteActions: ["run-device-sync-wake"],
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "device-sync.reconcile",
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [codexRetry, deviceWake],
+      }));
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "device-sync.reconcile",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
@@ -688,5 +779,64 @@ function buildPendingRuntimeControlMailboxItem(input: {
     routeAction: "apply-runtime-control-request",
     status: input.postCheckpointRecord ? "recording" : "pending",
     wake,
+  };
+}
+
+function buildPendingApprovalContinuationMailboxItem(input: {
+  effectId: string;
+  itemId: string;
+  mailboxLaneSeq: string;
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: `runtime-control:pending-effects:${input.effectId}`,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: null,
+    requestId: null,
+    routeAction: "apply-runtime-control-request",
+    status: "pending",
+    wake: {
+      effectId: input.effectId,
+      eventId: `runtime-control:pending-effects:${input.effectId}`,
+      kind: "runtime.pending-effects-reconcile-requested",
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_123",
+    },
+  };
+}
+
+function buildPendingDeviceSyncMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string;
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: `device-sync.wake:${input.itemId}`,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: null,
+    requestId: null,
+    routeAction: "run-device-sync-wake",
+    status: "pending",
+    wake: {
+      eventId: `device-sync.wake:${input.itemId}`,
+      kind: "device-sync.wake",
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      reason: "reconcile_due",
+      userId: "member_123",
+    },
   };
 }

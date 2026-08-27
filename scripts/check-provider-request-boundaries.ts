@@ -212,6 +212,14 @@ export const providerBoundaryRegistry = Object.freeze([
     sdkModules: [],
   },
   {
+    hosts: ["generativelanguage.googleapis.com"],
+    id: "gemini",
+    identifiers: ["gemini", "google-generative-language"],
+    label: "Google Gemini",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@google/genai"],
+  },
+  {
     hosts: ["api.telegram.org"],
     id: "telegram",
     identifiers: ["telegram"],
@@ -250,6 +258,7 @@ type ApprovedRawHttpOwnerReason =
   | "official-sdk-fetch-hook"
   | "presigned-byte-transfer"
   | "provider-sdk-override"
+  | "gemini-video-analysis"
   | "xai-x-search";
 
 interface ApprovedRawHttpOwner {
@@ -317,6 +326,12 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     providerIds: ["linq"],
     reason: "presigned-byte-transfer",
     relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
+  },
+  {
+    ownerName: "executeAnalyzeVideoTool",
+    providerIds: ["gemini"],
+    reason: "gemini-video-analysis",
+    relativePath: "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts",
   },
   {
     ownerName: "executeAskGrokTool",
@@ -417,7 +432,7 @@ export const approvedProviderRawHttpOwners = Object.freeze([
   },
   {
     ownerName: "fetchAuthorizedProviderUpstream",
-    providerIds: ["elevenlabs", "exa", "linq", "openai", "xai"],
+    providerIds: ["elevenlabs", "exa", "gemini", "linq", "openai", "xai"],
     reason: "existing-provider-boundary",
     relativePath: "apps/cloudflare/src/runner-egress-intercept.ts",
   },
@@ -444,6 +459,7 @@ export const approvedProviderRawHttpOwners = Object.freeze([
 type ProviderRequestBoundaryViolationKind =
   | "approved-owner-overflow"
   | "invalid-approved-owner"
+  | "official-sdk-request-override"
   | "raw-provider-http";
 
 export interface ProviderRequestBoundaryViolation {
@@ -522,8 +538,28 @@ export function findProviderRequestBoundaryViolations(
   const violations = new Map<string, ProviderRequestBoundaryViolation>();
 
   traverse(sourceFile, {
+    AssignmentExpression(assignmentPath) {
+      inspectOfficialSdkRequestOverride(
+        assignmentPath,
+        readStaticMemberName(assignmentPath.node.left),
+      );
+    },
     CallExpression(callPath) {
       inspectCall(callPath);
+    },
+    ObjectProperty(propertyPath) {
+      if (!propertyPath.parentPath.isObjectExpression()) {
+        return;
+      }
+      const key = propertyPath.node.key;
+      inspectOfficialSdkRequestOverride(
+        propertyPath,
+        !propertyPath.node.computed && key.type === "Identifier"
+          ? key.name
+          : key.type === "StringLiteral"
+            ? key.value
+            : null,
+      );
     },
     OptionalCallExpression(callPath) {
       inspectCall(callPath);
@@ -596,6 +632,24 @@ export function findProviderRequestBoundaryViolations(
       boundary: `Direct ${labels.join(" / ")} provider HTTP in ${ownerName}`,
       kind: "raw-provider-http",
       node: callPath.node,
+    });
+  }
+
+  function inspectOfficialSdkRequestOverride(
+    nodePath: NodePath<Node>,
+    optionName: string | null,
+  ): void {
+    if (
+      normalizedPath !== "apps/web/src/lib/physical-notes/lob-runtime.ts"
+      || !hasRuntimeModule(runtimeModules, "@lob/lob-typescript-sdk")
+      || optionName !== "params"
+    ) {
+      return;
+    }
+    recordViolation({
+      boundary: "Lob official SDK low-level request params",
+      kind: "official-sdk-request-override",
+      node: nodePath.node,
     });
   }
 
@@ -939,6 +993,17 @@ function collectCallProviderIds(input: {
   readonly relativePath: string;
   readonly urlPath: NodePath<Node> | null;
 }): string[] {
+  const staticHost = readStaticHttpUrlHost(input.urlPath);
+  if (staticHost !== null) {
+    // A proven request host outranks naming heuristics; unresolved URLs use the fallback below.
+    return providerBoundaryRegistry
+      .filter((provider) =>
+        provider.hosts.some((host) => isSameOrSubdomain(staticHost, host)),
+      )
+      .map((provider) => provider.id)
+      .sort((left, right) => left.localeCompare(right));
+  }
+
   const providerIds = new Set(input.importedProviderIds);
   const callText = readNodeText(input.callPath.node, input.contents);
   const urlText = input.urlPath
@@ -957,6 +1022,86 @@ function collectCallProviderIds(input: {
     }
   }
   return [...providerIds].sort((left, right) => left.localeCompare(right));
+}
+
+function readStaticHttpUrlHost(
+  originalPath: NodePath<Node> | null,
+): string | null {
+  const value = readStaticString(originalPath, new Set());
+  if (value === null) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.hostname.toLowerCase().replace(/\.+$/u, "")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStaticString(
+  originalPath: NodePath<Node> | null,
+  resolvingBindings: Set<string>,
+): string | null {
+  if (!originalPath?.node) {
+    return null;
+  }
+  const expressionPath = unwrapExpressionPath(originalPath);
+  if (expressionPath.isStringLiteral()) {
+    return expressionPath.node.value;
+  }
+  if (expressionPath.isTemplateLiteral()) {
+    return expressionPath.node.expressions.length === 0
+      ? expressionPath.node.quasis[0]?.value.cooked ?? null
+      : null;
+  }
+  if (expressionPath.isBinaryExpression() && expressionPath.node.operator === "+") {
+    const left = readStaticString(
+      expressionPath.get("left") as NodePath<Node>,
+      resolvingBindings,
+    );
+    if (left === null) {
+      return null;
+    }
+    const right = readStaticString(
+      expressionPath.get("right") as NodePath<Node>,
+      resolvingBindings,
+    );
+    return right === null ? null : left + right;
+  }
+  if (!expressionPath.isIdentifier()) {
+    return null;
+  }
+  const binding = expressionPath.scope.getBinding(expressionPath.node.name);
+  if (!binding?.constant) {
+    return null;
+  }
+  const bindingKey = `${expressionPath.node.name}:${binding.identifier.start ?? 0}`;
+  if (resolvingBindings.has(bindingKey)) {
+    return null;
+  }
+  const declarator = binding.path.isVariableDeclarator()
+    ? binding.path
+    : binding.path.parentPath?.isVariableDeclarator()
+      ? binding.path.parentPath
+      : null;
+  if (
+    !declarator ||
+    declarator.node.id.type !== "Identifier" ||
+    declarator.node.id.name !== expressionPath.node.name
+  ) {
+    return null;
+  }
+  const initPath = declarator.get("init") as NodePath<Node> | null;
+  return initPath?.node
+    ? readStaticString(initPath, new Set(resolvingBindings).add(bindingKey))
+    : null;
+}
+
+function isSameOrSubdomain(hostname: string, registeredHost: string): boolean {
+  return hostname === registeredHost || hostname.endsWith(`.${registeredHost}`);
 }
 
 function isStaticSameOrigin(
@@ -1270,6 +1415,8 @@ function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string
       return "contains more raw transport calls than its approval permits";
     case "invalid-approved-owner":
       return "lost its required runtime SDK import";
+    case "official-sdk-request-override":
+      return "overrides low-level official SDK request options";
     case "raw-provider-http":
       return "uses raw provider HTTP";
   }

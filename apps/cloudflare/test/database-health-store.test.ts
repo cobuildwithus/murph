@@ -83,6 +83,7 @@ describe("database health store", () => {
     };
 
     store.recordFailedSample({
+      checkedAtMs: 301_000,
       connectionErrorCounterBaseline,
       connectionErrorDelta: 2,
       conditions: [
@@ -131,6 +132,7 @@ describe("database health store", () => {
     });
     expect(store.readRecentSamples()).toEqual([
       expect.objectContaining({
+        checkedAtMs: 301_000,
         connectionErrorDelta: 2,
         failureCode: "required_metrics_missing",
       }),
@@ -189,8 +191,18 @@ describe("database health store", () => {
     });
     expect(sql.exec<{ name: string }>(
       "PRAGMA table_info(database_health_samples)",
-    ).toArray().map((column) => column.name))
-      .toContain("monitoring_evidence_json");
+    ).toArray().map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "checked_at_ms",
+        "monitoring_evidence_json",
+      ]),
+    );
+    expect(store.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        checkedAtMs: null,
+        observedAtMs: 300_000,
+      }),
+    ]);
     expect(sql.exec<{ value: number }>(
       `SELECT value
        FROM database_health_schema_meta

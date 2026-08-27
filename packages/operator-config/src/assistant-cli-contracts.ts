@@ -797,6 +797,11 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // True when an assistant entry begins a conversation turn without an
+  // originating member entry in this transcript and remains meaningful as
+  // context for the member's next reply. Omission is the ordinary dependent
+  // assistant-reply case and keeps existing persisted entries compatible.
+  standaloneAssistantContext: z.literal(true).optional(),
   // Stable provenance for replay-safe imports that originate from a durable
   // outbox delivery rather than a provider turn.
   sourceOutboxIntentId: assistantOutboxIntentIdSchema.optional(),
@@ -1396,7 +1401,20 @@ const assistantOnboardingResumeContextSurfaceOkSchema = z
 const assistantOnboardingResumeContextSurfaceErrorSchema = z
   .object({
     status: z.literal('error'),
+    code: z.string().min(1).max(80),
     message: z.string().min(1),
+    retryable: z.boolean(),
+    hint: z.string().min(1).max(320).optional(),
+  })
+  .strict()
+
+const assistantOnboardingResumeContextSurfaceUnavailableSchema = z
+  .object({
+    status: z.literal('unavailable'),
+    code: z.string().min(1).max(80),
+    message: z.string().min(1),
+    retryable: z.literal(false),
+    hint: z.string().min(1).max(320).optional(),
   })
   .strict()
 
@@ -1404,6 +1422,7 @@ export const assistantOnboardingResumeContextSurfaceSchema =
   z.discriminatedUnion('status', [
     assistantOnboardingResumeContextSurfaceOkSchema,
     assistantOnboardingResumeContextSurfaceErrorSchema,
+    assistantOnboardingResumeContextSurfaceUnavailableSchema,
   ])
 
 export const assistantOnboardingResumeContextMemorySchema =
@@ -1419,6 +1438,7 @@ export const assistantOnboardingResumeContextMemorySchema =
       })
       .strict(),
     assistantOnboardingResumeContextSurfaceErrorSchema,
+    assistantOnboardingResumeContextSurfaceUnavailableSchema,
   ])
 
 export const assistantOnboardingResumeContextResultSchema = z
@@ -1835,6 +1855,15 @@ export const assistantRunResultSchema = z.object({
   replySkipped: z.number().int().nonnegative(),
   replyFailed: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
+  lastFailure: z
+    .object({
+      phase: z.enum(['capture', 'reply', 'daemon']),
+      code: z.string().min(1).max(96),
+      retryable: z.boolean(),
+      message: z.string().min(1).max(320),
+    })
+    .nullable()
+    .default(null),
 })
 
 export const assistantStopResultSchema = z.object({

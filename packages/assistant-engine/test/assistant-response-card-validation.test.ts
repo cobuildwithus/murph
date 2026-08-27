@@ -145,16 +145,17 @@ describe('response-card validation feedback', () => {
       if (!request || request.kind !== 'invalid-response-card-arguments') {
         throw new Error('expected response-card family choice feedback')
       }
-      expect(buildResponseCardValidationFeedback(
+      expect(JSON.parse(buildResponseCardValidationFeedback(
         request.validationDigest,
-      )).toBe(JSON.stringify({
+      ))).toMatchObject({
         error: 'invalid_response_card_arguments',
-        hints: [{
-          field: 'card.kind',
+        validationIssues: [{
           code: 'custom',
-          expected: 'daily_nutrition_or_compact_table',
+          message: 'Choose a supported response-card family.',
+          params: { murphExpectedShape: 'daily_nutrition_or_compact_table' },
+          path: ['card', 'kind'],
         }],
-      }))
+      })
       const serialized = JSON.stringify(request)
       expect(serialized).not.toContain('synthetic-private-family')
       expect(serialized).not.toContain('card.columns')
@@ -205,7 +206,7 @@ describe('response-card validation feedback', () => {
     ]))
   })
 
-  it('returns bounded schema-owned repair hints and accepts the corrected retry', async () => {
+  it('returns complete validation reasons and accepts the corrected retry', async () => {
     const request = readCardToolRequest(INVALID_TABLE)
     expect(request?.kind).toBe('invalid-response-card-arguments')
     if (!request || request.kind !== 'invalid-response-card-arguments') {
@@ -275,13 +276,21 @@ describe('response-card validation feedback', () => {
     })
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
     expect(result.rpcResult.success).toBe(false)
-    expect(feedback).toContain(
-      '"field":"card.rows[].values","code":"too_small","expected":"array.min_1"',
-    )
-    expect(feedback).toContain(
-      '"field":"card.rows[].values","code":"custom","expected":"same_count_as_card.columns"',
-    )
-    expect(feedback.length).toBeLessThanOrEqual(1_600)
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_response_card_arguments',
+      validationIssues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'too_small',
+          path: ['card', 'rows', 0, 'values'],
+        }),
+        expect.objectContaining({
+          code: 'custom',
+          params: { murphExpectedShape: 'same_count_as_card.columns' },
+          path: ['card', 'rows', 0, 'values'],
+        }),
+      ]),
+    })
+    expect(Buffer.byteLength(feedback, 'utf8')).toBeLessThanOrEqual(60_000)
     expect(feedback).not.toContain('"received"')
     expect(feedback).not.toContain(INVALID_TABLE.title)
     expect(feedback).not.toContain(INVALID_TABLE.rows[0].label)
@@ -292,7 +301,7 @@ describe('response-card validation feedback', () => {
     })).toMatchObject({ kind: 'attach-response-card' })
   })
 
-  it('returns value-free exercise-card hints without attaching a card', async () => {
+  it('returns the exercise-card validation reason without attaching a card', async () => {
     const privateMarker = 'synthetic-private-exercise-marker'
     const request = readTestMurphDynamicToolRequest({
       id: 2,
@@ -347,9 +356,14 @@ describe('response-card validation feedback', () => {
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
 
     expect(result.rpcResult.success).toBe(false)
-    expect(feedback).toContain(
-      '"field":"card.exercises[].estimatedSeconds","code":"invalid_type","expected":"number"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_response_card_arguments',
+      validationIssues: [expect.objectContaining({
+        code: 'invalid_type',
+        expected: 'number',
+        path: ['card', 'exercises', 0, 'estimatedSeconds'],
+      })],
+    })
     expect(feedback).not.toContain(privateMarker)
     expect(feedback).not.toContain('privateMarker')
     expect(feedback).not.toContain('"received"')
@@ -488,16 +502,17 @@ describe('response-card validation feedback', () => {
     ) {
       throw new Error('expected compact-table shape choice feedback')
     }
-    expect(buildResponseCardValidationFeedback(
+    expect(JSON.parse(buildResponseCardValidationFeedback(
       shapeChoiceRequest.validationDigest,
-    )).toBe(JSON.stringify({
+    ))).toMatchObject({
       error: 'invalid_response_card_arguments',
-      hints: [{
-        field: 'card',
+      validationIssues: [{
         code: 'custom',
-        expected: 'compact_table.generic_or_workout_shape',
+        message: 'Choose one compact-table card shape.',
+        params: { murphExpectedShape: 'compact_table.generic_or_workout_shape' },
+        path: ['card'],
       }],
-    }))
+    })
   })
 
   it('returns refinement-owned semantics for provider-permissive failures', () => {
@@ -524,7 +539,7 @@ describe('response-card validation feedback', () => {
     }
     expect(buildResponseCardValidationFeedback(
       nutritionMealCountRequest.validationDigest,
-    )).toContain('"expected":"at_most_card.meal_count"')
+    )).toContain('"murphExpectedShape":"at_most_card.meal_count"')
     expect(readCardToolRequest({
       ...INVALID_NUTRITION_MEAL_COUNT_CARD,
       totals: {
@@ -565,16 +580,16 @@ describe('response-card validation feedback', () => {
       ) {
         throw new Error('expected optional metric relation to fail')
       }
-      expect(buildResponseCardValidationFeedback(
+      expect(JSON.parse(buildResponseCardValidationFeedback(
         hybridRequest.validationDigest,
-      )).toBe(JSON.stringify({
+      ))).toMatchObject({
         error: 'invalid_response_card_arguments',
-        hints: [{
-          field: 'card.totals.proteinGrams.mealCount',
+        validationIssues: [{
           code: 'custom',
-          expected: 'zero_iff_total_null',
+          params: { murphExpectedShape: 'zero_iff_total_null' },
+          path: ['card', 'totals', 'proteinGrams', 'mealCount'],
         }],
-      }))
+      })
     }
     expect(readCardToolRequest(VALID_NUTRITION_CARD)).toMatchObject({
       kind: 'attach-response-card',
@@ -640,6 +655,6 @@ describe('response-card validation feedback', () => {
     expect(feedback).toContain('within_response_card_payload_limit')
     expect(feedback).not.toContain('generic_or_workout_shape')
     expect(feedback).not.toContain(oversizedCard.title)
-    expect(feedback.length).toBeLessThanOrEqual(1_600)
+    expect(Buffer.byteLength(feedback, 'utf8')).toBeLessThanOrEqual(60_000)
   })
 })

@@ -19,6 +19,7 @@ import {
   editEventRecord,
   removeAutomaticMealPhotoEventRecord,
 } from './event-record-mutations.js'
+import { readOwnedEventRecord } from './exact-event-record.js'
 import {
   asListEnvelope,
   readRawImportManifest,
@@ -116,13 +117,11 @@ async function loadOwnedRecord(
   lookup: string,
   expectedKind: DocumentMealKind,
 ): Promise<QueryRecord> {
-  const query = await loadQueryRuntime('document/meal query reads')
-  const readModel = await query.readVault(vault)
-  const record = query.lookupEntityById(readModel, lookup)
-
-  if (!record || record.family !== 'event' || record.kind !== expectedKind) {
-    throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
-  }
+  const { record } = await readOwnedEventRecord({
+    vault,
+    lookup,
+    kind: expectedKind,
+  })
 
   const normalizedLookup = lookup.trim()
   if (normalizedLookup !== record.entityId && normalizedLookup !== record.primaryLookupId) {
@@ -154,14 +153,14 @@ async function listOwnedRecords(input: {
 }) {
   const limit = input.limit ?? DEFAULT_LIST_LIMIT
   const query = await loadQueryRuntime('document/meal query reads')
-  const readModel = await query.readVault(input.vault)
-  const items = query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: [input.expectedKind],
-      from: input.from,
-      to: input.to,
-    })
+  const records = await query.listCanonicalEntities(input.vault, {
+    family: 'event',
+    kinds: [input.expectedKind],
+    from: input.from,
+    to: input.to,
+    limit: null,
+  })
+  const items = records
     .slice(0, limit)
     .map((record: QueryRecord) => {
       const entity = toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS)
@@ -192,13 +191,13 @@ export async function listAutomaticMealPhotoCloseoutWorkRecords(input: {
   }
   const occurrenceTime = occurrenceAt.getTime()
   const query = await loadQueryRuntime('automatic meal photo closeout reads')
-  const readModel = await query.readVault(input.vault)
-  const automaticCaptures = query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: ['meal'],
-      to: input.to,
-    })
+  const records = await query.listCanonicalEntities(input.vault, {
+    family: 'event',
+    kinds: ['meal'],
+    to: input.to,
+    limit: null,
+  })
+  const automaticCaptures = records
     .filter(isAutomaticMealCapture)
   const retryEvidence = automaticCaptures.filter(
     (record) => readTimestamp(record.attributes.recordedAt) >= occurrenceTime,
@@ -334,7 +333,10 @@ export async function editDocumentRecord(input: {
     expectedKinds: ['document'],
   })
 
-  return showDocumentRecord(input.vault, input.lookup)
+  return {
+    vault: input.vault,
+    entity: toOwnedEventCommandShowEntity(result.record, OWNED_EVENT_LINK_KEYS),
+  }
 }
 
 export async function deleteDocumentRecord(input: {
@@ -368,7 +370,10 @@ export async function editMealRecord(input: {
     expectedKinds: ['meal'],
   })
 
-  return showMealRecord(input.vault, input.lookup)
+  return {
+    vault: input.vault,
+    entity: toOwnedEventCommandShowEntity(result.record, OWNED_EVENT_LINK_KEYS),
+  }
 }
 
 export async function deleteMealRecord(input: {

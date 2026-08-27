@@ -56,6 +56,7 @@ export type BrowserVaultWarmLoadOutcome =
 
 export interface StartBrowserVaultWarmLoadOptions {
   expectedMemberId?: string | null;
+  refreshObservationOnly?: boolean;
   requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
   requestedShards?: readonly BrowserVaultReplicaShard[];
   requestRefresh?: boolean;
@@ -64,6 +65,7 @@ export interface StartBrowserVaultWarmLoadOptions {
 let readySnapshot: BrowserVaultReadySnapshot | null = null;
 let inFlight: Promise<BrowserVaultWarmLoadOutcome> | null = null;
 let inFlightController: AbortController | null = null;
+let inFlightObservationOnly = false;
 let inFlightRequestsRefresh = false;
 let inFlightRequestedShards: readonly BrowserVaultReplicaShard[] = [];
 let inFlightRequestedMetricBuckets: readonly BrowserVaultMetricBucketId[] = [];
@@ -98,10 +100,12 @@ export function startBrowserVaultWarmLoad(
   const requestedMetricBuckets = normalizeBrowserVaultMetricBucketDemand(
     options.requestedMetricBuckets ?? [],
   );
+  const observationOnly = options.refreshObservationOnly === true;
 
   if (inFlight) {
     if (
-      (options.requestRefresh && !inFlightRequestsRefresh)
+      (!observationOnly && inFlightObservationOnly)
+      || (options.requestRefresh && !inFlightRequestsRefresh)
       || !browserVaultDemandsMatch(
         inFlightRequestedShards,
         inFlightRequestedMetricBuckets,
@@ -125,6 +129,7 @@ export function startBrowserVaultWarmLoad(
   const loadGeneration = generation;
   const controller = new AbortController();
   inFlightController = controller;
+  inFlightObservationOnly = observationOnly;
   inFlightRequestsRefresh = options.requestRefresh === true;
   inFlightRequestedShards = requestedShards;
   inFlightRequestedMetricBuckets = requestedMetricBuckets;
@@ -142,6 +147,7 @@ export function startBrowserVaultWarmLoad(
         knownReplicaRef: readySnapshot?.ref ?? null,
         requestedShards,
         requestedMetricBuckets,
+        refreshObservationOnly: options.refreshObservationOnly,
         requestRefresh: options.requestRefresh,
         signal: controller.signal,
       });
@@ -163,7 +169,9 @@ export function startBrowserVaultWarmLoad(
       };
 
       if (result.state === "empty") {
-        readySnapshot = null;
+        if (!observationOnly) {
+          readySnapshot = null;
+        }
         return { status: "empty", memberId: result.memberId, metadata };
       }
 
@@ -244,6 +252,7 @@ export function startBrowserVaultWarmLoad(
       if (loadGeneration === generation) {
         inFlight = null;
         inFlightController = null;
+        inFlightObservationOnly = false;
         inFlightRequestsRefresh = false;
         inFlightRequestedShards = [];
         inFlightRequestedMetricBuckets = [];
@@ -277,6 +286,7 @@ export function abortBrowserVaultInFlightLoad(): void {
   inFlightController?.abort();
   inFlightController = null;
   inFlight = null;
+  inFlightObservationOnly = false;
   inFlightRequestsRefresh = false;
   inFlightRequestedShards = [];
   inFlightRequestedMetricBuckets = [];
@@ -292,6 +302,7 @@ export function clearBrowserVaultWarmState(): void {
   inFlightController?.abort();
   inFlightController = null;
   inFlight = null;
+  inFlightObservationOnly = false;
   inFlightRequestsRefresh = false;
   inFlightRequestedShards = [];
   inFlightRequestedMetricBuckets = [];

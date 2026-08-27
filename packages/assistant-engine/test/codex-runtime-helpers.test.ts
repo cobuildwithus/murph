@@ -156,7 +156,6 @@ function completeTestCodexProtocolEvents(
       params: {
         ...completedParams,
         tokenUsage: {
-          modelContextWindow: null,
           ...tokenUsage,
           last,
           total,
@@ -191,7 +190,6 @@ function completeTestTokenUsageBreakdown(
     : 0
   return breakdown
     ? {
-        cacheWriteInputTokens: 0,
         cachedInputTokens: 0,
         inputTokens,
         outputTokens,
@@ -324,6 +322,7 @@ describe('Codex assistant registry helpers', () => {
     const env = {
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
       CODEX_HOME: '/runtime/codex-home',
+      GEMINI_API_KEY: 'worker-owned-sentinel',
       HOME: '/runtime/home',
       PATH: '/usr/bin',
     }
@@ -375,6 +374,11 @@ describe('Codex assistant registry helpers', () => {
       expect(preparationInput?.[key]).toEqual(turnInput?.[key])
     }
     expect(preparationInput?.signal).toBe(signal)
+    expect(preparationInput?.env).not.toHaveProperty('GEMINI_API_KEY')
+    expect(turnInput?.env).not.toHaveProperty('GEMINI_API_KEY')
+    expect(turnInput?.analyzeVideoRuntime).toMatchObject({
+      apiKey: 'worker-owned-sentinel',
+    })
     expect(preparationInput).not.toHaveProperty('prompt')
     expect(preparationInput).not.toHaveProperty('resumeSessionId')
     expect(preparationInput).not.toHaveProperty('dynamicTools')
@@ -434,6 +438,81 @@ describe('Codex assistant registry helpers', () => {
       servedModel: 'codex-mini',
       tokenPricingBasis: 'standard',
       totalTokens: null,
+    })
+  })
+
+  it('retains raw current-shape token usage with optional fields omitted', () => {
+    const extracted = extractExactCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        modelProvider: 'openai',
+        oss: false,
+      }),
+      rawEvents: [
+        {
+          method: 'turn/started',
+          params: {
+            turn: { id: 'turn-current-token-usage-shape' },
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-current-token-usage-shape',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 7,
+                inputTokens: 41,
+                outputTokens: 11,
+                reasoningOutputTokens: 3,
+                totalTokens: 52,
+              },
+              total: {
+                cachedInputTokens: 7,
+                inputTokens: 41,
+                outputTokens: 11,
+                reasoningOutputTokens: 3,
+                totalTokens: 52,
+              },
+            },
+            turnId: 'turn-current-token-usage-shape',
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-current-token-usage-shape',
+              model: 'gpt-5.4',
+            },
+          },
+        },
+      ],
+    })
+
+    expect(extracted).toMatchObject({
+      cacheWriteTokens: 0,
+      cachedInputTokens: 7,
+      inputTokens: 41,
+      outputTokens: 11,
+      providerRequestId: 'turn-current-token-usage-shape',
+      rawUsageJson: {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 7,
+        inputTokens: 41,
+        outputTokens: 11,
+        reasoningOutputTokens: 3,
+        totalTokens: 52,
+      },
+      reasoningTokens: 3,
+      totalTokens: 52,
+      turnProfileJson: {
+        modelContextWindow: null,
+        requestCount: 1,
+        requests: [{ cachedInput: 7, input: 41, output: 11 }],
+      },
+      usageExtractionSourcePath: 'thread.tokenUsage.total.delta',
     })
   })
 
@@ -1621,6 +1700,7 @@ describe('Codex assistant registry helpers', () => {
                   commands,
                   count: commands.length,
                   failed: 0,
+                  vault: '/private/member/vault',
                 }),
                 command: 'vault-cli batch --compact --format json',
                 durationMs: commandCount,
@@ -3213,6 +3293,36 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
+  it('serializes trusted occurrence times with committed conversation history', () => {
+    expect(
+      resolveAssistantProviderPrompt({
+        conversationHistoryMessages: [
+          {
+            content: 'Earlier completion.',
+            occurredAt: '2026-08-05T12:30:00.000Z',
+            role: 'user',
+          },
+          {
+            content: 'You completed the morning routine.',
+            occurredAt: '2026-08-05T12:31:00.000Z',
+            role: 'assistant',
+          },
+        ],
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        userPrompt: 'Run the scheduled occurrence.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toContain([
+      'User at 2026-08-05T12:30:00.000Z:',
+      'Earlier completion.',
+      '',
+      'Assistant at 2026-08-05T12:31:00.000Z:',
+      'You completed the morning routine.',
+    ].join('\n'))
+  })
+
   it('keeps raw Linq delivery targets out of Codex prompt context', () => {
     const prompt = resolveAssistantProviderPrompt({
       providerConfig: normalizeAssistantProviderConfig({
@@ -3826,7 +3936,7 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('closes active input admission through the production provider adapter', async () => {
-    const closeInputAdmission = vi.fn()
+    const onFirstAssistantResponseCompleted = vi.fn()
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
       transcriptMessage: 'Final answer.',
@@ -3844,7 +3954,7 @@ describe('Codex assistant registry helpers', () => {
 
     const attempt = await executeCodexAssistantTurnAttempt({
       activeTurnSteering: {
-        closeInputAdmission,
+        onFirstAssistantResponseCompleted,
         registerLiveProviderTurn: vi.fn(() => () => {}),
       },
       automationRelativeDateReferenceWindow: {
@@ -3869,7 +3979,7 @@ describe('Codex assistant registry helpers', () => {
       latestAt: '2031-02-15T09:59:59.900Z',
     })
     appServerInput?.onFirstAssistantResponseCompleted?.()
-    expect(closeInputAdmission).toHaveBeenCalledTimes(1)
+    expect(onFirstAssistantResponseCompleted).toHaveBeenCalledTimes(1)
   })
 
   it('preserves response delivery ordinals across the provider adapter', async () => {

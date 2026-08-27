@@ -24,6 +24,8 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncDirtyStateResponse,
+  parseHostedExecutionDeviceSyncNoDataOutreachRequest,
+  parseHostedExecutionDeviceSyncNoDataOutreachResponse,
   parseHostedExecutionDeviceSyncReconcileRequest,
   parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -274,6 +276,61 @@ describe("hosted device-sync reconcile contract", () => {
       occurredAt: "2026-07-15T12:00:00.000Z",
       status: "disconnected",
     })).toThrow(/status must be queued/u);
+  });
+});
+
+describe("hosted device-sync no-data outreach contract", () => {
+  it("accepts explicit bounded settings and rejects ambiguous shapes", () => {
+    const authority = {
+      assistantInputId: "ain_00000000000000000000000000000001",
+      sourceProviderSlug: "garmin",
+    };
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      afterDays: 10,
+      mode: "after_days",
+    })).toEqual({ ...authority, afterDays: 10, mode: "after_days" });
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      mode: "off",
+    })).toEqual({ ...authority, mode: "off" });
+    for (const afterDays of [4, 31]) {
+      expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+        ...authority,
+        afterDays,
+        mode: "after_days",
+      })).toThrow(/between 5 and 30/u);
+    }
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      afterDays: 10,
+      mode: "off",
+    })).toThrow(/afterDays is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      assistantInputId: "not-an-input-id",
+      mode: "off",
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachResponse({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    })).toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    });
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachResponse({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "custom",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    })).toThrow(/inconsistent/u);
   });
 });
 
@@ -1198,6 +1255,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyAckRequest(
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_current",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "heart_rate",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_current",
           processedDirtyPayloadIds: ["dsp_current"],
           processedRevision: "21",
@@ -1213,6 +1276,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "trusted-user",
       ),
     ).toEqual({
+      completedImports: [{
+        dirtyPayloadId: "dsp_current",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "heart_rate",
+        sourceProviderSlug: "apple_health_kit",
+      }],
       connectionId: "dsc_current",
       processedDirtyPayloadIds: ["dsp_current"],
       processedRevision: "21",
@@ -1225,6 +1294,54 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       userId: "trusted-user",
     });
+  });
+
+  it("rejects canonical import receipts outside the exact processed payload set", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          completedImports: [{
+            dirtyPayloadId: "dsp_other",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
+          connectionId: "dsc_current",
+          processedDirtyPayloadIds: ["dsp_current"],
+          processedRevision: "21",
+          userId: "trusted-user",
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/must reference processed dirty payload ids/u);
+  });
+
+  it("rejects duplicate and unnormalized canonical import receipts", () => {
+    const receipt = {
+      dirtyPayloadId: "dsp_current",
+      importCompletedAt: "2026-08-20T09:00:00.000Z",
+      resource: "steps",
+      sourceProviderSlug: "apple_health_kit",
+    };
+    const request = {
+      completedImports: [receipt, receipt],
+      connectionId: "dsc_current",
+      processedDirtyPayloadIds: ["dsp_current"],
+      processedRevision: "21",
+      userId: "trusted-user",
+    };
+
+    expect(() => parseHostedExecutionDeviceSyncDirtyAckRequest(request, "trusted-user"))
+      .toThrowError(/must not repeat a dirty payload id/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          ...request,
+          completedImports: [{ ...receipt, resource: "Heart Rate" }],
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/resource must be a normalized device-sync key/u);
   });
 
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {
@@ -3020,7 +3137,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
   });
 
-  it("parses the hosted wake hint owner shape once", () => {
+  it("parses the hosted wake hint shape once", () => {
     const parsed = parseHostedExecutionDeviceSyncWakeHint({
       eventType: "sleep.updated",
       jobs: [
@@ -3084,7 +3201,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
-  it("feeds the parsed owner shape into job-hint normalization", () => {
+  it("feeds the parsed wake shape into job-hint normalization", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
@@ -3140,6 +3257,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
             historicalBackfillVersion: 2,
+            historicalProofFirstSeenAt: "2026-04-01T12:00:00Z",
+            historicalProofSourceProviderSlug: "google_health",
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -3176,6 +3295,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
       historicalBackfillVersion: 2,
+      historicalProofFirstSeenAt: "2026-04-01T12:00:00.000Z",
+      historicalProofSourceProviderSlug: "google_health",
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -3222,9 +3343,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           kind: "resource",
           payload: {
             objectId: "",
-            resource: "heartrate",
+            resource: "workout_stream",
             resourceCategory: "timeseries",
             sourceProviderSlug: "",
+            workoutStreamEmptyReplay: true,
+            workoutStreamEmptySeen: true,
             windowStart: "2026-04-08T00:00:00Z",
           },
         },
@@ -3232,8 +3355,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
-      resource: "heartrate",
+      resource: "workout_stream",
       resourceCategory: "timeseries",
+      workoutStreamEmptyReplay: true,
+      workoutStreamEmptySeen: true,
       windowStart: "2026-04-08T00:00:00.000Z",
     });
   });

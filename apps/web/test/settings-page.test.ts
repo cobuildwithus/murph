@@ -122,6 +122,7 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedDataPrivacySettings: vi.fn((props: {
     authenticated: boolean;
+    authorizationEnabled?: boolean;
   }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedHealthDataConsentSettings: vi.fn((props: {
@@ -605,28 +606,43 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
 test.each(["active", "checkout"])(
   "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
   async (stage) => {
-    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-      authenticated: true,
-      authenticatedMember: {
-        billingStatus: stage === "active" ? "active" : "not_started",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      session: {
-        privyUserId: "did:privy:user_123",
-      },
-    });
+    const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
-    const { default: SettingsDataPrivacyPage } =
-      await import("../app/settings/data-privacy/page");
+    try {
+      mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+        authenticated: true,
+        authenticatedMember: {
+          billingStatus: stage === "active" ? "active" : "not_started",
+          id: "member_123",
+          suspendedAt: null,
+        },
+        session: {
+          privyUserId: "did:privy:user_123",
+        },
+      });
 
-    const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+      const { default: SettingsDataPrivacyPage } =
+        await import("../app/settings/data-privacy/page");
 
-    assert.match(markup, /Data &amp; privacy/);
-    assert.match(markup, /Hosted data privacy settings true/);
-    assert.match(markup, /without an active subscription or health-data consent/);
-    expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
-    expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+      const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+
+      assert.match(markup, /Data &amp; privacy/);
+      assert.match(markup, /Hosted data privacy settings true/);
+      assert.match(markup, /without an active subscription or health-data consent/);
+      expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+      expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+      expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+        authenticated: true,
+        authorizationEnabled: false,
+      }, undefined);
+    } finally {
+      if (originalPrivyAppId === undefined) {
+        delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+      } else {
+        process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
+      }
+    }
   },
 );
 
@@ -1221,6 +1237,15 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
       authenticated: true,
       authorizationEnabled: true,
+    }, undefined);
+
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    mocks.HostedDataPrivacySettings.mockClear();
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+      authenticated: true,
+      authorizationEnabled: false,
     }, undefined);
   } finally {
     if (originalPrivyAppId === undefined) {
@@ -2500,7 +2525,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
   mocks.resolveMurphContactOptions.mockImplementation((input) =>
     input?.contactChannels?.email === true
       ? [{
-          href: "mailto:murph@mail.withmurph.ai?body=test",
+          href: "mailto:mail@mail.withmurph.ai?body=test",
           kind: "email",
           label: "Email",
         }]

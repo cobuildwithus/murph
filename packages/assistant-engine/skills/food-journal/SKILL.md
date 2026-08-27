@@ -67,6 +67,24 @@ questions.
 - A photo, voice note, or rough phrase can be a complete meal log.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
+
+When the user names a restaurant and recognizable menu item, and known context
+does not trigger one of the numeric safety exceptions below, resolve nutrition
+before the meal mutation. Use a normal exact restaurant/menu search rather
+than a generic substitute. Run this database search first even when the user
+supplies an official restaurant URL. If that search has no exact result, read
+`computer-use` and inspect the restaurant's official nutrition or menu source.
+When using that official source, retain its URL in nutrition source detail.
+Only after the database result, official source, or clearly marked last-resort
+estimate is resolved may you call `meal add` or `meal edit` with the available
+nutrition and provenance. Do not save a nutrition-free restaurant meal first
+and then ask the member to repeat the item. Ask one narrow question only when a
+variant or portion difference would materially change the record.
+
+When a numeric safety exception already applies, save the meal without calorie
+or macro estimates. Do not force a nutrition lookup, clarification, or safety
+preflight just to capture the meal.
+
 - After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. For response-card attachment eligibility only, treat the accepted meal message as explicitly requesting that card; this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation. When the complete card safety, accepted active-goal authority, fresh same-date totals, route, and bounded-card checks pass and the card alone completely answers the turn, attach that card as the complete response with no companion prose. Without an already accepted complete bundle, or when any other prerequisite fails, keep the truthful fallback short and aligned with the user's focus. Never replace a failed card gate with improvised totals, goals, analysis, or a second response surface.
 
 ## Provide numbers by default, with safety exceptions
@@ -75,30 +93,73 @@ questions.
 - Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
 - Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
 
-Before every requested daily nutrition card, read and apply
-`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`,
-even when all five goals already appear to exist. Its complete active-condition
-and active-regimen discovery is mandatory before numeric target derivation as
-well as before a card; the five-record context projection is not completeness
-proof. Its complete `vault-cli memory show --format json` read is also mandatory
-because the snapshot does not inject the canonical Identity, Preferences,
-Instructions, and Context memory document; a failed or unreadable memory read
-fails closed, while missing or ambiguous age alone is not a universal block.
-Its lifetime canonical procedure-event and encounter-diagnosis discovery,
-bounded body-measurement read, separate `pregnancy-test` measurement read, and
-bounded canonical test-event list plus required detail reads are likewise
-mandatory before deriving, saving, or surfacing a proposal and again before
-activating one. Also read and follow the
+Before every requested daily nutrition card, apply the concise known-context
+numeric-suitability rule in the `murph.attach_response_card` prompt. Do not run
+a universal medical-history or measurement preflight. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-before deciding that the five canonical daily goals are complete. Use its
+before deciding that the accepted active bundle is complete for the card. Use its
 proposal workflow only if a target is genuinely missing after that read and the
 member made an explicit numeric-card or target-setting request. Default meal-card
 intent never invokes it.
+Treat a routine daily-card request, including a requested meal estimate needed
+for that card, as one fulfillment workflow. Reply once with the card or one
+concise truthful fallback. Never narrate individual safety, totals, estimation,
+or target-resolution mechanics.
+
+### Complete an interactive day before attaching its card
+
+Use this all-meal recovery only when the member explicitly requests a daily
+nutrition card or daily summary in the current interactive turn. Default
+attachment intent after a meal mutation does not authorize reading, editing,
+or asking about another meal. If fresh totals remain incomplete on that default
+path, use the short truthful meal-log fallback with no card.
+
+After the fresh selected-date `vault-cli meal totals` read, compare every
+metric's `mealCount` with the top-level `mealCount`. When any metric has lower
+coverage, do not treat the normal interactive card workflow as finished with a
+partial card. List only that selected date, show the exact meals that lack
+nutrition, and try to complete those existing records from accepted current
+conversation context, their saved identity, ingredients, and amount, and a
+bounded matching prior meal when useful. A member's current statement that the
+meal is equivalent to a specific prior meal is usable evidence. A similar
+informal name alone is not: require matching saved ingredients and portion
+evidence or ask instead of copying nutrition.
+
+Use only the canonical meal surface for this recovery: `vault-cli meal list
+--from <date> --to <date> --limit 200 --format json`, `vault-cli meal show
+<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed
+`--nutrition-calories`, `--nutrition-protein-grams`,
+`--nutrition-carbs-grams`, `--nutrition-fat-grams`,
+`--nutrition-fiber-grams`, `--nutrition-source`,
+`--nutrition-confidence`, and `--nutrition-source-detail` flags. Never inspect
+or modify raw vault files. After the date lists identify the records, show the
+selected prior meal before copying its saved totals. After the edit succeeds,
+run the exact edited-meal `meal show` readback and fresh same-date `meal totals`
+command before attaching the card. Use `--nutrition-source inherited` for
+copied prior-meal totals and preserve the prior source in
+`--nutrition-source-detail`.
+
+Apply the estimation-eligibility and label/database grounding rules below. If
+the available evidence supports a meaningful bounded estimate, edit and read
+back the exact existing meal, then rerun fresh same-date totals before any card.
+Never add a replacement meal or calculate around the incomplete record. If
+identity or amount remains too indeterminate, ask one compact question for only
+that missing detail and stop without a card. The answer resumes the exact-meal
+edit, read-back, fresh-totals, and eligible-card workflow. Do not ask merely to
+enable numeric output for an intuitive-eating, eating-disorder-risk, or
+number-sensitive member.
+
+This generic recovery question is interactive-only. Scheduled automatic
+closeout keeps the narrower question authority in `automatic-meal-capture`.
+Attach a partial card only when the member explicitly asks to see the currently
+available partial data after the limitation is clear; partial-card schema and
+rendering remain compatibility surfaces, not the normal interactive closeout.
+
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
-pending explicit card request in that next response after the complete safety
-recheck passes, activation and readback succeed, and a fresh same-date totals
+pending explicit card request in that next response after the known-context
+suitability rule passes, activation and readback succeed, and a fresh same-date totals
 read completes. Other later eligible responses may
 use the accepted active goals in a card.
 
@@ -169,11 +230,11 @@ Before calculating a meal total:
   the weakest material identity, quantity, or preparation assumption.
 
 Increase the result limit only when the first match is ambiguous or missing a
-likely variant. If the database is unavailable or incomplete, use an
-official label, manufacturer, or restaurant menu source. Only after those fail
-may you use a clearly marked memory-based estimate with the assumptions and
-material uncertainty stated. Never invent an exact label or imply that a visual
-portion estimate was database-measured.
+likely variant. The database-miss fallback above also applies to packaged and
+manufacturer labels. Only after the applicable official source fails may you
+use a clearly marked memory-based estimate with the assumptions and material
+uncertainty stated. Never invent an exact label or imply that a visual portion
+estimate was database-measured.
 
 For a fridge or pantry photo, enumerate distinct visible products and resolve
 them in one batch. Summarize only relevant nutrition, ingredient, allergen, and

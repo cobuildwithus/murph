@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 100,
+  "item": {
+    "id": "approved-actions-finish-first",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Approved actions finish first",
+    "summary": "When you approve an action Murph already prepared, Murph now resumes that action before unrelated background device syncing.",
+    "details": "Your approval, delivery destination, and safety checks stay the same; device updates remain queued and continue afterward.",
+    "relevanceTags": ["approvals", "messaging", "reliability"],
+    "sourcePullRequests": [2077]
+  }
+}

@@ -12,11 +12,12 @@ import {
   EnvironmentPrintLoading,
   EnvironmentPrintReport,
 } from "../environment-print-report";
-import { selectEnvironmentHabitatValues } from "../habitat-values";
 import {
-  resolveEnvironmentCoverage,
-  resolveHabitatScene,
-} from "../home-model";
+  selectEnvironmentHabitatIndicatorNotes,
+  selectEnvironmentHabitatValues,
+} from "../habitat-values";
+import { resolveEnvironmentCoverage, resolveHabitatScene } from "../home-model";
+import { useImperialUnits } from "../use-imperial-units";
 
 export function EnvironmentPrintPageClient({
   generatedOn,
@@ -28,12 +29,20 @@ export function EnvironmentPrintPageClient({
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
   );
-  const scene = useMemo(() => resolveHabitatScene(values), [values]);
-  const notes = useMemo(
-    () => scene.categories.map((category) => deriveCategoryNote(category, values)),
-    [scene, values],
+  const indicatorNotes = useMemo(
+    () => (client ? selectEnvironmentHabitatIndicatorNotes(client) : {}),
+    [client],
   );
-  const grade = useMemo(() => overallGrade(notes), [notes]);
+  const scene = useMemo(() => resolveHabitatScene(values), [values]);
+  const imperial = useImperialUnits();
+  const notes = useMemo(
+    () =>
+      scene.categories.map((category) =>
+        deriveCategoryNote(category, values, indicatorNotes, imperial)
+      ),
+    [imperial, indicatorNotes, scene, values],
+  );
+  const grade = useMemo(() => overallGrade(notes, values), [notes, values]);
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
 
   if (status === "loading") {
@@ -46,7 +55,8 @@ export function EnvironmentPrintPageClient({
         <Alert variant="destructive">
           <AlertTitle>Could not load your Environment report</AlertTitle>
           <AlertDescription>
-            {error ?? "Murph could not unlock your private Habitat records right now."}
+            {error ??
+              "Murph could not unlock your private Habitat records right now."}
           </AlertDescription>
         </Alert>
       </PrintStatus>
@@ -57,7 +67,10 @@ export function EnvironmentPrintPageClient({
     return (
       <PrintStatus>
         <p>There is no Environment report to print yet.</p>
-        <Link href="/environment" className="text-primary underline underline-offset-4">
+        <Link
+          href="/environment"
+          className="text-primary underline underline-offset-4"
+        >
           Add your home details
         </Link>
       </PrintStatus>
@@ -80,12 +93,10 @@ export function EnvironmentPrintPageClient({
 
 function printableContextValue(value: unknown): string | null {
   if (
-    value === HABITAT_DECLINED_VALUE
-    || (
-      typeof value !== "string"
-      && typeof value !== "number"
-      && typeof value !== "boolean"
-    )
+    value === HABITAT_DECLINED_VALUE ||
+    (typeof value !== "string" &&
+      typeof value !== "number" &&
+      typeof value !== "boolean")
   ) {
     return null;
   }

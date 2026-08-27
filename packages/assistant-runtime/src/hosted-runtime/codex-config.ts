@@ -8,13 +8,13 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
   buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   parseHostedLocalCodexSubscriptionHostAuth,
@@ -264,6 +264,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
       chatGptAuth,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       contextWindowTokens,
+      exposeSpawnAgentModelOverrides:
+        !customInferenceProvider
+        && input.runtimeEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]
+          === "1",
       provider: providerConfig,
       reasoningEffort: customInferenceProvider
         ? null
@@ -568,6 +572,7 @@ function requireHostedCustomInferenceContextWindowTokens(value: unknown): number
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
   contextWindowTokens?: number | null;
+  exposeSpawnAgentModelOverrides: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string | null;
@@ -630,7 +635,6 @@ export function buildHostedCodexConfigToml(input: {
     ...providerConfigLines,
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
-    ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
     ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
@@ -647,10 +651,11 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",
-    // Keep per-spawn model overrides hidden until V2 activity emits authoritative
-    // effective child-model evidence before Murph writes immutable usage.
     "[features.multi_agent_v2]",
     "enabled = true",
+    `expose_spawn_agent_model_overrides = ${
+      input.exposeSpawnAgentModelOverrides ? "true" : "false"
+    }`,
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,

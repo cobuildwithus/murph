@@ -112,6 +112,10 @@ const hostedSignalRuntimeModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/signal-runtime.ts",
   import.meta.url,
 ).href;
+const hostedActionApprovalModuleSpecifier = new URL(
+  "../../src/lib/action-approvals.ts",
+  import.meta.url,
+).href;
 const hostedAssistantModelPreferenceModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/assistant-model-preference.ts",
   import.meta.url,
@@ -138,6 +142,10 @@ const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
 ).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
+  import.meta.url,
+).href;
+const hostedComputerUseCryptoModuleSpecifier = new URL(
+  "../../src/lib/computer-use/crypto.ts",
   import.meta.url,
 ).href;
 const hostedComputerUseStoreModuleSpecifier = new URL(
@@ -204,19 +212,22 @@ interface HostedVaultShareGrantStoreForTestModule {
 }
 
 interface HostedVaultShareProjectionStoreForTestModule {
-  findActiveHostedVaultShares(input: {
+  findActiveHostedVaultSharePage(input: {
     grantorMemberId: string;
     prisma: HostedTestPrismaClient;
     projectionMode?: HostedVaultShareProjectionMode;
     projectionScope: HostedVaultShareProjectionScope;
-  }): Promise<Array<{
-    destinationMemberId: string;
-    grantorMemberId: string;
-    id: string;
-    projectionKind: string;
-    projectionScope: HostedVaultShareProjectionScope;
-    projectionScopeKey: string;
-  }>>;
+    sourceWorkspaceVersion: string;
+  }): Promise<{
+    shares: Array<{
+      destinationMemberId: string;
+      grantorMemberId: string;
+      id: string;
+      projectionKind: string;
+      projectionScope: HostedVaultShareProjectionScope;
+      projectionScopeKey: string;
+    }>;
+  }>;
   replaceHostedVaultShareProjectionSnapshot(input: {
     prisma: HostedTestPrismaClient;
     projectionMode?: HostedVaultShareProjectionMode;
@@ -290,7 +301,10 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
     } | null>;
   };
   hostedThreadContainer: {
-    findUnique(args: unknown): Promise<{ memberId: string } | null>;
+    findUnique(args: unknown): Promise<{
+      memberId: string;
+      monthlyUsageLimitUsdMicros: bigint;
+    } | null>;
   };
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
@@ -518,6 +532,16 @@ interface HostedComputerUseServiceModule {
   }) => HostedComputerUseServiceForTest;
 }
 
+interface HostedComputerUseCryptoModule {
+  encryptComputerRunSecret(input: {
+    field: "kernel-live-view-url";
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    runId: string;
+    value: string;
+  }): Promise<string | null>;
+}
+
 export interface HostedComputerRunForTest {
   awaitingReason: string | null;
   checkpointContext: {
@@ -564,6 +588,20 @@ interface HostedMailboxAppendForTestStoreModule {
   }): Promise<Array<{ consumedSeq: string; lane: string }>>;
   appendHostedMailboxEnvelopeTx(input: {
     envelope: HostedExecutionWake;
+    tx: unknown;
+  }): Promise<{
+    duplicate: boolean;
+    inserted: boolean;
+    item: {
+      dedupeKey: string;
+      id: string;
+      laneSeq: bigint | number | string;
+    };
+  }>;
+  appendHostedMailboxEnvelopeWithIdentityTx(input: {
+    envelope: HostedExecutionWake;
+    expiresAt: Date | string | null;
+    itemId: string;
     tx: unknown;
   }): Promise<{
     duplicate: boolean;
@@ -666,6 +704,11 @@ interface HostedRuntimeSignalModule {
     client?: HostedRuntimeTemporalSignalClient | null;
     environment?: NodeJS.ProcessEnv;
     expectedUserId?: string | null;
+    knownCheckpoint?: {
+      lane: "system";
+      laneSeq: string;
+      userId: string;
+    };
     mailboxItemId: string;
     prisma?: HostedTestPrismaClient;
   }): Promise<{
@@ -699,6 +742,42 @@ interface HostedRuntimeSignalModule {
     signalAccepted: true;
     workflowId: string;
   }>;
+}
+
+interface HostedActionApprovalIdentityForTest {
+  bindingHash: string;
+  expiresAt: Date;
+  tokenHash: string;
+}
+
+interface HostedActionApprovalModuleForTest {
+  decideHostedActionApprovalTx(input: {
+    approval: HostedActionApprovalIdentityForTest;
+    challenge: {
+      bindingHash: string;
+      expiresAt: Date;
+      kind: "assistant.action.approve";
+      memberId: string;
+      tokenHash: string;
+    };
+    decision: "approved";
+    memberId: string;
+    now: Date;
+    tx: unknown;
+  }): Promise<{
+    runtimeResume: {
+      lane: "system";
+      laneSeq: string;
+      mailboxItemId: string;
+      userId: string;
+    };
+  }>;
+  requirePendingHostedActionApproval(input: {
+    approvalId: string;
+    memberId: string;
+    now: Date;
+    prisma: unknown;
+  }): Promise<HostedActionApprovalIdentityForTest>;
 }
 
 interface HostedAssistantModelPreferenceModule {
@@ -873,10 +952,18 @@ export async function appendHostedExecutionWakeForTest(input: {
   const wake = parseHostedExecutionWake(input.wake);
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
     const append = await deps.prisma.$transaction(async (tx) =>
-      deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      }));
+      wake.kind === "assistant.ask.requested"
+        || wake.kind === "assistant.ask.completed"
+        ? deps.hostedMailboxStore.appendHostedMailboxEnvelopeWithIdentityTx({
+            envelope: wake,
+            expiresAt: wake.ask.expiresAt,
+            itemId: wake.eventId,
+            tx,
+          })
+        : deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
+            envelope: wake,
+            tx,
+          }));
     return {
       duplicate: append.duplicate,
       inserted: append.inserted,
@@ -1435,12 +1522,13 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const shares = await projectionStore.findActiveHostedVaultShares({
+        const page = await projectionStore.findActiveHostedVaultSharePage({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
         });
-        const share = shares.find((candidate) =>
+        const share = page.shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {
@@ -1564,24 +1652,50 @@ export async function readLatestHostedSensitiveActionChallengeForTest(input: {
   );
 }
 
-export async function approveHostedSensitiveActionChallengeForTest(input: {
+export async function approveHostedActionAndSignalRuntimeForTest(input: {
+  approvalId: string;
   environment?: NodeJS.ProcessEnv;
+  memberId: string;
   tokenHash: string;
-}): Promise<HostedSensitiveActionChallengeForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const decidedAt = new Date();
-    return await deps.prisma.hostedSensitiveActionChallenge.update({
-      data: {
-        approvalStatus: "approved",
-        consumedAt: null,
-        consumedBy: null,
-        decidedAt,
-        expiresAt: new Date(decidedAt.getTime() + 15 * 60 * 1_000),
-      },
-      where: {
-        tokenHash: input.tokenHash,
-      },
+}): Promise<{ signalAccepted: true }> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const now = new Date();
+    const actionApproval = await loadHostedActionApprovalModuleForTest();
+    const approval = await actionApproval.requirePendingHostedActionApproval({
+      approvalId: input.approvalId,
+      memberId: input.memberId,
+      now,
+      prisma: deps.prisma,
     });
+    const result = await deps.prisma.$transaction(async (tx) =>
+      await actionApproval.decideHostedActionApprovalTx({
+        approval,
+        challenge: {
+          bindingHash: approval.bindingHash,
+          expiresAt: approval.expiresAt,
+          kind: "assistant.action.approve",
+          memberId: input.memberId,
+          tokenHash: input.tokenHash,
+        },
+        decision: "approved",
+        memberId: input.memberId,
+        now,
+        tx,
+      }));
+    const signalModule = await loadHostedRuntimeSignalModule();
+    const signal = await signalModule.signalHostedMailboxAppendRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      expectedUserId: input.memberId,
+      knownCheckpoint: {
+        lane: result.runtimeResume.lane,
+        laneSeq: result.runtimeResume.laneSeq,
+        userId: result.runtimeResume.userId,
+      },
+      mailboxItemId: result.runtimeResume.mailboxItemId,
+      prisma: deps.prisma,
+    });
+    return { signalAccepted: signal.signalAccepted };
   });
 }
 
@@ -1699,15 +1813,20 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
   periodStart: Date;
   remainingUsdMicros?: bigint;
 }): Promise<HostedAiUsagePeriodForTest> {
-  const limitUsdMicros = 10_000_000n;
-  const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
-  if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
-    throw new RangeError("Hosted AI usage test balance must be within the period limit.");
-  }
-  const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
-  const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedAiUsagePeriod.upsert({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const threadContainer = await deps.prisma.hostedThreadContainer.findUnique({
+      select: { monthlyUsageLimitUsdMicros: true },
+      where: { memberId: input.memberId },
+    });
+    const limitUsdMicros =
+      threadContainer?.monthlyUsageLimitUsdMicros ?? 10_000_000n;
+    const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
+    if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
+      throw new RangeError("Hosted AI usage test balance must be within the period limit.");
+    }
+    const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
+    const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
+    return await deps.prisma.hostedAiUsagePeriod.upsert({
       create: {
         billingPlanCode: "launch_monthly",
         blockedAt,
@@ -1732,8 +1851,8 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
           periodStart: input.periodStart,
         },
       },
-    })
-  );
+    });
+  });
 }
 
 export async function readHostedAiUsageLimitPeriodForTest(input: {
@@ -1813,14 +1932,29 @@ export async function seedHostedComputerRunForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expiresAt?: Date;
   kernelSessionId?: string;
+  liveViewUrl: string;
   memberId: string;
   runId: string;
 }): Promise<HostedComputerRunForTest> {
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const cryptoModule = await import(
+      hostedComputerUseCryptoModuleSpecifier
+    ) as HostedComputerUseCryptoModule;
+    const kernelLiveViewUrlEncrypted = await cryptoModule.encryptComputerRunSecret({
+      field: "kernel-live-view-url",
+      memberId: input.memberId,
+      prisma: deps.prisma,
+      runId: input.runId,
+      value: input.liveViewUrl,
+    });
+    if (!kernelLiveViewUrlEncrypted) {
+      throw new Error("Hosted computer test run live-view encryption failed.");
+    }
     const run = await deps.prisma.hostedComputerRun.create({
       data: {
         expiresAt: input.expiresAt ?? new Date(Date.now() + 60 * 60 * 1_000),
         id: input.runId,
+        kernelLiveViewUrlEncrypted,
         kernelProfileName: `hosted-local-${input.runId}`,
         kernelSessionId: input.kernelSessionId ?? `hosted-local-${input.runId}`,
         memberId: input.memberId,
@@ -2310,6 +2444,8 @@ async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxApp
     advanceHostedMailboxConsumedSeqByLane:
       typedHostedMailboxStoreModule.advanceHostedMailboxConsumedSeqByLane,
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithIdentityTx:
+      typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeWithIdentityTx,
   };
 }
 
@@ -2332,6 +2468,14 @@ async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientMod
 
 async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModule> {
   return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
+}
+
+async function loadHostedActionApprovalModuleForTest(): Promise<
+  HostedActionApprovalModuleForTest
+> {
+  return await import(
+    hostedActionApprovalModuleSpecifier
+  ) as HostedActionApprovalModuleForTest;
 }
 
 async function loadHostedAssistantModelPreferenceModule(): Promise<

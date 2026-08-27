@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 
-import { act, createElement } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -236,7 +236,7 @@ test("PatternsPage keeps a legacy replica in the preparing state during refresh"
   assert.doesNotMatch(markup, /No clear comparison is ready/u);
 });
 
-test("PatternsPage exposes the existing retry action after a load failure", async () => {
+test("PatternsPage keeps a stable error without a Retry action", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
@@ -248,6 +248,7 @@ test("PatternsPage exposes the existing retry action after a load failure", asyn
   });
   const rendered = await renderClientComponent(
     createElement(PatternsPageClient),
+    { requireButton: false },
   );
 
   try {
@@ -255,16 +256,13 @@ test("PatternsPage exposes the existing retry action after a load failure", asyn
       rendered.container.textContent ?? "",
       /Could not load your patterns/u,
     );
-    const retryButton = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry",
+    assert.equal(
+      [...rendered.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry",
+      ),
+      false,
     );
-    assert.ok(retryButton);
-    await act(async () => {
-      retryButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.equal(mocks.refresh.mock.calls.length, 0);
   } finally {
     await rendered.cleanup();
   }
@@ -350,6 +348,8 @@ test("EnvironmentPage renders private habitat facts from Browser Vault", async (
   assert.match(markup, /href="\/environment\/print"/);
   assert.match(markup, /Print report/);
   assert.match(markup, /group\/category/);
+  assert.match(markup, /What to review next/);
+  assert.doesNotMatch(markup, /What to check next/);
   assert.doesNotMatch(markup, /fixture data|mock/i);
   assert.doesNotMatch(markup, /Overall picture/);
   assert.doesNotMatch(markup, /Target score/);
@@ -432,10 +432,18 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
 
   const markup = renderToStaticMarkup(await EnvironmentPage());
 
-  assert.match(markup, /See how your home supports your sleep, air and focus/);
-  assert.match(markup, /Start the 2-minute walkthrough/);
+  assert.match(
+    markup,
+    /Fill in your report to review your setup for sleep, air quality and focus/,
+  );
+  assert.match(markup, /Fill in my report/);
   assert.match(markup, /Prefer typing\? Use chat/);
-  assert.match(markup, /Murph will turn the clear details/);
+  assert.match(
+    markup,
+    /Murph turns your answers into a grade and practical next checks/,
+  );
+  assert.doesNotMatch(markup, /Habitat/);
+  assert.doesNotMatch(markup, /Private to you/);
   assert.match(markup, /Your report will cover/);
   assert.match(markup, /class="flex w-full flex-col gap-10"/);
   assert.doesNotMatch(

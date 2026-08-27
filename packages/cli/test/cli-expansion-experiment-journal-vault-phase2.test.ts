@@ -472,6 +472,138 @@ test.sequential('custom experiment start explains the required primary outcome b
   }
 })
 
+test.sequential('experiment start maps option parses to bounded factual fields', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-option-repair-'))
+  const privateDirection = 'private-direction-marker'
+  const privateOutcomeKey = 'private-primary-marker'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const invalidDirection = await runSliceCli([
+      'experiment',
+      'start',
+      'direction-repair',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Direction Repair',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:direction-repair',
+      '--expected-direction',
+      `biomarker:direction-repair=${privateDirection}`,
+      '--vault',
+      vaultRoot,
+    ])
+    const invalidOutcome = await runSliceCli([
+      'experiment',
+      'start',
+      'outcome-repair',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Outcome Repair',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      privateOutcomeKey,
+      '--primary-outcome-kind',
+      'structured_review',
+      '--vault',
+      vaultRoot,
+    ])
+
+    for (const [result, expectedPath, privateValue] of [
+      [invalidDirection, 'expectedDirection.0', privateDirection],
+      [invalidOutcome, 'primaryOutcomeKey', privateOutcomeKey],
+    ] as const) {
+      assert.equal(result.ok, false)
+      if (result.ok) {
+        assert.fail('expected invalid experiment start option to fail')
+      }
+      assert.equal(result.error.code, 'invalid_option')
+      assert.equal(result.error.stage, 'validation')
+      assert.equal(
+        result.error.fieldErrors?.some((field) => field.path === expectedPath),
+        true,
+      )
+      assert.equal(result.error.retryable, false)
+      assert.equal(result.error.hint, undefined)
+      assert.equal(JSON.stringify(result).includes(privateValue), false)
+      assert.equal(JSON.stringify(result).includes(vaultRoot), false)
+    }
+
+    for (const slug of ['direction-repair', 'outcome-repair']) {
+      const shown = await runSliceCli([
+        'experiment',
+        'show',
+        slug,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, false)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start maps canonical plan conflicts without echoing plan data', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-conflict-repair-'))
+  const slug = 'private-conflict-slug'
+  const changedTitle = 'Private changed plan title'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const startArgs = (title: string) => [
+      'experiment',
+      'start',
+      slug,
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      title,
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:conflict-repair',
+      '--vault',
+      vaultRoot,
+    ]
+    const started = await runSliceCli(startArgs('Original plan title'))
+    assert.equal(started.ok, true, started.ok ? undefined : started.error.message)
+
+    const conflict = await runSliceCli(startArgs(changedTitle))
+    assert.equal(conflict.ok, false)
+    if (conflict.ok) {
+      assert.fail('expected changed canonical plan data to conflict')
+    }
+    assert.equal(conflict.error.code, 'conflict')
+    assert.equal(conflict.error.stage, 'write')
+    assert.equal(conflict.error.fieldErrors?.[0]?.path, 'experiment.slug')
+    assert.equal(conflict.error.retryable, false)
+    assert.equal(conflict.error.hint, undefined)
+    const encoded = JSON.stringify(conflict)
+    for (const forbidden of [slug, changedTitle, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+
+    const shown = requireData(await runSliceCli<{
+      entity: { data: { title?: string } }
+    }>([
+      'experiment',
+      'show',
+      slug,
+      '--vault',
+      vaultRoot,
+    ]))
+    assert.equal(shown.entity.data.title, 'Original plan title')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('custom experiment start persists one first-class primary outcome', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-primary-outcome-'))
 
@@ -3414,6 +3546,17 @@ test.sequential(
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
 
+      const regexShapedLegacyDate = await runSliceCli<{
+        created: boolean
+        date: string
+        journalPath: string
+      }>([
+        'journal',
+        'ensure',
+        '2026-02-30',
+        '--vault',
+        vaultRoot,
+      ])
       const appended = await runSliceCli<{
         created: boolean
         updated: boolean
@@ -3568,10 +3711,17 @@ test.sequential(
         vaultRoot,
       ])
 
+      assert.equal(regexShapedLegacyDate.ok, true)
+      assert.equal(requireData(regexShapedLegacyDate).created, true)
+      assert.equal(requireData(regexShapedLegacyDate).date, '2026-02-30')
+      assert.equal(
+        requireData(regexShapedLegacyDate).journalPath,
+        'journal/2026/2026-02-30.md',
+      )
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
-      assert.equal(linked.ok, true)
+      assert.equal(linked.ok, true, JSON.stringify(linked))
       assert.equal(requireData(linked).changed, 2)
       assert.deepEqual(requireData(linked).eventIds, [firstEventId, secondEventId])
       assert.equal(linkedStreams.ok, true)
@@ -3585,12 +3735,12 @@ test.sequential(
       assert.equal(commaDelimitedEventLink.ok, false)
       assert.match(
         commaDelimitedEventLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
+        /canonical event id|repeat the flag instead|comma-delimited values are not supported/iu,
       )
       assert.equal(commaDelimitedStreamLink.ok, false)
       assert.match(
         commaDelimitedStreamLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
+        /supported sample stream|repeat the flag instead|comma-delimited values are not supported/iu,
       )
       assert.equal(unlinked.ok, true)
       assert.equal(requireData(unlinked).changed, 1)
@@ -3626,6 +3776,7 @@ test.sequential(
       )
       assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
+      await access(path.join(vaultRoot, 'journal/2026/2026-02-30.md'))
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')
       assert.match(journalMarkdown, /Evening note from the CLI append helper\./u)

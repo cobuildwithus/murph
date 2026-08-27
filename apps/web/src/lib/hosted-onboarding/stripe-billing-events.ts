@@ -32,7 +32,10 @@ import {
   parseHostedBillingPlanCode,
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
-import { isHostedAccessBlockedBillingStatus } from "./entitlement";
+import {
+  hasHostedMemberOwnActiveAccess,
+  isHostedAccessBlockedBillingStatus,
+} from "./entitlement";
 import {
   HostedOnboardingError,
   hostedOnboardingError,
@@ -42,6 +45,9 @@ import {
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
+import {
+  appendHostedAccessRestorationRuntimeHandoffTx,
+} from "./member-access-runtime-handoff";
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   assertNoHostedMemberStripeEffectTx,
@@ -135,6 +141,7 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
+  newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds?: string[];
   welcomeEmailMemberId: string | null;
 };
@@ -307,6 +314,7 @@ export async function applyStripeCheckoutCompleted(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -350,6 +358,7 @@ export async function applyStripeCheckoutCompleted(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -475,6 +484,7 @@ export async function applyStripeCheckoutCompleted(
   return {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    newlyActivatedMemberIds: [],
     welcomeEmailMemberId: memberSnapshot.core.id,
   };
 }
@@ -879,6 +889,7 @@ async function convertHostedLegacyPulseTrialToStarterTx(input: {
     cleanupPulseTrialStripeSubscriptionId,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+    newlyActivatedMemberIds: activation.activated ? [input.member.id] : [],
     runtimeRecheckMemberIds: [input.member.id],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? input.member.id
@@ -1353,6 +1364,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -1386,6 +1398,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -1401,6 +1414,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -1442,6 +1456,11 @@ export async function applyStripeInvoicePaid(
     tx: prisma,
     updatedMember,
   });
+  const restoredDirectAccess = Boolean(
+    updatedMember
+    && !hasHostedMemberOwnActiveAccess(member.core)
+    && hasHostedMemberOwnActiveAccess(updatedMember.core),
+  );
 
   if (!updatedMember) {
     return {
@@ -1460,9 +1479,23 @@ export async function applyStripeInvoicePaid(
   });
 
   if (isHostedAccessBlockedBillingStatus(startingBillingStatus)) {
+    const accessRestorationHandoff = restoredDirectAccess
+      ? await appendHostedAccessRestorationRuntimeHandoffTx({
+          memberId: updatedMember.core.id,
+          sourceEventId: dispatchContext.sourceEventId,
+          sourceType: dispatchContext.sourceType,
+          tx: prisma,
+        })
+      : null;
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
+      activatedMemberId: accessRestorationHandoff?.memberId ?? null,
+      hostedExecutionEventId:
+        accessRestorationHandoff?.hostedExecutionEventId ?? null,
+      hostedExecutionMailboxItemId:
+        accessRestorationHandoff?.hostedExecutionMailboxItemId ?? null,
       runtimeRecheckMemberIds: runtimeRecheckMemberId
+        && !accessRestorationHandoff
         ? [runtimeRecheckMemberId]
         : [],
     };
@@ -1478,14 +1511,30 @@ export async function applyStripeInvoicePaid(
     skipIfBillingAlreadyActive: hadActiveBilling,
     skipIfPreviouslyActivated: true,
   });
+  const accessRestorationHandoff = restoredDirectAccess
+    && !activation.hostedExecutionEventId
+    ? await appendHostedAccessRestorationRuntimeHandoffTx({
+        memberId: updatedMember.core.id,
+        sourceEventId: dispatchContext.sourceEventId,
+        sourceType: dispatchContext.sourceType,
+        tx: prisma,
+      })
+    : null;
 
   return {
     activatedMemberId: activation.hostedExecutionEventId
+      || accessRestorationHandoff
       ? updatedMember.core.id
       : null,
-    hostedExecutionEventId: activation.hostedExecutionEventId,
-    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+    hostedExecutionEventId: activation.hostedExecutionEventId
+      ?? accessRestorationHandoff?.hostedExecutionEventId
+      ?? null,
+    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId
+      ?? accessRestorationHandoff?.hostedExecutionMailboxItemId
+      ?? null,
+    newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
     runtimeRecheckMemberIds: runtimeRecheckMemberId
+      && !accessRestorationHandoff
       ? [runtimeRecheckMemberId]
       : [],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
@@ -1586,6 +1635,9 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     activatedMemberId: firstActivation?.activatedMemberId ?? null,
     activatedMembers,
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
+    newlyActivatedMemberIds: familySubscription.activations
+      .filter((activation) => activation.activated)
+      .map((activation) => activation.memberId),
     runtimeRecheckMemberIds: familySubscription.runtimeRecheckMemberIds ?? [],
     welcomeEmailMemberId: null,
   };
@@ -1599,7 +1651,12 @@ async function applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx(input: {
 }): Promise<HostedFamilyStripeSubscriptionResult> {
   const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
   const now = input.dispatchContext.eventCreatedAt ?? new Date();
-  for (const memberId of familySubscription.runtimeRecheckMemberIds ?? []) {
+  const usageGateMemberIds = new Set([
+    ...(familySubscription.accessRestoredMemberIds ?? []),
+    ...(familySubscription.billingModeChangedMemberIds ?? []),
+    ...(familySubscription.runtimeRecheckMemberIds ?? []),
+  ]);
+  for (const memberId of usageGateMemberIds) {
     await reconcileHostedAiUsageGateForBillingModeChangeTx({
       memberId,
       now,
@@ -1614,6 +1671,7 @@ function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcom
     activatedMemberId: null,
     activatedMembers: [],
     hostedExecutionEventId: null,
+    newlyActivatedMemberIds: [],
     runtimeRecheckMemberIds: [],
     welcomeEmailMemberId: null,
   };
@@ -2465,7 +2523,9 @@ export async function applyStripeDisputeUpdated(
   prisma: Prisma.TransactionClient,
   customerId?: string | null,
   preparedProviderState?: PreparedHostedStripeReversalProviderState | null,
-): Promise<"applied" | "subscription_identity_pending"> {
+): Promise<
+  HostedStripeActivatedMemberOutcome | "applied" | "subscription_identity_pending"
+> {
   const outcome = classifyHostedStripeDisputeOutcome(dispute, dispatchContext.sourceType);
   if (outcome === "ignore") {
     return "applied";
@@ -2518,7 +2578,7 @@ export async function applyStripeDisputeUpdated(
         member,
       });
 
-    await writeHostedMemberStripeBillingTx({
+    const updatedMember = await writeHostedMemberStripeBillingTx({
       billingStatus: HostedBillingStatus.active,
       canonicalBillingStatus: resolvedCanonicalBillingStatus,
       ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
@@ -2534,6 +2594,24 @@ export async function applyStripeDisputeUpdated(
       suspendedAtOverride: null,
       tx: prisma,
     });
+    if (
+      updatedMember
+      && !hasHostedMemberOwnActiveAccess(member.core)
+      && hasHostedMemberOwnActiveAccess(updatedMember.core)
+    ) {
+      const handoff = await appendHostedAccessRestorationRuntimeHandoffTx({
+        memberId: updatedMember.core.id,
+        sourceEventId: dispatchContext.sourceEventId,
+        sourceType: dispatchContext.sourceType,
+        tx: prisma,
+      });
+      return {
+        activatedMemberId: handoff.memberId,
+        hostedExecutionEventId: handoff.hostedExecutionEventId,
+        hostedExecutionMailboxItemId:
+          handoff.hostedExecutionMailboxItemId,
+      };
+    }
     return "applied";
   }
 

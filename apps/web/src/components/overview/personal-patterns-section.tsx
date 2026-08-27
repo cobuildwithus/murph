@@ -4,7 +4,6 @@ import Image from "next/image";
 
 import type {
   PersonalPatternCell,
-  PersonalPatternFactor,
   PersonalPatternReport,
   PersonalPatternStage,
 } from "@murphai/query/browser-overview";
@@ -16,7 +15,6 @@ import {
   TooltipTrigger,
 } from "@/src/components/ui/tooltip";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
 import {
   Card,
   CardDescription,
@@ -44,12 +42,10 @@ const STAGE_RANK: Record<PersonalPatternStage, number> = {
 
 export function PersonalPatternsSection({
   error,
-  onRetry,
   report,
   state = "ready",
 }: {
   error?: string | null;
-  onRetry?: () => void;
   report: PersonalPatternReport | null;
   state?: "error" | "loading" | "ready" | "unavailable";
 }) {
@@ -72,14 +68,7 @@ export function PersonalPatternsSection({
       <Alert variant="destructive">
         <AlertTitle>Could not load your patterns</AlertTitle>
         <AlertDescription>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              {error ?? "We couldn't unlock your pattern data right now."}
-            </span>
-            <Button size="sm" variant="outline" onClick={onRetry}>
-              Retry
-            </Button>
-          </div>
+          {error ?? "We couldn't unlock your pattern data right now."}
         </AlertDescription>
       </Alert>
     );

@@ -39,6 +39,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultExportSession",
       "createBrowserVaultSession",
+      "createEnvironmentRealtimeCall",
       "deleteEnvironmentVoice",
       "deleteMealPhoto",
       "deleteUserData",
@@ -99,7 +100,7 @@ describe("createCloudflareHostedControlClient", () => {
 
   it("verifies a bounded inference candidate through the user-bound route", async () => {
     const fetchImpl = vi.fn(async () => createJsonResponse({
-      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
+      verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
       verified: true,
     })) as typeof fetch;
     const client = createCloudflareHostedControlClient({
@@ -119,7 +120,7 @@ describe("createCloudflareHostedControlClient", () => {
       },
       userId: "user_123",
     })).resolves.toEqual({
-      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
+      verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
       verified: true,
     });
 

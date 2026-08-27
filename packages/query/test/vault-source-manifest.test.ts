@@ -181,7 +181,12 @@ test("readVaultSourceStrict rejects a direct experiment filename that disagrees 
     (error: unknown) =>
       error instanceof Error
       && "code" in error
-      && error.code === "EXPERIMENT_DOCUMENT_PATH_MISMATCH",
+      && error.code === "QUERY_SOURCE_INVALID"
+      && "details" in error
+      && typeof error.details === "object"
+      && error.details !== null
+      && "issue" in error.details
+      && error.details.issue === "document_path_mismatch",
   );
 });
 
@@ -219,6 +224,19 @@ test("hashCanonicalQuerySources changes when query-visible files are deleted", a
   assert.equal(populated.fileCount, 1);
   assert.equal(empty.fileCount, 0);
   assert.notEqual(empty.hash, populated.hash);
+});
+
+test("hashCanonicalQuerySources rejects an already-aborted source read", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "# Core\n");
+  const controller = new AbortController();
+  const reason = new DOMException("Source hash was cancelled.", "AbortError");
+  controller.abort(reason);
+
+  await assert.rejects(
+    hashCanonicalQuerySources(vaultRoot, { signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
 });
 
 test("isCanonicalQuerySourcePath matches the shared source families", () => {

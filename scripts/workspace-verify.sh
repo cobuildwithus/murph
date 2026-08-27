@@ -647,8 +647,12 @@ run_dependency_policy_check() {
 }
 
 run_workspace_boundary_check() {
-  node "scripts/verify-workspace-boundaries.mjs"
-  node "scripts/check-workspace-package-cycles.mjs"
+  local status=0
+
+  node "scripts/verify-workspace-boundaries.mjs" || status=$?
+  node "scripts/check-workspace-package-cycles.mjs" || status=$?
+
+  return "$status"
 }
 
 run_typecheck_packages() {
@@ -947,14 +951,7 @@ run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  pnpm exec vitest run --config "vitest.config.ts" \
-    --project="!assistant-engine" "$@" || return $?
-
-  # The curated Assistant Engine project has a proven 6 GiB requirement. Keep
-  # that ceiling at this owner instead of lifting every repo test and build.
-  NODE_OPTIONS=--max-old-space-size=6144 \
-    pnpm exec vitest run --config "vitest.config.ts" \
-      --project="assistant-engine" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
 run_workspace_package_coverage() {
@@ -974,15 +971,6 @@ run_workspace_package_coverage() {
       "$label" \
       env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
         pnpm --dir packages/contracts test:coverage:prepared
-    return $?
-  fi
-
-  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-    run_timed_step \
-      "$label" \
-      env NODE_OPTIONS=--max-old-space-size=6144 \
-        MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
-        pnpm --dir "$package_dir" test:coverage
     return $?
   fi
 
@@ -1090,6 +1078,7 @@ run_all_package_coverage() {
 
   while [[ "$package_index" -lt "$package_count" ]]; do
     local active_pids=()
+    local active_package_dirs=()
     local active_failure_files=()
     local active_labels=()
     local active_status_files=()
@@ -1103,8 +1092,40 @@ run_all_package_coverage() {
       printf '%s\n' "$package_coverage_concurrency"
     }
 
+    package_coverage_conflicts_with_active() {
+      local next_package_dir="$1"
+      local active_package_dir
+
+      if [[ -z "${active_package_dirs[*]-}" ]]; then
+        return 1
+      fi
+
+      for active_package_dir in "${active_package_dirs[@]}"; do
+        # Both owners start real child runtimes. Their isolated CI shards pass,
+        # but overlapping them makes wall-clock readiness assertions measure
+        # shared-host contention instead of either package's behavior.
+        if [[
+          "$next_package_dir" == "packages/assistant-engine"
+          && "$active_package_dir" == "packages/hosted-local-harness"
+        ]] || [[
+          "$next_package_dir" == "packages/hosted-local-harness"
+          && "$active_package_dir" == "packages/assistant-engine"
+        ]]; then
+          return 0
+        fi
+      done
+
+      return 1
+    }
+
     can_launch_next_package_coverage() {
       if [[ "$package_index" -ge "$package_count" ]]; then
+        return 1
+      fi
+
+      local next_package_dir="${package_coverage_dirs[$package_index]}"
+
+      if package_coverage_conflicts_with_active "$next_package_dir"; then
         return 1
       fi
 
@@ -1113,7 +1134,7 @@ run_all_package_coverage() {
       # built-runtime coverage may be importing prepared dist outputs.
       if [[
         "$cli_coverage_active" == "1"
-        && "${package_coverage_dirs[$package_index]}" == "packages/contracts"
+        && "$next_package_dir" == "packages/contracts"
         && "$contracts_artifacts_prepared" != "1"
       ]]; then
         return 1
@@ -1158,6 +1179,7 @@ run_all_package_coverage() {
       ) &
       local coverage_pid="$!"
       active_pids+=("$coverage_pid")
+      active_package_dirs+=("$package_dir")
       active_failure_files+=("$failure_file")
       active_labels+=("$package_label")
       active_status_files+=("$status_file")
@@ -1171,6 +1193,7 @@ run_all_package_coverage() {
 
     reap_finished_package_coverage() {
       local remaining_pids=()
+      local remaining_package_dirs=()
       local remaining_failure_files=()
       local remaining_labels=()
       local remaining_status_files=()
@@ -1179,6 +1202,7 @@ run_all_package_coverage() {
 
       for active_index in "${!active_pids[@]}"; do
         local active_pid="${active_pids[$active_index]}"
+        local active_package_dir="${active_package_dirs[$active_index]}"
         local failure_file="${active_failure_files[$active_index]}"
         local active_label="${active_labels[$active_index]}"
         local status_file="${active_status_files[$active_index]}"
@@ -1200,6 +1224,7 @@ run_all_package_coverage() {
             continue
           fi
           remaining_pids+=("$active_pid")
+          remaining_package_dirs+=("$active_package_dir")
           remaining_failure_files+=("$failure_file")
           remaining_labels+=("$active_label")
           remaining_status_files+=("$status_file")
@@ -1224,12 +1249,14 @@ run_all_package_coverage() {
       done
 
       active_pids=()
+      active_package_dirs=()
       active_failure_files=()
       active_labels=()
       active_status_files=()
 
       if [[ "${#remaining_pids[@]}" -gt 0 ]]; then
         active_pids=("${remaining_pids[@]}")
+        active_package_dirs=("${remaining_package_dirs[@]}")
         active_failure_files=("${remaining_failure_files[@]}")
         active_labels=("${remaining_labels[@]}")
         active_status_files=("${remaining_status_files[@]}")
@@ -1340,7 +1367,6 @@ run_test_diff_package_tests() {
   local filter_args=()
   local package_test_env=(env)
   local package_dir
-  local assistant_engine_selected=0
   local cli_selected=0
   local contracts_selected=0
 
@@ -1348,10 +1374,6 @@ run_test_diff_package_tests() {
     [[ -n "$package_dir" ]] || continue
     if [[ "$package_dir" == "packages/contracts" ]]; then
       contracts_selected=1
-      continue
-    fi
-    if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-      assistant_engine_selected=1
       continue
     fi
     if [[ "$package_dir" == "packages/cli" ]]; then
@@ -1376,17 +1398,6 @@ run_test_diff_package_tests() {
   # the artifact lock before source-first dependents start importing them.
   if [[ "$contracts_selected" == "1" ]]; then
     run_diff_contracts_test_with_workspace_artifact_lock || return $?
-  fi
-
-  # Keep the affected-owner lane aligned with the full coverage lane: the
-  # Assistant Engine suite can exceed Node's default 4 GiB heap even with one
-  # Vitest worker, so run that owner separately with its proven heap ceiling.
-  if [[ "$assistant_engine_selected" == "1" ]]; then
-    run_command_with_retry \
-      "Affected package test for packages/assistant-engine" \
-      env NODE_OPTIONS=--max-old-space-size=6144 \
-        MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" \
-        pnpm --dir "packages/assistant-engine" test || return $?
   fi
 
   if [[ "${#filter_args[@]}" -gt 0 ]]; then
@@ -1507,13 +1518,13 @@ run_typecheck_overlapped() {
   pids+=("$package_typecheck_pid")
   register_background_pid "$package_typecheck_pid"
 
-  wait_for_background_jobs "${pids[@]}"
+  wait_for_background_jobs_allow_failures "${pids[@]}"
 }
 
 run_typecheck() {
   if [[ "$typecheck_preflight_parallel" == "1" ]]; then
     run_typecheck_overlapped
-    return 0
+    return $?
   fi
 
   run_typecheck_preflight

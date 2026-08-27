@@ -15,7 +15,10 @@ import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
 } from "@murphai/importers/device-providers/provider-descriptors";
-import type { CompleteDeviceProviderSourceDay } from "@murphai/importers";
+import type {
+  CompleteDeviceProviderSourceDay,
+  DeviceBatchImportExecutionOptions,
+} from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 export type { DeviceSyncAccountSetupPhase } from "./client.ts";
@@ -28,8 +31,10 @@ export type { ListDeviceConnectionSourcesInput } from "./client.ts";
 export type { ListDeviceSyncAccountsInput } from "./client.ts";
 export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
+export type { DeviceSyncCanonicalImportReceipt } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+export const DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT = 100;
 // Shared between the Junction provider's temporal resource/day dedupe keys and
 // the store's bounded terminal-history retention for those coordinates.
 export const JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX = "junction-temporal-authority:";
@@ -87,6 +92,16 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   failureCauseName?: string;
   failureErrorCause?: string;
   failureErrorName?: string;
+  junctionWorkoutStreamMaxTimestampCount?: number;
+  junctionWorkoutStreamTimestampCardinalityKind?: string;
+  junctionWorkoutStreamTimestampCount?: number;
+  junctionEcgActualRecordingCount?: number;
+  junctionEcgActualSampleCount?: number;
+  junctionEcgBindingReason?: string;
+  junctionEcgExpectedRecordingCount?: number;
+  junctionEcgExpectedSampleCount?: number;
+  junctionEcgMaxRecordingCount?: number;
+  junctionEcgMaxSampleCount?: number;
   normalizationFailureReason?: string;
   normalizationRowOrdinal?: number;
   normalizationSourceProvider?: string;
@@ -161,6 +176,47 @@ export interface DeviceSyncJobFailureDiagnostic {
   retryable: boolean;
   /** Sanitized failure summary already passed through the shared redaction helpers. */
   summary?: string;
+}
+
+export type DeviceSyncJobTimingOutcome =
+  | "cancelled"
+  | "completed"
+  | "deferred"
+  | "failed"
+  | "yielded";
+
+/**
+ * Bounded metadata for one claimed worker attempt. This intentionally omits
+ * account/job ids, payloads, cursors, provider responses, and health values so
+ * hosted runtimes can persist it as privacy-safe operational telemetry.
+ */
+export interface DeviceSyncJobTimingDiagnostic {
+  at: string;
+  attempts: number;
+  connectionSourceReadCount: number;
+  connectionSourceReadElapsedMs: number;
+  credentialRefreshCount: number;
+  credentialRefreshElapsedMs: number;
+  durableProgressCommitted: boolean;
+  elapsedMs: number;
+  jobCount: number;
+  jobKind: string;
+  outcome: DeviceSyncJobTimingOutcome;
+  provider: string;
+  providerExecutionElapsedMs: number | null;
+  providerInventoryRequestCount: number;
+  providerInventoryRequestElapsedMs: number;
+  providerResourceRequestCount: number;
+  providerResourceRequestElapsedMs: number;
+  providerUnattributedElapsedMs: number | null;
+  resource?: string;
+  snapshotImportCount: number;
+  snapshotImportElapsedMs: number;
+  snapshotCanonicalCoreElapsedMs: number;
+  snapshotCanonicalWriteElapsedMs: number;
+  snapshotEventIdentityIndexCacheHitCount: number;
+  snapshotEventIdentityIndexElapsedMs: number;
+  snapshotNormalizationElapsedMs: number;
 }
 
 export interface DeviceSyncHttpConfig {
@@ -944,6 +1000,10 @@ export interface ProviderJobContext {
   connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
+  recordProviderRequestTiming?(
+    category: "inventory" | "resource",
+    elapsedMs: number,
+  ): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(
@@ -1214,6 +1274,8 @@ export interface DeviceSyncImporterPort {
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;
+  }, options?: {
+    importSession?: DeviceBatchImportExecutionOptions["session"];
   }): Promise<unknown>;
   resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
     vaultRoot?: string;

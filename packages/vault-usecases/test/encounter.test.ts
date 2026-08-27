@@ -592,6 +592,11 @@ describe("encounter usecase", () => {
       name: "VaultCliError",
       code: "invalid_payload",
       message: "encounter payload failed validation.",
+      context: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({ publicPath: expect.any(Array) }),
+        ]),
+      },
     });
     expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
   });

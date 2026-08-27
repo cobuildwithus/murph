@@ -1,4 +1,5 @@
 import {
+  eventRecordSchema,
   normalizeStrictIsoTimestamp,
   type WorkoutExercise,
   type WorkoutSession,
@@ -6,8 +7,9 @@ import {
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
-  deriveWorkoutActionBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
+  workoutActionBindingTargetsWorkout,
 } from '@murphai/operator-config/workout-action-binding'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -18,7 +20,7 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
 import {
-  editWorkoutRecordAfterValidatedExerciseReplacement,
+  editWorkoutRecordAfterValidatedExerciseUpdate,
 } from './workout.js'
 import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
@@ -116,13 +118,43 @@ export async function findLiveWorkoutActionTargets(
     if (
       isOpenLiveWorkout(workout)
       && !hasAmbiguousWorkoutActionExerciseCoordinates(workout)
-      && deriveWorkoutActionBinding(shown.entity.id, workout) === actionBinding
+      && workoutActionBindingMatchesCurrentState(
+        shown.entity.id,
+        workout,
+        actionBinding,
+      )
     ) {
       bindingMatches.push(shown)
     }
   }
 
   return { bindingMatches, exactReplays }
+}
+
+export async function findLiveWorkoutRefreshTargets(
+  vault: string,
+  workoutBinding: string,
+): Promise<WorkoutShowResult[]> {
+  const records = await findStructuredWorkoutRecords(vault)
+  return records.flatMap(({ record, workout }) => {
+    if (
+      workout.sourceApp !== LIVE_WORKOUT_SOURCE_APP
+      || typeof workout.startedAt !== 'string'
+    ) {
+      return []
+    }
+    const shown = {
+      vault,
+      entity: toCommandShowEntity(record),
+    }
+    return workoutActionBindingTargetsWorkout(
+      shown.entity.id,
+      workout,
+      workoutBinding,
+    )
+      ? [shown]
+      : []
+  })
 }
 
 async function findStructuredWorkoutRecords(vault: string) {
@@ -145,8 +177,7 @@ export function parseShownWorkout(shown: WorkoutShowResult): WorkoutSession {
   if (!parsed.success) {
     throw new VaultCliError(
       'contract_invalid',
-      `Workout ${shown.entity.id} does not contain a valid structured workout session.`,
-      { issues: parsed.error.issues },
+      'The stored workout does not contain a valid structured workout session.',
     )
   }
   return parsed.data
@@ -164,13 +195,24 @@ export async function updateLiveWorkoutExercises(
     exercises,
     options,
   )
-  return editWorkoutRecordAfterValidatedExerciseReplacement({
+  const parsedEvent = eventRecordSchema.safeParse(shown.entity.data)
+  if (!parsedEvent.success || parsedEvent.data.kind !== 'activity_session' || !shown.entity.path) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Workout ${shown.entity.id} does not contain a valid canonical event.`,
+    )
+  }
+  return editWorkoutRecordAfterValidatedExerciseUpdate({
     durationMinutes: update.durationMinutes,
     endedAt: update.endedAt,
     exercises: update.exercises,
     lastMemberActionId: options.lastMemberActionId,
     lookup: shown.entity.id,
     vault: shown.vault,
+    validatedEvent: {
+      event: parsedEvent.data,
+      ledgerFile: shown.entity.path,
+    },
   })
 }
 
@@ -203,14 +245,17 @@ function validateLiveWorkoutExerciseUpdate(
   if (!parsed.success) {
     throw new VaultCliError(
       'contract_invalid',
-      `Workout ${shown.entity.id} would contain an invalid structured workout session.`,
-      { issues: parsed.error.issues },
+      'The workout update would produce an invalid structured workout session.',
     )
   }
-  assertTargetableLiveWorkout(parsed.data, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(parsed.data)
 
+  const exercisesChanged = JSON.stringify(parsed.data.exercises)
+    !== JSON.stringify(workout.exercises)
   const durationBoundary = endedAt
-    ?? (workout.endedAt === undefined ? observedAt : undefined)
+    ?? (exercisesChanged && workout.endedAt === undefined
+      ? observedAt
+      : undefined)
   return {
     durationMinutes:
       durationBoundary !== undefined && workout.startedAt !== undefined
@@ -305,7 +350,6 @@ export function compactSetPatch(input: LogLiveWorkoutSetInput): Partial<WorkoutS
 
 export function assertTargetableLiveWorkout(
   workout: WorkoutSession,
-  label: string,
 ): void {
   const exerciseOrders = new Set<number>()
 
@@ -313,8 +357,7 @@ export function assertTargetableLiveWorkout(
     if (exerciseOrders.has(exercise.order)) {
       throw new VaultCliError(
         'contract_invalid',
-        `${label} contains duplicate exercise order ${exercise.order}. Repair the workout structure before using targeted live commands.`,
-        { exerciseOrder: exercise.order },
+        'The workout contains duplicate exercise orders. Repair the workout structure before using targeted live commands.',
       )
     }
     exerciseOrders.add(exercise.order)
@@ -324,12 +367,7 @@ export function assertTargetableLiveWorkout(
       if (setOrders.has(set.order)) {
         throw new VaultCliError(
           'contract_invalid',
-          `${label} contains duplicate set order ${set.order} for exercise ${exercise.order} (${exercise.name}). Repair the workout structure before using targeted live commands.`,
-          {
-            exerciseName: exercise.name,
-            exerciseOrder: exercise.order,
-            setOrder: set.order,
-          },
+          'The workout contains duplicate set orders. Repair the workout structure before using targeted live commands.',
         )
       }
       setOrders.add(set.order)

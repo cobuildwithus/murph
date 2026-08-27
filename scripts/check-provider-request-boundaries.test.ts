@@ -112,6 +112,53 @@ describe("check-provider-request-boundaries", () => {
     `, "packages/example/src/client.ts")).toEqual(["raw-provider-http"]);
   });
 
+  it("uses a statically resolved GitHub host instead of temporal naming", () => {
+    expect(violations(`
+      const scheme = "https://";
+      const githubHost = \`api.github.com\`;
+      const temporalRepositoryPath = "/repos/temporalio/sdk-typescript";
+      const temporalUrl = scheme + githubHost + temporalRepositoryPath;
+      async function fetchTemporalRepository() {
+        return fetch(temporalUrl);
+      }
+    `, "packages/example/src/temporal-github-client.ts")).toEqual([]);
+  });
+
+  it("detects a registered provider host through static bindings and concatenation", () => {
+    const result = findProviderRequestBoundaryViolations(
+      "packages/example/src/temporal-provider-client.ts",
+      `
+        const scheme = "https://";
+        const openAiHost = "api." + \`openai.com\`;
+        const temporalUrl = scheme + openAiHost + "/v1/responses";
+        async function requestTemporalProvider() {
+          return fetch(temporalUrl);
+        }
+      `,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      boundary: "Direct OpenAI provider HTTP in requestTemporalProvider",
+      kind: "raw-provider-http",
+    });
+  });
+
+  it("falls back to temporal naming when the URL cannot be resolved", () => {
+    const result = findProviderRequestBoundaryViolations(
+      "packages/example/src/temporal-provider-client.ts",
+      `
+        async function requestTemporalProvider(url: string) {
+          return fetch(url);
+        }
+      `,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      boundary: "Direct Temporal provider HTTP in requestTemporalProvider",
+      kind: "raw-provider-http",
+    });
+  });
+
   it("does not mistake official SDK operations for raw HTTP", () => {
     expect(violations(`
       import OpenAI from "openai";
@@ -119,6 +166,38 @@ describe("check-provider-request-boundaries", () => {
       const client = new OpenAI({ apiKey: "test", fetch: sdkFetch });
       await client.responses.create({ model: "gpt", input: "hello" });
     `)).toEqual([]);
+  });
+
+  it("rejects low-level Lob request params around an official SDK call", () => {
+    expect(violations(`
+      import { LettersApi } from "@lob/lob-typescript-sdk";
+      async function findLetter(letters: LettersApi, query: Record<string, string>) {
+        const requestOptions = {};
+        requestOptions.params = query;
+        return letters.list(2, undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, requestOptions);
+      }
+      function createLobFetchAdapter(fetchImpl: typeof fetch) {
+        return (url: string) => fetchImpl(url);
+      }
+    `, "apps/web/src/lib/physical-notes/lob-runtime.ts")).toEqual([
+      "official-sdk-request-override",
+    ]);
+  });
+
+  it("rejects object-literal Lob request params around an official SDK call", () => {
+    expect(violations(`
+      import { LettersApi } from "@lob/lob-typescript-sdk";
+      async function findLetter(letters: LettersApi, query: Record<string, string>) {
+        return letters.list(2, undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, { params: query });
+      }
+      function createLobFetchAdapter(fetchImpl: typeof fetch) {
+        return (url: string) => fetchImpl(url);
+      }
+    `, "apps/web/src/lib/physical-notes/lob-runtime.ts")).toEqual([
+      "official-sdk-request-override",
+    ]);
   });
 
   it("keeps providers without a verified TypeScript SDK outside the ban", () => {
@@ -236,6 +315,27 @@ describe("check-provider-request-boundaries", () => {
     ]);
   });
 
+  it("allows Gemini only in the exact runtime-validated video owner", () => {
+    expect(violations(`
+      async function executeAnalyzeVideoTool(fetchImpl: typeof fetch) {
+        return fetchImpl(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+          { method: "POST" },
+        );
+      }
+    `, "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts"))
+      .toEqual([]);
+    expect(violations(`
+      async function analyzeVideo(fetchImpl: typeof fetch) {
+        return fetchImpl(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+          { method: "POST" },
+        );
+      }
+    `, "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts"))
+      .toEqual(["raw-provider-http"]);
+  });
+
   it("reports the primitive once inside a local wrapper", () => {
     const result = findProviderRequestBoundaryViolations(
       "packages/example/src/openai-client.ts",
@@ -261,6 +361,7 @@ describe("check-provider-request-boundaries", () => {
       "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
       "apps/web/src/lib/linq/api.ts",
       "packages/assistant-engine/src/assistant/channels/runtime.ts",
+      "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts",
       "packages/operator-config/src/linq-runtime.ts",
       "scripts/linq-typing-repro.ts",
       "scripts/native-ios-hosted-e2e-identity.mjs",

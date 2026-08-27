@@ -3,6 +3,8 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   applyLiveWorkoutMemberAction,
+  readLiveWorkoutCardSnapshot,
+  setWorkoutUnitPreferences,
 } from "@murphai/vault-usecases/workouts";
 
 import {
@@ -15,11 +17,45 @@ export async function executeHostedMemberActionWake(input: {
   wake: HostedExecutionMemberActionRequestedWake;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
-    case "workout.live.apply":
+    case "workout.live.apply": {
+      const action = input.wake.request.action;
       const result = await applyLiveWorkoutMemberAction({
         acceptedAt: input.wake.occurredAt,
-        action: input.wake.request.action,
+        action,
         actionId: input.wake.request.actionId,
+        vault: input.vaultRoot,
+      });
+      if (
+        result.status !== "rejected"
+        && action.weightUnitPreference !== undefined
+      ) {
+        await setWorkoutUnitPreferences({
+          recordedAt: input.wake.occurredAt,
+          vault: input.vaultRoot,
+          weight: action.weightUnitPreference,
+        });
+      }
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: input.wake.request.actionId,
+            completedAt: new Date().toISOString(),
+            reason: result.status === "rejected" ? result.reason : null,
+            ...(result.status !== "rejected" && result.result !== undefined
+              ? { result: result.result }
+              : {}),
+            schemaVersion: 1,
+            status: result.status,
+          },
+        },
+      });
+    }
+    case "workout.live.snapshot": {
+      const result = await readLiveWorkoutCardSnapshot({
+        action: input.wake.request.action,
         vault: input.vaultRoot,
       });
       return createNoopMailboxEffect({
@@ -31,10 +67,14 @@ export async function executeHostedMemberActionWake(input: {
             actionId: input.wake.request.actionId,
             completedAt: new Date().toISOString(),
             reason: result.status === "rejected" ? result.reason : null,
+            ...(result.status === "unchanged"
+              ? { result: result.result }
+              : {}),
             schemaVersion: 1,
             status: result.status,
           },
         },
       });
+    }
   }
 }

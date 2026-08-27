@@ -91,6 +91,7 @@ import {
 import {
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  readAssistantOutboxIntentByDeliveryIdempotencyKey,
 } from './outbox.js'
 import { createAssistantBinding } from './bindings.js'
 import {
@@ -134,6 +135,22 @@ const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   promptProfile: 'maintenance',
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
+}
+const ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
+const ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'operator-message',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
 }
 const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
@@ -194,8 +211,10 @@ export type AssistantNotificationTurnPolicy =
     }
 
 export type AssistantNotificationPromptProfile =
+  | 'context-handoff'
   | 'creative-response'
   | 'creative-response-text'
+  | 'operator-message'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -312,6 +331,11 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const recoveredOperatorMessage =
+        await recoverQueuedAssistantOperatorMessage(input)
+      if (recoveredOperatorMessage) {
+        return recoveredOperatorMessage
+      }
       const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,
@@ -627,6 +651,12 @@ export async function sendAssistantNotificationLocal(
           providerResult.providerAuthoredResponse !== null &&
             providerResult.providerAuthoredResponse !== undefined &&
             providerResult.response !== providerResult.providerAuthoredResponse
+        const hasAppendOnlyRuntimePresentation =
+          (providerResult.responseCard === null ||
+            providerResult.responseCard === undefined) &&
+          providerAuthoredResponse.length > 0 &&
+          providerResult.response !== providerAuthoredResponse &&
+          providerResult.response.startsWith(providerAuthoredResponse)
         let decision: AssistantNotificationDecision
         try {
           decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
@@ -634,9 +664,21 @@ export async function sendAssistantNotificationLocal(
                 kind: 'skip',
                 privateSummary: 'Group email effect completed.',
               }
-            : parseAssistantNotificationDecision(
-                providerAuthoredResponse,
-              )
+            : input.notificationPromptProfile === 'context-handoff'
+              ? {
+                  kind: 'send_message',
+                  privateSummary: 'Required context handoff message.',
+                  text: normalizeRequiredContextHandoffText(
+                    providerAuthoredResponse,
+                  ),
+                }
+              : resolveAssistantNotificationDecision({
+                  providerAuthoredResponse,
+                  runtimeReplacesFinalPresentation:
+                    runtimeOwnsFinalPresentation &&
+                    !hasAppendOnlyRuntimePresentation,
+                  runtimeResponse: providerResult.response,
+                })
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
@@ -676,6 +718,7 @@ export async function sendAssistantNotificationLocal(
             response: null,
           })
           const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptStandaloneContext: true,
             assistantTranscriptText: null,
             input: messageInput,
             plan: sharedPlan,
@@ -708,6 +751,7 @@ export async function sendAssistantNotificationLocal(
         const { responseText, transcriptText } =
           resolveAssistantNotificationPresentation({
             decision,
+            hasAppendOnlyRuntimePresentation,
             providerAuthoredResponse,
             providerResult,
             runtimeOwnsFinalPresentation,
@@ -740,6 +784,7 @@ export async function sendAssistantNotificationLocal(
         if (input.deferCommitUntilDeliveryAccepted !== true) {
           await createNotificationReceipt(providerResult.session)
           const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptStandaloneContext: true,
             assistantTranscriptText: transcriptText,
             input: messageInput,
             plan: sharedPlan,
@@ -849,6 +894,7 @@ export async function sendAssistantNotificationLocal(
             }
             await createNotificationReceipt(deliveryOutcome.session)
             const savedSession = await persistAssistantTurnAndSession({
+              assistantTranscriptStandaloneContext: true,
               assistantTranscriptText: transcriptText,
               input: messageInput,
               plan: sharedPlan,
@@ -924,8 +970,63 @@ export async function sendAssistantNotificationLocal(
   })
 }
 
+async function recoverQueuedAssistantOperatorMessage(
+  input: AssistantNotificationInput,
+): Promise<AssistantNotificationResult | null> {
+  const deliveryIdempotencyKey = normalizeNullableString(
+    input.deliveryIdempotencyKey,
+  )
+  if (
+    input.notificationPromptProfile !== 'operator-message'
+    || input.deliveryDispatchMode !== 'queue-only'
+    || input.responsePolicy?.kind !== 'require_send'
+    || deliveryIdempotencyKey === null
+  ) {
+    return null
+  }
+
+  const intent = await readAssistantOutboxIntentByDeliveryIdempotencyKey({
+    deliveryIdempotencyKey,
+    vault: input.vault,
+  })
+  if (!intent) {
+    return null
+  }
+  if (intent.operation !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_OPERATOR_MESSAGE_REPLAY_INVALID',
+      'Hosted operator message retry matched a non-message outbox action.',
+    )
+  }
+  const response = normalizeRequiredText(
+    intent.message,
+    'Hosted operator message retry matched an empty outbox message.',
+  )
+  const session = await createAssistantRuntimeStateService(input.vault)
+    .sessions.get(intent.sessionId)
+
+  return {
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Previously queued operator message.',
+      subject: intent.subject,
+      text: response,
+    },
+    deliveryOutcome: {
+      error: intent.lastError,
+      intentId: intent.intentId,
+      kind: 'queued',
+      media: intent.media,
+      session,
+    },
+    response,
+    session,
+  }
+}
+
 function resolveAssistantNotificationPresentation(input: {
   decision: AssistantNotificationSendDecision
+  hasAppendOnlyRuntimePresentation: boolean
   providerAuthoredResponse: string
   providerResult: {
     response: string
@@ -942,15 +1043,9 @@ function resolveAssistantNotificationPresentation(input: {
     return { responseText, transcriptText: responseText }
   }
 
-  const authoredResponse = input.providerAuthoredResponse
   const runtimeResponse = input.providerResult.response
-  const hasAppendOnlyRuntimePresentation =
-    (input.providerResult.responseCard === null ||
-      input.providerResult.responseCard === undefined) &&
-    authoredResponse.length > 0 &&
-    runtimeResponse !== authoredResponse &&
-    runtimeResponse.startsWith(authoredResponse)
-  if (hasAppendOnlyRuntimePresentation) {
+  if (input.hasAppendOnlyRuntimePresentation) {
+    const authoredResponse = input.providerAuthoredResponse
     const responseText = normalizeRequiredText(
       `${input.decision.text}${runtimeResponse.slice(authoredResponse.length)}`,
       'runtime-extended notification response',
@@ -1224,6 +1319,7 @@ async function persistAssistantExactTextNotificationSession(input: {
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: input.responseText,
         createdAt: input.turnCreatedAt,
       },
@@ -1753,11 +1849,17 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
+  if (input.notificationPromptProfile === 'context-handoff') {
+    return ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE
+  }
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
   }
   if (input.notificationPromptProfile === 'creative-response-text') {
     return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
+  }
+  if (input.notificationPromptProfile === 'operator-message') {
+    return ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE
   }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {
     return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
@@ -1988,6 +2090,55 @@ export function parseAssistantNotificationDecision(
         'Assistant notification turn returned an invalid decision object.',
       )
     }
+  }
+}
+
+function resolveAssistantNotificationDecision(input: {
+  providerAuthoredResponse: string
+  runtimeReplacesFinalPresentation: boolean
+  runtimeResponse: string
+}): AssistantNotificationDecision {
+  if (!input.runtimeReplacesFinalPresentation) {
+    return parseAssistantNotificationDecision(input.providerAuthoredResponse)
+  }
+
+  try {
+    const providerDecision = parseAssistantNotificationDecision(
+      input.providerAuthoredResponse,
+    )
+    if (providerDecision.kind === 'send_message') {
+      return providerDecision
+    }
+  } catch (error) {
+    if (
+      !(error instanceof VaultCliError) ||
+      error.code !== 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE'
+    ) {
+      throw error
+    }
+  }
+
+  return {
+    kind: 'send_message',
+    privateSummary: 'Delivered the runtime-owned notification presentation.',
+    text: normalizeRequiredText(
+      input.runtimeResponse,
+      'runtime-owned notification response',
+    ),
+  }
+}
+
+function normalizeRequiredContextHandoffText(value: string): string {
+  try {
+    return normalizeRequiredText(value, 'notification response')
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      throw new VaultCliError(error.code, error.message, {
+        ...(error.context ?? {}),
+        retryable: false,
+      })
+    }
+    throw error
   }
 }
 

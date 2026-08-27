@@ -16,7 +16,6 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -93,6 +92,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
+import type {
+  AnalyzeVideoTurnState,
+} from '../assistant-codex/analyze-video-tool.js'
 import {
   resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputItemInput,
@@ -115,6 +117,7 @@ import {
 import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
+import { recordAdditionalAssistantUsageEvents } from './service-usage.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -265,6 +268,7 @@ export async function executeCodexTurnWithRecovery(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   input: AssistantMessageInput
   onFinishWithoutReplyAccepted?: ((
@@ -307,6 +311,7 @@ export async function executeCodexTurnWithRecovery(input: {
   let attemptOutcome: AssistantCodexAttemptOutcome
   try {
     attemptOutcome = await executeAssistantCodexAttempt({
+      analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       attemptPlan,
       executionPlan,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
@@ -465,6 +470,7 @@ function emitCodexPlanTraceEvent(input: {
 }
 
 async function executeAssistantCodexAttempt(input: {
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
   onProviderRequestStarted?: ((event: {
@@ -620,6 +626,7 @@ async function executeAssistantCodexAttempt(input: {
         abortSignal: serviceTier
           ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
           : executionPlan.input.abortSignal,
+        analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
         activeTurnId: executionPlan.turnId,
         activeTurnSteering:
           hostedImageCompletionNativeCapabilitiesRestrictedTurn
@@ -687,6 +694,24 @@ async function executeAssistantCodexAttempt(input: {
           attemptPlan.routePlan.onboardingGuidanceInjected &&
           executionPlan.input.scheduledOccurrenceAt == null &&
           executionPlan.input.scheduledInvocationAuthority == null,
+        onAdditionalUsage: executionPlan.executionContext.hosted?.usageRecorder
+          ? (additionalUsage) => recordAdditionalAssistantUsageEvents({
+              additionalUsages: [additionalUsage],
+              effectiveEnv: attemptEnv,
+              executionContext: executionPlan.executionContext,
+              providerRequestAcceptedInputIds:
+                (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+              providerResult: {
+                attemptCount: attemptPlan.attemptCount,
+                provider: attemptPlan.route.provider,
+                providerOptions: attemptPlan.route.providerOptions,
+                route: attemptPlan.route,
+                session: attemptPlan.session,
+                usageAttribution,
+              },
+              turnId: executionPlan.turnId,
+            })
+          : null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
@@ -727,9 +752,7 @@ async function executeAssistantCodexAttempt(input: {
         permissions:
           groupRoomModelMaintenanceTurn
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : memberMemoryMaintenanceTurn
-              ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
-              : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
                 ? hostedLocalTestProviderTurn
@@ -776,6 +799,8 @@ async function executeAssistantCodexAttempt(input: {
         showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
         systemPrompt: attemptPlan.routePlan.systemPrompt,
         turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
+        trustedContextReferences:
+          executionPlan.input.trustedContextReferences ?? null,
         usageAttribution,
         vaultRoot: executionPlan.input.vault,
         userMessageContent: resolveCodexRouteUserMessageContent({

@@ -99,9 +99,15 @@ import {
   type HostedMemberActivationResult,
 } from "./member-activation";
 import {
+  buildHostedAccessRestorationRuntimeEventId,
+} from "./member-access-runtime-handoff";
+import {
   HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
+import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
 import {
   createHostedMember,
   readHostedMemberCoreState,
@@ -481,6 +487,7 @@ interface HostedAccountGroupStripeObjectMatch {
 }
 
 export type HostedFamilyStripeSubscriptionResult = {
+  accessRestoredMemberIds?: string[];
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
   groupId: string | null;
@@ -2210,7 +2217,10 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
 }
 
 export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
-  dispatchContext: { eventCreatedAt?: Date | null };
+  dispatchContext: {
+    eventCreatedAt?: Date | null;
+    sourceEventId?: string;
+  };
   preparedCryptoDomainRootsByMember?: PreparedHostedFamilyCryptoDomainRoots;
   subscription: Stripe.Subscription;
   tx: Prisma.TransactionClient;
@@ -2283,6 +2293,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
           ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
               eventCreatedAt,
               groupId: group.id,
+              includeActiveMemberships: currentActiveFamilySubscription,
               ownerMemberId: currentActiveFamilySubscription
                 ? group.ownerMemberId
                 : null,
@@ -2472,6 +2483,11 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       !activeMembersFitPaidSeats
     ? HostedBillingStatus.unpaid
     : stripeBillingStatus;
+  const familyAccessRestored = !hasHostedAccountGroupAccess(group) &&
+    hasHostedAccountGroupAccess({
+      billingStatus,
+      suspendedAt: group.suspendedAt,
+    });
   const billingRef = await writeHostedAccountGroupStripeBillingTx({
     billingStatus,
     currentBillingPhase:
@@ -2514,9 +2530,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       stripeSubscriptionId: input.subscription.id,
       tx: input.tx,
     });
-    if (billingModeChanged || recheckOwnerOnExactActiveEventReplay) {
-      runtimeRecheckMemberIds.add(group.ownerMemberId);
-    }
     await revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx({
       capacities: familyPlanState.capacities,
       groupId: group.id,
@@ -2524,8 +2537,18 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       tx: input.tx,
     });
     const activations = await activateHostedFamilyGroupMembersForActiveBillingTx({
+      ...(familyAccessRestored
+        || billingModeChanged
+        || recheckOwnerOnExactActiveEventReplay
+        ? {
+            accessRestorationSourceEventId:
+              input.dispatchContext.sourceEventId
+              ?? `family-subscription:${input.subscription.id}:${eventCreatedAt?.toISOString() ?? "unknown"}`,
+          }
+        : {}),
       groupId: group.id,
       occurredAt: input.dispatchContext.eventCreatedAt ?? new Date(),
+      ownerMemberId: group.ownerMemberId,
       preparedCryptoDomainRootsByMember:
         input.preparedCryptoDomainRootsByMember ?? new Map(),
       sourceEventId: `family-subscription:${input.subscription.id}`,
@@ -2533,6 +2556,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     });
 
     return {
+      accessRestoredMemberIds: familyAccessRestored
+        ? activations.map((activation) => activation.memberId)
+        : [],
       activations,
       billingModeChangedMemberIds: billingModeChanged
         ? [group.ownerMemberId]
@@ -2551,6 +2577,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
   eventCreatedAt: Date | null;
   groupId: string;
+  includeActiveMemberships: boolean;
   ownerMemberId: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<string[]> {
@@ -2563,8 +2590,12 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
     where: {
       groupId: input.groupId,
       status: "active",
-      usagePlanTransitionAt: input.eventCreatedAt,
-      usagePlanTransitionKind: "plan_upgrade",
+      ...(input.includeActiveMemberships
+        ? {}
+        : {
+            usagePlanTransitionAt: input.eventCreatedAt,
+            usagePlanTransitionKind: "plan_upgrade",
+          }),
     },
   });
   return [
@@ -4941,6 +4972,13 @@ export async function acceptHostedFamilyInvite(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const activation = activationHolder.value;
 
+  if (activation?.activated) {
+    scheduleHostedSignupNotificationEmails({
+      activationSurface: "website",
+      memberIds: [activation.memberId],
+      prisma,
+    });
+  }
   if (activation?.hostedExecutionEventId) {
     await signalHostedMemberActivationRuntimeWakeBestEffortResult({
       hostedExecutionEventId: activation.hostedExecutionEventId,
@@ -5794,6 +5832,7 @@ export async function acceptHostedFamilyInviteTx(input: {
 
   if (hasHostedAccountGroupAccess(invite.group)) {
     const activation = await activateHostedMemberForFamilySponsorshipTx({
+      accessRestorationSourceEventId: `family-invite:${invite.id}`,
       memberId: input.acceptedMemberId,
       occurredAt: now,
       ...(input.preparedCryptoDomainRoots
@@ -5842,16 +5881,26 @@ async function readHostedFamilyInviteActivationReplayResultTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationResult> {
-  const hostedExecutionEventId = buildHostedMemberActivationEventId({
+  const activationEventId = buildHostedMemberActivationEventId({
     memberId: input.memberId,
     sourceEventId: `family-invite:${input.inviteId}`,
     sourceType: "hosted.family.sponsorship",
   });
-  const mailboxItem = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: hostedExecutionEventId,
+  const activationMailboxItem = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: activationEventId,
     prisma: input.tx,
     userId: input.memberId,
   });
+  const mailboxItem = activationMailboxItem
+    ?? await readHostedMailboxItemByDedupeKey({
+      dedupeKey: buildHostedAccessRestorationRuntimeEventId({
+        memberId: input.memberId,
+        sourceEventId: `family-invite:${input.inviteId}`,
+        sourceType: "hosted.family.sponsorship",
+      }),
+      prisma: input.tx,
+      userId: input.memberId,
+    });
 
   return {
     activated: false,
@@ -7446,8 +7495,10 @@ async function hasHostedFamilyMemberLiveDirectSubscription(input: {
 }
 
 async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
+  accessRestorationSourceEventId?: string;
   groupId: string;
   occurredAt: Date;
+  ownerMemberId: string;
   preparedCryptoDomainRootsByMember: PreparedHostedFamilyCryptoDomainRoots;
   sourceEventId: string;
   tx: Prisma.TransactionClient;
@@ -7467,7 +7518,15 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
   });
 
   const eligibleMemberships: typeof memberships = [];
-  for (const membership of memberships) {
+  const accessMembers = memberships.some(
+    (membership) => membership.memberId === input.ownerMemberId,
+  )
+    ? memberships
+    : [
+        ...memberships,
+        { memberId: input.ownerMemberId, role: "owner" as const },
+      ];
+  for (const membership of accessMembers) {
     await assertHostedFamilyMemberNotSponsoredElsewhereTx({
       groupId: input.groupId,
       memberId: membership.memberId,
@@ -7488,6 +7547,12 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
   const activations: HostedMemberActivationResult[] = [];
   for (const membership of eligibleMemberships) {
     activations.push(await activateHostedMemberForFamilySponsorshipTx({
+      ...(input.accessRestorationSourceEventId
+        ? {
+            accessRestorationSourceEventId:
+              input.accessRestorationSourceEventId,
+          }
+        : {}),
       memberId: membership.memberId,
       occurredAt: input.occurredAt,
       preparedCryptoDomainRoots:

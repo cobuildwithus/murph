@@ -68,6 +68,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
@@ -504,6 +505,11 @@ type AssistantOnboardingResumeContextSurface =
     | 'deviceAccounts'
   ]
 
+type AssistantOnboardingResumeContextFailureSurface = Exclude<
+  AssistantOnboardingResumeContextSurface,
+  { status: 'ok' }
+>
+
 type AssistantOnboardingDeviceAccountServices = {
   devices?: {
     listAccounts(input: {
@@ -539,12 +545,58 @@ function requireAssistantVaultServices(
   return services
 }
 
-function buildAssistantOnboardingResumeContextErrorSurface():
-  AssistantOnboardingResumeContextSurface {
+function buildAssistantOnboardingResumeContextErrorSurface(
+  error: unknown,
+): AssistantOnboardingResumeContextFailureSurface {
+  if (error instanceof VaultCliError) {
+    const projection = projectVaultCliError(error)
+    return {
+      status: 'error',
+      code: projection.code,
+      message: 'This onboarding context surface could not be read.',
+      retryable: projection.retryable,
+      ...(projection.hint ? { hint: projection.hint } : {}),
+    }
+  }
+
+  const nodeCode = readAssistantOnboardingErrorCode(error)
+  if (nodeCode === 'EACCES' || nodeCode === 'EPERM') {
+    return {
+      status: 'error',
+      code: 'permission_denied',
+      message: 'This onboarding context surface could not be read.',
+      retryable: false,
+      hint: 'Check the vault file permissions before retrying.',
+    }
+  }
+
   return {
     status: 'error',
-    message: 'Read failed.',
+    code: nodeCode === 'ENOENT' ? 'not_found' : 'read_failed',
+    message: 'This onboarding context surface could not be read.',
+    retryable: nodeCode !== 'ENOENT',
+    hint: nodeCode === 'ENOENT'
+      ? 'Check that the vault is initialized and the expected records exist.'
+      : 'Retry the context read; use the individual vault command if it continues to fail.',
   }
+}
+
+function buildAssistantOnboardingResumeContextUnavailableSurface():
+  AssistantOnboardingResumeContextFailureSurface {
+  return {
+    status: 'unavailable',
+    code: 'service_unavailable',
+    message: 'This onboarding context surface is not available in the current runtime.',
+    retryable: false,
+    hint: 'Use a runtime with the matching service enabled to inspect this surface.',
+  }
+}
+
+function readAssistantOnboardingErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+  return typeof error.code === 'string' ? error.code : null
 }
 
 function buildAssistantOnboardingResumeContextListSurface(input: {
@@ -578,8 +630,8 @@ async function readAssistantOnboardingResumeContextListSurface(input: {
       items: result.items ?? [],
       limit: input.limit,
     })
-  } catch {
-    return buildAssistantOnboardingResumeContextErrorSurface()
+  } catch (error) {
+    return buildAssistantOnboardingResumeContextErrorSurface(error)
   }
 }
 
@@ -605,11 +657,8 @@ async function readAssistantOnboardingResumeContextMemory(input: {
       truncated: result.document.records.length > records.length,
       updatedAt: result.document.updatedAt,
     }
-  } catch {
-    return {
-      status: 'error',
-      message: 'Read failed.',
-    }
+  } catch (error) {
+    return buildAssistantOnboardingResumeContextErrorSurface(error)
   }
 }
 
@@ -628,7 +677,7 @@ async function readAssistantOnboardingResumeContextDeviceAccounts(input: {
     input.services,
   )
   if (!deviceServices) {
-    return buildAssistantOnboardingResumeContextErrorSurface()
+    return buildAssistantOnboardingResumeContextUnavailableSurface()
   }
 
   return readAssistantOnboardingResumeContextListSurface({

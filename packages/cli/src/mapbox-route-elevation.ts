@@ -7,7 +7,10 @@ import {
   type MapboxRouteGeometry,
   type MapboxTilequeryResponse,
 } from './mapbox-route-contracts.js'
-import { fetchMapboxJson } from './mapbox-route-client.js'
+import {
+  createMapboxResponseInvalidError,
+  fetchMapboxJson,
+} from './mapbox-route-client.js'
 
 export async function summarizeRouteElevation(input: {
   accessToken: string
@@ -212,15 +215,26 @@ async function queryElevationAtPoint(input: {
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: 'terrain elevation',
   })
 
   if (!payload) {
     return null
   }
 
+  if (
+    typeof payload !== 'object' ||
+    (payload.features !== undefined && !Array.isArray(payload.features))
+  ) {
+    throw createMapboxResponseInvalidError()
+  }
+
   const elevations = (payload.features ?? [])
-    .map((feature) => parseElevationValue(feature.properties?.ele))
+    .map((feature) => {
+      if (!feature || typeof feature !== 'object') {
+        throw createMapboxResponseInvalidError()
+      }
+      return parseElevationValue(feature.properties?.ele)
+    })
     .filter((value): value is number => typeof value === 'number')
 
   return elevations.length > 0 ? Math.max(...elevations) : null

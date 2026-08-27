@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
+  assertHostedThreadRouteEgressAuthority: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
@@ -10,16 +12,21 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxWakeByItemId: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
+  runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
+  runWithPreparedHostedMailboxItemAppendCrypto:
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -36,6 +43,8 @@ vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority:
     mocks.assertHostedLinqRouteEgressAuthority,
+  assertHostedThreadRouteEgressAuthority:
+    mocks.assertHostedThreadRouteEgressAuthority,
 }));
 
 import {

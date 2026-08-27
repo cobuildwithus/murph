@@ -166,6 +166,14 @@ export function EnvironmentPrintReport({
           <p className="mt-1 text-xs text-muted-foreground">
             {coverage.known} of {coverage.total} facts known · {coverage.coverage}% coverage
           </p>
+          {grade.capabilityBonus && grade.basePct !== undefined ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {grade.basePct}% base + {grade.capabilityBonus} capability bonus
+              {grade.basePct + grade.capabilityBonus > 100
+                ? " · capped at 100%"
+                : ""}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -256,6 +264,11 @@ function PrintCategory({ note }: { note: CategoryNote }) {
                 {row.value}
                 {row.detail ? (
                   <span className="text-muted-foreground"> · {row.detail}</span>
+                ) : null}
+                {row.note ? (
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                    {row.note}
+                  </span>
                 ) : null}
               </td>
               <td className="py-1.5 text-muted-foreground">

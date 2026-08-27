@@ -55,7 +55,7 @@ overrides:
 
 patchedDependencies:
   incur@0.4.5:
-    hash: d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e
+    hash: 0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3
     path: patches/incur@0.4.5.patch
   ink@6.8.0:
     hash: 9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5
@@ -78,8 +78,8 @@ importers:
         specifier: ^0.1.17
         version: 0.1.17
       '@cobuild/review-gpt':
-        specifier: ^0.5.136
-        version: 0.5.136(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        specifier: ^0.5.138
+        version: 0.5.138(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -164,6 +164,9 @@ importers:
       jose:
         specifier: ^6.2.3
         version: 6.2.3
+      openai:
+        specifier: 6.45.0
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.3
@@ -414,7 +417,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+        version: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -472,8 +475,8 @@ importers:
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
     devDependencies:
       '@openai/codex':
-        specifier: 0.147.0
-        version: 0.147.0
+        specifier: 0.149.1
+        version: 0.149.1
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -662,7 +665,7 @@ importers:
         version: 1.42.0
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+        version: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
       indent-string:
         specifier: ^5.0.0
         version: 5.0.0
@@ -1050,7 +1053,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+        version: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -1484,8 +1487,8 @@ packages:
     resolution: {integrity: sha512-cq+LzXoKNOn+KXLBm9+N9QMTEwbIXzki5AZXP/cHnAex3+3LnyhJ7zMxB5InZVgQgqI9hEs0dsXoJX/tNxlW3Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.136':
-    resolution: {integrity: sha512-+6+8idtX4w8Ki86a9Ezk5zQ3o6tpta2bi01xh/RHMyn2ncP5jsxIouBEs2thPHNVMLBWGeGvfaxphNAPJgjd4w==}
+  '@cobuild/review-gpt@0.5.138':
+    resolution: {integrity: sha512-Qat+rCegGKdx6RR4TDckUn8L+FqlX3ADaOXrWM31VdBAFqG/lkj/Aq8nTIJfXRGR1Bo7b1FP6x53QmcuSeJQmA==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -2774,43 +2777,43 @@ packages:
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
 
-  '@openai/codex@0.147.0':
-    resolution: {integrity: sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w==}
+  '@openai/codex@0.149.1':
+    resolution: {integrity: sha512-6q5pbcpFbJbqOpkubSDBwXmktQ55aD8eUzGzBF1zASob2DjwhBKDSNGtdZKalfrNJUdTDTPDMmzCXEXs5tMBYA==}
     engines: {node: '>=16'}
     hasBin: true
 
-  '@openai/codex@0.147.0-darwin-arm64':
-    resolution: {integrity: sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw==}
+  '@openai/codex@0.149.1-darwin-arm64':
+    resolution: {integrity: sha512-6X84kTCbnTgPIJ2EdcPsrvwS0Wxsqpa+bCswGmRf4BjhcQ5nPMnBC6yCAaCMj+vrbXQHj+L6sa9FaR4QkmA1qw==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [darwin]
 
-  '@openai/codex@0.147.0-darwin-x64':
-    resolution: {integrity: sha512-Tb8McE5SvJIH0Vs5R6sq7u+quiC931yan2KOOl6km1OdZ82+Wi7eF5XrSFPs5CF7xCgoIK4Vs+byMbT5hN+ZUw==}
+  '@openai/codex@0.149.1-darwin-x64':
+    resolution: {integrity: sha512-MfLBQLfcElJL9tvj6y45qVHHMGSXCPnQOixuD3/Zq0g1BW/eFizkrGLdn48cFpc+l8cK+gt5nYG5pQYwVs6g4A==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [darwin]
 
-  '@openai/codex@0.147.0-linux-arm64':
-    resolution: {integrity: sha512-SLC1JXw2TYfr/c3HhrJubyyLelq7vTOLWVmiThFA+z0+WgzCPmaseJ/kzDD3Gge/TO7fCnnj7UcPmC0d2c8XAg==}
+  '@openai/codex@0.149.1-linux-arm64':
+    resolution: {integrity: sha512-OqxUfZ1TVvHd18zHPKK/8ZRlpk8Vy11mg5CMHaLxNWldTbwVImDKtSLWT+m8m4NM5Sz4PbjtZMrVT/RfpBW/mQ==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [linux]
 
-  '@openai/codex@0.147.0-linux-x64':
-    resolution: {integrity: sha512-0W9MBxPpWW0cSkNqrTDN2jR7rzzT7oNMhQY5446lT2Lw5cz5yhDTck4Va9rjkQEm+HlFzP/dmEMSZbXfJsINmw==}
+  '@openai/codex@0.149.1-linux-x64':
+    resolution: {integrity: sha512-Of5fGYgr7tAMsyj6vhXb4/RM/UoA3Zq8BLegUBDC09UNy1XTLGYP/2XD+UX8z3qh0NDwxYdCjFIWdDNijKZggQ==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [linux]
 
-  '@openai/codex@0.147.0-win32-arm64':
-    resolution: {integrity: sha512-e2ZstJ8zT8Rm1nvR7CUVO+Gr3cTChE41+VfOzGhynzDXEoW0wfbjUQbc2bWbh1arG94LMm4y3dqBtUIbSrfeGA==}
+  '@openai/codex@0.149.1-win32-arm64':
+    resolution: {integrity: sha512-5K0DmOKGK9Bos627p8sK8ATHjovPK0sDyT6h9Cb+4v+5CW5SGw1HLgjGxoLfJ8g3cg6mtg/pRCXXo2L/j71UVA==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [win32]
 
-  '@openai/codex@0.147.0-win32-x64':
-    resolution: {integrity: sha512-oT7Ss5fAPf2fiWE9QNURqZcQGAAawSVxmIUdgPzckq4KFZAM+pRz9JbM4Rr498CjtbNgTOjWvDJ+DXvIBSfOPA==}
+  '@openai/codex@0.149.1-win32-x64':
+    resolution: {integrity: sha512-G3QXGAg7nyyhqOeooAMUekBCeHd8a1QByhKcVAFyzNBaI06t6Ft7nsF+1SzFS0spuIdU4YyMi5YD26ukADBQUQ==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
@@ -10831,10 +10834,10 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.17': {}
 
-  '@cobuild/review-gpt@0.5.136(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.138(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.17
-      incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+      incur: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -12147,31 +12150,31 @@ snapshots:
 
   '@open-draft/until@2.1.0': {}
 
-  '@openai/codex@0.147.0':
+  '@openai/codex@0.149.1':
     optionalDependencies:
-      '@openai/codex-darwin-arm64': '@openai/codex@0.147.0-darwin-arm64'
-      '@openai/codex-darwin-x64': '@openai/codex@0.147.0-darwin-x64'
-      '@openai/codex-linux-arm64': '@openai/codex@0.147.0-linux-arm64'
-      '@openai/codex-linux-x64': '@openai/codex@0.147.0-linux-x64'
-      '@openai/codex-win32-arm64': '@openai/codex@0.147.0-win32-arm64'
-      '@openai/codex-win32-x64': '@openai/codex@0.147.0-win32-x64'
+      '@openai/codex-darwin-arm64': '@openai/codex@0.149.1-darwin-arm64'
+      '@openai/codex-darwin-x64': '@openai/codex@0.149.1-darwin-x64'
+      '@openai/codex-linux-arm64': '@openai/codex@0.149.1-linux-arm64'
+      '@openai/codex-linux-x64': '@openai/codex@0.149.1-linux-x64'
+      '@openai/codex-win32-arm64': '@openai/codex@0.149.1-win32-arm64'
+      '@openai/codex-win32-x64': '@openai/codex@0.149.1-win32-x64'
 
-  '@openai/codex@0.147.0-darwin-arm64':
+  '@openai/codex@0.149.1-darwin-arm64':
     optional: true
 
-  '@openai/codex@0.147.0-darwin-x64':
+  '@openai/codex@0.149.1-darwin-x64':
     optional: true
 
-  '@openai/codex@0.147.0-linux-arm64':
+  '@openai/codex@0.149.1-linux-arm64':
     optional: true
 
-  '@openai/codex@0.147.0-linux-x64':
+  '@openai/codex@0.149.1-linux-x64':
     optional: true
 
-  '@openai/codex@0.147.0-win32-arm64':
+  '@openai/codex@0.149.1-win32-arm64':
     optional: true
 
-  '@openai/codex@0.147.0-win32-x64':
+  '@openai/codex@0.149.1-win32-x64':
     optional: true
 
   '@opentelemetry/api@1.9.0':
@@ -18233,7 +18236,7 @@ snapshots:
       yaml: 2.9.0
       zod: 4.4.3
 
-  incur@0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e):
+  incur@0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3):
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/server': 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)

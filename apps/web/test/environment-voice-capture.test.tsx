@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, test, vi } from "vitest";
 
 const authMocks = vi.hoisted(() => ({
@@ -46,6 +46,22 @@ vi.mock("@/src/components/ui/dialog", () => ({
           children,
         )
       : null,
+  DialogClose: ({
+    children,
+    render,
+  }: {
+    children: ReactNode;
+    render?: ReactElement<{ disabled?: boolean }>;
+  }) =>
+    createElement(
+      "button",
+      {
+        "aria-label": "Close",
+        disabled: render?.props.disabled,
+        type: "button",
+      },
+      children,
+    ),
   DialogContent: ({ children }: { children: ReactNode }) =>
     createElement("div", null, children),
   DialogDescription: ({ children }: { children: ReactNode }) =>
@@ -57,11 +73,55 @@ vi.mock("@/src/components/ui/dialog", () => ({
 }));
 
 import {
+  addDeclinedAnswersForSkippedTopic,
+  buildTopicInstructions,
+  keepUnreflectedWrites,
   EnvironmentVoiceCapture,
   microphoneAccessNotice,
+  summarizeEnvironmentInterviewCompletion,
+  withoutSavedFields,
 } from "../app/(dashboard)/environment/environment-voice-capture";
-import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
+import {
+  buildEnvironmentVoiceScript,
+  type EnvironmentVoiceScript,
+} from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
+
+const SCRIPT: EnvironmentVoiceScript = {
+  dialogTitle: "Build your Environment report",
+  flow: "walkthrough",
+  idleTitle: "Ready when you are",
+  topics: [
+    {
+      eyebrow: "Sleep",
+      fields: [
+        {
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+          label: "Your bedroom temperature at night",
+          valueType: { kind: "number" },
+        },
+      ],
+      focus: ["Your bedroom temperature at night"],
+      id: "sleep:0",
+      title: "Your bedroom at night",
+    },
+    {
+      eyebrow: "Workspace",
+      fields: [
+        {
+          aspectId: "workspace",
+          indicatorId: "work_mode",
+          label: "Whether you work at home, an office, or both",
+          valueType: { kind: "text" },
+        },
+      ],
+      focus: ["Whether you work at home, an office, or both"],
+      id: "workspace:0",
+      title: "Your work setup",
+    },
+  ],
+};
 
 beforeEach(() => {
   authMocks.authenticated = true;
@@ -75,51 +135,453 @@ test("explains when the browser has blocked microphone permission", () => {
   );
 });
 
-test("renders a user-specific missing-data script", async () => {
-  const script: EnvironmentVoiceScript = {
-    dialogTitle: "Fill the gaps in your report",
-    flow: "fill-gaps",
-    idleDescription: "One short topic, based on what Murph does not know yet.",
-    idleTitle: "Only the missing details",
-    topics: [
-      {
-        eyebrow: "Sleep",
-        focus: ["Night temperature", "Darkness"],
-        id: "sleep",
-        prompt: "Cover only the details Murph is still missing.",
-        title: "Your sleep setup",
-      },
-    ],
-  };
+test("opens with concise instructions before showing the first topic", async () => {
   const rendered = await renderClientComponent(
     createElement(EnvironmentVoiceCapture, {
-      script,
-      triggerLabel: "Fill in what's missing",
+      script: SCRIPT,
+      triggerLabel: "Start report",
     }),
   );
 
   try {
-    await clickButton(rendered.window, "Fill in what's missing");
+    await clickButton(rendered.window, "Start report");
     const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Fill the gaps in your report/);
-    assert.match(bodyText, /Topic 1 of 1/);
-    assert.match(bodyText, /Night temperature/);
-    assert.match(bodyText, /Darkness/);
-    assert.doesNotMatch(bodyText, /Recovery and devices/);
+    assert.match(bodyText, /One topic at a time/);
+    assert.match(bodyText, /Start recording/);
+    assert.match(bodyText, /Speaking language/);
+    assert.match(bodyText, /Private/);
+    assert.match(
+      bodyText,
+      /Only confirmed details are saved. Audio and the live transcript are not added to your report./,
+    );
+    assert.doesNotMatch(bodyText, /focused topics/);
+    assert.doesNotMatch(bodyText, /Your bedroom at night/);
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("requires authentication before opening the voice walkthrough", async () => {
-  authMocks.authenticated = false;
+test("shows the active topic, durable check mark, and persistent transcript", async () => {
   const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture),
+    createElement(EnvironmentVoiceCapture, {
+      preview: {
+        capturedFieldKeys: ["sleep-environment.night_temp_c"],
+        detectedLanguageCode: "pl",
+        state: "listening",
+        transcript: "The bedroom stays near nineteen degrees.",
+      },
+      script: SCRIPT,
+    }),
   );
 
   try {
-    await clickButton(rendered.window, "Tell Murph by voice");
+    const bodyText = rendered.window.document.body.textContent ?? "";
+    assert.match(bodyText, /Your bedroom at night/);
+    assert.match(bodyText, /The bedroom stays near nineteen degrees/);
+    assert.match(bodyText, /Saved: Your bedroom temperature at night/);
+    assert.match(bodyText, /Finish report/);
+    assert.match(bodyText, /Next/);
+    const transcriptLabel = [
+      ...rendered.window.document.querySelectorAll("p"),
+    ].find((candidate) => candidate.textContent === "Live transcript");
+    assert.ok(transcriptLabel?.parentElement);
+    assert.equal(
+      transcriptLabel.parentElement.hasAttribute("aria-live"),
+      false,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
 
+test("blocks navigation while an answer is being accepted", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture, {
+      preview: {
+        state: "saving",
+        transcript: "The bedroom stays near nineteen degrees.",
+      },
+      script: SCRIPT,
+    }),
+  );
+
+  try {
+    assert.equal(findButton(rendered.window, "Finish report").disabled, true);
+    assert.equal(findButton(rendered.window, "Next").disabled, true);
+    assert.equal(findButton(rendered.window, "Close").disabled, true);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Not saved: Your bedroom temperature at night/,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("turns every unresolved field into a decline on skip", () => {
+  const topic = {
+    ...SCRIPT.topics[0],
+    fields: [
+      ...(SCRIPT.topics[0]?.fields ?? []),
+      {
+        aspectId: "sleep-environment",
+        indicatorId: "darkness",
+        label: "Bedroom darkness",
+        valueType: { kind: "text" as const },
+      },
+    ],
+  };
+  const answers = addDeclinedAnswersForSkippedTopic(
+    topic,
+    [
+      {
+        aspectId: "sleep-environment",
+        indicatorId: "night_temp_c",
+        value: 19,
+      },
+    ],
+    new Map(),
+  );
+
+  assert.deepEqual(answers, [
+    {
+      aspectId: "sleep-environment",
+      indicatorId: "night_temp_c",
+      value: 19,
+    },
+    {
+      aspectId: "sleep-environment",
+      indicatorId: "darkness",
+      value: "declined",
+    },
+  ]);
+});
+
+test("does not count declined fields as clear progress", () => {
+  assert.deepEqual(
+    summarizeEnvironmentInterviewCompletion(
+      { ...SCRIPT, initialCoveredDetails: 0, totalDetails: 2 },
+      new Map([
+        ["sleep-environment.night_temp_c", "declined"],
+        ["workspace.work_mode", "declined"],
+      ]),
+    ),
+    {
+      coveredDetails: 0,
+      remainingDetails: 0,
+      savedDetails: 0,
+      totalDetails: 2,
+    },
+  );
+});
+
+test("saves current and next-topic facts before navigation", async () => {
+  const runtimeScript: EnvironmentVoiceScript = {
+    ...SCRIPT,
+    topics: [
+      {
+        ...SCRIPT.topics[0],
+        fields: [
+          ...(SCRIPT.topics[0]?.fields ?? []),
+          {
+            aspectId: "sleep-environment",
+            indicatorId: "darkness",
+            label: "Whether your bedroom is dark",
+            valueType: { kind: "boolean" },
+          },
+        ],
+        focus: [
+          ...(SCRIPT.topics[0]?.focus ?? []),
+          "Whether your bedroom is dark",
+        ],
+      },
+      SCRIPT.topics[1],
+      {
+        eyebrow: "Light",
+        fields: [
+          {
+            aspectId: "light",
+            indicatorId: "daylight",
+            label: "Daylight access",
+            valueType: { kind: "boolean" },
+          },
+        ],
+        id: "light:0",
+        prompt: "Describe the item below.",
+        title: "Your daylight",
+      },
+    ],
+  };
+  const onAccepted = vi.fn();
+  const harness = await startRealtimeInterview(runtimeScript, onAccepted);
+
+  try {
+    const sessionUpdate = harness.dataChannel.sent
+      .map((value): unknown => JSON.parse(value))
+      .find(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "type" in value &&
+          value.type === "session.update",
+      );
+    assert.ok(
+      typeof sessionUpdate === "object" &&
+        sessionUpdate !== null &&
+        "session" in sessionUpdate,
+    );
+    const session = sessionUpdate.session;
+    assert.ok(
+      typeof session === "object" &&
+        session !== null &&
+        "tools" in session &&
+        Array.isArray(session.tools),
+    );
+    const updateTool = session.tools.find(
+      (tool) =>
+        typeof tool === "object" &&
+        tool !== null &&
+        "name" in tool &&
+        tool.name === "update_environment_interview",
+    );
+    assert.ok(updateTool);
+    assert.ok("parameters" in updateTool);
+    assert.ok(
+      typeof updateTool.parameters === "object" &&
+        updateTool.parameters !== null,
+    );
+    assert.equal("anyOf" in updateTool.parameters, false);
+    assert.match(JSON.stringify(updateTool), /sleep:0/);
+    assert.match(JSON.stringify(updateTool), /workspace:0/);
+    assert.match(JSON.stringify(updateTool), /"next"/);
+    assert.doesNotMatch(
+      JSON.stringify(session.tools),
+      /mark_environment_fields/,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(session.tools),
+      /control_environment_interview/,
+    );
+
+    await act(async () => {
+      harness.dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({
+            languageCode: "en",
+            topics: [
+              {
+                answers: [
+                  {
+                    aspectId: "workspace",
+                    indicatorId: "work_mode",
+                    value: "home",
+                  },
+                ],
+                topicId: "workspace:0",
+              },
+            ],
+          }),
+          call_id: "call_1",
+          name: "update_environment_interview",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.equal(onAccepted.mock.calls.length, 1);
+      assert.match(
+        harness.rendered.window.document.body.textContent ?? "",
+        /Your bedroom at night/,
+      );
+    });
+
+    await act(async () => {
+      harness.dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({
+            action: "next",
+            languageCode: "en",
+            topics: [
+              {
+                answers: [
+                  {
+                    aspectId: "sleep-environment",
+                    indicatorId: "night_temp_c",
+                    value: 19,
+                  },
+                  {
+                    aspectId: "sleep-environment",
+                    indicatorId: "darkness",
+                    value: true,
+                  },
+                ],
+                topicId: "sleep:0",
+              },
+              {
+                answers: [
+                  {
+                    aspectId: "workspace",
+                    indicatorId: "work_mode",
+                    note: "The member works from home full time.",
+                    value: "home",
+                  },
+                ],
+                topicId: "workspace:0",
+              },
+            ],
+          }),
+          call_id: "call_2",
+          name: "update_environment_interview",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.equal(onAccepted.mock.calls.length, 2);
+      assert.match(
+        harness.rendered.window.document.body.textContent ?? "",
+        /Your work setup/,
+      );
+    });
+    await clickButton(harness.rendered.window, "Finish report");
+    assert.match(
+      harness.rendered.window.document.body.textContent ?? "",
+      /Your answers were accepted/,
+    );
+    assert.equal(
+      harness.fetchMock.mock.calls.filter(
+        ([input]) => input === "/api/environment/realtime/topics",
+      ).length,
+      2,
+    );
+    const topicRequests = harness.fetchMock.mock.calls.filter(
+      ([input]) => input === "/api/environment/realtime/topics",
+    );
+    assert.ok(topicRequests[0]?.[1]?.body);
+    assert.deepEqual(JSON.parse(String(topicRequests[0][1].body)).topics, [
+      {
+        answers: [
+          {
+            aspectId: "workspace",
+            indicatorId: "work_mode",
+            value: "home",
+          },
+        ],
+        topicId: "workspace:0",
+      },
+    ]);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("does not claim that an empty interview changed the report", async () => {
+  const harness = await startRealtimeInterview(SCRIPT, vi.fn());
+
+  try {
+    await clickButton(harness.rendered.window, "Finish report");
+    const bodyText = harness.rendered.window.document.body.textContent ?? "";
+    assert.match(bodyText, /No new details were saved/);
+    assert.match(bodyText, /Your report has not changed/);
+    assert.doesNotMatch(bodyText, /Your answers are safe/);
+    assert.equal(
+      harness.fetchMock.mock.calls.some(
+        ([input]) => input === "/api/environment/realtime/topics",
+      ),
+      false,
+    );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("does not claim that unanswered navigation changed the report", async () => {
+  const harness = await startRealtimeInterview(SCRIPT, vi.fn());
+
+  try {
+    await clickButton(harness.rendered.window, "Next");
+    assert.match(
+      harness.rendered.window.document.body.textContent ?? "",
+      /Your work setup/,
+    );
+    await clickButton(harness.rendered.window, "Next");
+    const bodyText = harness.rendered.window.document.body.textContent ?? "";
+    assert.match(bodyText, /No new details were saved/);
+    assert.doesNotMatch(bodyText, /will update shortly/);
+    assert.equal(
+      harness.fetchMock.mock.calls.some(
+        ([input]) => input === "/api/environment/realtime/topics",
+      ),
+      false,
+    );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("treats an accepted decline as a saved interview update", async () => {
+  const harness = await startRealtimeInterview(SCRIPT, vi.fn());
+
+  try {
+    await act(async () => {
+      harness.dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({ action: "skip" }),
+          call_id: "call_skip",
+          name: "update_environment_interview",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.match(
+        harness.rendered.window.document.body.textContent ?? "",
+        /Your work setup/,
+      );
+    });
+    await clickButton(harness.rendered.window, "Finish report");
+    assert.match(
+      harness.rendered.window.document.body.textContent ?? "",
+      /Your answers were accepted/,
+    );
+    const topicRequest = harness.fetchMock.mock.calls.find(
+      ([input]) => input === "/api/environment/realtime/topics",
+    );
+    assert.ok(topicRequest?.[1]?.body);
+    assert.deepEqual(JSON.parse(String(topicRequest[1].body)).topics, [
+      {
+        answers: [
+          {
+            aspectId: "sleep-environment",
+            indicatorId: "night_temp_c",
+            value: "declined",
+          },
+        ],
+        topicId: "sleep:0",
+      },
+    ]);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("requires authentication before opening the interview", async () => {
+  authMocks.authenticated = false;
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture, {
+      script: SCRIPT,
+      triggerLabel: "Start report",
+    }),
+  );
+
+  try {
+    await clickButton(rendered.window, "Start report");
     assert.equal(authMocks.openAuthDialog.mock.calls.length, 1);
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
@@ -130,572 +592,358 @@ test("requires authentication before opening the voice walkthrough", async () =>
   }
 });
 
-test("keeps the walkthrough open while iOS resolves microphone permission", async () => {
+test("keeps the dialog open when live voice is unsupported", async () => {
+  const originalPeerConnection = Reflect.get(globalThis, "RTCPeerConnection");
+  Reflect.deleteProperty(globalThis, "RTCPeerConnection");
   const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture),
+    createElement(EnvironmentVoiceCapture, {
+      script: SCRIPT,
+      triggerLabel: "Start report",
+    }),
   );
-  let rejectPermission: ((reason?: unknown) => void) | undefined;
-  const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
-    navigator,
-    "mediaDevices",
-  );
-  const windowMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
-    rendered.window.navigator,
-    "mediaDevices",
-  );
-  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
 
   try {
-    class PendingMediaRecorder {
-      static isTypeSupported() {
-        return true;
-      }
+    await clickButton(rendered.window, "Start report");
+    await clickButton(rendered.window, "Start recording");
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /cannot start live voice here/,
+    );
+    assert.match(rendered.window.document.body.textContent ?? "", /Try again/);
+  } finally {
+    if (originalPeerConnection === undefined) {
+      Reflect.deleteProperty(globalThis, "RTCPeerConnection");
+    } else {
+      Reflect.set(globalThis, "RTCPeerConnection", originalPeerConnection);
     }
-    const mediaDevices = {
-      getUserMedia: vi.fn(
-        () => new Promise<MediaStream>((_resolve, reject) => {
-          rejectPermission = reject;
-        }),
+    await rendered.cleanup();
+  }
+});
+
+async function startRealtimeInterview(
+  script: EnvironmentVoiceScript,
+  onAccepted: () => void,
+) {
+  const originalPeerConnection = Reflect.get(globalThis, "RTCPeerConnection");
+  const originalFetch = Reflect.get(globalThis, "fetch");
+  const dataChannel = new FakeDataChannel();
+  const track = { enabled: true, stop: vi.fn() };
+  const stream = {
+    getAudioTracks: () => [track],
+    getTracks: () => [track],
+  };
+  const fetchMock = vi.fn(
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/environment/realtime") {
+        return new Response("answer-sdp", { status: 200 });
+      }
+      assert.equal(url, "/api/environment/realtime/topics");
+      assert.equal(init?.method, "POST");
+      return new Response(null, { status: 202 });
+    },
+  );
+  vi.stubGlobal(
+    "RTCPeerConnection",
+    class FakePeerConnection extends EventTarget {
+      connectionState = "connected";
+
+      addTrack() {}
+
+      close() {}
+
+      createDataChannel() {
+        return dataChannel;
+      }
+
+      async createOffer() {
+        return { sdp: "offer-sdp", type: "offer" as const };
+      }
+
+      async setLocalDescription() {}
+
+      async setRemoteDescription() {}
+    },
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture, {
+      onAccepted,
+      script,
+      triggerLabel: "Start report",
+    }),
+  );
+  const originalMediaDevices = navigator.mediaDevices;
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia: vi.fn(async () => stream) },
+  });
+
+  await clickButton(rendered.window, "Start report");
+  await clickButton(rendered.window, "Start recording");
+  await vi.waitFor(() => {
+    assert.equal(
+      fetchMock.mock.calls.some(
+        ([input]) => input === "/api/environment/realtime",
       ),
-    };
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Reflect.set(globalThis, "MediaRecorder", PendingMediaRecorder);
-    Reflect.set(rendered.window, "MediaRecorder", PendingMediaRecorder);
-
-    await clickButton(rendered.window, "Tell Murph by voice");
-    await clickButton(rendered.window, "Start recording");
-
-    const dialog = rendered.window.document.querySelector(
-      "[data-pointer-dismissal-disabled]",
+      true,
     );
-    assert.equal(
-      dialog?.getAttribute("data-pointer-dismissal-disabled"),
-      "true",
-    );
+  });
+  await act(async () => {
+    dataChannel.emit("open");
+    await Promise.resolve();
+  });
 
-    await clickButton(rendered.window, "Dismiss dialog");
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Start recording/,
-    );
-
-    await act(async () => {
-      rejectPermission?.({ name: "NotAllowedError" });
-      await Promise.resolve();
-    });
-  } finally {
-    if (mediaDevicesDescriptor) {
-      Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
-    } else {
-      Reflect.deleteProperty(navigator, "mediaDevices");
-    }
-    if (windowMediaDevicesDescriptor) {
-      Object.defineProperty(
-        rendered.window.navigator,
-        "mediaDevices",
-        windowMediaDevicesDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(rendered.window.navigator, "mediaDevices");
-    }
-    if (originalMediaRecorder === undefined) {
-      Reflect.deleteProperty(globalThis, "MediaRecorder");
-      Reflect.deleteProperty(rendered.window, "MediaRecorder");
-    } else {
-      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
-      Reflect.set(rendered.window, "MediaRecorder", originalMediaRecorder);
-    }
-    await rendered.cleanup();
-  }
-});
-
-test("explains microphone failure without handing private audio to another app", async () => {
-  const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture),
-  );
-
-  try {
-    await clickButton(rendered.window, "Tell Murph by voice");
-    await clickButton(rendered.window, "Start recording");
-
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /could not access the microphone|cannot record audio here/,
-    );
-    assert.equal(
-      Array.from(rendered.window.document.querySelectorAll("a")).some(
-        (anchor) => anchor.textContent?.includes("Open Murph"),
-      ),
-      false,
-    );
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("keeps the dialog open until an unsent recording is explicitly discarded", async () => {
-  const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture),
-  );
-  const trackStop = vi.fn();
-
-  class FakeMediaRecorder {
-    static isTypeSupported() {
-      return true;
-    }
-
-    mimeType = "audio/webm";
-    state: RecordingState = "inactive";
-    private readonly listeners = new Map<string, EventListener[]>();
-
-    addEventListener(type: string, listener: EventListener) {
-      const listeners = this.listeners.get(type) ?? [];
-      listeners.push(listener);
-      this.listeners.set(type, listeners);
-    }
-
-    start() {
-      this.state = "recording";
-    }
-
-    stop() {
-      this.state = "inactive";
-      for (const listener of this.listeners.get("stop") ?? []) {
-        listener(new Event("stop"));
-      }
-    }
-  }
-
-  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
-  const originalCreateObjectUrl = URL.createObjectURL;
-  const originalRevokeObjectUrl = URL.revokeObjectURL;
-  const originalPause = Object.getOwnPropertyDescriptor(
-    rendered.window.HTMLMediaElement.prototype,
-    "pause",
-  );
-  try {
-    const mediaDevices = {
-      getUserMedia: async () => ({
-        getTracks: () => [{ stop: trackStop }],
-      }),
-    };
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
-    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
-    URL.createObjectURL = vi.fn(() => "blob:environment-recording");
-    URL.revokeObjectURL = vi.fn();
-    Object.defineProperty(rendered.window.HTMLMediaElement.prototype, "pause", {
-      configurable: true,
-      value: vi.fn(),
-    });
-
-    await clickButton(rendered.window, "Tell Murph by voice");
-    await clickButton(
-      rendered.window,
-      "Go to topic 3: Light through the day",
-    );
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Light through the day/,
-    );
-    await clickButton(rendered.window, "Start recording");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const bodyText = rendered.window.document.body.textContent ?? "";
-    assert.match(bodyText, /Finish recording/, bodyText);
-    assert.match(bodyText, /Light through the day/, bodyText);
-    const dialog = rendered.window.document.querySelector(
-      "[data-pointer-dismissal-disabled]",
-    );
-    assert.equal(
-      dialog?.getAttribute("data-pointer-dismissal-disabled"),
-      "true",
-    );
-    await clickButton(rendered.window, "Dismiss dialog");
-
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Recording/,
-    );
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Finish recording/,
-    );
-
-    await clickButton(rendered.window, "Finish recording");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-    const previewAudio = rendered.window.document.querySelector("audio");
-    assert.ok(previewAudio);
-    Object.defineProperty(previewAudio, "pause", {
-      configurable: true,
-      value: vi.fn(),
-    });
-    assert.equal(
-      dialog?.getAttribute("data-pointer-dismissal-disabled"),
-      "true",
-    );
-    await clickButton(rendered.window, "Dismiss dialog");
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-
-    await clickButton(rendered.window, "Discard recording");
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Discard this recording\?/,
-    );
-
-    await clickButton(rendered.window, "Keep recording");
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-    assert.doesNotMatch(
-      rendered.window.document.body.textContent ?? "",
-      /Discard this recording\?/,
-    );
-
-    await clickButton(rendered.window, "Discard recording");
-    await clickButton(rendered.window, "Discard permanently");
-    assert.doesNotMatch(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-  } finally {
-    if (originalMediaRecorder === undefined) {
-      Reflect.deleteProperty(globalThis, "MediaRecorder");
-    } else {
-      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
-    }
-    URL.createObjectURL = originalCreateObjectUrl;
-    URL.revokeObjectURL = originalRevokeObjectUrl;
-    if (originalPause) {
-      Object.defineProperty(
-        rendered.window.HTMLMediaElement.prototype,
-        "pause",
-        originalPause,
-      );
-    }
-    await rendered.cleanup();
-  }
-});
-
-test("releases the microphone when Safari moves the page into the background", async () => {
-  const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture),
-  );
-  const trackStop = vi.fn();
-
-  class FakeMediaRecorder {
-    static isTypeSupported() {
-      return true;
-    }
-
-    mimeType = "audio/webm";
-    state: RecordingState = "inactive";
-    private readonly listeners = new Map<string, EventListener[]>();
-
-    addEventListener(type: string, listener: EventListener) {
-      const listeners = this.listeners.get(type) ?? [];
-      listeners.push(listener);
-      this.listeners.set(type, listeners);
-    }
-
-    start() {
-      this.state = "recording";
-    }
-
-    stop() {
-      const dataEvent = new Event("dataavailable");
-      Object.defineProperty(dataEvent, "data", {
-        value: new Blob([Uint8Array.from([1, 2, 3])], {
-          type: "audio/webm",
-        }),
+  return {
+    cleanup: async () => {
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: originalMediaDevices,
       });
-      for (const listener of this.listeners.get("dataavailable") ?? []) {
-        listener(dataEvent);
+      if (originalPeerConnection === undefined) {
+        Reflect.deleteProperty(globalThis, "RTCPeerConnection");
+      } else {
+        Reflect.set(globalThis, "RTCPeerConnection", originalPeerConnection);
       }
-      this.state = "inactive";
-      for (const listener of this.listeners.get("stop") ?? []) {
-        listener(new Event("stop"));
+      if (originalFetch === undefined) {
+        Reflect.deleteProperty(globalThis, "fetch");
+      } else {
+        Reflect.set(globalThis, "fetch", originalFetch);
       }
-    }
-  }
+      await rendered.cleanup();
+    },
+    dataChannel,
+    fetchMock,
+    rendered,
+  };
+}
 
-  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
-  const originalCreateObjectUrl = URL.createObjectURL;
-  const originalRevokeObjectUrl = URL.revokeObjectURL;
-  const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
-    navigator,
-    "mediaDevices",
-  );
-  const windowMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
-    rendered.window.navigator,
-    "mediaDevices",
-  );
-  const visibilityStateDescriptor = Object.getOwnPropertyDescriptor(
-    rendered.window.document,
-    "visibilityState",
-  );
-  try {
-    const mediaDevices = {
-      getUserMedia: async () => ({
-        getTracks: () => [{ stop: trackStop }],
-      }),
-    };
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
-    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
-    URL.createObjectURL = vi.fn(() => "blob:backgrounded-recording");
-    URL.revokeObjectURL = vi.fn();
-
-    await clickButton(rendered.window, "Tell Murph by voice");
-    await clickButton(rendered.window, "Start recording");
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    Object.defineProperty(rendered.window.document, "visibilityState", {
-      configurable: true,
-      value: "hidden",
-    });
-    await act(async () => {
-      rendered.window.document.dispatchEvent(new Event("visibilitychange"));
-      await Promise.resolve();
-    });
-
-    assert.equal(trackStop.mock.calls.length, 1);
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-  } finally {
-    if (mediaDevicesDescriptor) {
-      Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
-    } else {
-      Reflect.deleteProperty(navigator, "mediaDevices");
-    }
-    if (windowMediaDevicesDescriptor) {
-      Object.defineProperty(
-        rendered.window.navigator,
-        "mediaDevices",
-        windowMediaDevicesDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(rendered.window.navigator, "mediaDevices");
-    }
-    if (visibilityStateDescriptor) {
-      Object.defineProperty(
-        rendered.window.document,
-        "visibilityState",
-        visibilityStateDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(rendered.window.document, "visibilityState");
-    }
-    if (originalMediaRecorder === undefined) {
-      Reflect.deleteProperty(globalThis, "MediaRecorder");
-      Reflect.deleteProperty(rendered.window, "MediaRecorder");
-    } else {
-      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
-      Reflect.set(rendered.window, "MediaRecorder", originalMediaRecorder);
-    }
-    URL.createObjectURL = originalCreateObjectUrl;
-    URL.revokeObjectURL = originalRevokeObjectUrl;
-    await rendered.cleanup();
-  }
-});
-
-test("keeps a failed recording for retry and reuses its capture time", async () => {
-  const onAccepted = vi.fn();
-  const onUploadStarted = vi.fn();
-  const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture, { onAccepted, onUploadStarted }),
-  );
-  const uploadRequests: RequestInit[] = [];
-  const trackStop = vi.fn();
-  let uploadAttempt = 0;
-
-  class FakeMediaRecorder {
-    static isTypeSupported() {
-      return true;
-    }
-
-    mimeType = "audio/webm";
-    state: RecordingState = "inactive";
-    private readonly listeners = new Map<string, EventListener[]>();
-
-    addEventListener(type: string, listener: EventListener) {
-      const listeners = this.listeners.get(type) ?? [];
-      listeners.push(listener);
-      this.listeners.set(type, listeners);
-    }
-
-    start() {
-      this.state = "recording";
-    }
-
-    stop() {
-      const dataEvent = new Event("dataavailable");
-      Object.defineProperty(dataEvent, "data", {
-        value: new Blob([
-          Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]),
-        ], { type: "audio/webm" }),
-      });
-      for (const listener of this.listeners.get("dataavailable") ?? []) {
-        listener(dataEvent);
-      }
-      this.state = "inactive";
-      for (const listener of this.listeners.get("stop") ?? []) {
-        listener(new Event("stop"));
-      }
-    }
-  }
-
-  const originalFetch = globalThis.fetch;
-  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
-  const originalCreateObjectUrl = URL.createObjectURL;
-  const originalRevokeObjectUrl = URL.revokeObjectURL;
-  try {
-    const mediaDevices = {
-      getUserMedia: async () => ({
-        getTracks: () => [{ stop: trackStop }],
-      }),
-    };
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
-      configurable: true,
-      value: mediaDevices,
-    });
-    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
-    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
-    URL.createObjectURL = vi.fn(() => "blob:environment-recording");
-    URL.revokeObjectURL = vi.fn();
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      uploadRequests.push(init ?? {});
-      uploadAttempt += 1;
-      return uploadAttempt === 1
-        ? Response.json(
-            { error: { message: "Murph cannot receive this recording right now." } },
-            { status: 503 },
-          )
-        : Response.json({ accepted: true }, { status: 202 });
-    });
-    globalThis.fetch = fetchMock;
-    rendered.window.fetch = fetchMock;
-
-    await clickButton(rendered.window, "Tell Murph by voice");
-    await clickButton(rendered.window, "Start recording");
-    await clickButton(rendered.window, "Finish recording");
-
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Play preview/,
-    );
-    await clickButton(rendered.window, "Send to Murph");
-    await vi.waitFor(() => {
-      assert.match(
-        rendered.window.document.body.textContent ?? "",
-        /Murph cannot receive this recording right now/,
-      );
-    });
-
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Download/,
-    );
-
-    await clickButton(rendered.window, "Send to Murph");
-    await vi.waitFor(() => {
-      assert.match(
-        rendered.window.document.body.textContent ?? "",
-        /Recording received/,
-      );
-    });
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /You can close this and keep browsing/,
-    );
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /The recording is deleted after processing/,
-    );
-
-    assert.equal(onAccepted.mock.calls.length, 1);
-    assert.equal(onUploadStarted.mock.calls.length, 2);
-    assert.equal(uploadRequests.length, 2);
-    const firstHeaders = new Headers(uploadRequests[0]?.headers);
-    const secondHeaders = new Headers(uploadRequests[1]?.headers);
-    assert.equal(
-      firstHeaders.get("x-murph-environment-voice-captured-at"),
-      secondHeaders.get("x-murph-environment-voice-captured-at"),
-    );
-    assert.equal(
-      firstHeaders.get("x-murph-environment-voice-capture-id"),
-      secondHeaders.get("x-murph-environment-voice-capture-id"),
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalMediaRecorder === undefined) {
-      Reflect.deleteProperty(globalThis, "MediaRecorder");
-    } else {
-      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
-    }
-    URL.createObjectURL = originalCreateObjectUrl;
-    URL.revokeObjectURL = originalRevokeObjectUrl;
-    await rendered.cleanup();
-  }
-});
-
-async function clickButton(
-  window: Window & typeof globalThis,
-  label: string,
-): Promise<void> {
-  const button = Array.from(window.document.querySelectorAll("button")).find(
-    (candidate) =>
-      candidate.textContent?.includes(label) ||
-      candidate.getAttribute("aria-label")?.includes(label),
-  );
-  assert.ok(button, `Could not find button "${label}".`);
+async function clickButton(window: Window, label: string) {
+  const button = findButton(window, label);
   await act(async () => {
     button.click();
+    await Promise.resolve();
   });
 }
+
+function findButton(window: Window, label: string): HTMLButtonElement {
+  const button = [...window.document.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent?.includes(label),
+  );
+  assert.ok(button, `Missing button: ${label}`);
+  return button;
+}
+
+class FakeDataChannel {
+  private readonly listeners = new Map<
+    string,
+    Array<(event: { currentTarget: FakeDataChannel; data: string }) => void>
+  >();
+  readonly readyState = "open";
+  readonly sent: string[] = [];
+
+  addEventListener(
+    type: string,
+    listener: (event: { currentTarget: FakeDataChannel; data: string }) => void,
+  ) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  close() {}
+
+  emit(type: string, data = "") {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ currentTarget: this, data });
+    }
+  }
+
+  send(value: string) {
+    this.sent.push(value);
+  }
+}
+
+test("does not ask again for a field this session already saved", () => {
+  const resumed = withoutSavedFields(
+    { ...SCRIPT, initialCoveredDetails: 0, totalDetails: 2 },
+    new Map([["sleep-environment.night_temp_c", 19]]),
+  );
+
+  assert.ok(resumed);
+  assert.deepEqual(
+    resumed.topics.map((topic) => topic.id),
+    ["workspace:0"],
+  );
+  assert.equal(resumed.initialCoveredDetails, 1);
+  assert.deepEqual(
+    summarizeEnvironmentInterviewCompletion(resumed, new Map()),
+    {
+      coveredDetails: 1,
+      remainingDetails: 1,
+      savedDetails: 0,
+      totalDetails: 2,
+    },
+  );
+});
+
+test("keeps the checklist aligned when one field of a topic is already saved", () => {
+  const script: EnvironmentVoiceScript = {
+    ...SCRIPT,
+    topics: [
+      {
+        ...SCRIPT.topics[0],
+        fields: [
+          {
+            aspectId: "workspace",
+            indicatorId: "work_mode",
+            label: "Whether you work at home, an office, or both",
+            valueType: { kind: "text" },
+          },
+          {
+            aspectId: "workspace",
+            indicatorId: "desk_hours",
+            label: "How many hours you spend at a desk each day",
+            valueType: { kind: "number" },
+          },
+        ],
+        focus: [
+          "Whether you work at home, an office, or both",
+          "How many hours you spend at a desk each day",
+        ],
+        id: "workspace:0",
+        title: "Your work setup",
+      },
+    ],
+  };
+
+  const resumed = withoutSavedFields(
+    script,
+    new Map([["workspace.work_mode", "remote"]]),
+  );
+
+  assert.ok(resumed);
+  assert.deepEqual(resumed.topics[0]?.focus, [
+    "How many hours you spend at a desk each day",
+  ]);
+  assert.deepEqual(
+    resumed.topics[0]?.fields?.map((field) => field.indicatorId),
+    ["desk_hours"],
+  );
+});
+
+test("tells the extractor how to read a checklist topic, a range, and imperial units", () => {
+  const instructions = buildTopicInstructions(SCRIPT.topics[1], null, "en");
+
+  assert.doesNotMatch(instructions, /undefined/);
+  assert.match(instructions, /the field labels below as the visible checklist/);
+  assert.match(instructions, /saves the rounded midpoint/);
+  assert.match(instructions, /an approximate single number/i);
+  assert.match(instructions, /leaves the field unresolved and writes nothing/);
+  assert.match(instructions, /Fahrenheit to Celsius/);
+});
+
+test("gives the extractor a deterministic precedence for multiple indoor smoke sources", () => {
+  const script = buildEnvironmentVoiceScript({});
+  const smokeTopic = script.topics.find((topic) =>
+    topic.fields?.some((field) => field.indicatorId === "smoke_sources"),
+  );
+  assert.ok(smokeTopic);
+
+  const instructions = buildTopicInstructions(smokeTopic, null, "en");
+
+  assert.match(
+    instructions,
+    /store smoking before fireplace before frequent_candles/,
+  );
+  assert.match(instructions, /Keep every additional source in the note/);
+});
+
+test("reports nothing left to ask when this session answered every field", () => {
+  assert.equal(
+    withoutSavedFields(
+      SCRIPT,
+      new Map<string, string | number | boolean>([
+        ["sleep-environment.night_temp_c", 19],
+        ["workspace.work_mode", "remote"],
+      ]),
+    ),
+    null,
+  );
+});
+
+test("drops accepted keys once the canonical script stops asking for them", () => {
+  const kept = keepUnreflectedWrites(
+    { ...SCRIPT, topics: [SCRIPT.topics[1]] },
+    new Map<string, string | number | boolean>([
+      ["sleep-environment.night_temp_c", 19],
+      ["workspace.work_mode", "remote"],
+    ]),
+  );
+
+  assert.deepEqual([...kept.keys()], ["workspace.work_mode"]);
+});
+
+test("reopening after a close does not ask again for an accepted detail", async () => {
+  const onAccepted = vi.fn();
+  const harness = await startRealtimeInterview(SCRIPT, onAccepted);
+
+  try {
+    await act(async () => {
+      harness.dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({
+            languageCode: "en",
+            topics: [
+              {
+                answers: [
+                  {
+                    aspectId: "sleep-environment",
+                    indicatorId: "night_temp_c",
+                    value: 19,
+                  },
+                ],
+                topicId: "sleep:0",
+              },
+            ],
+          }),
+          call_id: "call_resume",
+          name: "update_environment_interview",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.equal(onAccepted.mock.calls.length, 1);
+    });
+
+    await clickButton(harness.rendered.window, "Dismiss dialog");
+    await clickButton(harness.rendered.window, "Start report");
+    await clickButton(harness.rendered.window, "Start recording");
+    await act(async () => {
+      harness.dataChannel.emit("open");
+      await Promise.resolve();
+    });
+
+    const bodyText = harness.rendered.window.document.body.textContent ?? "";
+    assert.doesNotMatch(bodyText, /Your bedroom temperature at night/);
+    assert.match(bodyText, /Whether you work at home/);
+
+    const sessionUpdates = harness.dataChannel.sent
+      .map((value): unknown => JSON.parse(value))
+      .filter(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "type" in value &&
+          value.type === "session.update",
+      );
+    const latest = JSON.stringify(sessionUpdates.at(-1));
+    assert.doesNotMatch(latest, /night_temp_c/);
+    assert.match(latest, /work_mode/);
+  } finally {
+    await harness.cleanup();
+  }
+});

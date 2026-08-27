@@ -379,6 +379,7 @@ export async function sendAssistantAskContinuationLocal(
           turnId,
         })
         const savedSession = await persistAssistantTurnAndSession({
+          assistantTranscriptStandaloneContext: true,
           assistantTranscriptText: response,
           input: messageInput,
           persistUserPromptToTranscript: false,

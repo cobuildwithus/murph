@@ -36,7 +36,8 @@ export type {
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
 export type {
-  AssistantAutomationTimingVerificationIssue,
+  AssistantAutomationOccurrenceProjection,
+  AssistantAutomationOccurrenceProjectionIssue,
   AssistantGroupParticipantDisplayName,
   AssistantGroupParticipantDisplayNameSource,
   AssistantGeneratedImageCapturePersistenceMetadata,
@@ -68,6 +69,7 @@ export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'
 export * from './assistant/reminder-availability-maintenance.js'
 export * from './assistant/onboarding-followup-automation.js'
+export * from './assistant/onboarding-followup-seed.js'
 export * from './assistant/onboarding-first-personal-read-automation.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'

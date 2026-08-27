@@ -158,7 +158,7 @@ if [[ -n "$review_gpt_direct_browser_lane_count" ]]; then
 elif [[ -n "$review_gpt_direct_compat_browser_lane_count" ]]; then
   review_gpt_browser_lane_count="$review_gpt_direct_compat_browser_lane_count"
 else
-  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
+  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6}}"
 fi
 
 if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
@@ -273,7 +273,7 @@ package_script="scripts/package-audit-context-full.sh"
 app_connector="current"
 model="gpt-5.6-sol"
 thinking="current"
-response_timeout_ms="${response_timeout_ms:-$((180 * 60 * 1000))}"
+response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 
 review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on trust boundaries." \

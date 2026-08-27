@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,12 @@ import {
   EXPERIMENT_PROGRESS_CARD_DAY_CODES,
   experimentProgressCardSchema,
 } from "@murphai/contracts";
-import { initializeVault } from "@murphai/core";
+import {
+  deleteEvent,
+  findCaptureByLookup,
+  initializeVault,
+} from "@murphai/core";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import sharp from "sharp";
 import { test } from "vitest";
 
@@ -278,6 +283,136 @@ test("progress-card renderer makes unavailable direction context visible and acc
       "Morning light & recovery <check> experiment progress",
     );
     assert.doesNotMatch(healthyMedia.alt ?? "", /Direction context unavailable/u);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card validation exposes only its public field and does not write", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-validation-"),
+  );
+  const privateMarker = "private-progress-card-title";
+  try {
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard({
+        card: {
+          ...CARD,
+          phase: {
+            ...CARD.phase,
+            day: 0,
+          },
+          title: privateMarker,
+        },
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFR",
+        vaultRoot,
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_validation_failed");
+    assert.deepEqual(captured.context, {
+      issues: [{
+        code: "too_small",
+        publicPath: ["phase"],
+      }],
+      retryable: false,
+      stage: "validation",
+    });
+    const encoded = JSON.stringify(captured.context);
+    assert.equal(encoded.includes(privateMarker), false);
+    assert.equal(encoded.includes(vaultRoot), false);
+    assert.deepEqual(await readdir(vaultRoot), []);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card capture deletion reports a terminal conflict without exposing paths", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-conflict-"),
+  );
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFQ";
+  try {
+    await initializeVault({ vaultRoot });
+    const input = { card: CARD, experimentId, vaultRoot };
+    const media = await renderAndSaveExperimentProgressCard(input);
+    const lookup = await findCaptureByLookup({
+      lookupKey:
+        `murph.experiment-progress-card.capture.v1:${experimentId}:${CARD.asOf}:${media.sha256}`,
+      vaultRoot,
+    });
+    assert.equal(lookup.status, "live");
+    if (lookup.status !== "live") {
+      assert.fail("expected the saved progress card to have a live capture lookup");
+    }
+    await deleteEvent({ eventId: lookup.eventId, vaultRoot });
+
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard(input);
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_capture_conflict");
+    assert.equal(captured.context?.stage, "conflict");
+    assert.equal(captured.context?.retryable, false);
+    assert.equal(captured.context?.hint, undefined);
+    const encoded = JSON.stringify({
+      code: captured.code,
+      context: captured.context,
+      message: captured.message,
+    });
+    assert.equal(encoded.includes("final review"), false);
+    for (const forbidden of [experimentId, media.ref, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card persistence reports a stable integrity stage without exposing paths", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-integrity-"),
+  );
+  const privateMarker = "private-corrupt-progress-card-marker";
+  try {
+    await initializeVault({ vaultRoot });
+    const input = {
+      card: CARD,
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFP",
+      vaultRoot,
+    };
+    const media = await renderAndSaveExperimentProgressCard(input);
+    await writeFile(path.join(vaultRoot, media.ref), privateMarker);
+
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard(input);
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_integrity_failed");
+    assert.equal(captured.context?.stage, "integrity");
+    assert.equal(captured.context?.retryable, false);
+    assert.equal(captured.context?.hint, undefined);
+    const encoded = JSON.stringify({
+      code: captured.code,
+      context: captured.context,
+      message: captured.message,
+    });
+    assert.equal(encoded.includes("final review"), false);
+    for (const forbidden of [privateMarker, media.ref, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

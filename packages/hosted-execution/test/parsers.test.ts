@@ -5,6 +5,8 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
@@ -450,7 +452,7 @@ describe("parseHostedExecutionEvent", () => {
     ).toThrow(/channel must be linq/u);
   });
 
-  it("parses member activation signup welcomes and ignores legacy fixed policy fields", () => {
+  it("parses member activation follow-up routes and signup welcomes", () => {
     expect(
       parseHostedExecutionEvent({
         initialGroupRoomModelMarkdown:
@@ -460,6 +462,18 @@ describe("parseHostedExecutionEvent", () => {
           email: true,
           linq: true,
           telegram: false,
+        },
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
         },
         signupWelcome: {
           deliveryDispatchMode: "queue-only",
@@ -491,6 +505,18 @@ describe("parseHostedExecutionEvent", () => {
         email: true,
         linq: true,
         telegram: false,
+      },
+      onboardingFollowupEnrollment: true,
+      onboardingFollowupRoute: {
+        actorId: "+15550002222",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
       },
       signupWelcome: {
         route: {
@@ -968,8 +994,10 @@ describe("parseHostedRuntimeGroupTool", () => {
   it("parses read, join-link, and join-offer requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     })).toEqual({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     });
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_current",
@@ -980,6 +1008,21 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "list_memberships",
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    })).toEqual({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_current",
+      disclosureGrantCursor: "x".repeat(
+        HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS + 1,
+      ),
+    })).toThrow(/disclosureGrantCursor/u);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "leave_membership",
       membershipId: "hgm_self_123",
@@ -1056,6 +1099,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
+      repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
@@ -1064,6 +1108,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         projectionKinds: null,
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
+      repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
@@ -1279,6 +1324,12 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
+        repostOriginAssistantInputId: "provider-message-id",
+      })
+    ).toThrow(/repostOriginAssistantInputId/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
         joinOffer: { intro: "Like this to join us." },
       })
     ).toThrow(/not allowed/u);
@@ -1392,6 +1443,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           groupLabel: "Fun-loving runners",
           permissionText: "Recent sleep timing and duration",
         }],
+        disclosureGrantsTruncated: true,
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
@@ -1418,6 +1470,8 @@ describe("parseHostedRuntimeGroupTool", () => {
           ],
           role: "member",
         }],
+        nextCursor: "membership_page_64",
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
         truncated: false,
       },
@@ -1540,7 +1594,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "list_memberships",
       result: {
         memberships: Array.from(
-          { length: 26 },
+          { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1 },
           () => response.result.memberships[0],
         ),
         status: "ok",
@@ -1937,6 +1991,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -1961,11 +2016,13 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     })).toEqual({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -1990,6 +2047,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     });
@@ -4254,6 +4312,18 @@ describe("parseHostedExecutionWake", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
+        },
         occurredAt: "2026-04-18T00:00:00.000Z",
         signupWelcome: {
           deliveryDispatchMode: "immediate",
@@ -4287,6 +4357,18 @@ describe("parseHostedExecutionWake", () => {
         linq: true,
         telegram: false,
       },
+      onboardingFollowupEnrollment: true,
+      onboardingFollowupRoute: {
+        actorId: "+15550002222",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
+      },
       occurredAt: "2026-04-18T00:00:00.000Z",
       signupWelcome: {
         route: {
@@ -4303,6 +4385,28 @@ describe("parseHostedExecutionWake", () => {
         text: "Welcome to Murph.",
       },
       userId: "user-1",
+    });
+  });
+
+  it("preserves an explicit member activation follow-up opt-out", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "member.activated:thread-container:linq:thread-1",
+        kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        onboardingFollowupEnrollment: false,
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        signupWelcome: null,
+        userId: "member_container_123",
+      }),
+    ).toMatchObject({
+      kind: "member.activated",
+      onboardingFollowupEnrollment: false,
+      signupWelcome: null,
     });
   });
 

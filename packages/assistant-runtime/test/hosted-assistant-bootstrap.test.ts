@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  readOperatorConfig,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
 } from "@murphai/operator-config/operator-config";
@@ -249,7 +250,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     });
   });
 
-  it("replaces invalid durable hosted config from hosted Codex env without reviving legacy defaults", async () => {
+  it("replaces invalid durable hosted config from hosted Codex env while preserving assistant defaults", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
     const operatorConfigPath = resolveOperatorConfigPath(homeDirectory);
 
@@ -258,13 +259,10 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       operatorConfigPath,
       `${JSON.stringify({
         assistant: {
-          defaults: {
-            apiKeyEnv: "PROVIDER_API_KEY",
-            baseUrl: "https://api.example.test/v1",
-            model: "gpt-4.1-mini",
-            provider: "unsupported-provider",
-            providerName: "legacy",
-          },
+          account: null,
+          backend: null,
+          identityId: "existing-identity",
+          selfDeliveryTargets: null,
         },
         defaultVault: null,
         hostedAssistant: {
@@ -301,6 +299,12 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
           target: CODEX_VERCEL_GATEWAY_TARGET,
         },
       ],
+    });
+    await expect(readOperatorConfig(homeDirectory)).resolves.toMatchObject({
+      assistant: {
+        backend: null,
+        identityId: "existing-identity",
+      },
     });
   });
 });

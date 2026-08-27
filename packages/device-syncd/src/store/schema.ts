@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v10: device_connection_source.lifecycle_epoch (exact-source reconnect fence).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 10;
+// v11: exact canonical source/resource import receipts on completed jobs.
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 11;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -48,6 +48,10 @@ function readConnectionSourceColumns(database: DatabaseSync): SqliteTableColumn[
 
 function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(webhook_trace)").all() as SqliteTableColumn[];
+}
+
+function readDeviceJobColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_job)").all() as SqliteTableColumn[];
 }
 
 function columnNames(columns: readonly SqliteTableColumn[]): Set<string> {
@@ -182,6 +186,16 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
 
   if (!names.has(DEVICE_CONNECTION_SETUP_COLUMNS.setupExpiresAt)) {
     database.exec("alter table device_connection add column setup_expires_at text");
+  }
+}
+
+function ensureDeviceJobCanonicalImportReceiptsColumn(database: DatabaseSync): void {
+  const names = columnNames(readDeviceJobColumns(database));
+
+  if (!names.has("canonical_import_receipts_json")) {
+    database.exec(
+      "alter table device_job add column canonical_import_receipts_json text not null default '[]'",
+    );
   }
 }
 
@@ -381,7 +395,8 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         created_at text not null,
         updated_at text not null,
         started_at text,
-        finished_at text
+        finished_at text,
+        canonical_import_receipts_json text not null default '[]'
       );
 
       create index if not exists device_job_claim_idx
@@ -417,5 +432,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureWebhookTraceClaimTokenColumn(database);
   ensureConnectionSourceLastDataColumn(database);
   ensureConnectionSourceLifecycleEpochColumn(database);
+  ensureDeviceJobCanonicalImportReceiptsColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

@@ -422,6 +422,10 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
       );
 
       for (const failure of eventFailures) {
+        const expectedContext =
+          failure.vaultCode === "EVENT_CONTRACT_INVALID"
+            ? { stage: "validation" }
+            : { exampleDetail: failure.vaultCode.toLowerCase() };
         const eventRuntime = {
           upsertProvider: async () => {
             throw providerConflict;
@@ -448,6 +452,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                     kind: "note",
                     occurredAt: "2026-03-12T12:00:00.000Z",
                     title: "Mock note",
+                    note: "Mock note body.",
                   },
                 }),
               (error: unknown) =>
@@ -455,9 +460,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                   code: failure.cliCode,
                   message: failure.message,
                   vaultCode: failure.vaultCode,
-                  context: {
-                    exampleDetail: failure.vaultCode.toLowerCase(),
-                  },
+                  context: expectedContext,
                 }),
             );
           },
@@ -474,6 +477,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           queryRuntime: {
             readVault: async () => ({}),
             lookupEntityById: () => eventRecord,
+            resolveCanonicalEntityInFamily: async () => eventRecord,
           },
           run: async ({ records }) => {
             const { editEventRecord } = records;
@@ -490,9 +494,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                   code: failure.cliCode,
                   message: failure.message,
                   vaultCode: failure.vaultCode,
-                  context: {
-                    exampleDetail: failure.vaultCode.toLowerCase(),
-                  },
+                  context: expectedContext,
                 }),
             );
           },
@@ -537,18 +539,28 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
 
   await withCliUsecaseMocks({
     coreRuntime: {
+      readEvent: async () => ({
+        eventId: eventRecord.primaryLookupId,
+        ledgerFile: eventRecord.path,
+        event: eventRecord.attributes,
+      }),
       upsertEvent: async (input: { payload: Record<string, unknown> }) => {
         capturedPayloads.push(input.payload);
         return {
           eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
           ledgerFile: "ledger/events/2026/2026-03.jsonl",
           created: false,
+          event: {
+            ...input.payload,
+            lifecycle: { revision: 8 },
+          },
         };
       },
     },
     queryRuntime: {
       readVault: async () => ({}),
       lookupEntityById: () => eventRecord,
+      resolveCanonicalEntityInFamily: async () => eventRecord,
     },
     run: async ({ records }) => {
       const { editEventRecord } = records;
@@ -582,6 +594,10 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
     queryRuntime: {
       readVault: async () => ({}),
       lookupEntityById: () => ({
+        family: "experiment",
+        path: "experiments/focus-sprint.md",
+      }),
+      resolveCanonicalEntityInFamily: async () => ({
         family: "experiment",
         path: "experiments/focus-sprint.md",
       }),

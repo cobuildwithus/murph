@@ -16,11 +16,13 @@ import {
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
   createHostedRuntimeWriteFenceHeaders,
+  isHostedRuntimeInternalAuthorityRejectedError,
   requireHostedRuntimeWriteFenceHeaders,
 } from "./authority-headers.ts";
 import {
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
   HostedRuntimeControlPlaneFetchError,
+  readHostedRuntimeControlPlaneFetchFailureDiagnostics,
   shouldPreserveHostedRuntimeFetchError,
   shouldRetryHostedRuntimeReplaySafeRead,
   sleepHostedReplaySafeReadRetryDelay,
@@ -307,7 +309,7 @@ export function createCloudflareArtifactStore(input: {
           }
           throw new HostedRuntimeArtifactReadError({
             cause: error,
-            retryable: true,
+            retryable: isRetryableHostedArtifactReadError(error),
           });
         }
         assertHostedArtifactFetchLive(context.signal);
@@ -337,7 +339,7 @@ export function createCloudflareArtifactStore(input: {
         } catch (error) {
           throw new HostedRuntimeArtifactReadError({
             cause: error,
-            retryable: response.status !== 422,
+            retryable: isRetryableHostedArtifactReadStatus(response.status),
           });
         }
         const bodyStartedAt = Date.now();
@@ -426,6 +428,48 @@ export function createCloudflareArtifactStore(input: {
       await putArtifactOnce({ bytes, sha256 });
     },
   };
+}
+
+function isRetryableHostedArtifactReadStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function isRetryableHostedArtifactReadError(error: unknown): boolean {
+  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+    return false;
+  }
+
+  const status = readHostedArtifactErrorStatus(error);
+  if (status !== null) {
+    return isRetryableHostedArtifactReadStatus(status);
+  }
+
+  const diagnostics = readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
+  if (!diagnostics || diagnostics.fetchCallerSignalAborted) {
+    return false;
+  }
+  return diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
+    || diagnostics.fetchCauseKind === "fetch_failed"
+    || diagnostics.fetchCauseKind === "network"
+    || diagnostics.fetchCauseKind === "timeout";
+}
+
+function readHostedArtifactErrorStatus(error: unknown): number | null {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    for (const key of ["status", "statusCode", "responseStatus"] as const) {
+      const value = (current as Partial<Record<typeof key, unknown>>)[key];
+      if (typeof value === "number" && Number.isSafeInteger(value)) {
+        return value;
+      }
+    }
+    current = "cause" in current
+      ? (current as { cause?: unknown }).cause
+      : null;
+  }
+  return null;
 }
 
 function isRetryableHostedArtifactWriteStatus(status: number): boolean {

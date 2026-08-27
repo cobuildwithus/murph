@@ -3,6 +3,11 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const HOSTED_MEMBER_SCHEMA_GUARD = {
+  HostedGroupParticipantObservation: [
+    'contactLookupKey String @id @map("contact_lookup_key")',
+    'firstObservedAt DateTime @map("first_observed_at")',
+    'expiresAt DateTime @map("expires_at")',
+  ],
   HostedSensitiveActionChallenge: [
     'tokenHash String @id @map("token_hash")',
     'memberId String @map("member_id")',
@@ -75,17 +80,26 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "deviceProviderApplications DeviceProviderApplication[]",
+    "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
+    'groupPrivateConversionTrackedAt DateTime? @map("group_private_conversion_tracked_at")',
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
     "inferenceConnection HostedInferenceConnection?",
     'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
+    'linqDeliveryPayloads HostedLinqDelivery[] @relation("HostedLinqDeliveryPayloadOwner")',
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
+    'operatorTasks HostedOperatorTask[] @relation("HostedOperatorTaskMember")',
+    'operatorTasksRequested HostedOperatorTask[] @relation("HostedOperatorTaskRequester")',
+    "opsUsageResetReceipts HostedOpsUsageResetReceipt[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
+    'signupNotificationContextEncrypted String? @map("signup_notification_context_encrypted")',
+    'signupNotificationContextExpiresAt DateTime? @map("signup_notification_context_expires_at")',
     "pendingGroupSetup HostedPendingGroupSetup?",
+    "physicalNoteRecoveries HostedPhysicalNoteRecovery[]",
     "physicalNotes HostedPhysicalNote[]",
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
@@ -153,6 +167,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
     'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
+    'replyAliasGeneration Int? @map("reply_alias_generation")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -213,6 +228,19 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'directPublicSenderAuthorizedAt DateTime? @map("direct_public_sender_authorized_at")',
     'stripeCheckoutEmailAddressEncrypted String? @map("stripe_checkout_email_address_encrypted")',
     'stripeCheckoutEmailCollectedAt DateTime? @map("stripe_checkout_email_collected_at")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedEmailPublicBootstrapAttempt: [
+    "id String @id",
+    'memberId String @map("member_id")',
+    'candidateEmailLookupKey String @map("candidate_email_lookup_key")',
+    "status HostedEmailPublicBootstrapAttemptStatus",
+    'claimedAt DateTime @map("claimed_at")',
+    'providerEntryAt DateTime? @map("provider_entry_at")',
+    'providerMessageId String? @map("provider_message_id")',
+    'completedAt DateTime? @map("completed_at")',
+    'expiresAt DateTime @map("expires_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -420,6 +448,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedSignupNotificationEmailAttemptMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026061500_hosted_signup_notification_email_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedSignupNotificationContextMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260820020000_hosted_signup_notification_context/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -936,6 +971,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260812030200_whoop_capacity_index",
       "20260812030300_referral_handoff_indexes",
       "20260812050000_hosted_sensitive_action_transient_retention_index",
+      "20260826190000_hosted_vault_share_delivery_cursor_index",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1129,6 +1165,20 @@ describe("hosted Prisma baseline migration", () => {
       "20260815010000_hosted_phone_call_stop_intent",
       "20260815120000_hosted_phone_call_result_notification_channel",
       "20260815190000_outbound_message_volume_receipts",
+      "20260820010000_hosted_email_public_bootstrap",
+      "20260820020000_hosted_signup_notification_context",
+      "20260820170000_hosted_physical_note_recovery",
+      "20260820190000_hosted_ops_usage_reset_receipt",
+      "20260821120000_hosted_group_sponsorship_fifty_cap",
+      "20260822210000_hosted_linq_delivery_payload",
+      "20260824010000_rearm_hosted_inbox_video_retention",
+      "20260824120000_hosted_runtime_issue_attempt_provenance",
+      "20260825050000_device_source_no_data_outreach_preference",
+      "20260825180000_hosted_operator_task",
+      "20260825193000_hosted_group_private_conversion",
+      "20260826120000_hosted_group_participant_observation",
+      "20260826201500_imessage_mini_app_renewal_credential",
+      "20260826230000_hosted_stripe_payment_notification_email",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
@@ -2136,6 +2186,27 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("member.activated");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'ADD COLUMN "signup_notification_context_encrypted" TEXT',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'ADD COLUMN "signup_notification_context_expires_at" TIMESTAMP(3)',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_member_signup_notification_context_retention_idx"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      "CREATE FUNCTION clear_hosted_signup_notification_context_on_attempt()",
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_signup_notification_context_attempt_clear"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'BEFORE UPDATE OF\n  "signup_notification_email_attempted_at",\n  "signup_notification_context_encrypted",\n  "signup_notification_context_expires_at"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).not.toContain(
+      'ADD COLUMN "signup_notification_context_encrypted" TEXT NOT NULL',
+    );
     expect(hostedSubscriptionCancellationEmailSentMigrationSql).toContain(
       'ADD COLUMN "subscription_cancellation_email_sent_at" TIMESTAMP(3)',
     );
@@ -2583,7 +2654,7 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|MealPhotoCaptureEnrollment|Member\w*|PendingGroupSetup|SensitiveActionChallenge))\s+\{/gmu)]
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|EmailPublicBootstrapAttempt|GroupParticipantObservation|MealPhotoCaptureEnrollment|Member\w*|PendingGroupSetup|SensitiveActionChallenge))\s+\{/gmu)]
     .map((match) => match[1]);
 }
 

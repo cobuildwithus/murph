@@ -20,7 +20,6 @@ import {
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
@@ -34,6 +33,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   buildHostedRuntimeForwardedEnv,
@@ -74,6 +74,8 @@ const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_INPUT_TOKENS =
   HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT + 1_000;
+const CURRENT_TIME_REMINDER_PATTERN =
+  /It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\./gu;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
@@ -109,6 +111,7 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
 
 test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: false,
     model: "gpt-5.2",
     provider: {
       id: "hosted-openai",
@@ -182,6 +185,7 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
+  assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
   assert.match(
     config,
     /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
@@ -222,6 +226,7 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
+  assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(
     config,
@@ -241,6 +246,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]: "1",
       OPENAI_API_KEY: "secret-openai-key",
     },
   });
@@ -323,6 +329,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
+    "expose_spawn_agent_model_overrides = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -951,6 +958,37 @@ test("hosted Codex runtime config rejects relative command overrides", async () 
   );
 });
 
+test("hosted Codex current-time proof ignores non-authoritative request content", () => {
+  const reminder = "It is 2026-08-26 01:23:45 UTC.";
+  const userInput = {
+    role: "user",
+    content: [{ type: "input_text", text: reminder }],
+  };
+
+  assert.equal(
+    countAuthoritativeCurrentTimeReminders(JSON.stringify({ input: [userInput] })),
+    0,
+  );
+  assert.equal(
+    countAuthoritativeCurrentTimeReminders(
+      JSON.stringify({ input: [userInput], instructions: reminder }),
+    ),
+    1,
+  );
+  assert.equal(
+    countAuthoritativeCurrentTimeReminders(JSON.stringify({
+      input: [
+        userInput,
+        {
+          role: "developer",
+          content: [{ type: "input_text", text: reminder }],
+        },
+      ],
+    })),
+    1,
+  );
+});
+
 testHostedCodexAuthE2e(
   "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
   async () => {
@@ -1081,10 +1119,7 @@ testHostedCodexAuthE2e(
             request.includes(individualPrompt) || request.includes(groupPrompt),
         );
       const currentTimeReminderCounts = promptRequests.map(
-        (request) =>
-          request.match(
-            /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
-          )?.length ?? 0,
+        countAuthoritativeCurrentTimeReminders,
       );
       assert.ok(currentTimeReminderCounts.every((count) => count === 1));
 
@@ -1739,6 +1774,29 @@ test("hosted runtime launch env policy forwards the test-only model provider bas
   );
 });
 
+test("hosted runtime launch env policy forwards subagent model authority", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    HOSTED_RUNTIME_ENV_KEY_NAMES.includes(
+      HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]: "1",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV],
+    "1",
+  );
+});
+
 test("hosted runtime launch env policy forwards the neutral hosted Codex command override", () => {
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
@@ -1815,6 +1873,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
 
 test("hosted Codex config TOML omits credential values and runtime authority headers", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: true,
     model: null,
     provider: {
       id: "openai",
@@ -1876,17 +1935,6 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
-      "# Silent member memory consolidation uses only its host-owned dynamic tool.",
-      `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
-      '":minimal" = "read"',
-      "glob_scan_max_depth = 1",
-      "",
-      `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
-      '"." = "deny"',
-      "",
-      `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.network]`,
-      "enabled = false",
-      "",
       "# Read-only scheduled member reflection using the current private vault.",
       `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem]`,
       '":minimal" = "read"',
@@ -1933,6 +1981,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# A CLI boolean override would replace the table and silently drop them.",
       "[features.multi_agent_v2]",
       "enabled = true",
+      "expose_spawn_agent_model_overrides = true",
       "# V2 counts the root in this limit: four means root plus three children.",
       "max_concurrent_threads_per_session = 4",
       `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -1990,6 +2039,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
 
 test("hosted Codex config keeps skill instructions and native memory disabled", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: true,
     model: "gpt-5.6-terra",
     provider: {
       id: "openai",
@@ -2008,7 +2058,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.match(config, /^memories = false$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
-  assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
+  assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^agent_max_threads/mu);
   assert.ok(config.includes(
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -2034,8 +2084,9 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.match(config, /break provider prefix caching/u);
 });
 
-test("hosted Codex config promotes permitted leaf delegation without cross-model routing", () => {
+test("hosted Codex config promotes permitted leaf delegation with native per-spawn model selection", () => {
   const config = buildHostedCodexConfigToml({
+    exposeSpawnAgentModelOverrides: true,
     model: "gpt-5.6-terra",
     provider: {
       id: "openai",
@@ -2056,10 +2107,11 @@ test("hosted Codex config promotes permitted leaf delegation without cross-model
   assert.ok(config.includes(
     "Complete only the self-contained assignment and stop.",
   ));
-  assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
+  assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^default_subagent_model/mu);
   assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);
   assert.doesNotMatch(config, /gpt-5\.6-luna/u);
+  assert.doesNotMatch(config, /gpt-5\.6-sol/u);
 });
 
 test("hosted Codex runtime exposes a stable package-owned assistant skill root", async () => {
@@ -2404,12 +2456,47 @@ async function prepareLegacyBuiltInOpenAiCodexHome(input: {
 function parseJsonObject(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
+    return isJsonObject(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function countAuthoritativeCurrentTimeReminders(requestBody: string): number {
+  const parsed = parseJsonObject(requestBody);
+  if (!parsed) {
+    return 0;
+  }
+
+  const inputReminderCount = Array.isArray(parsed.input)
+    ? parsed.input.reduce((count, item) => {
+        if (!isJsonObject(item) || item.role !== "developer") {
+          return count;
+        }
+        return count + countCurrentTimeReminders(item.content);
+      }, 0)
+    : 0;
+  return countCurrentTimeReminders(parsed.instructions) + inputReminderCount;
+}
+
+function countCurrentTimeReminders(value: unknown): number {
+  if (typeof value === "string") {
+    return value.match(CURRENT_TIME_REMINDER_PATTERN)?.length ?? 0;
+  }
+  if (!Array.isArray(value)) {
+    return 0;
+  }
+  return value.reduce(
+    (count, item) =>
+      count + (isJsonObject(item)
+        ? countCurrentTimeReminders(item.text)
+        : countCurrentTimeReminders(item)),
+    0,
+  );
 }
 
 function isNativeMemoryRequestMarker(input: {

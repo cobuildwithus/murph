@@ -26,6 +26,9 @@ import {
   appendHostedMailboxEnvelopeTx,
 } from "../hosted-mailbox/store";
 import {
+  ensureHostedGroupStructureForThreadContainerTx,
+} from "../hosted-groups/group-store";
+import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKey,
@@ -705,6 +708,11 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     threadIdentityLookupKey,
     threadLookupKey,
   });
+  await ensureHostedGroupStructureForThreadContainerTx({
+    containerMemberId,
+    now: input.occurredAt,
+    tx: input.prisma,
+  });
 
   const activationWake = buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedThreadContainerActivationEventId({
@@ -713,6 +721,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     }),
     memberChannels: resolveHostedThreadContainerMemberChannels(input.channel),
     memberId: containerMemberId,
+    onboardingFollowupEnrollment: false,
     occurredAt: input.occurredAt.toISOString(),
     ...(input.initialGroupRoomModelMarkdown
       ? { initialGroupRoomModelMarkdown: input.initialGroupRoomModelMarkdown }

@@ -211,7 +211,7 @@ test("mixed categories also expose optional learning topics without grading them
   );
 });
 
-test("urgent exposures cap an otherwise strong grade at E", () => {
+test("urgent exposures cap an otherwise strong grade at F", () => {
   for (const [indicatorId, value, expectedMet, expectedPct] of [
     ["damp_or_mold", "visible_mold", 15, 94],
     ["smoke_sources", "smoking", 15, 94],
@@ -232,7 +232,7 @@ test("urgent exposures cap an otherwise strong grade at E", () => {
     assert.deepEqual(grade, {
       eligible: 16,
       graded: 16,
-      letter: "E",
+      letter: "F",
       met: expectedMet,
       pct: expectedPct,
       redFlags: 1,
@@ -278,8 +278,8 @@ test("the hero explains urgent grade caps without requiring a dialog", () => {
   );
 
   assert.match(strongMarkup, />94%/);
-  assert.match(strongMarkup, /of known conditions within target/);
-  assert.match(strongMarkup, /1 urgent issue caps the grade at E/);
+  assert.match(strongMarkup, /Murph knows 16 of 16 conditions/);
+  assert.match(strongMarkup, /1 urgent issue caps the grade at F/);
 
   const sparseValues: HabitatValues = {
     "home-air": { damp_or_mold: "visible_mold" },
@@ -391,3 +391,59 @@ function renderEnvironmentHero(
     }),
   );
 }
+
+test("letter grades follow the scale a US reader expects", () => {
+  const gradeAt = (met: number, graded: number) =>
+    overallGrade([
+      {
+        id: "sleep",
+        title: "Sleep",
+        known: graded,
+        total: graded,
+        grade: {
+          letter: null,
+          pct: null,
+          met,
+          graded,
+          eligible: graded,
+          redFlags: 0,
+        },
+        rows: [],
+        optionalFacts: [],
+        unknownFacts: [],
+        skippedFacts: [],
+      },
+    ]);
+
+  assert.equal(gradeAt(90, 100).letter, "A");
+  assert.equal(gradeAt(89, 100).letter, "B");
+  assert.equal(gradeAt(80, 100).letter, "B");
+  assert.equal(gradeAt(79, 100).letter, "C");
+  assert.equal(gradeAt(70, 100).letter, "C");
+  assert.equal(gradeAt(69, 100).letter, "D");
+  assert.equal(gradeAt(60, 100).letter, "D");
+  assert.equal(gradeAt(59, 100).letter, "F");
+});
+
+test("temperatures read in the unit system the reader uses", () => {
+  const category = {
+    aspectIds: ["sleep-environment"],
+    id: "sleep",
+    title: "Sleep",
+  };
+  const values: HabitatValues = {
+    "sleep-environment": { night_temp_c: 20 },
+  };
+
+  const metric = deriveCategoryNote(category, values);
+  const imperial = deriveCategoryNote(category, values, {}, true);
+
+  assert.equal(
+    metric.rows.find((row) => row.indicatorId === "night_temp_c")?.value,
+    "20°C",
+  );
+  assert.equal(
+    imperial.rows.find((row) => row.indicatorId === "night_temp_c")?.value,
+    "68°F",
+  );
+});

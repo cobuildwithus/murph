@@ -1,10 +1,10 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Cli } from 'incur'
+import type { Cli, Formatter } from 'incur'
 
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node/sqlite-warning-filter'
-import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { VaultCliErrorProjection } from '@murphai/operator-config/vault-cli-error-projection'
 import { getVaultCliPackageVersion } from './vault-cli-package.js'
 import { VAULT_CLI_SKILL_HASH } from './vault-cli-skill-hash.generated.js'
 import {
@@ -360,8 +360,117 @@ async function servePlannedVaultCliInvocation(input: {
   await cli.serve(input.argv, input.serveOptions)
 }
 
-export function formatMurphCliError(error: unknown): string {
-  return formatStructuredErrorMessage(error)
+export interface RenderedMurphCliError {
+  exitCode: number
+  machineReadable: boolean
+  output: string
+}
+
+export async function renderMurphCliEntrypointError(
+  error: unknown,
+  argv: readonly string[],
+  options: { human?: boolean | undefined } = {},
+): Promise<RenderedMurphCliError> {
+  const { projectVaultCliError } = await import(
+    './vault-cli-error-projection.js'
+  )
+  const projected = projectVaultCliError(error)
+  const explicitFormat = findExplicitOutputFormat(argv)
+  const human = options.human ?? process.stdout.isTTY === true
+
+  if (explicitFormat === null && human) {
+    return {
+      exitCode: projected.exitCode ?? 1,
+      machineReadable: false,
+      output: formatProjectedCliErrorForHuman(projected),
+    }
+  }
+
+  const format = explicitFormat ?? 'toon'
+  const { Formatter: runtimeFormatter } = await import('incur')
+  const errorBody = {
+    code: projected.code,
+    message: projected.message,
+    retryable: projected.retryable,
+    ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
+    ...(projected.hint ? { hint: projected.hint } : {}),
+    ...(projected.stage ? { stage: projected.stage } : {}),
+  }
+  const outputBody = argv.includes('--full-output')
+    ? {
+        ok: false,
+        error: errorBody,
+        meta: {
+          command: 'invocation',
+          duration: '0ms',
+        },
+      }
+    : errorBody
+  const output = runtimeFormatter.format(
+    outputBody,
+    format,
+  )
+
+  return {
+    exitCode: projected.exitCode ?? 1,
+    machineReadable: true,
+    output,
+  }
+}
+
+function formatProjectedCliErrorForHuman(
+  error: VaultCliErrorProjection,
+): string {
+  const prefix = error.code === 'UNKNOWN' ? 'Error' : `Error (${error.code})`
+  const lines = [`${prefix}: ${error.message}`]
+
+  if (error.stage) {
+    lines.push(`Stage: ${error.stage}`)
+  }
+  if (error.fieldErrors) {
+    lines.push(
+      ...error.fieldErrors.map(
+        (fieldError) => `  ${fieldError.path}: ${fieldError.message}`,
+      ),
+    )
+  }
+  if (error.hint) {
+    lines.push(`Hint: ${error.hint}`)
+  }
+
+  return lines.join('\n')
+}
+
+function findExplicitOutputFormat(
+  argv: readonly string[],
+): Formatter.Format | null {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--json') {
+      return 'json'
+    }
+    if (token === '--format') {
+      return parseOutputFormat(argv[index + 1])
+    }
+    if (token?.startsWith('--format=')) {
+      return parseOutputFormat(token.slice('--format='.length))
+    }
+  }
+
+  return null
+}
+
+function parseOutputFormat(value: string | undefined): Formatter.Format | null {
+  switch (value) {
+    case 'json':
+    case 'jsonl':
+    case 'md':
+    case 'toon':
+    case 'yaml':
+      return value
+    default:
+      return null
+  }
 }
 
 export function createCliServeOptions(

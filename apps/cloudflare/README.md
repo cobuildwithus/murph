@@ -37,7 +37,15 @@ Internal control routes:
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
   the bound user's runtime. Both credentials receive the real accepted-or-retry
   result after start/wake intent is accepted, not after the runtime reaches
-  idle; the direct path does not hide that result behind Worker `waitUntil()`
+  idle; the direct path does not hide that result behind Worker `waitUntil()`.
+  The server-derived direct marker plus a valid direct-ingress attempt identity
+  lets foreground/default work exact-abort and replace active system-mailbox
+  work. Once the child acknowledges that abort, the runner keeps its outer
+  transport alive until the child settles its current atomic persistence
+  boundary; only then can the foreground replacement take the fence. A stale,
+  failed, or unavailable child abort keeps the existing fail-closed outer
+  cancellation. Callback-signed Temporal/default work retains the cooperative
+  wake-and-retry behavior.
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
   Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
   distinguishes those two existing callers; an empty legacy request remains
@@ -46,9 +54,15 @@ Internal control routes:
   readiness or create runtime authority.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
+- `GET /internal/temporal-worker/binding-admission` authenticates the existing
+  callback signature without a member binding, consumes its replay nonce, and
+  returns only the production `bindings-v1` owner/key identity needed before a
+  versioned Temporal worker may register pollers. The response is `no-store`.
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 
-The supported worker HTTP surface stops at those narrow control routes, the deploy smoke callback, and the public banner and health checks.
+The supported worker HTTP surface stops at those narrow control routes, the
+binding-admission and deploy-smoke callbacks, and the public banner and health
+checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
@@ -103,6 +117,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 
 - The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to the canonical ENAM R2 bucket through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
 - V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
+- Ordinary inbound hosted video bytes are not portable workspace state. Snapshot planning excludes normalized video paths derived from validated canonical inbox captures even while accepted input still protects the local file; invalid capture metadata fails planning closed. Unprotected videos are immediately eligible for the existing atomic inbox-retention cleanup, while explicit canonical event raw references remain the durable-save exception.
 - Legacy full/base bundle refs and legacy artifact sidecars remain restoreable during migration, but v2 snapshot production does not externalize raw files into artifact blobs.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and short-lived direct-R2 upload sessions without persisted presigned URLs. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; snapshot refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
@@ -210,6 +225,13 @@ to retain 30 days of:
 - primary Postgres connection states and total utilization; and
 - per-region connection-error counters and positive deltas for direct port 5432
   and pooled application port 6432.
+
+Each retained sample stores both the scheduled Cron slot and the actual
+post-collection check time. Legacy rows expose a null check time rather than
+pretending the scheduled slot was the collection instant. Primary-only
+Postgres and PgBouncer families require the provider's explicit
+`planetscale_role="primary"` label; missing role metadata makes that family
+incomplete instead of treating mixed or replica data as primary.
 
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
@@ -549,6 +571,6 @@ failure is logged and ignored with no retry or result mutation.
 - `apps/cloudflare/.deploy/worker-secrets.json`
 
 `pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, the hosted email send binding restrictions, and the cached native runner base image before upload; its apply step also runs deploy preflight before direct Wrangler upload.
-Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle fingerprint with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`. The same smoke can mint an actual R2 S3 presigned PUT URL, upload a payload larger than 150 MiB from the container, verify the object size through the Worker R2 binding, and delete the smoke object.
+Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle/source fingerprints and public Murph release SHA with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`. The release SHA identifies the checked-out public base commit even when the protected private workflow composes its private runtime assets into that checkout; the source and bundle fingerprints identify the resulting composed artifact. A missing or malformed public release SHA is rejected. A Cloudflare version id or the private deployment-workflow commit is not release provenance. The same smoke can mint an actual R2 S3 presigned PUT URL, upload a payload larger than 150 MiB from the container, verify the object size through the Worker R2 binding, and delete the smoke object.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.

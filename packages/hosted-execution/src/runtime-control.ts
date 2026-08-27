@@ -164,6 +164,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -925,6 +926,7 @@ export interface HostedRuntimeUsageRecordRequest {
 }
 
 export interface HostedRuntimeUsageRecordResponse {
+  platformAiUsageAllowedAfter: boolean;
   recorded: boolean;
   usageId: string;
 }
@@ -938,7 +940,7 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 2_000;
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 5_000;
 
 const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
 
@@ -1092,7 +1094,7 @@ export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS =
   HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX = 25;
-export const HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS = 512;
 
 export interface HostedRuntimeGroupDisclosureGrantSummary {
   grantId: string;
@@ -1191,7 +1193,9 @@ export interface HostedRuntimeUsageReferralSourceContext {
   sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
 }
 
+export const HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX = 64;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS = 512;
 
 export interface HostedRuntimeGroupMembershipSummary {
   displayName: string | null;
@@ -1355,10 +1359,15 @@ export interface HostedRuntimeGroupToolSelfOptOutContext {
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
+export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX =
+  "assistant.notification.requested:group-context-handoff:";
+export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS = 4_000;
+export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS = 10 * 60 * 1_000;
 export const HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS = 512;
 // JSON can escape one code point to six bytes. One KiB covers the fixed
 // request envelope, projection scopes, quotes, and commas.
 export const HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES = 1_024
+  + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS * 6
   + HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
     * HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
     * 6;
@@ -1478,6 +1487,12 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | {
+      action: "handoff";
+      context: string;
+      groupLabel?: string | null;
+      originAssistantInputId: string;
+    }
+  | {
       action: "ask_current_sender";
       audience?: "current_sender" | "group";
       mode: "clarification" | "continuation" | "new";
@@ -1507,7 +1522,7 @@ export type HostedRuntimeGroupToolRequest =
       permissionText: string;
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
-  | { action: "read_current" }
+  | { action: "read_current"; disclosureGrantCursor?: string }
   | {
       action: "prepare_next_group";
       setup?: HostedRuntimePendingGroupSetupInput;
@@ -1561,7 +1576,11 @@ export type HostedRuntimeGroupToolRequest =
       action: "prepare_email";
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
     }
-  | { action: "list_memberships" }
+  | {
+      action: "list_memberships";
+      cursor?: string;
+      disclosureGrantCursor?: string;
+    }
   | { action: "leave_membership"; membershipId: string }
   | {
       action: "update_display_name";
@@ -1573,6 +1592,8 @@ export type HostedRuntimeGroupToolRequest =
       action: "post_join_offer";
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      /** Exact accepted-input identity for an explicitly requested native repost. */
+      repostOriginAssistantInputId?: string;
     }
   | {
       action: "preflight_set_chat_avatar";
@@ -1635,6 +1656,10 @@ export type HostedRuntimeGroupToolResponse =
       result: HostedRuntimeGroupAskResult;
     }
   | {
+      action: "handoff";
+      result: HostedRuntimeGroupAskResult;
+    }
+  | {
       action: "ask_current_sender";
       result: HostedRuntimeGroupCurrentSenderDirectResult;
     }
@@ -1659,7 +1684,12 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "read_current";
       result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | {
+            status: "ok";
+            disclosureGrantsTruncated?: boolean;
+            group: HostedRuntimeGroupSummary;
+            nextDisclosureGrantCursor?: string | null;
+          }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
@@ -1725,7 +1755,10 @@ export type HostedRuntimeGroupToolResponse =
         | {
             status: "ok";
             disclosureGrants: HostedRuntimeGroupDisclosureGrantListEntry[];
+            disclosureGrantsTruncated?: boolean;
             memberships: HostedRuntimeGroupMembershipSummary[];
+            nextDisclosureGrantCursor?: string | null;
+            nextCursor?: string | null;
             truncated: boolean;
           }
         | {
@@ -3300,6 +3333,7 @@ export interface HostedWorkspaceReadResponse {
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
+  hostedAssistantSubagentModelOverridesAllowed?: boolean;
   platformAiUsageAllowed?: boolean;
   workspace: HostedWorkspaceState | null;
 }
@@ -3466,6 +3500,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.lease_superseded",
   "runner.provider_egress_diagnostic",
   "runner.started",
+  "runtime.invocation_finished",
   "workspace.codex_home_snapshot",
 ] as const;
 
@@ -3597,6 +3632,7 @@ export interface HostedWorkspaceInvocationBudget {
 
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
+  "environment_interview",
   "inbox_media_retention",
   "system_mailbox",
 ] as const;

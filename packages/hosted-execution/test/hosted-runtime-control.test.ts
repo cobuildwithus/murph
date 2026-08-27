@@ -239,6 +239,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
+      "environment-interview.completed",
       "environment-voice.captured",
       "health.daily-metric.reported",
       "meal-photo.captured",
@@ -302,6 +303,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.snapshot_preempted");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.accepted_attempt_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.provider_egress_diagnostic");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.invocation_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
@@ -1220,9 +1222,11 @@ describe("hosted runtime control contracts", () => {
       usage,
     });
     expect(parseHostedRuntimeUsageRecordResponse({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: usage.usageId,
     })).toEqual({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: usage.usageId,
     });
@@ -1272,13 +1276,19 @@ describe("hosted runtime control contracts", () => {
       ],
     })).toThrow(/issueId/u);
     expect(() => parseHostedRuntimeUsageRecordResponse({
+      platformAiUsageAllowedAfter: true,
       recorded: -1,
       usageId: usage.usageId,
     })).toThrow(/boolean/u);
     expect(() => parseHostedRuntimeUsageRecordResponse({
+      platformAiUsageAllowedAfter: true,
       recorded: true,
       usageId: "",
     })).toThrow(/non-empty string/u);
+    expect(() => parseHostedRuntimeUsageRecordResponse({
+      recorded: true,
+      usageId: usage.usageId,
+    })).toThrow(/platformAiUsageAllowedAfter/u);
   });
 
   it("parses hosted Codex auth updates with exact bounded callback shapes", () => {
@@ -2259,15 +2269,22 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: true,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: true,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(() => parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantSubagentModelOverridesAllowed: "true",
+      workspace: null,
+    })).toThrow(/hostedAssistantSubagentModelOverridesAllowed/u);
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -2571,6 +2588,24 @@ describe("hosted runtime control contracts", () => {
     }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
   });
 
+  it("accepts retired device-sync environment logs from warm runners", () => {
+    const entry = {
+      at: "2026-04-26T00:00:03.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.legacy_platform_env_present",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        junctionPlatformEnvPresent: true,
+        legacyPlatformEnvKeyCount: 4,
+      },
+    };
+
+    expect(parseHostedRuntimeLogRequest({ entries: [entry] })).toEqual({
+      entries: [entry],
+    });
+  });
+
   it("keeps runtime logs structured and privacy-bounded", () => {
     const entry = {
       at: "2026-04-26T00:00:03.000Z",
@@ -2585,6 +2620,9 @@ describe("hosted runtime control contracts", () => {
       phase: "import",
       redactedJson: {
         importedCount: 2,
+        junctionWorkoutStreamMaxTimestampCount: 100_000,
+        junctionWorkoutStreamTimestampCardinalityKind: "over_limit",
+        junctionWorkoutStreamTimestampCount: 100_127,
         messageReactionsAvailable: true,
         reasoningEffort: "low",
         retryable: false,
@@ -3072,6 +3110,36 @@ describe("hosted runtime control contracts", () => {
         phase: "invoke",
         redactedJson: {
           configured: true,
+          deviceSyncJobTimingCount: 1,
+          deviceSyncJobTimingSampleLimit: 16,
+          deviceSyncJobTimingSummaries: [{
+            attempts: 1,
+            connectionSourceReadCount: 1,
+            connectionSourceReadElapsedMs: 250,
+            credentialRefreshCount: 0,
+            credentialRefreshElapsedMs: 0,
+            durableProgressCommitted: false,
+            elapsedMs: 45_000,
+            jobCount: 1,
+            jobKind: "resource",
+            outcome: "yielded",
+            provider: "junction",
+            providerExecutionElapsedMs: 44_900,
+            providerInventoryRequestCount: 1,
+            providerInventoryRequestElapsedMs: 34_000,
+            providerResourceRequestCount: 1,
+            providerResourceRequestElapsedMs: 6_000,
+            providerUnattributedElapsedMs: 4_650,
+            resource: "sleep",
+            snapshotImportCount: 0,
+            snapshotImportElapsedMs: 0,
+            snapshotCanonicalCoreElapsedMs: 0,
+            snapshotCanonicalWriteElapsedMs: 0,
+            snapshotEventIdentityIndexCacheHitCount: 0,
+            snapshotEventIdentityIndexElapsedMs: 0,
+            snapshotNormalizationElapsedMs: 0,
+          }],
+          deviceSyncJobTimingTruncated: false,
           elapsedMs: 45000,
           lifecycle: "finished",
           nextWakeAtPresent: true,
@@ -3586,6 +3654,9 @@ function createAssistantRuntimeIssueRecord(): AssistantRuntimeIssueRecord {
     occurredAt: "2026-04-26T00:00:07.000Z",
     operation: "hosted-runtime.import",
     phase: "tool_call",
+    releaseSha: "0123456789abcdef0123456789abcdef01234567",
+    runtimeAttemptId: "attempt_evt_123",
+    runtimeName: "cloudflare-hosted-runner",
     schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
     severity: "error",
     summary: "Assistant runtime issue: tool error during tool_call (hosted-runtime.import).",

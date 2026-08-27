@@ -25,7 +25,9 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { readHostedFamilyBillingRecoveryForOwner } from "./family-plan";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
+import { hasHostedRecoverableBilling } from "./lifecycle";
 import {
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationEventId,
@@ -35,6 +37,10 @@ import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
+import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import type { HostedSignupSurface } from "./signup-notification-context";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
@@ -85,6 +91,13 @@ export interface HostedStarterUsageEnrollmentResult {
   status: HostedStarterUsageEnrollmentStatus;
 }
 
+export type HostedJoinInviteStarterContinuationResult =
+  | { disposition: "deferred" }
+  | {
+      disposition: "enrolled";
+      enrollment: HostedStarterUsageEnrollmentResult;
+    };
+
 export interface HostedLinqInstantStartDeferredActivationWake {
   hostedExecutionEventId: string;
   memberId: string;
@@ -103,7 +116,7 @@ type HostedStarterUsageEnrollmentPolicy = {
   };
   requireActivationRuntimeWake: boolean;
   requireLaunchConsent: boolean;
-  source: HostedStarterUsageSource;
+  source: Exclude<HostedStarterUsageSource, "legacy_trial_migration">;
   suppressSignupWelcomeEmail: boolean;
   suppressSignupWelcome: boolean;
 };
@@ -112,6 +125,7 @@ type HostedStarterUsagePostCommitEffects = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  signupNotificationEmailMemberId: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -154,6 +168,26 @@ export async function ensureHostedStarterUsageEnrollment(
       suppressSignupWelcome || companionOnboarding,
   });
   return enrollment.result;
+}
+
+export async function continueHostedJoinInviteAfterLaunchConsent(
+  input: HostedStarterUsageEnrollmentInput,
+): Promise<HostedJoinInviteStarterContinuationResult> {
+  try {
+    const enrollment = await ensureHostedStarterUsageEnrollment(input);
+    return { disposition: "enrolled", enrollment };
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && (
+        error.code === "HOSTED_MESSAGING_CHANNEL_REQUIRED"
+        || error.code === "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED"
+      )
+    ) {
+      return { disposition: "deferred" };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -327,6 +361,32 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         memberId: invite.member.id,
         tx,
       });
+      const familyBillingRecovery =
+        await readHostedFamilyBillingRecoveryForOwner({
+          ownerMemberId: invite.member.id,
+          prisma: tx,
+        });
+      if (familyBillingRecovery) {
+        throw hostedOnboardingError({
+          code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+          message:
+            "This hosted account has Family billing to recover before starting individual access.",
+          httpStatus: 409,
+        });
+      }
+      if (hasHostedRecoverableBilling({
+        billingStatus: member.billingStatus,
+        hasExistingSubscription: Boolean(
+          member.billingRef?.stripeSubscriptionLookupKey,
+        ),
+      })) {
+        throw hostedOnboardingError({
+          code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+          message:
+            "This hosted account already has billing to recover before starting individual access.",
+          httpStatus: 409,
+        });
+      }
       const hasPaidSubscription = hasHostedPaidBillingRefEvidence(
         member.billingRef,
       );
@@ -433,6 +493,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           hostedExecutionMailboxItemId: shouldWakeActivationRuntime
             ? activation?.hostedExecutionMailboxItemId ?? null
             : null,
+          signupNotificationEmailMemberId:
+            activation?.activated ? invite.member.id : null,
           welcomeEmailMemberId:
             activation?.activated && !policy.suppressSignupWelcomeEmail
               ? invite.member.id
@@ -480,6 +542,14 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     );
   })();
 
+  if (outcome.effects.signupNotificationEmailMemberId) {
+    scheduleHostedSignupNotificationEmails({
+      activationSurface: resolveHostedStarterSignupSurface(policy.source),
+      memberIds: [outcome.effects.signupNotificationEmailMemberId],
+      prisma,
+    });
+  }
+
   const deferredActivationWake = policy.instantStartAdmission
     ? buildHostedLinqInstantStartDeferredActivationWake(outcome.effects)
     : null;
@@ -510,6 +580,19 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     deferredActivationWake,
     result: outcome.result,
   };
+}
+
+function resolveHostedStarterSignupSurface(
+  source: HostedStarterUsageEnrollmentPolicy["source"],
+): HostedSignupSurface {
+  switch (source) {
+    case "companion_onboarding":
+      return "mobile_app";
+    case "linq_instant_start":
+      return "imessage";
+    case "web_onboarding":
+      return "website";
+  }
 }
 
 async function prepareHostedStarterUsageActivationCrypto(input: {

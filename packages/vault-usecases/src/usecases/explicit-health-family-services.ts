@@ -2,11 +2,12 @@ import {
   bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
-  safeParseContract,
+  immunizationImportPayloadSchema,
   supplementIngredientPayloadSchema,
   type JsonObject,
   type RegimenUpsertPayload,
 } from "@murphai/contracts";
+import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
   CommandContext,
@@ -61,6 +62,10 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
+import {
+  toRegimenUpsertVaultCliError,
+  toVaultCliError,
+} from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -133,6 +138,197 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "body",
 ]);
 
+function finiteHealthPublicPath(path: readonly PropertyKey[]): Array<string | number> {
+  const publicPath: Array<string | number> = [];
+
+  for (const segment of path) {
+    if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
+      publicPath.push(segment);
+      continue;
+    }
+
+    if (typeof segment !== "string") {
+      continue;
+    }
+    publicPath.push(segment);
+    if (segment === "requiredQualifiers") {
+      return publicPath;
+    }
+  }
+
+  return publicPath;
+}
+
+function publicHealthValidationIssue(
+  issue: ZodIssue,
+  publicPath?: readonly (string | number)[],
+) {
+  const normalizedPublicPath = publicPath ?? finiteHealthPublicPath(issue.path);
+  const expected =
+    "expected" in issue && typeof issue.expected === "string"
+      ? issue.expected
+      : undefined;
+
+  return {
+    code: issue.code,
+    publicPath: normalizedPublicPath,
+    ...(expected === undefined ? {} : { expected }),
+  };
+}
+
+interface PrivateProtocolVaultError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+}
+
+function isPrivateProtocolVaultError(error: unknown): error is PrivateProtocolVaultError {
+  return error instanceof Error
+    && error.name === "VaultError"
+    && "code" in error
+    && typeof error.code === "string";
+}
+
+function protocolValidationIssues(
+  details: Record<string, unknown> | undefined,
+): Array<{ code: unknown; publicPath: Array<string | number> }> {
+  const fields = Array.isArray(details?.fields) ? details.fields : [];
+  return fields.flatMap((field) => {
+    if (typeof field !== "object" || field === null || Array.isArray(field)) {
+      return [];
+    }
+
+    if (!("path" in field) || !Array.isArray(field.path)) {
+      return [];
+    }
+
+    return [{
+      publicPath: protocolPublicValidationPath(field.path),
+      code: "code" in field ? field.code : undefined,
+    }];
+  });
+}
+
+const PROTOCOL_PUBLIC_VALIDATION_FIELDS = new Set([
+  "activityKinds",
+  "activitySessionEvidence",
+  "after",
+  "before",
+  "commonsProtocolRef",
+  "constraints",
+  "diff",
+  "docType",
+  "doseSignature",
+  "durationMinutes",
+  "effectiveSpec",
+  "effectiveSpecHash",
+  "frequency",
+  "instructions",
+  "key",
+  "lineage",
+  "max",
+  "min",
+  "minimumDurationMinutes",
+  "minimumUsefulSessions",
+  "modality",
+  "notes",
+  "op",
+  "pageRevisionId",
+  "parentProtocolRef",
+  "path",
+  "personalization",
+  "preferences",
+  "protocolId",
+  "protocolRevisionId",
+  "rationale",
+  "reason",
+  "runSpecRevisionId",
+  "schemaVersion",
+  "sessionsPerDay",
+  "sessionsPerWeek",
+  "slug",
+  "sourceKind",
+  "status",
+  "stopConditions",
+  "target",
+  "targetSessions",
+  "temperatureC",
+  "testPlanId",
+  "title",
+]);
+
+const PROTOCOL_DYNAMIC_VALIDATION_FIELDS = new Set([
+  "after",
+  "before",
+  "constraints",
+  "preferences",
+]);
+
+function protocolPublicValidationPath(
+  path: readonly unknown[],
+): Array<string | number> {
+  const publicPath: Array<string | number> = [];
+  for (const segment of path) {
+    if (
+      typeof segment === "number"
+      && Number.isSafeInteger(segment)
+      && segment >= 0
+    ) {
+      publicPath.push(segment);
+      continue;
+    }
+    if (typeof segment !== "string" || !PROTOCOL_PUBLIC_VALIDATION_FIELDS.has(segment)) {
+      break;
+    }
+    publicPath.push(segment);
+    if (PROTOCOL_DYNAMIC_VALIDATION_FIELDS.has(segment)) {
+      break;
+    }
+  }
+  return publicPath;
+}
+
+function toPrivateProtocolVaultCliError(error: unknown): unknown {
+  if (!isPrivateProtocolVaultError(error)) {
+    return error;
+  }
+
+  if (error.code === "VAULT_INVALID_PROTOCOL") {
+    if (error.details?.validationSource !== "submitted_candidate") {
+      return new VaultCliError(
+        "vault_state_invalid",
+        "Stored protocol state is invalid.",
+        {
+          vaultCode: error.code,
+          validationSource: error.details?.validationSource === "stored_vault_state"
+            ? "stored_vault_state"
+            : "unknown",
+        },
+      );
+    }
+
+    return new VaultCliError(
+      "contract_invalid",
+      "Protocol payload is invalid.",
+      {
+        vaultCode: error.code,
+        validationSource: "submitted_candidate",
+        issues: protocolValidationIssues(error.details),
+        stage: "validation",
+      },
+    );
+  }
+
+  if (error.code === "VAULT_INVALID_INPUT") {
+    return new VaultCliError(
+      "contract_invalid",
+      error.message,
+      { vaultCode: error.code },
+    );
+  }
+
+  return toVaultCliError(error);
+}
+
 function parseRegistryPayloadWithSharedSchema(
   kind: RegistryDocFamilyKind,
   payload: JsonObject,
@@ -146,10 +342,11 @@ function parseRegistryPayloadWithSharedSchema(
     return payload;
   }
 
-  const result = safeParseContract(schema, payload);
+  const result = schema.safeParse(payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
-      issues: result.errors,
+      issues: result.error.issues.map((issue) => publicHealthValidationIssue(issue)),
+      stage: "validation",
     });
   }
 
@@ -171,6 +368,15 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
       throw new VaultCliError(
         "invalid_payload",
         `results[${index}].valueText is not supported. Did you mean results[${index}].textValue?`,
+        {
+          issues: [
+            {
+              code: "custom",
+              publicPath: ["results", index, "valueText"],
+            },
+          ],
+          stage: "validation",
+        },
       );
     }
   }
@@ -178,10 +384,23 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
 
 function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
   assertNoBloodTestValueTextAlias(payload);
-  const result = safeParseContract(bloodTestImportPayloadSchema, payload);
+  const result = bloodTestImportPayloadSchema.safeParse(payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
-      issues: result.errors,
+      issues: result.error.issues.map((issue) => publicHealthValidationIssue(issue)),
+      stage: "validation",
+    });
+  }
+
+  return result.data as JsonObject;
+}
+
+function parseImmunizationImportPayload(payload: JsonObject): JsonObject {
+  const result = immunizationImportPayloadSchema.safeParse(payload);
+  if (!result.success) {
+    throw new VaultCliError("invalid_payload", "immunization payload failed validation.", {
+      issues: result.error.issues.map((issue) => publicHealthValidationIssue(issue)),
+      stage: "validation",
     });
   }
 
@@ -422,20 +641,28 @@ function validateSupplementSaveInput(input: {
 
 function formatSupplementIngredientValidationMessage(
   index: number,
-  errors: readonly string[],
+  issues: readonly ZodIssue[],
+  value: unknown,
 ): string {
-  const entries = errors.map(readContractValidationErrorEntry);
+  const valueRecord =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
   const missingFields = [
     ...new Set(
-      entries
-        .filter((entry) => entry.path !== "$")
-        .filter((entry) => /received undefined/u.test(entry.message))
-        .map((entry) => entry.path),
+      issues.flatMap((issue) => {
+        const field = issue.path.length === 1 && typeof issue.path[0] === "string"
+          ? issue.path[0]
+          : null;
+        return field && valueRecord && !Object.prototype.hasOwnProperty.call(valueRecord, field)
+          ? [field]
+          : [];
+      }),
     ),
   ];
   const paths = [
     ...new Set(
-      entries.map((entry) => entry.path),
+      issues.map((issue) => formatSupplementIngredientValidationPath(issue.path)),
     ),
   ];
   const expectedFields = "Expected fields: compound, label, amount, unit, active, note.";
@@ -450,6 +677,14 @@ function formatSupplementIngredientValidationMessage(
   }
 
   return `--ingredient #${index} failed validation${fieldSummary}.${unitHint}`;
+}
+
+function formatSupplementIngredientValidationPath(path: readonly PropertyKey[]): string {
+  if (path.length === 0) {
+    return "$";
+  }
+
+  return path.map(String).join(".");
 }
 
 function normalizeSupplementLabelUnitAlias(unit: string): string {
@@ -542,21 +777,6 @@ function normalizeSupplementIngredientValue(value: unknown): unknown {
   };
 }
 
-function readContractValidationErrorEntry(error: string): {
-  message: string;
-  path: string;
-} {
-  const separatorIndex = error.indexOf(":");
-  const rawPath = separatorIndex === -1 ? "$" : error.slice(0, separatorIndex);
-  const rawMessage = separatorIndex === -1 ? error : error.slice(separatorIndex + 1);
-  const normalizedPath = rawPath.replace(/^\$\./u, "") || "$";
-
-  return {
-    message: rawMessage.trim(),
-    path: normalizedPath,
-  };
-}
-
 function parseSupplementIngredient(spec: string, index: number): SupplementIngredientRecord {
   const trimmed = spec.trim();
 
@@ -585,11 +805,28 @@ function parseSupplementIngredient(spec: string, index: number): SupplementIngre
   }
 
   value = normalizeSupplementIngredientValue(value);
-  const result = safeParseContract(supplementIngredientPayloadSchema, value);
+  const result = supplementIngredientPayloadSchema.safeParse(value);
   if (!result.success) {
-    throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors), {
-      issues: result.errors,
-    });
+    throw new VaultCliError(
+      "invalid_option",
+      formatSupplementIngredientValidationMessage(index, result.error.issues, value),
+      {
+        issues: result.error.issues.map((issue) => {
+          const [field] = issue.path;
+          const publicPath =
+            field === "active" ||
+              field === "amount" ||
+              field === "compound" ||
+              field === "label" ||
+              field === "note" ||
+              field === "unit"
+              ? ["ingredient", index - 1, field]
+              : ["ingredient", index - 1];
+          return publicHealthValidationIssue(issue, publicPath);
+        }),
+        stage: "validation",
+      },
+    );
   }
 
   return result.data;
@@ -712,6 +949,17 @@ function toSupplementSaveResult(
     created: Boolean(result.created),
     entity: toSavedEntitySnapshot(toSupplementReadEntity(result.record)),
   };
+}
+
+async function upsertRegimenForCli(
+  core: CoreRuntimeModule,
+  input: Parameters<CoreRuntimeModule["upsertRegimen"]>[0],
+) {
+  try {
+    return await core.upsertRegimen(input);
+  } catch (error) {
+    throw toRegimenUpsertVaultCliError(error);
+  }
 }
 
 function toRegistryDocEntityData(record: object) {
@@ -1209,8 +1457,9 @@ export function createExplicitHealthCoreServices(
       };
     },
     async upsertImmunization(input: JsonFileInput) {
-      const payload = await readJsonPayload(input.input);
-      assertNoReservedPayloadKeys(payload);
+      const rawPayload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(rawPayload);
+      const payload = parseImmunizationImportPayload(rawPayload);
       const { core } = await loadRuntime();
       const result = await core.appendImmunization({
         ...payload,
@@ -1230,7 +1479,7 @@ export function createExplicitHealthCoreServices(
       const payload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(payload);
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen({
+      const result = await upsertRegimenForCli(core, {
         ...payload,
         vaultRoot: input.vault,
       });
@@ -1246,27 +1495,32 @@ export function createExplicitHealthCoreServices(
     },
     async saveRegimen(input: RegimenSaveInput) {
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen(buildRegimenSavePayload(input));
+      const result = await upsertRegimenForCli(core, buildRegimenSavePayload(input));
 
       return toRegimenSaveResult(input.vault, result);
     },
     async saveSupplement(input: SupplementSaveInput) {
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen(buildSupplementSavePayload(input));
+      const result = await upsertRegimenForCli(core, buildSupplementSavePayload(input));
 
       return toSupplementSaveResult(input.vault, result);
     },
     async upsertPrivateProtocol(input) {
       const { core } = await loadRuntime();
-      const result = await core.upsertProtocol({
-        vaultRoot: input.vault,
-        protocolId: input.protocolId,
-        slug: input.slug,
-        allowSlugRename: input.allowSlugRename,
-        title: input.title,
-        frontmatter: input.frontmatter,
-        body: input.body,
-      });
+      let result: Awaited<ReturnType<typeof core.upsertProtocol>>;
+      try {
+        result = await core.upsertProtocol({
+          vaultRoot: input.vault,
+          protocolId: input.protocolId,
+          slug: input.slug,
+          allowSlugRename: input.allowSlugRename,
+          title: input.title,
+          frontmatter: input.frontmatter,
+          body: input.body,
+        });
+      } catch (error) {
+        throw toPrivateProtocolVaultCliError(error);
+      }
       const protocolId = String(result.record.entity.protocolId);
 
       return {
@@ -1384,8 +1638,17 @@ export function createExplicitHealthQueryServices(
     },
     async showPrivateProtocol(input: EntityLookupInput) {
       const { query } = await loadRuntime();
-      const vault = await query.readVault(input.vault);
-      const summary = query.getProtocolSummary(vault, input.id);
+      const entities = await query.readCanonicalEntityFamilySource(
+        input.vault,
+        "protocol",
+      );
+      const summary = query.getProtocolSummary(
+        query.createVaultReadModel({
+          entities,
+          vaultRoot: input.vault,
+        }),
+        input.id,
+      );
       if (!summary) {
         throw new VaultCliError("not_found", `No protocol found for "${input.id}".`);
       }
@@ -1397,7 +1660,14 @@ export function createExplicitHealthQueryServices(
     },
     async listPrivateProtocols(input: PrivateProtocolListInput) {
       const { query } = await loadRuntime();
-      const vault = await query.readVault(input.vault);
+      const entities = await query.readCanonicalEntityFamilySource(
+        input.vault,
+        "protocol",
+      );
+      const vault = query.createVaultReadModel({
+        entities,
+        vaultRoot: input.vault,
+      });
       const summaries = query
         .listProtocolSummaries(vault, {
           statuses: input.status ? [input.status] : undefined,

@@ -54,6 +54,8 @@ import {
   listHistoryEvents,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  readEvent,
+  readOwnedEvent,
   removeAutomaticMealPhoto,
   parseFrontmatterDocument,
   projectAssessmentResponse,
@@ -69,6 +71,7 @@ import {
   updateVaultSummary,
   upsertEvent,
   upsertProvider,
+  validateSampleImport,
   validateVault,
   VaultError,
 } from "../src/index.ts";
@@ -407,6 +410,104 @@ test("upsertEvent stores the vault-local dayKey without persisting the fallback 
   assert.equal(eventRecord.timeZone, undefined);
 });
 
+test("upsertEvent rejects unusable explicit identity aliases before minting an event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-id-guard");
+  await initializeVault({ vaultRoot });
+
+  const basePayload = {
+    kind: "note",
+    occurredAt: "2026-03-26T21:00:00.000Z",
+    title: "Identity guard",
+  };
+  const invalidValues: unknown[] = [
+    null,
+    "   ",
+    { privateValue: "not-an-id" },
+    "invalid-event-id",
+  ];
+
+  for (const identityField of ["id", "eventId"] as const) {
+    for (const [invalidValueIndex, invalidValue] of invalidValues.entries()) {
+      await assert.rejects(
+        () =>
+          upsertEvent({
+            vaultRoot,
+            payload: {
+              ...basePayload,
+              [identityField]: invalidValue,
+            },
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof VaultError);
+          assert.equal(error.code, "EVENT_CONTRACT_INVALID");
+          assert.ok(Array.isArray(error.details.errors));
+          assert.equal(
+            error.details.errors.some(
+              (entry) => typeof entry === "string" && entry.startsWith("$.id:"),
+            ),
+            true,
+          );
+          assert.equal(JSON.stringify(error.details).includes("not-an-id"), false);
+          assert.equal(JSON.stringify(error.details).includes("invalid-event-id"), false);
+          return true;
+        },
+        `${identityField} invalid value ${invalidValueIndex} must reject`,
+      );
+    }
+  }
+
+  assert.deepEqual(
+    await fs.readdir(path.join(vaultRoot, "ledger", "events"), { recursive: true }),
+    [],
+  );
+});
+
+test("upsertEvent gives canonical id precedence over the legacy eventId alias", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-id-precedence");
+  await initializeVault({ vaultRoot });
+
+  const created = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-03-26T21:00:00.000Z",
+      title: "Identity precedence baseline",
+      note: "Initial identity precedence note.",
+    },
+  });
+  const updated = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: created.eventId,
+      eventId: null,
+      kind: "note",
+      occurredAt: "2026-03-26T21:00:00.000Z",
+      title: "Identity precedence update",
+      note: "Updated identity precedence note.",
+    },
+  });
+
+  assert.equal(updated.created, false);
+  assert.equal(updated.eventId, created.eventId);
+
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          id: null,
+          eventId: created.eventId,
+          kind: "note",
+          occurredAt: "2026-03-26T21:00:00.000Z",
+          title: "Invalid canonical identity",
+          note: "Invalid canonical identity note.",
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_CONTRACT_INVALID",
+  );
+});
+
 test("upsertEvent rejects specialized event kinds on the generic public boundary", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-kind-guard");
   await initializeVault({ vaultRoot });
@@ -572,6 +673,7 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   });
   const aprilResult = await upsertEvent({
     vaultRoot,
+    expectedRevision: 1,
     payload: {
       id: eventId,
       kind: "note",
@@ -584,6 +686,29 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.equal(marchResult.created, true);
   assert.equal(aprilResult.created, false);
   assert.notEqual(aprilResult.ledgerFile, marchResult.ledgerFile);
+  assert.equal(aprilResult.event.lifecycle?.revision, 2);
+  assert.equal(aprilResult.event.note, "Updated note.");
+
+  const current = await readEvent({ vaultRoot, eventId });
+  assert.equal(current.ledgerFile, aprilResult.ledgerFile);
+  assert.equal(current.event.lifecycle?.revision, 2);
+  assert.equal(current.event.note, "Updated note.");
+
+  await assert.rejects(
+    () => upsertEvent({
+      vaultRoot,
+      expectedRevision: 1,
+      payload: {
+        id: eventId,
+        kind: "note",
+        occurredAt: "2026-04-02T07:00:00.000Z",
+        title: "Morning note",
+        note: "Stale update.",
+      },
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_REVISION_CONFLICT",
+  );
 
   const marchRecords = await readJsonlRecords({
     vaultRoot,
@@ -606,6 +731,28 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.equal(updatedEvent.lifecycle?.revision, 2);
   assert.equal(updatedEvent.note, "Updated note.");
 
+  await assert.rejects(
+    () => deleteEvent({
+      vaultRoot,
+      eventId,
+      expectedRevision: 1,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_REVISION_CONFLICT",
+  );
+  const aprilRecordsAfterConflict = await readJsonlRecords({
+    vaultRoot,
+    relativePath: aprilResult.ledgerFile,
+  });
+  assert.equal(aprilRecordsAfterConflict.length, 1);
+  assert.equal(
+    aprilRecordsAfterConflict.some(
+      (record) =>
+        expectRecord<EventRecord>(record).lifecycle?.state === "deleted",
+    ),
+    false,
+  );
+
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-04-02T08:00:00.000Z"));
   let deleted;
@@ -613,6 +760,7 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
     deleted = await deleteEvent({
       vaultRoot,
       eventId,
+      expectedRevision: 2,
     });
   } finally {
     vi.useRealTimers();
@@ -635,6 +783,11 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.ok(tombstoneEvent);
   assert.equal(tombstoneEvent.lifecycle?.revision, 3);
   assert.equal(tombstoneEvent.note, "Updated note.");
+  await assert.rejects(
+    () => readEvent({ vaultRoot, eventId }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_MISSING",
+  );
 
   const marchAuditRecords = await readJsonlRecords({
     vaultRoot,
@@ -1331,6 +1484,43 @@ test("note-only meals stay first-class meal events without raw artifacts", async
   assert.deepEqual(manifest.artifacts, []);
 });
 
+test("readOwnedEvent resolves the current meal owner without a query projection", async () => {
+  const vaultRoot = await makeTempDirectory("murph-owned-event-read");
+  await initializeVault({ vaultRoot });
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    note: "toast and eggs",
+  });
+  const unrelatedShard = path.join(vaultRoot, "ledger/events/2025/2025-01.jsonl");
+  await fs.mkdir(path.dirname(unrelatedShard), { recursive: true });
+  await fs.writeFile(
+    unrelatedShard,
+    `${JSON.stringify({ id: "evt_unrelated", kind: "unsupported" })}\n`,
+    "utf8",
+  );
+
+  const owned = await readOwnedEvent({
+    vaultRoot,
+    kind: "meal",
+    ownerId: meal.event.mealId,
+  });
+  assert.equal(owned.eventId, meal.event.id);
+  assert.equal(owned.event.kind, "meal");
+  assert.equal(owned.ledgerFile, meal.eventPath);
+
+  await deleteEvent({ vaultRoot, eventId: meal.event.id });
+  await assert.rejects(
+    () => readOwnedEvent({
+      vaultRoot,
+      kind: "meal",
+      ownerId: meal.event.mealId,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_MISSING",
+  );
+});
+
 test("structured-only meals persist source, ingredients, and nutrition without raw artifacts", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -1650,6 +1840,26 @@ test("importSamples supports spo2 with percent unit aliases", async () => {
   assert.equal(record.stream, "spo2");
   assert.equal(record.unit, "%");
   assert.equal(record.value, 97.2);
+});
+
+test("validateSampleImport reuses Core sample preparation without writing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const before = (await fs.readdir(vaultRoot, { recursive: true })).sort();
+
+  await validateSampleImport({
+    vaultRoot,
+    stream: "spo2",
+    unit: "percent",
+    samples: [
+      {
+        recordedAt: "2026-01-15T10:00:00.000Z",
+        value: 97.2,
+      },
+    ],
+  });
+
+  assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), before);
 });
 
 test("importSamples rejects invalid sample objects and unsupported units", async () => {

@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MURPH_GROUP_TOOL_PROPERTIES,
+} from "../src/assistant-codex/dynamic-tool-catalog.ts";
+import {
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_EMAIL_TOOL,
+  MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_USAGE_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -43,7 +51,12 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
     350,
   ],
-  ["group", MURPH_GROUP_TOOL, 800],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 460],
+  ["group_data", MURPH_GROUP_DATA_TOOL, 410],
+  ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
+  ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
+  ["group_chat", MURPH_GROUP_CHAT_TOOL, 390],
+  ["group_email", MURPH_GROUP_EMAIL_TOOL, 310],
   ["computer_open", MURPH_COMPUTER_OPEN_TOOL, 250],
   ["computer_act", MURPH_COMPUTER_ACT_TOOL, 320],
   ["computer_os_control", MURPH_COMPUTER_OS_CONTROL_TOOL, 310],
@@ -71,6 +84,48 @@ describe("assistant tool description call contracts", () => {
       0,
     );
 
-    expect(total).toBeLessThanOrEqual(5_200);
+    expect(total).toBeLessThanOrEqual(6_700);
+  });
+
+  it("keeps group handoff discovery and pending-state semantics explicit", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Pass named group as groupLabel; never list first",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      'Before handoff, if name absent, run vault-cli memory show; use "a member" only if none',
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Accepted handoff: say queued, not sent/told/shared/posted",
+    );
+  });
+
+  it("keeps member attribution explicit in private-to-group handoffs", () => {
+    const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
+
+    expect(contextDescription).toContain(
+      "Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name",
+    );
+    expect(contextDescription).toContain(
+      "which joined groups already receive",
+    );
+    expect(contextDescription).toContain(
+      'run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name',
+    );
+    expect(contextDescription).toContain(
+      "Never write them as if Murph did, said, or experienced them",
+    );
+  });
+
+  it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Complete current-sender request: message_current_sender",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Follow-up: clarify_current_sender, then continue_current_sender_privately or continue_current_sender_in_group",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "never continue a fresh request",
+    );
   });
 });

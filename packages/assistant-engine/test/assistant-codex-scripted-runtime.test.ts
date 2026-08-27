@@ -12,15 +12,17 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+} from '@murphai/hosted-execution/assistant-model'
+import { goalMetricTargetSchema } from '@murphai/contracts'
+import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
 } from '@murphai/runtime-state/node'
 import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import type {
@@ -56,13 +58,18 @@ import {
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
   MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_FAMILY_TOOLS,
+  MURPH_GROUP_DATA_TOOL,
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+} from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -70,7 +77,11 @@ import {
   createAskGrokToolRuntimeFromEnv,
 } from '../src/assistant-codex/ask-grok-tool.ts'
 import type {
-  AssistantHostedToolContext,
+  AnalyzeVideoAttachmentAuthority,
+} from '../src/assistant-codex/analyze-video-tool.ts'
+import {
+  createAssistantHostedToolContext,
+  type AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantHostedAutomationToolRequest,
@@ -108,8 +119,8 @@ import {
 // against a local scripted Responses API stub. Deterministic and free: this is
 // the default-on protocol-contract lane that replaces the deleted
 // MockChildProcess happy-path fakes. Adversarial process behavior (malformed
-// events, stale ids, poisoning) stays in assistant-codex-runtime.test.ts where
-// a scriptable fake child process is the right tool.
+// events, stale ids, poisoning) stays in the assistant-codex-runtime-*.test.ts
+// behavior files where a scriptable fake child process is the right tool.
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 const SCRIPTED_MODEL = 'gpt-5.6-terra'
@@ -150,18 +161,15 @@ const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
   'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
   '',
 ] as const
-// GitHub's restricted Linux runner cannot create the uid map required by
-// Codex's named-permission bubblewrap shell. Exact-profile startup still runs
-// there below; only the shell execution proof uses a capable host.
+// Workspace-installed Codex lives outside the named-permission bubblewrap
+// filesystem on Linux. The production runner image proves native Linux
+// confinement separately; exact-profile startup still runs here below.
 const scriptedPermissionShellIt =
-  process.env.GITHUB_ACTIONS === 'true'
-    && process.env.RUNNER_OS === 'Linux'
-    ? it.skip
-    : it
+  process.platform === 'linux' ? it.skip : it
 
-function buildTestAutomationLocalAtRecoveryKey(identity: string): string {
+function buildTestAutomationLocalAtRecoveryKey(request: unknown): string {
   return createHash('sha256')
-    .update(JSON.stringify(identity))
+    .update(JSON.stringify(request))
     .digest('hex')
 }
 
@@ -351,6 +359,7 @@ interface ScriptedProviderRequestSummary {
     includesExecCommand: boolean
     includesAutomation: boolean
     includesGroup: boolean
+    includesPhysicalNoteRecovery: boolean
     includesReadShared: boolean
     includesResponseCardCompactTableShape: boolean
     includesResponseCardNutritionV2Shape: boolean
@@ -2039,12 +2048,6 @@ text(result.output);
 
   it.each([
     {
-      label: 'member-memory',
-      permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
-      profileLines:
-        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    },
-    {
       label: 'onboarding read-only',
       permissionProfile: MURPH_MEMBER_READ_PERMISSION_PROFILE,
       profileLines: buildMurphMemberReadPermissionProfileTomlLines(),
@@ -2103,10 +2106,7 @@ text(result.output);
   })
 
   it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
-    const scenario = await prepareScriptedTurnScenario({
-      additionalTomlLines:
-        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    })
+    const scenario = await prepareScriptedTurnScenario()
     const vaultRoot = scenario.turnInput.workingDirectory
     const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
     await writeFile(
@@ -2153,11 +2153,10 @@ text(JSON.stringify(result));
       dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
       ephemeral: true,
       memberMemoryMaintenanceAuthorized: true,
-      permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
       prompt: 'Show memory, save the scripted preference, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
       runtimeWorkspaceRoots: [vaultRoot],
-      sandbox: undefined,
+      sandbox: 'danger-full-access',
       threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG,
       vaultRoot,
     })
@@ -2702,11 +2701,13 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'onboarding-first-personal-read',
-              nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-06T21:00:00.000Z',
             }
           },
@@ -2920,7 +2921,7 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
+  cmd: "sed -n '1,/^## Bounded observation runs/p' skills/food-journal/SKILL.md",
 });
 text(result.output);
 `,
@@ -3105,9 +3106,7 @@ esac
         return { kind: 'sent' as const, source: 'model' as const }
       },
     }
-    const directGuidance = buildAssistantResearchScoutCapabilityText({
-      progressUpdateMode: 'direct',
-    })
+    const directGuidance = buildAssistantResearchScoutCapabilityText()
 
     scenario.stub.queue(
       {
@@ -3372,6 +3371,10 @@ text(result.output);
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
+      const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+      })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
       const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
@@ -3382,6 +3385,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
+              model: 'gpt-5.6-luna',
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3408,6 +3412,10 @@ text(result.output);
       const first = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: firstPrompt,
       })
@@ -3428,6 +3436,9 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
+      expect(
+        scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
+      ).toContain('gpt-5.6-luna')
       await delay(100)
 
       scenario.stub.queue({
@@ -3439,6 +3450,10 @@ text(result.output);
       })
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
@@ -3449,6 +3464,55 @@ text(result.output);
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )
+
+  it('rejects a non-product child model before a provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      multiAgentV2: true,
+    })
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            fork_turns: 'none',
+            message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
+            model: 'gpt-5.5',
+            task_name: 'non_product_child',
+          },
+          name: 'spawn_agent',
+          namespace: 'collaboration',
+        },
+      },
+      { text: 'NON_PRODUCT_CHILD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Try to spawn the requested non-product child model.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(result.finalMessage).toBe('NON_PRODUCT_CHILD_REJECTED')
+    expect(summaries.map(({ model }) => model)).toEqual([
+      SCRIPTED_MODEL,
+      SCRIPTED_MODEL,
+    ])
+    expect(summaries.flatMap(
+      (summary) => summary.functionCallOutputs ?? [],
+    )).toEqual([
+      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+    ])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
 
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
@@ -3560,7 +3624,7 @@ text(result.output);
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -3571,7 +3635,7 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group_chat");
 if (!tool) {
   text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
@@ -3592,7 +3656,7 @@ if (!tool) {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3610,11 +3674,13 @@ if (!tool) {
               created: true,
               effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
-              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -3644,7 +3710,7 @@ if (!tool) {
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
     expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
-    expect(automationOutput).toContain('morning-reminder')
+    expect(automationOutput).not.toContain('lookupId')
     expect(automationOutput).toContain('active')
     expect(automationRequests).toEqual([{
       action: 'save',
@@ -3666,7 +3732,7 @@ if (!tool) {
       configOverrides: [
         'features.code_mode.direct_only_tool_namespaces=["murph"]',
       ],
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...directScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3680,7 +3746,7 @@ if (!tool) {
     expect(directSummary).toMatchObject({
       providerRequestDiagnostics: {
         includesAutomation: true,
-        includesGroup: true,
+        includesGroup: false,
         includesGroupEmail: true,
       },
     })
@@ -3730,7 +3796,10 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: 'America/Chicago',
               lookupId: 'evening-reminder',
-              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 kind: 'dailyLocal',
@@ -3738,7 +3807,6 @@ text(JSON.stringify(result));
                 timeZone: 'America/Chicago',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -3807,7 +3875,10 @@ text(JSON.stringify(result));
               automationId: 'automation-central-evening',
               effectiveTimeZone: 'America/Chicago',
               lookupId: 'evening-reminder',
-              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 kind: 'dailyLocal',
@@ -3815,7 +3886,6 @@ text(JSON.stringify(result));
                 timeZone: 'America/Chicago',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:00:00.000Z',
             }
           },
@@ -3918,7 +3988,7 @@ text(JSON.stringify(result));
               action: 'offer_access',
               projectionScopes: [{ projectionKind: 'steps-days.v0' }],
             },
-            name: 'group',
+            name: 'group_data',
             namespace: 'murph',
           },
         })
@@ -3957,11 +4027,13 @@ text(JSON.stringify(result));
                 created: true,
                 effectiveTimeZone: 'America/New_York',
                 lookupId: 'weekly-movement-check-in',
-                nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                occurrenceProjection: {
+                  nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'current_conversation',
                 schedule: request.schedule,
                 status: 'active',
-                timingVerified: true,
                 updatedAt: '2026-08-17T13:00:00.000Z',
               }
             },
@@ -4071,14 +4143,16 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'group-one-shot-reminder',
-              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: {
                 at: '2031-02-15T09:20:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2031-02-14T12:00:00.000Z',
             }
           },
@@ -4107,7 +4181,7 @@ text(JSON.stringify(result));
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
       .replace(/\\"/gu, '"')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(toolOutputs).toContain('"effectiveTimeZone":null')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2031-02-15T09:20:00.000Z"')
     expect(result.finalMessage).toBe(
@@ -4204,9 +4278,7 @@ text(JSON.stringify(result));
       expectedAt: '2026-03-08T07:30:00.000Z',
       failedTime: '02:30',
       finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
-      initialSlug: null,
       kind: 'gap',
-      retrySlug: 'morning-meds',
       retryTitle: 'Morning meds',
       referenceAt: '2026-03-08T04:59:00.000Z',
       retryLocalAt: {
@@ -4225,9 +4297,7 @@ text(JSON.stringify(result));
       failedTime: '01:30',
       finalMessage:
         'Done — your reminder is set for the earlier 1:30 AM on November 1.',
-      initialSlug: 'fall-reminder',
       kind: 'fold',
-      retrySlug: null,
       retryTitle: 'Evening meds',
       referenceAt: '2026-11-01T03:59:00.000Z',
       retryLocalAt: {
@@ -4237,21 +4307,19 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'For reminder "Fall reminder (fall-reminder)", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fall reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       steerAt: '2026-11-01T04:01:00.000Z',
       steerPrompt: 'Use the earlier occurrence.',
       title: 'Fall reminder',
     },
-  ])('clears a $kind clarification after a renamed live-steered save retry', {
+  ])('clears a $kind clarification after a retitled live-steered save retry', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
     failedTime,
     finalMessage,
-    initialSlug,
     referenceAt,
     retryLocalAt,
-    retrySlug,
     retryTitle,
     staleClarification,
     steerAt,
@@ -4272,20 +4340,16 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      ...(initialSlug ? { slug: initialSlug } : {}),
       title,
     }
     const retryRequest = {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        initialSlug ?? title.toLowerCase().replace(/\s+/gu, '-'),
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
       },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }
     scenario.stub.queue(
@@ -4334,13 +4398,15 @@ text(JSON.stringify(result));
                 `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               created: true,
               effectiveTimeZone: null,
-              lookupId: retrySlug
-                ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
-              nextOccurrenceAt: expectedAt,
+              lookupId:
+                `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedAt,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: steerAt,
             }
           },
@@ -4372,7 +4438,6 @@ text(JSON.stringify(result));
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }])
     expect(result.finalMessage).toBe(finalMessage)
@@ -4385,24 +4450,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4463,25 +4529,26 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4556,24 +4623,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4628,11 +4696,13 @@ text(JSON.stringify(result));
         created: true,
         effectiveTimeZone: 'America/New_York',
         lookupId: 'replacement-reminder',
-        nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule,
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-03-08T05:01:00.000Z',
       }
     })
@@ -4674,70 +4744,32 @@ text(JSON.stringify(result));
   it.each([
     {
       expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '02:30',
       referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
       retryLocalAt: {
         date: '2026-03-08',
         time: '03:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'automation-medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'automation-medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      requestedSlug: 'morning-meds',
-      responseLookup: 'morning-meds',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
     },
     {
       expectedAt: '2026-11-01T06:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '01:30',
       referenceAt: '2026-11-01T03:59:00.000Z',
-      requestedSlug: 'evening-meds',
-      responseLookup: 'evening-meds',
       retryLocalAt: {
         date: '2026-11-01',
         fold: 'later' as const,
         time: '01:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'medication-reminder',
     },
-  ])('clears a patch clarification across canonical and renamed aliases', {
+  ])('clears a patch clarification using one exact automation id', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
-    failedLookup,
     failedTime,
     referenceAt,
-    requestedSlug,
-    responseLookup,
     retryLocalAt,
-    retryLookup,
   }) => {
     const scenario = await prepareScriptedTurnScenario()
     const responseCard = {
@@ -4751,11 +4783,11 @@ text(JSON.stringify(result));
       footer: null,
       tracking: null,
     } satisfies AssistantResponseCard
+    const automationId = 'automation-medication-reminder'
     const failedRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: failedLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: {
@@ -4768,9 +4800,8 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedLookup),
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
@@ -4813,18 +4844,20 @@ text(JSON.stringify(result));
       }
       return {
         action: 'patch' as const,
-        automationId: 'automation-medication-reminder',
+        automationId,
         created: false,
         effectiveTimeZone: 'America/New_York',
-        lookupId: responseLookup,
-        nextOccurrenceAt: expectedAt,
+        lookupId: automationId,
+        occurrenceProjection: {
+          nextOccurrenceAt: expectedAt,
+          status: 'resolved' as const,
+        },
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule ?? {
           at: expectedAt,
           kind: 'at' as const,
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-03-08T05:01:00.000Z',
       }
     })
@@ -4856,8 +4889,7 @@ text(JSON.stringify(result));
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: { at: expectedAt, kind: 'at' },
     }, expect.anything())
     expect(result.responseCard).toEqual(responseCard)
@@ -4865,7 +4897,7 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).not.toContain('the trusted date is')
   })
 
-  it('contains local one-shot slug failures and accepts a corrected retry', {
+  it('saves a localized one-shot title without a separate slug', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -4882,24 +4914,11 @@ text(JSON.stringify(result));
       },
       title: '薬を飲む',
     }
-    const correctedRequest = {
-      ...localizedRequest,
-      slug: 'take-medicine',
-    }
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
 const result = await tools.murph__automation(${JSON.stringify(localizedRequest)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      },
-      {
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(correctedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4916,13 +4935,15 @@ text(JSON.stringify(result));
       created: true,
       effectiveTimeZone: 'America/New_York',
       lookupId: 'take-medicine',
-      nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+        status: 'resolved' as const,
+      },
       routeBinding: 'current_conversation' as const,
       schedule: request.action === 'save'
         ? request.schedule
         : { at: '2026-03-08T07:30:00.000Z', kind: 'at' as const },
       status: 'active' as const,
-      timingVerified: true,
       updatedAt: '2026-03-08T05:01:00.000Z',
     }))
     const result = await executeCodexAppServerTurn({
@@ -5021,11 +5042,13 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'breakfast-reminder',
-              nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-03-08T05:01:00.000Z',
             }
           },
@@ -5059,7 +5082,6 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5071,12 +5093,11 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      slug,
       title: 'Medication reminder',
     }
     const retryRequest = {
       ...failedRequest,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: {
@@ -5125,7 +5146,7 @@ text(JSON.stringify(result));
     })
 
     const question =
-      'For reminder "Medication reminder (medication-reminder)", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(result.finalMessage).toContain(question)
     expect(result.transcriptMessage).toContain(question)
@@ -5180,9 +5201,6 @@ text(JSON.stringify(result));
     resolvedAt,
     resolvedLocalAt,
   }) => {
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(
-      'medication-reminder',
-    )
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5196,6 +5214,7 @@ text(JSON.stringify(result));
       },
       title: 'Medication reminder',
     }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     const matchingInvalidRetry = {
       ...failedRequest,
       instructions: 'Send the renamed medication reminder.',
@@ -5247,11 +5266,13 @@ text(JSON.stringify(result));
           created: true,
           effectiveTimeZone: 'America/New_York',
           lookupId: 'medication-reminder',
-          nextOccurrenceAt: resolvedAt,
+          occurrenceProjection: {
+            nextOccurrenceAt: resolvedAt,
+            status: 'resolved' as const,
+          },
           routeBinding: 'current_conversation' as const,
           schedule: request.schedule,
           status: 'active' as const,
-          timingVerified: true,
           updatedAt: '2026-03-08T05:01:00.000Z',
         }
       })
@@ -5424,14 +5445,12 @@ text(JSON.stringify(result));
     }
     const successA = {
       ...failureA,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        'medication-reminder',
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
       schedule: { kind: 'at', localAt: recoveryA },
     }
     const successB = {
       ...failureB,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey('call-reminder'),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureB),
       schedule: { kind: 'at', localAt: recoveryB },
     }
     const responseCard = {
@@ -5524,7 +5543,7 @@ text(JSON.stringify(result));
               input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${date}",
 });
 text(JSON.stringify(result));
@@ -5550,9 +5569,7 @@ text(JSON.stringify(result));
         }
         const mismatchedA = {
           ...failureA,
-          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-            'medication-reminder',
-          ),
+          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
           schedule: {
             kind: 'at',
             localAt: {
@@ -5629,7 +5646,7 @@ text(JSON.stringify(result));
             input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${mismatchDate}",
 });
 text(JSON.stringify(result));
@@ -5711,11 +5728,13 @@ text(JSON.stringify(result));
                 created: true,
                 effectiveTimeZone: 'America/New_York',
                 lookupId,
-                nextOccurrenceAt: request.schedule.at,
+                occurrenceProjection: {
+                  nextOccurrenceAt: request.schedule.at,
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'current_conversation',
                 schedule: request.schedule,
                 status: 'active',
-                timingVerified: true,
                 updatedAt: '2026-03-08T05:01:00.000Z',
               }
             },
@@ -5788,268 +5807,6 @@ text(JSON.stringify(result));
     }
   })
 
-  it.each([
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: 'morning-meds',
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: null,
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'later' as const,
-      newSlug: null,
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T06:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'earlier' as const,
-      newSlug: 'evening-meds',
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T05:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: true,
-    },
-  ])('settles $date save recovery through create conflict and versioned patch', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async ({
-    date,
-    failedTime,
-    fold,
-    newSlug,
-    patchLookup,
-    referenceAt,
-    resolvedAt,
-    resolvedTime,
-    secondPending,
-  }) => {
-    const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
-    const automationId = 'automation-medication-reminder'
-    const updatedAt = '2026-03-07T20:00:00.000Z'
-    const failedSave = {
-      action: 'save',
-      instructions: 'Send the medication reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug,
-      title: 'Medication reminder',
-    }
-    const recoveryLocalAt = {
-      date,
-      ...(fold ? { fold } : {}),
-      time: resolvedTime,
-      timeZone: 'America/New_York',
-    }
-    const retrySave = {
-      ...failedSave,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const inspect = { action: 'inspect', lookup: slug }
-    const patch = {
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const secondFailure = {
-      action: 'save',
-      instructions: 'Send the call reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug: 'call-reminder',
-      title: 'Call reminder',
-    }
-    const responseCard = {
-      kind: 'compact_table',
-      version: 1,
-      title: 'Medication reminder',
-      subtitle: `${date} at ${resolvedTime}`,
-      rowHeader: 'Status',
-      columns: ['Schedule'],
-      rows: [{ label: 'Active', values: [resolvedTime] }],
-      footer: null,
-      tracking: null,
-    } satisfies AssistantResponseCard
-    const calls = [
-      failedSave,
-      ...(secondPending ? [secondFailure] : []),
-      retrySave,
-      inspect,
-      patch,
-    ]
-    for (const request of calls) {
-      scenario.stub.queue({
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(request)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      })
-    }
-    scenario.stub.queue({
-      functionCall: {
-        arguments: { card: responseCard },
-        name: 'attach_response_card',
-        namespace: 'murph',
-      },
-    })
-    if (secondPending) {
-      scenario.stub.queue(
-        {
-          functionCall: {
-            arguments: {},
-            name: 'finish_without_reply',
-            namespace: 'murph',
-          },
-        },
-        { text: '' },
-      )
-    } else {
-      scenario.stub.queue({ text: 'CARD_ATTACHED' })
-    }
-
-    const ownerRequests: AssistantHostedAutomationToolRequest[] = []
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      allowFinishWithoutReply: true,
-      automationRelativeDateReferenceWindow: {
-        earliestAt: referenceAt,
-        latestAt: referenceAt,
-      },
-      dynamicTools: [
-        MURPH_AUTOMATION_TOOL,
-        MURPH_ATTACH_RESPONSE_CARD_TOOL,
-        MURPH_FINISH_WITHOUT_REPLY_TOOL,
-      ],
-      groupConversation: false,
-      hostedToolContext: {
-        automationTool: {
-          request: async (request) => {
-            ownerRequests.push(request)
-            if (request.action === 'save') {
-              throw Object.assign(new Error('automation already exists'), {
-                code: 'VAULT_AUTOMATION_CONFLICT' as const,
-              })
-            }
-            if (request.action === 'inspect') {
-              return {
-                action: 'inspect',
-                automationId,
-                effectiveTimeZone: 'America/New_York',
-                lookupId: slug,
-                nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
-                routeBinding: 'preserved',
-                schedule: {
-                  at: '2026-03-07T21:00:00.000Z',
-                  kind: 'at',
-                },
-                status: 'active',
-                timingVerified: true,
-                updatedAt,
-              }
-            }
-            if (request.action !== 'patch') {
-              throw new Error('Expected a versioned patch request.')
-            }
-            return {
-              action: 'patch',
-              automationId,
-              created: false,
-              effectiveTimeZone: 'America/New_York',
-              lookupId: newSlug ?? slug,
-              nextOccurrenceAt: resolvedAt,
-              routeBinding: 'current_conversation',
-              schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
-              status: 'active',
-              timingVerified: true,
-              updatedAt: '2026-03-08T05:01:00.000Z',
-            }
-          },
-        },
-        computerToolsAvailable: false,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        sendVaultFile: async () => {
-          throw new Error('Vault file sends are unavailable in this test.')
-        },
-        vaultFileSendAvailable: false,
-      },
-      prompt: 'Set or update my medication reminder for tomorrow.',
-    })
-
-    expect(ownerRequests.map((request) => request.action)).toEqual([
-      'save',
-      'inspect',
-      'patch',
-    ])
-    for (const request of ownerRequests) {
-      expect(request).not.toHaveProperty('localAtRecoveryKey')
-    }
-    expect(ownerRequests[2]).toMatchObject({
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { at: resolvedAt, kind: 'at' },
-    })
-    const medicationQuestion =
-      `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
-    expect(result.finalMessage).not.toContain(medicationQuestion)
-    expect(result.transcriptMessage).not.toContain(medicationQuestion)
-    if (secondPending) {
-      const callQuestion =
-        `For reminder "Call reminder (call-reminder)", the trusted date is ${date}.`
-      expect(result.finalAction).toBeNull()
-      expect(result.responseCard).toBeNull()
-      expect(result.finalMessage).toContain(callQuestion)
-      expect(result.transcriptMessage).toContain(callQuestion)
-    } else {
-      expect(result.responseCard).toEqual(responseCard)
-      expect(result.finalMessage).not.toContain('the trusted date is')
-      expect(result.transcriptMessage).not.toContain('the trusted date is')
-    }
-  })
 
   it('suppresses a response card until the trusted DST clarification is delivered', {
     timeout: TURN_TIMEOUT_MS,
@@ -6271,14 +6028,16 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'steered-one-shot-reminder',
-              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: {
                 at: '2031-02-15T09:20:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2031-02-15T09:59:59.950Z',
             }
           },
@@ -6441,14 +6200,16 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'one-time-evening-reminder',
-              nextOccurrenceAt: null,
+              occurrenceProjection: {
+                nextOccurrenceAt: null,
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 at: '2026-08-01T13:00:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -6476,7 +6237,7 @@ text(JSON.stringify(result));
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"at"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(result.finalMessage).toMatch(/already passed|no longer deliverable/iu)
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
@@ -6523,12 +6284,13 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
-              timingVerified: true,
-              timingVerificationIssues: [],
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -6550,7 +6312,7 @@ text(JSON.stringify(result));
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"every"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2026-08-11T00:01:00.000Z"')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(automationRequests).toEqual([
       {
         action: 'patch',
@@ -6564,7 +6326,7 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
-  it('reports persistent timing uncertainty without offering more inspection', {
+  it('confirms an active reminder while its occurrence projection is pending', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -6585,7 +6347,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is still finishing existing work, so the next run is not confirmed yet.',
+        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is finishing the current reminder work and will project the next occurrence automatically, so no action is needed.',
       },
     )
 
@@ -6601,12 +6363,10 @@ text(JSON.stringify(result));
               automationId: 'automation-daily-interval',
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: null,
+              occurrenceProjection: { status: 'pending' as const },
               routeBinding: 'preserved' as const,
               schedule: { everyMs: 86_400_000, kind: 'every' as const },
               status: 'active' as const,
-              timingVerified: false,
-              timingVerificationIssues: ['runtime_state_pending'] as const,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
             if (request.action !== 'patch') {
@@ -6638,9 +6398,262 @@ text(JSON.stringify(result));
         lookup: 'daily-interval-reminder',
       },
     ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"occurrenceProjection":{"status":"pending"}',
+    )
+    expect(toolOutputs).not.toContain('"timingVerified"')
     expect(result.finalMessage).toMatch(/updated|active/iu)
-    expect(result.finalMessage).toMatch(/next run is not confirmed yet/iu)
-    expect(result.finalMessage).not.toMatch(/if you want|inspect|10:30|tomorrow/iu)
+    expect(result.finalMessage).toMatch(/automatically|no action is needed/iu)
+    expect(result.finalMessage).not.toMatch(
+      /if you want|inspect|10:30|tomorrow|unconfirmed|not confirmed|could not verify/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it.each([
+    {
+      action: 'inspect' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The daily reminder remains active, but its occurrence is overdue and I couldn't confirm the next occurrence.",
+      prompt: 'Is my daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection',
+    },
+    {
+      action: 'patch' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The edit was saved, and the daily reminder remains active on its daily schedule. Its occurrence is overdue, and I couldn't confirm the next occurrence.",
+      prompt: 'Update my daily interval reminder now.',
+      title: 'reports an overdue recurring reminder edit',
+    },
+    {
+      action: 'inspect' as const,
+      audience: 'group' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The room's daily reminder remains active, but its occurrence is overdue and the next occurrence couldn't be confirmed.",
+      prompt: 'Is this room\'s daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection to its group',
+    },
+  ])('$title without promising automatic recovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    action,
+    audience,
+    expectedRequest,
+    finalMessage,
+    prompt,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    const toolInput = action === 'patch'
+      ? `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+      : `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: toolInput,
+          name: 'exec',
+        },
+      },
+      { text: finalMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt(audience, true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== action) {
+              throw new Error(`Expected an automation ${action} request.`)
+            }
+            const response = {
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              occurrenceProjection: {
+                issues: ['stale_recurring_occurrence'] as const,
+                status: 'unavailable' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+            if (request.action === 'patch') {
+              return {
+                action: 'patch' as const,
+                ...response,
+                created: false,
+              }
+            }
+            return {
+              action: 'inspect' as const,
+              ...response,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt,
+    })
+
+    expect(automationRequests).toEqual([expectedRequest])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"issues":["stale_recurring_occurrence"]',
+    )
+    expect(toolOutputs).toContain('"status":"unavailable"')
+    expect(result.finalMessage).toBe(finalMessage)
+    expect(result.finalMessage).toMatch(/active/iu)
+    expect(result.finalMessage).toMatch(/overdue/iu)
+    expect(result.finalMessage).toMatch(
+      /could(?:n't| not)(?: be)? confirm(?:ed)?/iu,
+    )
+    if (action === 'patch') {
+      expect(result.finalMessage).toMatch(/edit .*saved/iu)
+      expect(result.finalMessage).toMatch(/daily schedule/iu)
+    }
+    if (audience === 'group') {
+      expect(result.finalMessage).toMatch(/room/iu)
+      expect(result.finalMessage).not.toMatch(/\bI\b|\bmy\b|\byou(?:r)?\b/iu)
+    }
+    expect(result.finalMessage).not.toMatch(
+      /automatically|no action|nothing .*need|current .*work/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('does not promise delivery for an in-flight one-shot edit', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T14:29:00.000Z",
+  instructions: "Send the revised one-time reminder.",
+  lookup: "one-time-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "The edit was saved and the reminder is still active. Because its 10:30 occurrence was already in progress, the edit may not affect that delivery. If it doesn't arrive, I can reschedule it.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch' as const,
+              automationId: 'automation-one-time-reminder',
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'one-time-reminder',
+              occurrenceProjection: { status: 'pending' as const },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                at: '2026-08-10T14:30:00.000Z',
+                kind: 'at' as const,
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T14:30:01.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my one-time reminder now.',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T14:29:00.000Z',
+        instructions: 'Send the revised one-time reminder.',
+        lookup: 'one-time-reminder',
+      },
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"at"')
+    expect(toolOutputs).toContain(
+      '"occurrenceProjection":{"status":"pending"}',
+    )
+    expect(result.finalMessage).toMatch(/saved|active/iu)
+    expect(result.finalMessage).toMatch(/may not affect|already in progress/iu)
+    expect(result.finalMessage).toMatch(/reschedule/iu)
+    expect(result.finalMessage).not.toMatch(
+      /will (?:deliver|arrive)|automatically|no action|nothing .*need/iu,
+    )
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
@@ -6697,11 +6710,13 @@ if (!tool) {
               created: true,
               effectiveTimeZone: null,
               lookupId: 'next-workout-check-in',
-              nextOccurrenceAt: null,
+              occurrenceProjection: {
+                nextOccurrenceAt: null,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -6734,7 +6749,7 @@ if (!tool) {
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"deviceActivity"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(result.finalMessage).toContain('after your next workout')
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
@@ -6751,7 +6766,6 @@ if (!tool) {
       tracking: {
         kind: 'workout',
         entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-        snapshotAt: '2026-08-09T19:45:00.000Z',
       },
       workout: {
         version: 1,
@@ -6777,7 +6791,7 @@ if (!tool) {
           })),
         })),
       },
-    } satisfies AssistantResponseCard
+    } as const
     const cards = [
       {
         kind: 'compact_table',
@@ -6846,7 +6860,19 @@ if (!tool) {
         includesResponseCardNutritionV2Shape: true,
       })
       expect(result.runtimeIssueInputs).toEqual([])
-      expect(result.responseCard).toEqual(card)
+      if ('workout' in card) {
+        expect(result.responseCard).toMatchObject({
+          ...card,
+          tracking: {
+            ...card.tracking,
+            snapshotAt: expect.stringMatching(
+              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+            ),
+          },
+        })
+      } else {
+        expect(result.responseCard).toEqual(card)
+      }
     }
 
     const incompleteNutritionCards = [
@@ -6986,10 +7012,10 @@ if (!tool) {
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
     expect(invalidOutput).toContain(
-      '"field":"card.totals.proteinGrams.mealCount"',
+      '"path":["card","totals","proteinGrams","mealCount"]',
     )
     expect(invalidOutput).toContain(
-      '"expected":"zero_iff_total_null"',
+      '"murphExpectedShape":"zero_iff_total_null"',
     )
     expect(invalidOutput).not.toContain('challengeSlug')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
@@ -7000,6 +7026,54 @@ if (!tool) {
     expect(result.finalMessage).toContain('100g protein (status unavailable)')
     expect(result.finalMessage).not.toBe('CARD_REPAIRED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('records focused group-family schema rejections through the standard diagnostic', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            action: 'read_shared',
+            projectionScopes: [],
+          },
+          name: 'group_data',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_DATA_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_GROUP_DATA_TOOL],
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group data read.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_group_arguments')
+    expect(invalidOutput).toContain('projectionScopes')
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        issueKind: 'schema_rejection',
+        operation: 'murph.group_data',
+      }),
+      expect.objectContaining({
+        component: 'assistant.codex-action',
+        errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+        issueKind: 'tool_error',
+        operation: 'dynamic.tool.call',
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs))
+      .not.toContain('validationIssues')
+    expect(result.finalMessage).toBe('GROUP_DATA_REJECTED')
   })
 
   it('keeps malformed group-card repair feedback on the group contract', {
@@ -7027,2216 +7101,12 @@ if (!tool) {
     const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
       ?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
-    expect(invalidOutput).toContain('"field":"challengeSlug"')
-    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
-    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(invalidOutput).toContain('"path":["challengeSlug"]')
+    expect(invalidOutput).toContain('"path":["pageRevisionDigest"]')
+    expect(invalidOutput).not.toContain('"path":["card"]')
     expect(result.responseCard).toBeNull()
     expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
-  })
-
-  it('proves complete Goal and safety discovery before nutrition targets and cards', {
-    timeout: 720_000,
-  }, async () => {
-    const activeListCommand =
-      'goal list --status active --limit 200 --format json'
-    const visibleGoalShowCommand =
-      'goal show goal_visible_bundle --format json'
-    const hiddenGoalShowCommand =
-      'goal show goal_hidden_conflict --format json'
-    const memoryCommand = 'memory show --format json'
-    const conditionListCommand =
-      'condition list --status active --limit 200 --format json'
-    const regimenListCommand =
-      'regimen list --status active --limit 200 --format json'
-    const measurementCommand =
-      'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
-    const pregnancyMeasurementCommand =
-      'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
-    const testEventListCommand =
-      'event list --kind test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
-    const procedureListCommand =
-      'event list --kind procedure --limit 200 --format json'
-    const encounterListCommand =
-      'event list --kind encounter --limit 200 --format json'
-    const totalsCommand =
-      'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
-
-    const pointTarget = (
-      id: string,
-      metric: string,
-      unit: string,
-      value: number,
-    ) => ({
-      evaluation: {
-        comparator: 'between',
-        highValue: value,
-        kind: 'selected-value',
-        value,
-      },
-      id,
-      kind: 'metric',
-      metric,
-      unit,
-    })
-    const completeTargets = [
-      pointTarget('target_calories', 'dietary-calories', 'kcal', 1_800),
-      pointTarget('target_protein', 'protein-grams', 'g', 140),
-      pointTarget('target_carbs', 'carbs-grams', 'g', 190),
-      pointTarget('target_fat', 'fat-grams', 'g', 55),
-      pointTarget('target_fiber', 'fiber-grams', 'g', 25),
-    ]
-    const visibleGoal = {
-      entity: {
-        data: {
-          metricTargets: completeTargets,
-          status: 'active',
-          windowStartAt: '2026-07-01',
-        },
-        id: 'goal_visible_bundle',
-        kind: 'goal',
-        title: 'Plan A',
-      },
-      vault: 'synthetic-vault',
-    }
-    const hiddenGoal = {
-      entity: {
-        data: {
-          metricTargets: [
-            pointTarget(
-              'target_hidden_calories',
-              'dietary-calories',
-              'kcal',
-              1_100,
-            ),
-          ],
-          status: 'active',
-          windowStartAt: '2026-07-01',
-        },
-        id: 'goal_hidden_conflict',
-        kind: 'goal',
-        title: 'Plan L',
-      },
-      vault: 'synthetic-vault',
-    }
-    const conflictItems = Array.from({ length: 12 }, (_, index) => {
-      const itemNumber = index + 1
-      const id = index === 0
-        ? 'goal_visible_bundle'
-        : index === 11
-          ? 'goal_hidden_conflict'
-          : `goal_opaque_${itemNumber}`
-      return {
-        data: {
-          metricTargetsCount: index === 0 ? 5 : index === 11 ? 1 : 0,
-          status: 'active',
-        },
-        id,
-        kind: 'goal',
-        title: `Plan ${itemNumber}`,
-      }
-    })
-    const conflictList = {
-      count: conflictItems.length,
-      filters: { limit: 200, status: 'active' },
-      items: conflictItems,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const saturatedItems = Array.from({ length: 200 }, (_, index) => ({
-      data: {
-        metricTargetsCount: index % 17 === 0 ? 1 : 0,
-        status: 'active',
-      },
-      id: `goal_saturated_${index + 1}`,
-      kind: 'goal',
-      title: `Plan ${index + 1}`,
-    }))
-    const saturatedList = {
-      count: saturatedItems.length,
-      filters: { limit: 200, status: 'active' },
-      items: saturatedItems,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const completeList = {
-      count: 1,
-      filters: { limit: 200, status: 'active' },
-      items: [conflictItems[0]],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const safeMeasurements = {
-      count: 0,
-      filters: {
-        from: '2026-06-15',
-        limit: 200,
-        metric: ['bmi', 'height', 'weight', 'body-weight'],
-        to: '2026-07-30',
-      },
-      items: [],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const memoryResult = (
-      records: readonly { section: string; text: string }[],
-    ) => ({
-      document: {
-        records: records.map((record, index) => ({
-          ...record,
-          id: `memory_record_${index + 1}`,
-          updatedAt: '2026-07-29T12:00:00.000Z',
-        })),
-      },
-      memory: null,
-      vault: 'synthetic-vault',
-    })
-    const adultMemory = memoryResult([{
-      section: 'Identity',
-      text: 'Age: 34',
-    }])
-    const minorMemory = memoryResult([{
-      section: 'Identity',
-      text: 'Age: 16',
-    }])
-    const numberSensitiveMemory = memoryResult([{
-      section: 'Preferences',
-      text: 'Avoid calorie and macro numbers; use an intuitive-eating approach.',
-    }])
-    const measurementResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        from: '2026-06-15',
-        limit: 200,
-        metric: ['bmi', 'height', 'weight', 'body-weight'],
-        to: '2026-07-30',
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const pregnancyMeasurementResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        from: '2025-10-03',
-        limit: 200,
-        metric: ['pregnancy-test'],
-        to: '2026-07-30',
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const lowBmiMeasurements = measurementResult([{
-      eventId: 'event_low_bmi',
-      metric: 'bmi',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      unit: 'kg/m^2',
-      value: 16.8,
-    }])
-    const lowSameEventMeasurements = measurementResult([
-      {
-        eventId: 'event_low_pair',
-        metric: 'height',
-        occurredAt: '2026-07-29T12:00:00.000Z',
-        unit: 'cm',
-        value: 180,
-      },
-      {
-        eventId: 'event_low_pair',
-        metric: 'weight',
-        occurredAt: '2026-07-29T12:00:00.000Z',
-        unit: 'kg',
-        value: 54,
-      },
-    ])
-    const normalBmiMeasurements = measurementResult([{
-      eventId: 'event_normal_bmi',
-      metric: 'bmi',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      unit: 'kg/m^2',
-      value: 22.1,
-    }])
-    const saturatedMeasurements = measurementResult(
-      Array.from({ length: 200 }, (_, index) => ({
-        eventId: `event_height_only_${index + 1}`,
-        metric: 'height',
-        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
-        unit: 'cm',
-        value: 180,
-      })),
-    )
-    const noPregnancyMeasurements = pregnancyMeasurementResult([])
-    const negativePregnancyMeasurements = pregnancyMeasurementResult([{
-      eventId: 'event_negative_pregnancy_test',
-      measurementIndex: 0,
-      metric: 'pregnancy-test',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      qualifiers: { result: 'negative' },
-      recordKind: 'measurement',
-      source: 'device',
-      unit: 'result',
-      value: 0,
-    }])
-    const ambiguousPregnancyMeasurements = pregnancyMeasurementResult([{
-      eventId: 'event_ambiguous_pregnancy_test',
-      measurementIndex: 0,
-      metric: 'pregnancy-test',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      qualifiers: { result: 'indeterminate' },
-      recordKind: 'measurement',
-      source: 'device',
-      unit: 'result',
-      value: 1,
-    }])
-    const positivePregnancyMeasurements = pregnancyMeasurementResult([{
-      eventId: 'event_positive_pregnancy_test',
-      measurementIndex: 0,
-      metric: 'pregnancy-test',
-      occurredAt: '2026-07-28T12:00:00.000Z',
-      qualifiers: { result: 'positive' },
-      recordKind: 'measurement',
-      source: 'device',
-      unit: 'result',
-      value: 1,
-    }])
-    const laterNegativeAfterPositiveMeasurements = pregnancyMeasurementResult([
-      {
-        eventId: 'event_later_negative_pregnancy_test',
-        measurementIndex: 0,
-        metric: 'pregnancy-test',
-        occurredAt: '2026-07-29T12:00:00.000Z',
-        qualifiers: { result: 'negative' },
-        recordKind: 'measurement',
-        source: 'device',
-        unit: 'result',
-        value: 0,
-      },
-      positivePregnancyMeasurements.items[0]!,
-    ])
-    const saturatedPregnancyMeasurements = pregnancyMeasurementResult(
-      Array.from({ length: 200 }, (_, index) => ({
-        eventId: `event_negative_pregnancy_test_${index + 1}`,
-        measurementIndex: 0,
-        metric: 'pregnancy-test',
-        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
-        qualifiers: { result: 'negative' },
-        recordKind: 'measurement',
-        source: 'device',
-        unit: 'result',
-        value: 0,
-      })),
-    )
-    const testEventListResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        experiment: null,
-        from: '2025-10-03',
-        kind: 'test',
-        limit: 200,
-        tag: [],
-        to: '2026-07-30',
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const testEventItem = (
-      id: string,
-      testName: string,
-      resultStatus: string,
-      resultsCount: number,
-    ) => ({
-      data: {
-        resultStatus,
-        ...(resultsCount === 0 ? {} : { resultsCount }),
-        testName,
-      },
-      id,
-      kind: 'blood_test',
-      occurredAt: '2026-07-28T12:00:00.000Z',
-      title: 'Structured clinical result',
-    })
-    const testEventDetail = (input: {
-      id: string
-      resultStatus: string
-      results?: readonly Record<string, unknown>[]
-      summary?: string
-      testName: string
-    }) => ({
-      entity: {
-        data: {
-          resultStatus: input.resultStatus,
-          ...(input.results ? { results: input.results } : {}),
-          ...(input.summary ? { summary: input.summary } : {}),
-          testName: input.testName,
-        },
-        id: input.id,
-        kind: 'blood_test',
-        occurredAt: '2026-07-28T12:00:00.000Z',
-        title: 'Structured clinical result',
-      },
-      vault: 'synthetic-vault',
-    })
-    const noTestEvents = testEventListResult([])
-    const positivePregnancyTestEventId =
-      'event_positive_structured_pregnancy_test'
-    const positivePregnancyTestEvents = testEventListResult([
-      testEventItem(
-        positivePregnancyTestEventId,
-        'serum_hcg_qualitative',
-        'unknown',
-        0,
-      ),
-    ])
-    const positivePregnancyTestEventDetail = testEventDetail({
-      id: positivePregnancyTestEventId,
-      resultStatus: 'unknown',
-      summary: 'Pregnancy test: positive',
-      testName: 'serum_hcg_qualitative',
-    })
-    const negativePregnancyTestEventId =
-      'event_negative_structured_pregnancy_test'
-    const negativePregnancyTestEvents = testEventListResult([
-      testEventItem(
-        negativePregnancyTestEventId,
-        'urine_pregnancy_test',
-        'normal',
-        1,
-      ),
-    ])
-    const negativePregnancyTestEventDetail = testEventDetail({
-      id: negativePregnancyTestEventId,
-      resultStatus: 'normal',
-      results: [{ analyte: 'Pregnancy test', textValue: 'Negative' }],
-      summary: 'Pregnancy test: negative',
-      testName: 'urine_pregnancy_test',
-    })
-    const pendingPregnancyTestEventId =
-      'event_pending_structured_pregnancy_test'
-    const pendingPregnancyTestEvents = testEventListResult([
-      testEventItem(
-        pendingPregnancyTestEventId,
-        'urine_pregnancy_test',
-        'pending',
-        1,
-      ),
-    ])
-    const pendingPregnancyTestEventDetail = testEventDetail({
-      id: pendingPregnancyTestEventId,
-      resultStatus: 'pending',
-      results: [{ analyte: 'Pregnancy test', textValue: 'Positive' }],
-      summary: 'Preliminary pregnancy test: positive',
-      testName: 'urine_pregnancy_test',
-    })
-    const numericHcgTestEventId = 'event_numeric_hcg_result'
-    const unrelatedTestEventId = 'event_unrelated_strep_result'
-    const ambiguousHcgTestEventId = 'event_ambiguous_hcg_result'
-    const negatedHcgTestEventId = 'event_negated_hcg_result'
-    const numericAndUnrelatedTestEvents = testEventListResult([
-      testEventItem(
-        numericHcgTestEventId,
-        'quantitative_hcg',
-        'unknown',
-        1,
-      ),
-      testEventItem(
-        unrelatedTestEventId,
-        'rapid_strep_test',
-        'unknown',
-        1,
-      ),
-      testEventItem(
-        ambiguousHcgTestEventId,
-        'serum_hcg_qualitative',
-        'unknown',
-        1,
-      ),
-      testEventItem(
-        negatedHcgTestEventId,
-        'serum_hcg_qualitative',
-        'unknown',
-        1,
-      ),
-    ])
-    const numericHcgTestEventDetail = testEventDetail({
-      id: numericHcgTestEventId,
-      resultStatus: 'unknown',
-      results: [{
-        analyte: 'beta hCG',
-        unit: 'mIU/mL',
-        value: 86,
-      }],
-      summary: 'Quantitative result available',
-      testName: 'quantitative_hcg',
-    })
-    const unrelatedTestEventDetail = testEventDetail({
-      id: unrelatedTestEventId,
-      resultStatus: 'unknown',
-      results: [{ analyte: 'Strep A', textValue: 'Negative' }],
-      summary: 'No strep detected',
-      testName: 'rapid_strep_test',
-    })
-    const ambiguousHcgTestEventDetail = testEventDetail({
-      id: ambiguousHcgTestEventId,
-      resultStatus: 'unknown',
-      results: [{ analyte: 'hCG qualitative', textValue: 'Equivocal' }],
-      summary: 'Pregnancy status cannot be determined',
-      testName: 'serum_hcg_qualitative',
-    })
-    const negatedHcgTestEventDetail = testEventDetail({
-      id: negatedHcgTestEventId,
-      resultStatus: 'unknown',
-      results: [{ analyte: 'hCG qualitative', textValue: 'Not detected' }],
-      summary: 'Pregnancy test: not detected',
-      testName: 'serum_hcg_qualitative',
-    })
-    const saturatedTestEvents = testEventListResult(
-      Array.from({ length: 200 }, (_, index) =>
-        testEventItem(
-          `event_unrelated_test_${index + 1}`,
-          `unrelated_test_${index + 1}`,
-          'normal',
-          0,
-        )),
-    )
-    const procedureListResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        experiment: null,
-        from: null,
-        kind: 'procedure',
-        limit: 200,
-        tag: [],
-        to: null,
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const procedureItem = (
-      id: string,
-      procedure: string,
-      status: string,
-    ) => ({
-      data: { procedure, status },
-      id,
-      kind: 'procedure',
-      occurredAt: '2024-03-14T10:00:00.000Z',
-      title: procedure,
-    })
-    const noProcedures = procedureListResult([])
-    const completedBariatricProcedures = procedureListResult([
-      procedureItem(
-        'event_completed_bariatric_procedure',
-        'Roux-en-Y gastric bypass',
-        'completed',
-      ),
-    ])
-    const plannedBariatricProcedureWithoutListStatus = procedureListResult([{
-      data: { procedure: 'gastric sleeve' },
-      id: 'event_planned_bariatric_procedure',
-      kind: 'procedure',
-      occurredAt: '2026-09-14T10:00:00.000Z',
-      title: 'Planned gastric sleeve',
-    }])
-    const plannedBariatricProcedureDetail = {
-      entity: {
-        data: {
-          procedure: 'gastric sleeve',
-          status: 'planned',
-        },
-        id: 'event_planned_bariatric_procedure',
-        kind: 'procedure',
-        occurredAt: '2026-09-14T10:00:00.000Z',
-        title: 'Planned gastric sleeve',
-      },
-      vault: 'synthetic-vault',
-    }
-    const saturatedProcedures = procedureListResult(
-      Array.from({ length: 200 }, (_, index) =>
-        procedureItem(
-          `event_procedure_${index + 1}`,
-          `Unrelated procedure ${index + 1}`,
-          'completed',
-        )),
-    )
-    const encounterListResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        experiment: null,
-        from: null,
-        kind: 'encounter',
-        limit: 200,
-        tag: [],
-        to: null,
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const encounterItem = (
-      id: string,
-      diagnosesCount: number,
-    ) => ({
-      data: {
-        encounterType: 'office_visit',
-        ...(diagnosesCount === 0 ? {} : { diagnosesCount }),
-      },
-      id,
-      kind: 'encounter',
-      occurredAt: '2026-07-14T10:00:00.000Z',
-      title: 'Clinical visit',
-    })
-    const encounterDetail = (
-      id: string,
-      diagnoses: readonly Record<string, unknown>[],
-    ) => ({
-      entity: {
-        data: {
-          diagnoses,
-          encounterType: 'office_visit',
-        },
-        id,
-        kind: 'encounter',
-        occurredAt: '2026-07-14T10:00:00.000Z',
-        title: 'Clinical visit',
-      },
-      vault: 'synthetic-vault',
-    })
-    const noEncounters = encounterListResult([])
-    const encountersWithoutDiagnoses = encounterListResult([
-      encounterItem('event_encounter_without_diagnoses', 0),
-    ])
-    const activeKidneyEncounterId = 'event_encounter_active_kidney_diagnosis'
-    const activeKidneyEncounters = encounterListResult([
-      encounterItem(activeKidneyEncounterId, 1),
-    ])
-    const activeKidneyEncounterDetail = encounterDetail(
-      activeKidneyEncounterId,
-      [{
-        certainty: 'documented',
-        code: 'N18.30',
-        codeSystem: 'ICD-10-CM',
-        status: 'active',
-        text: 'Chronic kidney disease stage 3',
-      }],
-    )
-    const unresolvedKidneyEncounterId =
-      'event_encounter_unresolved_kidney_diagnosis'
-    const unresolvedKidneyEncounters = encounterListResult([
-      encounterItem(unresolvedKidneyEncounterId, 1),
-    ])
-    const unresolvedKidneyEncounterDetail = encounterDetail(
-      unresolvedKidneyEncounterId,
-      [{
-        certainty: 'unknown',
-        status: 'unknown',
-        text: 'Chronic kidney disease',
-      }],
-    )
-    const nonCurrentEncounterId = 'event_encounter_non_current_diagnoses'
-    const nonCurrentEncounters = encounterListResult([
-      encounterItem(nonCurrentEncounterId, 6),
-    ])
-    const nonCurrentEncounterDetail = encounterDetail(
-      nonCurrentEncounterId,
-      [
-        {
-          certainty: 'documented',
-          status: 'inactive',
-          text: 'Chronic kidney disease',
-        },
-        {
-          certainty: 'documented',
-          status: 'resolved',
-          text: 'Heart disease',
-        },
-        {
-          certainty: 'documented',
-          status: 'history',
-          text: 'Liver disease',
-        },
-        {
-          certainty: 'suspected',
-          status: 'rule_out',
-          text: 'Endocrine disease',
-        },
-        {
-          certainty: 'ruled_out',
-          status: 'active',
-          text: 'Eating disorder',
-        },
-        {
-          certainty: 'documented',
-          status: 'active',
-          text: 'Seasonal allergies',
-        },
-      ],
-    )
-    const saturatedEncounters = encounterListResult(
-      Array.from({ length: 200 }, (_, index) =>
-        encounterItem(`event_encounter_${index + 1}`, 0)),
-    )
-    const canonicalTotals = {
-      from: '2026-07-30',
-      mealCount: 3,
-      metrics: {
-        calories: { mealCount: 3, total: 1_760 },
-        carbsGrams: { mealCount: 3, total: 185 },
-        fatGrams: { mealCount: 3, total: 54 },
-        fiberGrams: { mealCount: 3, total: 24 },
-        proteinGrams: { mealCount: 3, total: 137 },
-      },
-      to: '2026-07-30',
-      vault: 'synthetic-vault',
-    }
-    const eligibleCard = {
-      goals: {
-        calories: { status: 'on_target', target: 1_800 },
-        carbsGrams: { status: 'on_target', target: 190 },
-        fatGrams: { status: 'on_target', target: 55 },
-        fiberGrams: { status: 'on_target', target: 25 },
-        proteinGrams: { status: 'on_target', target: 140 },
-      },
-      kind: 'daily_nutrition',
-      localDate: '2026-07-30',
-      mealCount: 3,
-      totals: canonicalTotals.metrics,
-      version: 2,
-    }
-
-    const runCase = async (input: {
-      card?: Record<string, unknown>
-      commandOutputs: readonly (readonly [string, unknown])[]
-      expectedCommands: readonly string[]
-      failedCommands?: readonly string[]
-      finalMessage: string
-      prompt: string
-      scheduled: boolean
-      snapshotPrompt?: string
-      skillReadCommands: readonly string[]
-      skillSlugs: readonly string[]
-    }) => {
-      const scenario = await prepareScriptedTurnScenario()
-      scenario.stub.resetQueue()
-      const skillsRoot = path.join(
-        scenario.turnInput.workingDirectory,
-        'skills',
-      )
-      await mkdir(skillsRoot, { recursive: true })
-      await Promise.all(input.skillSlugs.map((slug) =>
-        cp(
-          path.join(resolveAssistantSkillsRoot(), slug),
-          path.join(skillsRoot, slug),
-          { recursive: true },
-        )))
-      const commandLog = path.join(
-        scenario.turnInput.workingDirectory,
-        'nutrition-goal-discovery-commands.log',
-      )
-      await writeFile(commandLog, '', 'utf8')
-      const scriptedCommands = new Set([
-        ...input.commandOutputs.map(([command]) => command),
-        ...(input.failedCommands ?? []),
-      ])
-      for (const command of input.expectedCommands) {
-        if (!scriptedCommands.has(command)) {
-          throw new Error(`Missing scripted fixture for ${command}.`)
-        }
-      }
-      await writeFile(
-        path.join(
-          scenario.turnInput.workingDirectory,
-          'run-nutrition-discovery',
-        ),
-        [
-          '#!/bin/sh',
-          'set -eu',
-          ...input.expectedCommands.map(
-            (command) =>
-              `printf '%s\\n' ${quotePosixShellLiteral(command)} >> ${quotePosixShellLiteral(commandLog)}`,
-          ),
-          '',
-        ].join('\n'),
-        { encoding: 'utf8', mode: 0o755 },
-      )
-
-      const responses: ScriptedResponse[] = []
-      if (input.expectedCommands.length > 0) {
-        responses.push({
-          customToolCall: {
-            input: `
-const result = await tools.exec_command({
-  cmd: "./run-nutrition-discovery",
-  yield_time_ms: 30000,
-});
-text(result.output);
-`,
-            name: 'exec',
-          },
-        })
-        for (let waitAttempt = 0; waitAttempt < 4; waitAttempt += 1) {
-          responses.push({
-            functionCall: {
-              arguments: {
-                cell_id: '1',
-                yield_time_ms: 30_000,
-              },
-              name: 'wait',
-            },
-            requestIncludes: ['Script running with cell ID 1'],
-          })
-        }
-      }
-      if (input.card) {
-        responses.push({
-          functionCall: {
-            arguments: { card: input.card },
-            name: 'attach_response_card',
-            namespace: 'murph',
-          },
-        })
-      }
-      responses.push({ text: input.finalMessage })
-      scenario.stub.queue(...responses)
-
-      try {
-        const result = await executeCodexAppServerTurn({
-          ...scenario.turnInput,
-          baseInstructions: buildScriptedHostedSystemPrompt(
-            'direct',
-            false,
-            input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
-            input.snapshotPrompt,
-          ),
-          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
-          env: {
-            ...scenario.turnInput.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-          },
-          groupConversation: false,
-          prompt: input.prompt,
-          sandbox: 'danger-full-access',
-        })
-        const commandLogText = (await readFile(commandLog, 'utf8')).trim()
-        const commands = commandLogText === '' ? [] : commandLogText.split('\n')
-        expect(commands).toEqual(input.expectedCommands)
-        expect(result.responseCard).toEqual(input.card ?? null)
-        if (input.card) {
-          expect(result.finalMessage).toContain(
-            'Targets: 1,800 calories (on target)',
-          )
-          expect(result.finalMessage).toContain('25g fiber (on target).')
-          expect(result.finalMessage).not.toContain(input.finalMessage)
-        } else {
-          expect(result.finalMessage).toBe(input.finalMessage)
-        }
-      } finally {
-        await stopWarmCodexAppServer()
-      }
-    }
-
-    const scheduledSkillReads = [
-      "sed -n '1,320p' skills/automatic-meal-capture/SKILL.md",
-      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
-    ]
-    const scheduledProposalSkillReads = [
-      ...scheduledSkillReads,
-      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
-    ]
-    const interactiveSkillReads = [
-      "sed -n '1,180p' skills/food-journal/SKILL.md",
-      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
-      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
-    ]
-    const conflictOutputs = [
-      [activeListCommand, conflictList],
-      [visibleGoalShowCommand, visibleGoal],
-      [hiddenGoalShowCommand, hiddenGoal],
-    ] as const
-    const conflictCommands = [
-      activeListCommand,
-      visibleGoalShowCommand,
-      hiddenGoalShowCommand,
-    ]
-
-    await runCase({
-      commandOutputs: conflictOutputs,
-      expectedCommands: conflictCommands,
-      finalMessage: 'Closeout saved without a goal card because active targets conflict.',
-      prompt: [
-        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
-        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
-        'Follow the scheduled skill, resolve card authority, and fail closed on any hidden conflict.',
-      ].join(' '),
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-    await runCase({
-      commandOutputs: conflictOutputs,
-      expectedCommands: conflictCommands,
-      finalMessage: 'I found conflicting active targets, so I did not attach a card.',
-      prompt: [
-        'Show my daily nutrition card for 2026-07-30.',
-        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
-      ].join(' '),
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-    await runCase({
-      commandOutputs: [[activeListCommand, saturatedList]],
-      expectedCommands: [activeListCommand],
-      finalMessage: 'Closeout saved without a goal card because the active Goal read was saturated.',
-      prompt: [
-        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
-        'Resolve the requested goal-aware card, but fail closed if canonical Goal discovery is saturated.',
-      ].join(' '),
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    const controlOutputs = [
-      [activeListCommand, completeList],
-      [visibleGoalShowCommand, visibleGoal],
-      [memoryCommand, adultMemory],
-      [conditionListCommand, {
-        count: 0,
-        filters: { limit: 200, status: 'active' },
-        items: [],
-        nextCursor: null,
-        vault: 'synthetic-vault',
-      }],
-      [regimenListCommand, {
-        count: 0,
-        filters: { limit: 200, status: 'active' },
-        items: [],
-        nextCursor: null,
-        vault: 'synthetic-vault',
-      }],
-      [procedureListCommand, noProcedures],
-      [encounterListCommand, noEncounters],
-      [measurementCommand, safeMeasurements],
-      [pregnancyMeasurementCommand, noPregnancyMeasurements],
-      [testEventListCommand, noTestEvents],
-      [totalsCommand, canonicalTotals],
-    ] as const
-    const controlCommands = [
-      activeListCommand,
-      visibleGoalShowCommand,
-      memoryCommand,
-      conditionListCommand,
-      regimenListCommand,
-      procedureListCommand,
-      encounterListCommand,
-      measurementCommand,
-      pregnancyMeasurementCommand,
-      testEventListCommand,
-      totalsCommand,
-    ]
-    for (const control of [
-      {
-        prompt: 'Run the scheduled automatic meal closeout and attach the eligible 2026-07-30 goal-aware card.',
-        scheduled: true,
-        skillReadCommands: scheduledSkillReads,
-        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      },
-      {
-        prompt: 'Show my eligible daily nutrition card for 2026-07-30.',
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      },
-    ]) {
-      await runCase({
-        card: eligibleCard,
-        commandOutputs: controlOutputs,
-        expectedCommands: controlCommands,
-        finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_GOAL_READ',
-        ...control,
-      })
-    }
-
-    const listResult = (
-      kind: 'condition' | 'regimen',
-      ids: readonly string[],
-    ) => ({
-      count: ids.length,
-      filters: { limit: 200, status: 'active' },
-      items: ids.map((id, index) => ({
-        data: kind === 'condition'
-          ? { clinicalStatus: 'active' }
-          : { status: 'active' },
-        id,
-        kind,
-        title: `${kind === 'condition' ? 'Condition' : 'Regimen'} ${index + 1}`,
-      })),
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const detailResult = (input: {
-      contraindication?: 'glucose-lowering-medication' | 'kidney-disease'
-      id: string
-      kind: 'condition' | 'regimen'
-    }) => ({
-      entity: {
-        data: input.kind === 'condition'
-          ? {
-              clinicalStatus: 'active',
-              slug: input.contraindication === 'kidney-disease'
-                ? 'chronic-kidney-disease'
-                : `benign-condition-${input.id}`,
-            }
-          : {
-              kind: 'medication',
-              status: 'active',
-              substance: input.contraindication === 'glucose-lowering-medication'
-                ? 'insulin'
-                : `benign-medication-${input.id}`,
-            },
-        id: input.id,
-        kind: input.kind,
-        title: input.contraindication === 'kidney-disease'
-          ? 'Chronic kidney disease'
-          : input.contraindication === 'glucose-lowering-medication'
-            ? 'Basal insulin'
-            : `Benign ${input.kind}`,
-      },
-      vault: 'synthetic-vault',
-    })
-    const conditionIds = Array.from(
-      { length: 6 },
-      (_, index) => `condition_active_${index + 1}`,
-    )
-    const regimenIds = Array.from(
-      { length: 6 },
-      (_, index) => `regimen_active_${index + 1}`,
-    )
-    const completeSafetyOutputs = (input: {
-      hiddenCondition?: boolean
-      hiddenRegimen?: boolean
-    }): readonly (readonly [string, unknown])[] => [
-      [conditionListCommand, listResult('condition', conditionIds)],
-      [regimenListCommand, listResult('regimen', regimenIds)],
-      ...conditionIds.map((id, index) => [
-        `condition show ${id} --format json`,
-        detailResult({
-          contraindication: input.hiddenCondition && index === 5
-            ? 'kidney-disease'
-            : undefined,
-          id,
-          kind: 'condition',
-        }),
-      ] as const),
-      ...regimenIds.map((id, index) => [
-        `regimen show ${id} --format json`,
-        detailResult({
-          contraindication: input.hiddenRegimen && index === 5
-            ? 'glucose-lowering-medication'
-            : undefined,
-          id,
-          kind: 'regimen',
-        }),
-      ] as const),
-    ]
-    const completeSafetyCommands = [
-      conditionListCommand,
-      regimenListCommand,
-      ...conditionIds.map((id) => `condition show ${id} --format json`),
-      ...regimenIds.map((id) => `regimen show ${id} --format json`),
-    ]
-    const emptySafetyOutputs = [
-      [conditionListCommand, listResult('condition', [])],
-      [regimenListCommand, listResult('regimen', [])],
-    ] as const
-    const emptySafetyCommands = [conditionListCommand, regimenListCommand]
-    const hiddenSnapshot = (kind: 'condition' | 'regimen') => [
-      'Current canonical context snapshot (current and readable):',
-      kind === 'condition'
-        ? '- Active conditions: Condition 1; Condition 2; Condition 3; Condition 4; Condition 5. 1 additional active condition is omitted.'
-        : '- Active medication regimens: Regimen 1; Regimen 2; Regimen 3; Regimen 4; Regimen 5. 1 additional active medication regimen is omitted.',
-    ].join('\n')
-
-    const runHiddenSafetyCase = async (input: {
-      deriveTargets?: boolean
-      finalMessage: string
-      kind: 'condition' | 'regimen'
-      prompt: string
-      scheduled: boolean
-    }) => {
-      const goalOutputs: readonly (readonly [string, unknown])[] =
-        input.deriveTargets
-          ? []
-          : [
-              [activeListCommand, completeList],
-              [visibleGoalShowCommand, visibleGoal],
-            ]
-      const goalCommands = input.deriveTargets
-        ? []
-        : [activeListCommand, visibleGoalShowCommand]
-
-      await runCase({
-        commandOutputs: [
-          ...goalOutputs,
-          [memoryCommand, adultMemory],
-          ...completeSafetyOutputs({
-            hiddenCondition: input.kind === 'condition',
-            hiddenRegimen: input.kind === 'regimen',
-          }),
-        ],
-        expectedCommands: [
-          ...goalCommands,
-          memoryCommand,
-          ...completeSafetyCommands,
-        ],
-        finalMessage: input.finalMessage,
-        prompt: input.prompt,
-        scheduled: input.scheduled,
-        skillReadCommands: input.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: input.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: hiddenSnapshot(input.kind),
-      })
-    }
-
-    await runHiddenSafetyCase({
-      finalMessage: 'Closeout saved without numeric feedback because current medication context needs the non-numeric path.',
-      kind: 'regimen',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-    })
-    await runHiddenSafetyCase({
-      finalMessage: 'Closeout saved without numeric feedback because current health context needs the non-numeric path.',
-      kind: 'condition',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-    })
-    await runHiddenSafetyCase({
-      finalMessage: 'I kept this non-numeric because your current medication context makes target feedback inappropriate.',
-      kind: 'regimen',
-      prompt: 'Show my daily nutrition card for 2026-07-30.',
-      scheduled: false,
-    })
-    await runHiddenSafetyCase({
-      deriveTargets: true,
-      finalMessage: 'I kept this non-numeric because your current health context makes self-directed targets inappropriate.',
-      kind: 'condition',
-      prompt: 'Set any missing daily nutrition targets for me.',
-      scheduled: false,
-    })
-
-    const saturatedSafetyIds = Array.from(
-      { length: 200 },
-      (_, index) => `safety_saturated_${index + 1}`,
-    )
-    for (const saturation of [
-      {
-        conditionIds: saturatedSafetyIds,
-        finalMessage: 'Closeout saved without a card because active-condition discovery was saturated.',
-        regimenIds: [] as readonly string[],
-      },
-      {
-        conditionIds: [] as readonly string[],
-        finalMessage: 'Closeout saved without a card because active-regimen discovery was saturated.',
-        regimenIds: saturatedSafetyIds,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-          [memoryCommand, adultMemory],
-          [conditionListCommand, listResult('condition', saturation.conditionIds)],
-          [regimenListCommand, listResult('regimen', saturation.regimenIds)],
-        ],
-        expectedCommands: [
-          activeListCommand,
-          visibleGoalShowCommand,
-          memoryCommand,
-          conditionListCommand,
-          regimenListCommand,
-        ],
-        finalMessage: saturation.finalMessage,
-        prompt: 'Run the scheduled closeout and fail closed if canonical safety discovery is saturated.',
-        scheduled: true,
-        skillReadCommands: scheduledSkillReads,
-        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      })
-    }
-
-    const noActiveGoalsList = {
-      count: 0,
-      filters: { limit: 200, status: 'active' },
-      items: [],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const allStatusGoalListCommand = 'goal list --limit 200 --format json'
-    const proposalImportCommand = 'goal import-json --input - --format json'
-    const pausedGoalShowCommand = 'goal show goal_paused_bundle --format json'
-    const activateGoalCommand =
-      'goal save Daily nutrition targets --id goal_paused_bundle --status active --format json'
-    const pausedGoal = {
-      entity: {
-        data: {
-          metricTargets: completeTargets,
-          slug: 'murph-daily-nutrition-starting-targets',
-          status: 'paused',
-          windowStartAt: '2026-07-30',
-        },
-        id: 'goal_paused_bundle',
-        kind: 'goal',
-        title: 'Daily nutrition targets',
-      },
-      vault: 'synthetic-vault',
-    }
-    const activeManagedGoal = {
-      ...pausedGoal,
-      entity: {
-        ...pausedGoal.entity,
-        data: { ...pausedGoal.entity.data, status: 'active' },
-      },
-    }
-    const noManagedGoalsList = {
-      count: 0,
-      filters: { limit: 200 },
-      items: [],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const pausedManagedGoalList = {
-      count: 1,
-      filters: { limit: 200 },
-      items: [{
-        data: {
-          metricTargetsCount: 5,
-          slug: 'murph-daily-nutrition-starting-targets',
-          status: 'paused',
-        },
-        id: 'goal_paused_bundle',
-        kind: 'goal',
-        title: 'Daily nutrition targets',
-      }],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, noActiveGoalsList],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [allStatusGoalListCommand, noManagedGoalsList],
-        [proposalImportCommand, pausedGoal],
-        [pausedGoalShowCommand, pausedGoal],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        allStatusGoalListCommand,
-        proposalImportCommand,
-        pausedGoalShowCommand,
-      ],
-      finalMessage: 'For your first managed closeout, I proposed 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber starting 2026-07-30, based on your saved adult maintenance context. The proposal is paused until you choose to accept it.',
-      prompt: 'Run the first managed automatic meal closeout for 2026-07-30. Use only already-known responsible inputs, and follow the one-time paused-proposal path when canonical safety and Goal discovery permit it.',
-      scheduled: true,
-      skillReadCommands: scheduledProposalSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, noActiveGoalsList],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [allStatusGoalListCommand, pausedManagedGoalList],
-        [pausedGoalShowCommand, pausedGoal],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        allStatusGoalListCommand,
-        pausedGoalShowCommand,
-      ],
-      finalMessage: 'Meal closeout saved. Your earlier paused nutrition proposal is unchanged.',
-      prompt: 'Run a later managed automatic meal closeout for 2026-07-31. Do not create, change, or repeat a proposal once the canonical managed Goal already exists in any status.',
-      scheduled: true,
-      skillReadCommands: scheduledProposalSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    await runCase({
-      commandOutputs: [],
-      expectedCommands: [memoryCommand],
-      failedCommands: [memoryCommand],
-      finalMessage: 'I could not complete the current memory safety check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if canonical memory is unavailable.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The context snapshot does not contain the complete canonical memory document.',
-    })
-
-    await runCase({
-      commandOutputs: [[memoryCommand, minorMemory]],
-      expectedCommands: [memoryCommand],
-      finalMessage: 'I kept this non-numeric because self-directed nutrition targets are not available for someone under 18.',
-      prompt: 'Set daily nutrition targets for me using what I shared during onboarding.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
-    })
-
-    for (const acceptance of [
-      {
-        finalMessage: 'I left the proposal paused because numeric nutrition targets are not available for someone under 18.',
-        prompt: 'Yes, accept those nutrition targets.',
-      },
-      {
-        finalMessage: 'I left the proposal paused and did not attach the pending card because numeric nutrition guidance is not available for someone under 18.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [[memoryCommand, minorMemory]],
-        expectedCommands: [memoryCommand],
-        finalMessage: acceptance.finalMessage,
-        prompt: acceptance.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: [
-          'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
-          'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
-        ].join(' '),
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-        [memoryCommand, minorMemory],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-      ],
-      finalMessage: 'Closeout saved without numeric feedback because numeric nutrition guidance is not available for someone under 18.',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      snapshotPrompt: 'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
-    })
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-      ],
-      failedCommands: [memoryCommand],
-      finalMessage: 'Closeout saved without a goal card because canonical memory was unavailable.',
-      prompt: 'Run the scheduled closeout and fail closed if canonical memory is unavailable.',
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      snapshotPrompt: 'The context snapshot does not contain the complete canonical memory document.',
-    })
-
-    await runCase({
-      commandOutputs: [[memoryCommand, numberSensitiveMemory]],
-      expectedCommands: [memoryCommand],
-      finalMessage: 'I kept this non-numeric to respect your saved preference to avoid calorie and macro numbers.',
-      prompt: 'Set daily nutrition targets for me using my saved preferences.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The context snapshot does not inject the canonical Preferences memory section.',
-    })
-
-    for (const unavailableProcedureRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current procedure-history safety check, so I left target setup unchanged.',
-        output: noProcedures,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical procedure history is unavailable.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the procedure-history check, so I left target setup unchanged.',
-        output: saturatedProcedures,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical procedure discovery is saturated.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          ...(unavailableProcedureRead.failed
-            ? []
-            : [[procedureListCommand, unavailableProcedureRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-        ],
-        ...(unavailableProcedureRead.failed
-          ? { failedCommands: [procedureListCommand] }
-          : {}),
-        finalMessage: unavailableProcedureRead.finalMessage,
-        prompt: unavailableProcedureRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    for (const blockedProcedureCase of [
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I kept this non-numeric because completed bariatric surgery makes self-directed targets inappropriate.',
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused because completed bariatric surgery requires the qualified-care path.',
-        prompt: 'Yes, accept those nutrition targets.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused and did not attach the pending card because completed bariatric surgery requires the qualified-care path.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-        ] as const,
-        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
-        finalMessage: 'Closeout saved without numeric feedback because completed bariatric surgery requires the non-numeric path.',
-        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-        scheduled: true,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          ...blockedProcedureCase.commandPrefix,
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, completedBariatricProcedures],
-        ],
-        expectedCommands: [
-          ...blockedProcedureCase.expectedPrefix,
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-        ],
-        finalMessage: blockedProcedureCase.finalMessage,
-        prompt: blockedProcedureCase.prompt,
-        scheduled: blockedProcedureCase.scheduled,
-        skillReadCommands: blockedProcedureCase.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: blockedProcedureCase.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        ...(!blockedProcedureCase.scheduled && blockedProcedureCase.prompt.startsWith('Yes')
-          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
-          : {}),
-      })
-    }
-
-    for (const unavailableEncounterRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current encounter-diagnosis safety check, so I left target setup unchanged.',
-        output: noEncounters,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical encounter history is unavailable.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the encounter-diagnosis check, so I left target setup unchanged.',
-        output: saturatedEncounters,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is saturated.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not read the canonical encounter-diagnosis result, so I left target setup unchanged.',
-        output: { unexpected: 'unreadable encounter list' },
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is unreadable.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          ...(unavailableEncounterRead.failed
-            ? []
-            : [[encounterListCommand, unavailableEncounterRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-        ],
-        ...(unavailableEncounterRead.failed
-          ? { failedCommands: [encounterListCommand] }
-          : {}),
-        finalMessage: unavailableEncounterRead.finalMessage,
-        prompt: unavailableEncounterRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, activeKidneyEncounters],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        `event show ${activeKidneyEncounterId} --format json`,
-      ],
-      failedCommands: [`event show ${activeKidneyEncounterId} --format json`],
-      finalMessage: 'I could not complete the encounter-diagnosis detail check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if a required encounter detail read fails.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const blockedEncounterCase of [
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I kept this non-numeric because an active documented kidney diagnosis requires the qualified-care path.',
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused because an active documented kidney diagnosis requires the qualified-care path.',
-        prompt: 'Yes, accept those nutrition targets.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused and did not attach the pending card because an active documented kidney diagnosis requires the qualified-care path.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-        ] as const,
-        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
-        finalMessage: 'Closeout saved without numeric feedback because an active documented kidney diagnosis requires the non-numeric path.',
-        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-        scheduled: true,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          ...blockedEncounterCase.commandPrefix,
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, activeKidneyEncounters],
-          [`event show ${activeKidneyEncounterId} --format json`, activeKidneyEncounterDetail],
-        ],
-        expectedCommands: [
-          ...blockedEncounterCase.expectedPrefix,
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          `event show ${activeKidneyEncounterId} --format json`,
-        ],
-        finalMessage: blockedEncounterCase.finalMessage,
-        prompt: blockedEncounterCase.prompt,
-        scheduled: blockedEncounterCase.scheduled,
-        skillReadCommands: blockedEncounterCase.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: blockedEncounterCase.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        ...(!blockedEncounterCase.scheduled && blockedEncounterCase.prompt.startsWith('Yes')
-          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
-          : {}),
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, unresolvedKidneyEncounters],
-        [`event show ${unresolvedKidneyEncounterId} --format json`, unresolvedKidneyEncounterDetail],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        `event show ${unresolvedKidneyEncounterId} --format json`,
-      ],
-      finalMessage: 'I kept this non-numeric because a safety-relevant encounter diagnosis has unresolved current status.',
-      prompt: 'Set daily nutrition targets for me, but fail closed on unresolved safety-relevant encounter diagnoses.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const blockedProposal of [
-      {
-        finalMessage: 'I kept this non-numeric because your current measurements make self-directed targets inappropriate.',
-        measurements: lowBmiMeasurements,
-        prompt: 'Set daily nutrition targets for me using the context I already provided.',
-      },
-      {
-        finalMessage: 'I kept this non-numeric because the current same-event measurements make self-directed targets inappropriate.',
-        measurements: lowSameEventMeasurements,
-        prompt: 'Set daily nutrition targets for me using the context I already provided.',
-      },
-      {
-        finalMessage: 'I could not safely complete the measurement check, so I left target setup unchanged.',
-        measurements: saturatedMeasurements,
-        prompt: 'Set daily nutrition targets for me, but fail closed if the canonical measurement read is saturated.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, blockedProposal.measurements],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-        ],
-        finalMessage: blockedProposal.finalMessage,
-        prompt: blockedProposal.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-      ],
-      failedCommands: [measurementCommand],
-      finalMessage: 'I could not complete the current measurement safety check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical measurement read fails.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const unavailablePregnancyRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current pregnancy-test safety check, so I left target setup unchanged.',
-        output: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical pregnancy-test read fails.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the pregnancy-test check, so I left target setup unchanged.',
-        output: saturatedPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical pregnancy-test discovery is saturated.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          ...(unavailablePregnancyRead.failed
-            ? []
-            : [[pregnancyMeasurementCommand, unavailablePregnancyRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-        ],
-        ...(unavailablePregnancyRead.failed
-          ? { failedCommands: [pregnancyMeasurementCommand] }
-          : {}),
-        finalMessage: unavailablePregnancyRead.finalMessage,
-        prompt: unavailablePregnancyRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    for (const unavailableTestEventRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current structured pregnancy-result safety check, so I left target setup unchanged.',
-        output: noTestEvents,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical test-event discovery fails.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the structured pregnancy-result check, so I left target setup unchanged.',
-        output: saturatedTestEvents,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is saturated.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not read the canonical structured test result, so I left target setup unchanged.',
-        output: { unexpected: 'unreadable test-event list' },
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is unreadable.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, noPregnancyMeasurements],
-          ...(unavailableTestEventRead.failed
-            ? []
-            : [[testEventListCommand, unavailableTestEventRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-          testEventListCommand,
-        ],
-        ...(unavailableTestEventRead.failed
-          ? { failedCommands: [testEventListCommand] }
-          : {}),
-        finalMessage: unavailableTestEventRead.finalMessage,
-        prompt: unavailableTestEventRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, positivePregnancyTestEvents],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        `event show ${positivePregnancyTestEventId} --format json`,
-      ],
-      failedCommands: [
-        `event show ${positivePregnancyTestEventId} --format json`,
-      ],
-      finalMessage: 'I could not complete the structured pregnancy-result detail check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if a required test-event detail read fails.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const blockedTestEventCase of [
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I kept this non-numeric because a recent explicit positive structured pregnancy result keeps self-directed targets outside this path.',
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused because of a recent explicit positive structured pregnancy result.',
-        prompt: 'Yes, accept those nutrition targets.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive structured pregnancy result.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-        ] as const,
-        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
-        finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive structured pregnancy result requires the non-numeric path.',
-        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-        scheduled: true,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          ...blockedTestEventCase.commandPrefix,
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, noPregnancyMeasurements],
-          [testEventListCommand, positivePregnancyTestEvents],
-          [`event show ${positivePregnancyTestEventId} --format json`, positivePregnancyTestEventDetail],
-        ],
-        expectedCommands: [
-          ...blockedTestEventCase.expectedPrefix,
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-          testEventListCommand,
-          `event show ${positivePregnancyTestEventId} --format json`,
-        ],
-        finalMessage: blockedTestEventCase.finalMessage,
-        prompt: blockedTestEventCase.prompt,
-        scheduled: blockedTestEventCase.scheduled,
-        skillReadCommands: blockedTestEventCase.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: blockedTestEventCase.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        ...(!blockedTestEventCase.scheduled && blockedTestEventCase.prompt.startsWith('Yes')
-          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
-          : {}),
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, laterNegativeAfterPositiveMeasurements],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-      ],
-      finalMessage: 'I kept this non-numeric because a recent explicit positive pregnancy test keeps self-directed targets outside this path.',
-      prompt: 'Set daily nutrition targets for me. A later negative result must not erase a recent explicit positive result.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const acceptance of [
-      {
-        finalMessage: 'I left the proposal paused and kept this non-numeric because of a recent explicit positive pregnancy test.',
-        prompt: 'Yes, accept those nutrition targets.',
-      },
-      {
-        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive pregnancy test.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, positivePregnancyMeasurements],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-        ],
-        finalMessage: acceptance.finalMessage,
-        prompt: acceptance.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, positivePregnancyMeasurements],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-      ],
-      finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive pregnancy test requires the non-numeric path.',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    for (const acceptance of [
-      {
-        finalMessage: 'I left the proposal paused and kept this non-numeric because your current measurements make these targets inappropriate.',
-        prompt: 'Yes, accept those nutrition targets.',
-      },
-      {
-        finalMessage: 'I left the proposal paused and did not attach the pending card because your current measurements make numeric guidance inappropriate.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, lowBmiMeasurements],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-        ],
-        finalMessage: acceptance.finalMessage,
-        prompt: acceptance.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
-      })
-    }
-
-    for (const allowedPregnancyEvidence of [
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, encountersWithoutDiagnoses]] as const,
-        measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy measurements or structured test events exist.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, noProcedures]] as const,
-        testEventCommands: [testEventListCommand],
-        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
-      },
-      {
-        encounterCommands: [
-          encounterListCommand,
-          `event show ${nonCurrentEncounterId} --format json`,
-        ],
-        encounterOutputs: [
-          [encounterListCommand, nonCurrentEncounters],
-          [`event show ${nonCurrentEncounterId} --format json`, nonCurrentEncounterDetail],
-        ] as const,
-        measurements: negativePregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve plus exact negative measurement and structured pregnancy tests do not prove a current exclusion.',
-        procedureCommands: [
-          procedureListCommand,
-          'event show event_planned_bariatric_procedure --format json',
-        ],
-        procedureOutputs: [
-          [procedureListCommand, plannedBariatricProcedureWithoutListStatus],
-          ['event show event_planned_bariatric_procedure --format json', plannedBariatricProcedureDetail],
-        ] as const,
-        testEventCommands: [
-          testEventListCommand,
-          `event show ${negativePregnancyTestEventId} --format json`,
-        ],
-        testEventOutputs: [
-          [testEventListCommand, negativePregnancyTestEvents],
-          [`event show ${negativePregnancyTestEventId} --format json`, negativePregnancyTestEventDetail],
-        ] as const,
-      },
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
-        measurements: ambiguousPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass, conflicting pregnancy-test measurement, and pending structured test do not prove current exclusions.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, procedureListResult([
-          procedureItem('event_cancelled_bariatric_procedure', 'gastric bypass', 'cancelled'),
-        ])]] as const,
-        testEventCommands: [
-          testEventListCommand,
-          `event show ${pendingPregnancyTestEventId} --format json`,
-        ],
-        testEventOutputs: [
-          [testEventListCommand, pendingPregnancyTestEvents],
-          [`event show ${pendingPregnancyTestEventId} --format json`, pendingPregnancyTestEventDetail],
-        ] as const,
-      },
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
-        measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a completed appendectomy is unrelated and an old positive pregnancy test is stale.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, procedureListResult([
-          procedureItem('event_completed_appendectomy', 'appendectomy', 'completed'),
-        ])]] as const,
-        testEventCommands: [testEventListCommand],
-        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
-      },
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
-        measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguous gastric procedure plus unknown-status numeric-only, unrelated, ambiguous, and negated tests do not prove current exclusions.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, procedureListResult([
-          procedureItem('event_ambiguous_gastric_procedure', 'gastric procedure', 'unknown'),
-        ])]] as const,
-        testEventCommands: [
-          testEventListCommand,
-          `event show ${numericHcgTestEventId} --format json`,
-          `event show ${unrelatedTestEventId} --format json`,
-          `event show ${ambiguousHcgTestEventId} --format json`,
-          `event show ${negatedHcgTestEventId} --format json`,
-        ],
-        testEventOutputs: [
-          [testEventListCommand, numericAndUnrelatedTestEvents],
-          [`event show ${numericHcgTestEventId} --format json`, numericHcgTestEventDetail],
-          [`event show ${unrelatedTestEventId} --format json`, unrelatedTestEventDetail],
-          [`event show ${ambiguousHcgTestEventId} --format json`, ambiguousHcgTestEventDetail],
-          [`event show ${negatedHcgTestEventId} --format json`, negatedHcgTestEventDetail],
-        ] as const,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          ...allowedPregnancyEvidence.procedureOutputs,
-          ...allowedPregnancyEvidence.encounterOutputs,
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
-          ...allowedPregnancyEvidence.testEventOutputs,
-          [activeListCommand, noActiveGoalsList],
-          [allStatusGoalListCommand, noManagedGoalsList],
-          [proposalImportCommand, pausedGoal],
-          [pausedGoalShowCommand, pausedGoal],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          ...allowedPregnancyEvidence.procedureCommands,
-          ...allowedPregnancyEvidence.encounterCommands,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-          ...allowedPregnancyEvidence.testEventCommands,
-          activeListCommand,
-          allStatusGoalListCommand,
-          proposalImportCommand,
-          pausedGoalShowCommand,
-        ],
-        finalMessage: 'Proposed for 2026-07-30: 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber. These are paused until you accept them.',
-        prompt: allowedPregnancyEvidence.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    await runCase({
-      card: eligibleCard,
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [activeListCommand, noActiveGoalsList],
-        [allStatusGoalListCommand, pausedManagedGoalList],
-        [activateGoalCommand, activeManagedGoal],
-        [pausedGoalShowCommand, activeManagedGoal],
-        [totalsCommand, canonicalTotals],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        activeListCommand,
-        allStatusGoalListCommand,
-        activateGoalCommand,
-        pausedGoalShowCommand,
-        totalsCommand,
-      ],
-      finalMessage: 'CARD_ATTACHED_AFTER_PRE_ACTIVATION_SAFETY',
-      prompt: 'Yes, accept the paused nutrition proposal and show the daily card I requested.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting acceptance for the pending 2026-07-30 card request.',
-    })
-
-    await runCase({
-      card: eligibleCard,
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-        [memoryCommand, adultMemory],
-        ...completeSafetyOutputs({}),
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, safeMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [totalsCommand, canonicalTotals],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-        ...completeSafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        totalsCommand,
-      ],
-      finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',
-      prompt: 'Show my eligible daily nutrition card after checking all six benign active conditions and regimens.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: [
-        hiddenSnapshot('condition'),
-        hiddenSnapshot('regimen'),
-      ].join('\n'),
-    })
   })
 
   it('scores page-authorized group challenge observations through the code-mode App Server boundary', {
@@ -9503,7 +7373,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
@@ -9517,11 +7387,13 @@ text(result.output);
               created: true,
               effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
-              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -9550,7 +7422,7 @@ text(result.output);
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
-      '"name":"group"',
+      '"name":"group_chat"',
     )
     expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
@@ -9565,11 +7437,227 @@ text(result.output);
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
+  it('discovers a group handoff and reports accepted as queued', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph hand off verified context to a joined group',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'handoff',
+            context: 'I finished the race.',
+            groupLabel: 'Running Club',
+          },
+          name: 'group_consult',
+          namespace: 'murph',
+        },
+      },
+      { text: 'I queued that for Running Club; it has not been sent yet.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async (request) => {
+          groupRequests.push(request)
+          return {
+            action: 'handoff',
+            result: { status: 'accepted', targetLabel: 'Running Club' },
+          }
+        }),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'a'.repeat(32)}`],
+          conversationId: 'conversation-handoff',
+          conversationScope: 'direct',
+          inboundMailboxItemIds: ['mailbox-handoff'],
+          originSessionId: 'session-handoff',
+          recipientKey: 'member:current',
+        }),
+      },
+      prompt: 'Tell my running group that I finished the race.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group_consult"',
+    )
+    expect(groupRequests).toEqual([
+      expect.objectContaining({
+        action: 'handoff',
+        context: 'I finished the race.',
+        groupLabel: 'Running Club',
+      }),
+    ])
+    expect(result.finalMessage).toBe(
+      'I queued that for Running Club; it has not been sent yet.',
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('keeps physical-note recovery deferred until an explicit request discovers it', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const messageRef = `ain_${'e'.repeat(32)}`
+    const recoveryRequests: unknown[] = []
+    const createHostedToolContext = (): AssistantHostedToolContext => ({
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: [messageRef],
+        conversationId: 'conversation-physical-note-recovery',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox-physical-note-recovery'],
+        originSessionId: 'session-physical-note-recovery',
+        recipientKey: 'member:current',
+      }),
+      physicalNotes: {
+        resolve: async (request) => {
+          recoveryRequests.push(request)
+          return {
+            remainingUnresolved: false,
+            retryAfter: null,
+            settledUsageCostUsdMicros: null,
+            status: 'clear',
+          }
+        },
+        send: async () => {
+          throw new Error('Physical-note sending is unavailable in this test.')
+        },
+      },
+      sendVaultFile: async () => {
+        throw new Error('Vault-file sending is unavailable in this test.')
+      },
+      vaultFileSendAvailable: false,
+    })
+    const authorizeAcceptedMessageTarget = async (input: {
+      messageRef: string
+    }) => input.messageRef === messageRef
+      ? { targetInputId: messageRef }
+      : null
+
+    const ordinaryScenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+      codexCommand: ordinaryScenario.turnInput.codexCommand,
+      directory: ordinaryScenario.turnInput.codexHome,
+    })
+    ordinaryScenario.stub.captureProviderRequestDiagnostics()
+    ordinaryScenario.stub.queue({ text: 'ORDINARY_TURN_OK' })
+    const ordinaryResult = await executeCodexAppServerTurn({
+      ...ordinaryScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
+      env: {
+        ...ordinaryScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'What can you help me with today?',
+    })
+    const ordinarySummaries =
+      ordinaryScenario.stub.requestSummariesSinceBaseline()
+    expect(ordinarySummaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+      includesPhysicalNoteRecovery: false,
+    })
+    expect(ordinaryResult.finalMessage).toBe('ORDINARY_TURN_OK')
+    expect(recoveryRequests).toHaveLength(0)
+
+    await stopWarmCodexAppServer()
+    const baselineScenario = await prepareScriptedTurnScenario()
+    baselineScenario.stub.captureProviderRequestDiagnostics()
+    baselineScenario.stub.queue({ text: 'ORDINARY_TURN_OK' })
+    const baselineResult = await executeCodexAppServerTurn({
+      ...baselineScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      env: {
+        ...baselineScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'What can you help me with today?',
+    })
+    const baselineSummary =
+      baselineScenario.stub.requestSummariesSinceBaseline()[0]
+    expect(baselineResult.finalMessage).toBe('ORDINARY_TURN_OK')
+    const deferredDiscoveryOverheadBytes =
+      (ordinarySummaries[0]?.providerRequestDiagnostics?.bytes ?? 0)
+      - (baselineSummary?.providerRequestDiagnostics?.bytes ?? 0)
+    expect(deferredDiscoveryOverheadBytes).toBe(0)
+    expect(recoveryRequests).toHaveLength(0)
+
+    await stopWarmCodexAppServer()
+    const recoveryScenario = await prepareScriptedTurnScenario()
+    recoveryScenario.stub.captureProviderRequestDiagnostics()
+    recoveryScenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(
+  ({ name }) => name === "murph__resolve_physical_note",
+);
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__resolve_physical_note({
+    message_ref: ${JSON.stringify(messageRef)},
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'PHYSICAL_NOTE_RECOVERY_OK' },
+    )
+    const recoveryResult = await executeCodexAppServerTurn({
+      ...recoveryScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
+      env: {
+        ...recoveryScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'Clear my earlier unresolved physical note.',
+    })
+    const recoverySummaries =
+      recoveryScenario.stub.requestSummariesSinceBaseline()
+    expect(recoverySummaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+      includesPhysicalNoteRecovery: false,
+    })
+    const recoveryOutput =
+      recoverySummaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(recoveryOutput).toContain('"found":true')
+    expect(recoveryOutput).toContain('No unresolved physical-note submission')
+    expect(recoveryRequests).toEqual([{
+      originAssistantInputId: messageRef,
+    }])
+    expect(recoveryResult.finalMessage).toBe('PHYSICAL_NOTE_RECOVERY_OK')
+  })
+
   it('keeps narrow group reads eager beside deferred Terra tools', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -9689,7 +7777,10 @@ text(JSON.stringify(result));
       turnTrigger: null,
     })
     expect(groupDeveloperInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(groupDeveloperInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(groupDeveloperInstructions).not.toContain(
       'Do not use or offer `murph.assistant_configuration` here',
@@ -9802,7 +7893,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -10246,6 +8337,345 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it.each([
+    {
+      expectedFinalMessage:
+        'I found eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      expectedToolOutput: 'Eight visible push-ups',
+      geminiStatus: 200,
+      name: 'Gemini returns an analysis',
+    },
+    {
+      expectedFinalMessage:
+        'I could not analyze that video because the provider is rate-limited right now. Please try again later.',
+      expectedToolOutput:
+        'Video analysis was rate-limited; no analysis was retrieved',
+      geminiStatus: 429,
+      name: 'Gemini is rate-limited',
+    },
+  ])(
+    'carries a private-direct video result through the real tool loop into final output when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ expectedFinalMessage, expectedToolOutput, geminiStatus }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        geminiStatus === 200
+          ? Response.json({
+              candidates: [{
+                content: {
+                  parts: [{
+                    text:
+                      'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+                  }],
+                  role: 'model',
+                },
+                finishReason: 'STOP',
+              }],
+            })
+          : new Response(JSON.stringify({ error: 'rate limited' }), {
+              headers: { 'content-type': 'application/json' },
+              status: geminiStatus,
+            }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        {
+          requestExcludes: [
+            fixture.rawPath,
+            fixture.videoBytes.toString('base64'),
+          ],
+          requestIncludes: [expectedToolOutput],
+          text: expectedFinalMessage,
+        },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.functionCallOutputs ?? [])
+      expect(toolOutputs).toEqual(expect.arrayContaining([
+        expect.stringContaining(expectedToolOutput),
+      ]))
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalMessage).toBe(expectedFinalMessage)
+      expect(result.providerAuthoredFinalMessage).toBe(expectedFinalMessage)
+      expect(result.transcriptMessage).toBe(expectedFinalMessage)
+      if (geminiStatus === 429) {
+        expect(result.finalMessage).not.toBe(expectedToolOutput)
+      }
+      expect(result.responseDeliveryContextOrdinal).toBe(0)
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    },
+  )
+
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      name: 'the model returns empty text',
+      providerResponses: [{ text: '' }],
+    },
+    {
+      allowFinishWithoutReply: true,
+      name: 'the model explicitly selects no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+    },
+  ] satisfies readonly {
+    allowFinishWithoutReply: boolean
+    name: string
+    providerResponses: readonly ScriptedResponse[]
+  }[])(
+    'delivers the trusted video-analysis failure fallback when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ allowFinishWithoutReply, providerResponses }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const expectedFallback =
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        new Response(JSON.stringify({ error: 'rate limited' }), {
+          headers: { 'content-type': 'application/json' },
+          status: 429,
+        }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        ...providerResponses,
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          allowFinishWithoutReply,
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalAction).toBeNull()
+      expect(result.finalActionExplicit).toBe(false)
+      expect(result.finalMessage).toBe(expectedFallback)
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toBe(expectedFallback)
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(
+        allowFinishWithoutReply ? 3 : 2,
+      )
+    },
+  )
+
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      name: 'the model returns empty text',
+      providerResponses: [{ text: '' }],
+    },
+    {
+      allowFinishWithoutReply: true,
+      name: 'the model explicitly selects no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+    },
+  ] satisfies readonly {
+    allowFinishWithoutReply: boolean
+    name: string
+    providerResponses: readonly ScriptedResponse[]
+  }[])(
+    'delivers the trusted video-analysis success fallback when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ allowFinishWithoutReply, providerResponses }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        Response.json({
+          candidates: [{
+            content: {
+              parts: [{
+                text:
+                  'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+              }],
+              role: 'model',
+            },
+            finishReason: 'STOP',
+          }],
+        }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        ...providerResponses,
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          allowFinishWithoutReply,
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalAction).toBeNull()
+      expect(result.finalActionExplicit).toBe(false)
+      expect(result.finalMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toContain('Gemini video analysis below')
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(
+        allowFinishWithoutReply ? 3 : 2,
+      )
+    },
+  )
+
+  it('preserves the first successful video-analysis fallback after a later limit failure', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        candidates: [{
+          content: {
+            parts: [{
+              text:
+                'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+            }],
+            role: 'model',
+          },
+          finishReason: 'STOP',
+        }],
+      }),
+    )
+    const analyzeCall = {
+      functionCall: {
+        arguments: {
+          message_ref: fixture.inputId,
+          question: 'Count the visible push-ups and describe the form.',
+        },
+        name: 'analyze_video',
+        namespace: 'murph',
+      },
+    } satisfies ScriptedResponse
+    scenario.stub.queue(
+      analyzeCall,
+      analyzeCall,
+      { text: '' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: geminiFetch,
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: fixture.hostedToolContext,
+      prompt: 'Analyze my attached video twice and answer my question.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(toolOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('Eight visible push-ups'),
+      expect.stringContaining('Video analysis limit reached for this turn'),
+    ]))
+    expect(geminiFetch).toHaveBeenCalledOnce()
+    expect(result.finalMessage).toContain('Eight visible push-ups')
+    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.transcriptMessage).toContain('Eight visible push-ups')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
   it('ends an accepted group email effect without another provider request', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -10263,7 +8693,7 @@ text(JSON.stringify(result));
             subject: 'Scheduled update',
             text: 'Scheduled update',
           },
-          name: 'group',
+          name: 'group_email',
           namespace: 'murph',
         },
       },
@@ -10341,7 +8771,7 @@ text(JSON.stringify(result));
         {
           functionCall: {
             arguments: { action: 'share_contact_card' },
-            name: 'group',
+            name: 'group_chat',
             namespace: 'murph',
           },
         },
@@ -10422,7 +8852,7 @@ text(JSON.stringify(result));
       {
         functionCall: {
           arguments: { action: 'read_chat_participants' },
-          name: 'group',
+          name: 'group_chat',
           namespace: 'murph',
         },
       },
@@ -10519,7 +8949,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -10549,7 +8979,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: `ain_${'f'.repeat(32)}`,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -10626,7 +9056,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -10863,6 +9293,55 @@ function createScriptedGroupToolContext(
   }
 }
 
+async function prepareScriptedAnalyzeVideoFixture(
+  workingDirectory: string,
+): Promise<{
+  hostedToolContext: AssistantHostedToolContext
+  inputId: string
+  rawPath: string
+  vaultRoot: string
+  videoBytes: Buffer
+}> {
+  const inputId = `ain_${'7'.repeat(32)}`
+  const rawPath = 'raw/inbox/cap_video/attachments/01__video.mp4'
+  const vaultRoot = path.join(workingDirectory, 'video-vault')
+  const absolutePath = path.join(vaultRoot, rawPath)
+  const videoBytes = Buffer.concat([
+    Buffer.from([0, 0, 0, 16]),
+    Buffer.from('ftyp'),
+    Buffer.from('isom'),
+    Buffer.from('scripted-video'),
+  ])
+  await mkdir(path.dirname(absolutePath), { recursive: true })
+  await writeFile(absolutePath, videoBytes)
+  const attachmentAuthority: AnalyzeVideoAttachmentAuthority = {
+    byteSize: videoBytes.byteLength,
+    messageRef: inputId,
+    mimeType: 'video/mp4',
+    ordinal: 1,
+    rawPath,
+    sha256: createHash('sha256').update(videoBytes).digest('hex'),
+  }
+  const hostedToolContext = createAssistantHostedToolContext({
+    getAnalyzeVideoAttachmentAuthorities: () => [attachmentAuthority],
+    getConversationScope: () => 'direct',
+    getUserActionAcceptedInputIds: () => [inputId],
+    messageInput: { channel: 'linq' } as never,
+    session: {
+      binding: { channel: 'linq' },
+      sessionId: 'session_scripted_analyze_video',
+    } as never,
+  })
+
+  return {
+    hostedToolContext,
+    inputId,
+    rawPath,
+    vaultRoot,
+    videoBytes,
+  }
+}
+
 function createScriptedSongRuntime(
   generations: unknown[],
 ): VoiceMemoToolRuntime {
@@ -10888,6 +9367,7 @@ function buildScriptedHostedSystemPrompt(
   onboardingGuidance = false,
   scheduledOccurrenceAt?: string,
   assistantContextSnapshotPrompt?: string,
+  assistantProgressUpdatesAvailable = true,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
@@ -10895,6 +9375,7 @@ function buildScriptedHostedSystemPrompt(
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: true,
+    assistantProgressUpdatesAvailable,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -10975,7 +9456,7 @@ async function prepareScriptedTurnScenario(
   }
 }
 
-async function writeOpenAiFlexModelCatalogJson(input: {
+async function writeHostedOpenAiFlexModelCatalogJson(input: {
   codexCommand: string
   directory: string
 }): Promise<string> {
@@ -10988,30 +9469,37 @@ async function writeOpenAiFlexModelCatalogJson(input: {
     },
   )
   const catalog = readRecord(JSON.parse(stdout))
-  const models = Array.isArray(catalog?.models) ? catalog.models : []
-  const targetModel = models
-    .map(readRecord)
-    .find((model) => model?.slug === SCRIPTED_MODEL)
-  if (!targetModel) {
-    throw new Error(`Bundled Codex model catalog did not include ${SCRIPTED_MODEL}.`)
+  if (!catalog) {
+    throw new Error('Bundled Codex model catalog was not an object.')
   }
-
-  const serviceTiers = Array.isArray(targetModel.service_tiers)
-    ? targetModel.service_tiers
+  const bundledModels = Array.isArray(catalog.models)
+    ? catalog.models.map(readRecord)
     : []
-  const hasFlex = serviceTiers
-    .map(readRecord)
-    .some((tier) => tier?.id === 'flex')
-  if (!hasFlex) {
-    targetModel.service_tiers = [
-      ...serviceTiers,
-      {
-        description: 'Lower-cost flexible processing',
-        id: 'flex',
-        name: 'Flex',
-      },
-    ]
-  }
+  const productModels = HOSTED_ASSISTANT_PRODUCT_MODELS.map((slug) => {
+    const model = bundledModels.find((candidate) => candidate?.slug === slug)
+    if (!model) {
+      throw new Error(`Bundled Codex model catalog did not include ${slug}.`)
+    }
+
+    const serviceTiers = Array.isArray(model.service_tiers)
+      ? model.service_tiers
+      : []
+    const hasFlex = serviceTiers
+      .map(readRecord)
+      .some((tier) => tier?.id === 'flex')
+    if (!hasFlex) {
+      model.service_tiers = [
+        ...serviceTiers,
+        {
+          description: 'Lower-cost flexible processing',
+          id: 'flex',
+          name: 'Flex',
+        },
+      ]
+    }
+    return model
+  })
+  catalog.models = productModels
 
   const modelCatalogJson = path.join(
     input.directory,
@@ -11057,6 +9545,7 @@ function buildScriptedCodexConfigToml(
       ? [
           '[features.multi_agent_v2]',
           'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
           'max_concurrent_threads_per_session = 4',
           '',
         ]
@@ -11351,6 +9840,8 @@ function readScriptedProviderRequestSummary(
             includesExecCommand: requestBody.includes('exec_command'),
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
+            includesPhysicalNoteRecovery:
+              requestBody.includes('"name":"resolve_physical_note"'),
             includesReadShared: requestBody.includes('read_shared'),
             includesResponseCardCompactTableShape: [
               'compact_table',

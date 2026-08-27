@@ -249,7 +249,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ) => void) | null;
+  ) => Promise<void>) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -434,6 +434,7 @@ const HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS = 15_000;
 export interface HostedWorkspaceRunnerResult {
   afterDurableCheckpoint: readonly HostedWorkspaceDurableCheckpointEffect[];
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+  pendingEffectsContinuationWakeAt: string | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
@@ -829,6 +830,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     return {
       afterDurableCheckpoint,
       assistantPhaseResult: null,
+      pendingEffectsContinuationWakeAt: null,
       initialMailboxImport,
       latestMailboxImport: checkpointRequestSession.latestMailboxImport()
         ?? initialMailboxImport,
@@ -899,10 +901,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
   const startDeferredUsageRecords = (
     records: readonly HostedDeferredAssistantUsageRecord[],
-  ): void => {
+  ): Promise<void> => {
     if (records.length === 0) {
       maybeResolveDeferredUsageCompletion();
-      return;
+      return Promise.resolve();
     }
 
     const completion = deferredUsageWriteTail.then(async () => {
@@ -917,6 +919,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       pendingDeferredUsageWrites.delete(completion);
       maybeResolveDeferredUsageCompletion();
     });
+    return completion;
   };
   const startDeferredUsageCaptureOnce = (): Promise<void> => {
     if (deferredUsageCaptureStarted) {
@@ -924,7 +927,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
 
     deferredUsageCaptureStarted = true;
-    startDeferredUsageRecords(deferredUsageRecords.splice(0));
+    void startDeferredUsageRecords(deferredUsageRecords.splice(0));
     maybeResolveDeferredUsageCompletion();
     return deferredUsageCompletion;
   };
@@ -997,6 +1000,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     );
     input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
   };
+  const mailboxImportBeforeForegroundLoop =
+    checkpointRequestSession.latestMailboxImport();
   await startForegroundMailboxImportLoop();
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;
@@ -1098,7 +1103,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
-    ): void {
+    ): Promise<void> {
       const deferredRecord = {
         ...(providerRequestAcceptedInputIds === undefined
           ? {}
@@ -1106,17 +1111,18 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         record,
       };
       if (deferredUsageCaptureStarted) {
-        startDeferredUsageRecords([deferredRecord]);
-        return;
+        return startDeferredUsageRecords([deferredRecord]);
       }
 
       deferredUsageRecords.push(deferredRecord);
+      return Promise.resolve();
     },
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
   };
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  let pendingEffectsContinuationWakeAt: string | null = null;
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let runnerError: unknown = null;
   try {
@@ -1168,6 +1174,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (keepForegroundImportLoopDuringAfterCheckpoint) {
       await stopForegroundMailboxImportLoopAndNotify();
     }
+    const latestMailboxImport = checkpointRequestSession.latestMailboxImport();
+    pendingEffectsContinuationWakeAt =
+      latestMailboxImport !== mailboxImportBeforeForegroundLoop
+      && (latestMailboxImport?.importResult.importedSystemMailboxItemIds?.length ?? 0) > 0
+        ? await reconcilePendingEffectsContinuationWake({
+            now: input.now,
+            result: assistantPhaseResult,
+            vaultRoot: input.vaultRoot,
+          })
+        : null;
     if (postCheckpoint) {
       try {
         await checkpointHostedWorkspacePostAssistantPhase({
@@ -1277,6 +1293,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   return {
     afterDurableCheckpoint,
     assistantPhaseResult,
+    pendingEffectsContinuationWakeAt,
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
       ?? initialMailboxImport,
@@ -1328,6 +1345,13 @@ export async function runHostedWorkspaceCanonicalWriteAtBoundary<TResult>(input:
   const port: HostedCanonicalWritePort = {
     async persistCanonicalWrite(writeInput) {
       await canonicalWritePort.persistCanonicalWrite(writeInput);
+      canonicalWritePersisted = true;
+    },
+    async persistRuntimeState() {
+      if (!canonicalWritePort.persistRuntimeState) {
+        throw new TypeError("Hosted runtime state checkpoint requires canonical write port support.");
+      }
+      await canonicalWritePort.persistRuntimeState();
       canonicalWritePersisted = true;
     },
   };
@@ -1494,6 +1518,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               phase: "active_turn_input",
               signal: outerSignal,
             });
+          }
+          if (hasForegroundConversationWork) {
             observeForegroundConversationWork();
           }
           await notifyHostedActiveTurnInputForMailboxImport({
@@ -2739,6 +2765,60 @@ function createHostedWorkspaceCanonicalWritePort(input: {
 
       await persist();
     },
+    async persistRuntimeState() {
+      const persist = async () => {
+        if (!input.input.checkpointRuntimeRedactedStatus) {
+          throw new TypeError("Hosted runtime state checkpoint requires runtime status checkpoint support.");
+        }
+        const workspace =
+          input.checkpointRequestBuilder.latestWorkspace()
+          ?? input.input.workspace;
+        const now = resolveHostedWorkspaceRunnerNowIso(input.input.now);
+        const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+          now: () => now,
+          vaultRoot: input.input.vaultRoot,
+        });
+        const nextWake = selectHostedRuntimeWakeCandidate([
+          createHostedRuntimeWakeCandidate(
+            workspace?.nextWakeAt,
+            workspace?.nextWakeReason ?? null,
+          ),
+          systemMailboxWake,
+        ]);
+        const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+          nextWakeAt: nextWake.at,
+          nextWakeReason: nextWake.reason,
+          reason: "canonical_runtime_commit",
+          redactedStatus: input.readPreviousRedactedStatus(),
+          workspace,
+        });
+        if (checkpoint.workspace.userId !== input.input.expectedUserId) {
+          throw new HostedMailboxImportCheckpointUserMismatchError({
+            actualUserId: checkpoint.workspace.userId,
+            expectedUserId: input.input.expectedUserId,
+          });
+        }
+        if (!checkpoint.checkpointed) {
+          throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+        }
+        input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
+        input.checkpointRequestBuilder.markRuntimeStateDirty();
+        await writeHostedForegroundCheckpointDeferredLog({
+          checkpointPhase: "canonical_write",
+          now: input.input.now,
+          platform: input.input.platform,
+          reason: "canonical_runtime_commit",
+          runtimeLogContext: input.input.runtimeLogContext,
+        });
+      };
+      const withPersistence = input.input.withCanonicalWritePersistence;
+      if (withPersistence) {
+        await withPersistence(persist);
+        return;
+      }
+
+      await persist();
+    },
   };
 }
 
@@ -2805,6 +2885,36 @@ async function reconcilePendingAssistantInputWake(input: {
   })) {
     input.result.invocationLocalAssistantWakeAt = wakeAt;
   }
+}
+
+async function reconcilePendingEffectsContinuationWake(input: {
+  now?: (() => string) | null;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const now = resolveHostedWorkspaceRunnerNowIso(input.now);
+  const wake = await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: ["apply-runtime-control-request"],
+    allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+    now: () => now,
+    vaultRoot: input.vaultRoot,
+  });
+  if (
+    wake.at === null
+    || wake.reason !== "assistant"
+    || !hostedWorkspaceRunnerWakeIsImmediate(wake.at, () => now)
+  ) {
+    return null;
+  }
+
+  if (mergeHostedAssistantWake({
+    reason: wake.reason,
+    result: input.result,
+    wakeAt: wake.at,
+  })) {
+    input.result.invocationLocalAssistantWakeAt = wake.at;
+  }
+  return wake.at;
 }
 
 function hostedConversationReplayFloorNeedsCheckpoint(input: {

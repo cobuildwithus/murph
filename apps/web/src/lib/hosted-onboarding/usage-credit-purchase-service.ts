@@ -109,11 +109,13 @@ import {
 } from "../hosted-groups/group-usage-funding";
 import {
   createHostedGroupSponsorshipAuthorizationTx,
-  parseHostedGroupSponsorshipMonthlyCapMinor,
   prepareHostedGroupSponsorshipRecoveryTx,
-  type HostedGroupSponsorshipMonthlyCapMinor,
   type HostedGroupSponsorshipPaymentAuthority,
 } from "../hosted-groups/group-sponsorship-authorization";
+import {
+  parseHostedGroupSponsorshipMonthlyCapMinor,
+  type HostedGroupSponsorshipMonthlyCapMinor,
+} from "../hosted-groups/group-sponsorship-contract";
 import {
   assertHostedGroupSponsorshipRequestMatchesTx,
   createHostedGroupSponsorshipMomentTx,
@@ -357,7 +359,7 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_SPONSORSHIP_CAP_INVALID",
       httpStatus: 400,
-      message: "Monthly sponsorship starts with $5 and needs a $5, $10, or $20 maximum.",
+      message: "Monthly sponsorship starts with $5 and needs a $5, $10, $20, or $50 maximum.",
     });
   }
   return {
@@ -503,6 +505,23 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
+    // Owner-code funding locks the group first; the exact container is
+    // revalidated only after beneficiary serialization below.
+    const ownerJoinCodeFundingGroups =
+      input.target.kind === "group" &&
+        readHostedGroupUsageFundingLocatorRuntimeMemberId(
+          input.target.joinCode,
+        ) === null
+        ? await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "group"."id"
+            FROM "hosted_group" AS "group"
+            INNER JOIN "hosted_thread_container" AS "container"
+              ON "container"."member_id" = "group"."runtime_member_id"
+            WHERE "group"."join_code" = ${input.target.joinCode}
+              AND "group"."runtime_member_id" = ${input.target.beneficiaryMemberId}
+            FOR SHARE OF "group"
+          `
+        : null;
     let lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
     try {
       lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
@@ -774,21 +793,17 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       }
       stripeCustomerId = billingRef.stripeCustomerId;
     } else if (target.kind === "group") {
-      // The locator is either the owner-created join code or the signed
-      // funding-only locator bound to the exact runtime member.
+      // Both locator forms acquire the exact container only after the
+      // beneficiary lock, so concurrent funders cannot retain it while
+      // waiting to serialize on the beneficiary.
       const locatorRuntimeMemberId =
         readHostedGroupUsageFundingLocatorRuntimeMemberId(target.joinCode);
-      const fundingTargets = locatorRuntimeMemberId === null
-        ? await tx.$queryRaw<Array<{ id: string }>>`
-            SELECT "group"."id"
-            FROM "hosted_group" AS "group"
-            INNER JOIN "hosted_thread_container" AS "container"
-              ON "container"."member_id" = "group"."runtime_member_id"
-            WHERE "group"."join_code" = ${target.joinCode}
-              AND "group"."runtime_member_id" = ${target.beneficiaryMemberId}
-            FOR SHARE OF "group", "container"
-          `
-        : locatorRuntimeMemberId === target.beneficiaryMemberId
+      const fundingTargets =
+        (
+          locatorRuntimeMemberId === null
+            ? ownerJoinCodeFundingGroups?.length === 1
+            : locatorRuntimeMemberId === target.beneficiaryMemberId
+        )
           ? await tx.$queryRaw<Array<{ id: string }>>`
               SELECT "container"."member_id" AS "id"
               FROM "hosted_thread_container" AS "container"

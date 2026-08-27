@@ -268,6 +268,9 @@ test("JoinInvitePage builds a server model with the app-session member", async (
 test.each([
   "incomplete",
   "paused",
+  "past_due",
+  "canceled",
+  "unpaid",
 ] as const)(
   "JoinInvitePage sends a matched %s member with an existing subscription to recovery",
   async (billingStatus) => {

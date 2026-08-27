@@ -399,6 +399,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -642,6 +643,7 @@ describe("applyStripeCheckoutCompleted", () => {
         activatedMemberId: null,
         activatedMembers: [],
         hostedExecutionEventId: null,
+        newlyActivatedMemberIds: [],
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
@@ -738,6 +740,7 @@ describe("applyStripeCheckoutCompleted", () => {
           activatedMemberId: null,
           activatedMembers: [],
           hostedExecutionEventId: null,
+          newlyActivatedMemberIds: [],
           runtimeRecheckMemberIds: [],
           welcomeEmailMemberId: null,
         });
@@ -1422,6 +1425,7 @@ describe("applyStripeCheckoutCompleted", () => {
         subscriptionId: "sub_old",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -1448,6 +1452,7 @@ describe("applyStripeCheckoutCompleted", () => {
       cleanupPulseTrialStripeSubscriptionId: "sub_123",
       hostedExecutionEventId: "wake_123",
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: ["member_123"],
       runtimeRecheckMemberIds: ["member_123"],
       welcomeEmailMemberId: "member_123",
     });
@@ -1520,6 +1525,7 @@ describe("applyStripeCheckoutCompleted", () => {
         activatedMembers: [],
         cleanupPulseTrialStripeSubscriptionId: "sub_123",
         hostedExecutionEventId: null,
+        newlyActivatedMemberIds: [],
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
@@ -1551,6 +1557,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1688,6 +1695,7 @@ describe("applyStripeCheckoutCompleted", () => {
         activatedMemberId: null,
         activatedMembers: [],
         hostedExecutionEventId: null,
+        newlyActivatedMemberIds: [],
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
@@ -1717,6 +1725,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1743,6 +1752,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1783,6 +1793,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMembers: [],
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1829,6 +1840,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMembers: [],
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -2175,6 +2187,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMembers: [],
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });

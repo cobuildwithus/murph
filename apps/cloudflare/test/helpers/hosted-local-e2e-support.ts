@@ -3,6 +3,7 @@ import { createServer as createNetServer } from "node:net";
 import { expect } from "vitest";
 import {
   listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -20,6 +21,11 @@ const temporalDevUiPortOffset = 1_000;
 const minTemporalDevFrontendPort = 10_000;
 const maxTemporalDevFrontendPort = 65_535 - temporalDevUiPortOffset;
 const maxTemporalDevPortReservationAttempts = 1_000;
+const hostedGroupFamilyToolNames = new Set(
+  resolveMurphDynamicTools({ groupAvailable: true })
+    .filter((tool) => tool.name.startsWith("group_"))
+    .map((tool) => `${tool.namespace}.${tool.name}`),
+);
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;
@@ -28,6 +34,7 @@ export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "CEREBRAS_API_KEY",
   "DEEPSEEK_API_KEY",
   "FIREWORKS_API_KEY",
+  "GEMINI_API_KEY",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "GROQ_API_KEY",
   "HF_TOKEN",
@@ -140,7 +147,7 @@ export function scopeHostedLocalAssistantProviderResponse(
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
- * Codex 0.147.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * Codex 0.149.1 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
  * advertises the unified `exec_command` tool on Linux; bump the tool name here
  * if a Codex upgrade changes the advertised exec tool.
  */
@@ -232,13 +239,16 @@ function quoteShellArgument(value: string): string {
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
+    analyzeVideoAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
+    groupAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     pendingVaultFilesAvailable?: boolean;
+    physicalNoteRecoveryAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
@@ -253,6 +263,13 @@ export function expectAdvertisedMurphDynamicTools(
     .find((request) => request.url === "/v1/responses");
   const expectedToolNames = listMurphDynamicToolNames()
     .filter((name) => {
+      if (
+        options.analyzeVideoAvailable !== true
+        && name === "murph.analyze_video"
+      ) {
+        return false;
+      }
+
       if (
         options.computerToolsAvailable !== true
         && name.startsWith("murph.computer_")
@@ -278,6 +295,13 @@ export function expectAdvertisedMurphDynamicTools(
       }
 
       if (
+        options.groupAvailable !== true
+        && hostedGroupFamilyToolNames.has(name)
+      ) {
+        return false;
+      }
+
+      if (
         options.groupRoomModelAvailable !== true
         && name === "murph.group_room_model"
       ) {
@@ -287,6 +311,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.imessageContactAvailable !== true
         && name === "murph.imessage_contact"
+      ) {
+        return false;
+      }
+
+      if (
+        options.physicalNoteRecoveryAvailable !== true
+        && name === "murph.resolve_physical_note"
       ) {
         return false;
       }
@@ -363,7 +394,10 @@ export function expectAdvertisedMurphDynamicTools(
     lastResponsesRequest!.body,
   );
   const expectedAdvertisedToolNames = advertisement.codeMode
-    ? expectedToolNames.filter((name) => name !== "automation" && name !== "group")
+    ? expectedToolNames.filter((name) =>
+        name !== "automation"
+        && !hostedGroupFamilyToolNames.has(`murph.${name}`)
+      )
     : expectedToolNames;
   expect(advertisement.toolNames.sort()).toEqual(expectedAdvertisedToolNames);
   if (advertisement.codeMode) {

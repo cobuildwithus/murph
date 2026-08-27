@@ -343,6 +343,7 @@ describe("cloudflare worker routes", () => {
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "device-webhook-enqueue",
+      "temporal-worker-binding-admission",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -350,6 +351,7 @@ describe("cloudflare worker routes", () => {
       "inference-verification",
       "user-data-delete",
       "telegram-usage-limit-notice",
+      "environment-realtime-call",
       "environment-voice-stage",
       "environment-voice-delete",
       "meal-photo-stage",
@@ -378,6 +380,7 @@ describe("cloudflare worker routes", () => {
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
       "device-webhook-enqueue",
+      "temporal-worker-binding-admission",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -385,6 +388,7 @@ describe("cloudflare worker routes", () => {
       "inference-verification",
       "user-data-delete",
       "telegram-usage-limit-notice",
+      "environment-realtime-call",
       "environment-voice-stage",
       "environment-voice-delete",
       "meal-photo-stage",
@@ -450,6 +454,45 @@ describe("cloudflare worker routes", () => {
       },
       service: "cloudflare-hosted-runner",
     });
+  });
+
+  it("returns the signed Temporal worker binding admission without caching it", async () => {
+    const env = createWorkerEnv();
+    const url = new URL(
+      "https://runner.example.test/internal/temporal-worker/binding-admission",
+    );
+    const callbackSigning = readHostedExecutionEnvironment(
+      asWorkerStringEnvironment(env),
+    ).webCallbackSigning;
+    const headers = await createHostedWebCallbackSignatureHeaders({
+      environment: callbackSigning,
+      method: "GET",
+      path: url.pathname,
+      payload: "",
+      search: url.search,
+    });
+
+    const response = await worker.fetch(new Request(url, {
+      headers,
+      method: "GET",
+    }), env);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("pragma")).toBe("no-cache");
+    await expect(response.json()).resolves.toEqual({
+      bindingContractRevision: "bindings-v1",
+      environment: "production",
+      kind: "hosted_temporal_worker_binding_admission",
+      owner: "cloudflare",
+      signingKeyId: callbackSigning.keyId,
+    });
+
+    const replay = await worker.fetch(new Request(url, {
+      headers,
+      method: "GET",
+    }), env);
+    expect(replay.status).toBe(401);
   });
 
   it("returns smoke failure detail instead of a redacted 500 from the container smoke route", async () => {

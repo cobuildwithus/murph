@@ -22,17 +22,23 @@ import {
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
 } from "@murphai/hosted-execution/assistant-model";
 import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+} from "@murphai/hosted-execution/assistant-capabilities";
+import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
+  buildHostedGeminiVideoAnalysisUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
+  type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   resolveHostedAiUsageTokenPricingBasis,
+  type HostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
@@ -60,6 +66,7 @@ import {
   readHostedRunnerSafeResponseBodyMetadata,
 } from "./runner-outbound/diagnostics.ts";
 import {
+  applyRunnerRuntimeUsageSettlement,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
@@ -129,6 +136,14 @@ import {
   readHostedXaiResponseMetadata,
 } from "./runner-egress-xai.ts";
 import {
+  DEFAULT_GEMINI_API_BASE_URL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
+  isAllowedHostedGeminiVideoAnalysisRequest,
+  parseHostedGeminiVideoAnalysisRequestBody,
+  readHostedGeminiVideoAnalysisUsageMetadata,
+} from "./runner-egress-gemini.ts";
+import {
   DEFAULT_VENICE_API_BASE_URL,
   HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
   buildHostedVeniceResponsesRequestBody,
@@ -188,6 +203,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
   elevenLabs: "api.elevenlabs.io",
   exa: "api.exa.ai",
+  gemini: "generativelanguage.googleapis.com",
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
   openAi: "api.openai.com",
@@ -462,6 +478,7 @@ interface HostedProviderEgressWriteFenceMetadata {
 
 const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
   "elevenlabs",
+  "gemini",
   "exa",
   "mapbox",
   "openai",
@@ -486,6 +503,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs]: handleHostedRunnerElevenLabsOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa]: handleHostedRunnerExaOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini]: handleHostedRunnerGeminiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi]: handleHostedRunnerOpenAiOutbound,
@@ -519,6 +537,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
     ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleElevenLabsRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleXaiRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleGeminiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleVeniceRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
@@ -740,6 +759,25 @@ export async function handleHostedRunnerExaOutbound(
       ctx: _ctx,
       env,
       request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerGeminiOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  ctx: HostedRunnerOutboundContext,
+  upstreamFetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleGeminiRequest({
+      ctx,
+      env,
+      request,
+      upstreamFetchImpl,
       url,
       userId: readHostedRunnerBoundUserId(request),
     }),
@@ -1099,9 +1137,9 @@ async function maybeHandleHostedTranscribeRequest(input: {
   // money, and a 502 below must not drop the usage row.
   const usageRecording = recordHostedTranscribeUsage({
     audioBytes: audio.byteLength,
+    authorization,
     durationMs: readHostedTranscribeOutputDurationMs(output),
     env: input.env,
-    memberId: authorization.userId,
     occurredAt: new Date(upstreamStartedAt).toISOString(),
   });
 
@@ -1156,34 +1194,24 @@ async function maybeHandleHostedTranscribeRequest(input: {
 // response; failures only emit a structured warn log.
 function recordHostedTranscribeUsage(input: {
   audioBytes: number;
+  authorization: HostedProviderEgressAuthorization;
   durationMs: number | null;
   env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
   occurredAt: string;
 }): Promise<void> {
   return (async () => {
-    if (!input.memberId) {
-      throw new TypeError("Hosted transcription usage recording requires a member id.");
-    }
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
     const record = buildHostedTranscriptionUsageRecord({
       audioBytes: input.audioBytes,
       durationMs: input.durationMs,
-      memberId: input.memberId,
+      memberId: writeFence.userId,
       model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
       occurredAt: input.occurredAt,
     });
-    await recordHostedRuntimeUsageRecord({
-      boundUserId: input.memberId,
-      fetchImpl: fetch,
+    await recordHostedDirectRuntimeUsage({
+      env: input.env,
       record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
+      writeFence,
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
@@ -1197,6 +1225,56 @@ function recordHostedTranscribeUsage(input: {
       phase: "wake.running",
     });
   });
+}
+
+async function recordHostedDirectRuntimeUsage(input: {
+  env: RunnerOutboundEnvironmentSource;
+  record: AssistantUsageRecord;
+  writeFence: HostedProviderEgressWriteFenceMetadata;
+}): Promise<HostedRuntimeUsageRecordResponse> {
+  let settlement: HostedRuntimeUsageRecordResponse | null = null;
+  try {
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    settlement = await recordHostedRuntimeUsageRecord({
+      boundUserId: input.writeFence.userId,
+      fetchImpl: fetch,
+      record: input.record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+    return settlement;
+  } finally {
+    await applyRunnerRuntimeUsageSettlement({
+      env: input.env,
+      settlement,
+      userId: input.writeFence.userId,
+      writeAuthority: {
+        attemptId: input.writeFence.attemptId,
+        generation: input.writeFence.leaseGeneration,
+        workspaceVersion: input.writeFence.workspaceVersion,
+      },
+    });
+  }
+}
+
+function requireHostedDirectUsageWriteFence(
+  authorization: HostedProviderEgressAuthorization,
+): HostedProviderEgressWriteFenceMetadata {
+  const writeFence = authorization.writeFence;
+  if (
+    !authorization.authorized
+    || !authorization.userId
+    || !writeFence
+    || writeFence.userId !== authorization.userId
+  ) {
+    throw new TypeError("Hosted direct usage recording requires exact runtime authority.");
+  }
+  return writeFence;
 }
 
 interface HostedTranscribeResponsePayload {
@@ -1568,9 +1646,9 @@ async function maybeHandleOpenAiRequest(input: {
       persistUsage: async (completion) => {
         await recordHostedCodexMemoryUsage({
           apiKeyEnv: "OPENAI_API_KEY",
+          authorization,
           baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
           env: input.env,
-          memberId: authorization.userId,
           providerName: "hosted-openai",
           providerRequestOutcome: completion.providerRequestOutcome,
           requestMetadata: completion.requestMetadata,
@@ -1591,9 +1669,9 @@ async function maybeHandleOpenAiRequest(input: {
   return memoryRequestMetadata && nativeMemoryKind
     ? await handleHostedCodexMemoryUsageResponse({
         apiKeyEnv: "OPENAI_API_KEY",
+        authorization,
         baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
         env: input.env,
-        memberId: authorization.userId,
         memoryKind: nativeMemoryKind,
         providerName: "hosted-openai",
         requestMetadata: memoryRequestMetadata,
@@ -1747,9 +1825,9 @@ async function maybeHandleVeniceRequest(input: {
   return memoryRequestMetadata && nativeMemoryKind
     ? await handleHostedCodexMemoryUsageResponse({
         apiKeyEnv: "VENICE_API_KEY",
+        authorization,
         baseUrl: DEFAULT_VENICE_API_BASE_URL,
         env: input.env,
-        memberId: authorization.userId,
         memoryKind: nativeMemoryKind,
         providerName: "venice",
         requestMetadata: memoryRequestMetadata,
@@ -1760,9 +1838,9 @@ async function maybeHandleVeniceRequest(input: {
 
 async function handleHostedCodexMemoryUsageResponse(input: {
   apiKeyEnv: string;
+  authorization: HostedProviderEgressAuthorization;
   baseUrl: string;
   env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
   memoryKind: HostedCodexNativeMemoryKind;
   providerName: "hosted-openai" | "venice";
   requestMetadata: HostedCodexMemoryRequestMetadata;
@@ -1815,9 +1893,9 @@ async function handleHostedCodexMemoryUsageResponse(input: {
     try {
       await recordHostedCodexMemoryUsage({
         apiKeyEnv: input.apiKeyEnv,
+        authorization: input.authorization,
         baseUrl: input.baseUrl,
         env: input.env,
-        memberId: input.memberId,
         providerName: input.providerName,
         providerRequestOutcome: terminal.providerRequestOutcome,
         requestMetadata: input.requestMetadata,
@@ -1840,28 +1918,22 @@ async function handleHostedCodexMemoryUsageResponse(input: {
 
 async function recordHostedCodexMemoryUsage(input: {
   apiKeyEnv: string;
+  authorization: HostedProviderEgressAuthorization;
   baseUrl: string;
   env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
   providerName: "hosted-openai" | "venice";
   providerRequestOutcome: HostedCodexMemoryProviderRequestOutcome;
   requestMetadata: HostedCodexMemoryRequestMetadata;
   usage: HostedCodexMemoryUsage;
 }): Promise<void> {
-  if (!input.memberId) {
-    throw new TypeError("Hosted Codex memory usage recording requires a member id.");
-  }
-
-  const environment = readHostedExecutionEnvironment(
-    asWorkerStringEnvironment(input.env),
-  );
+  const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
   const record = buildHostedCodexMemoryUsageRecord({
     apiKeyEnv: input.apiKeyEnv,
     baseUrl: input.baseUrl,
     cacheWriteTokens: input.usage.cacheWriteTokens,
     cachedInputTokens: input.usage.cachedInputTokens,
     inputTokens: input.usage.inputTokens,
-    memberId: input.memberId,
+    memberId: writeFence.userId,
     occurredAt: input.usage.occurredAt,
     outputTokens: input.usage.outputTokens,
     providerName: input.providerName,
@@ -1883,17 +1955,10 @@ async function recordHostedCodexMemoryUsage(input: {
     }),
     totalTokens: input.usage.totalTokens,
   });
-  await recordHostedRuntimeUsageRecord({
-    boundUserId: input.memberId,
-    fetchImpl: fetch,
+  await recordHostedDirectRuntimeUsage({
+    env: input.env,
     record,
-    timeoutMs: environment.webControlTimeoutMs,
-    transport: {
-      callbackSigning: environment.webCallbackSigning,
-      mode: "direct",
-      webControlBaseUrl: environment.hostedWebBaseUrl,
-      workspaceCheckpointBridge: null,
-    },
+    writeFence,
   });
 }
 
@@ -2024,16 +2089,16 @@ async function maybeHandleElevenLabsRequest(input: {
   if (response.ok) {
     const usageRecording = providerRequest.kind === "tts"
       ? recordHostedElevenLabsTtsUsage({
+          authorization,
           characterCount: providerRequest.characterCount,
           env: input.env,
-          memberId: authorization.userId,
           model: providerRequest.modelId,
           occurredAt: new Date(providerRequestStartedAt).toISOString(),
         })
       : recordHostedElevenLabsMusicUsage({
+          authorization,
           durationMs: providerRequest.durationMs,
           env: input.env,
-          memberId: authorization.userId,
           model: providerRequest.modelId,
           occurredAt: new Date(providerRequestStartedAt).toISOString(),
           providerRequestId: response.headers.get("request-id"),
@@ -2048,34 +2113,24 @@ async function maybeHandleElevenLabsRequest(input: {
 }
 
 function recordHostedElevenLabsTtsUsage(input: {
+  authorization: HostedProviderEgressAuthorization;
   characterCount: number;
   env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
   model: string;
   occurredAt: string;
 }): Promise<void> {
   return (async () => {
-    if (!input.memberId) {
-      throw new TypeError("Hosted ElevenLabs TTS usage recording requires a member id.");
-    }
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
     const record = buildHostedElevenLabsTtsUsageRecord({
       characterCount: input.characterCount,
-      memberId: input.memberId,
+      memberId: writeFence.userId,
       model: input.model,
       occurredAt: input.occurredAt,
     });
-    await recordHostedRuntimeUsageRecord({
-      boundUserId: input.memberId,
-      fetchImpl: fetch,
+    await recordHostedDirectRuntimeUsage({
+      env: input.env,
       record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
+      writeFence,
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
@@ -2092,36 +2147,26 @@ function recordHostedElevenLabsTtsUsage(input: {
 }
 
 function recordHostedElevenLabsMusicUsage(input: {
+  authorization: HostedProviderEgressAuthorization;
   durationMs: number;
   env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
   model: string;
   occurredAt: string;
   providerRequestId: string | null;
 }): Promise<void> {
   return (async () => {
-    if (!input.memberId) {
-      throw new TypeError("Hosted ElevenLabs Music usage recording requires a member id.");
-    }
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
     const record = buildHostedElevenLabsMusicUsageRecord({
       durationMs: input.durationMs,
-      memberId: input.memberId,
+      memberId: writeFence.userId,
       model: input.model,
       occurredAt: input.occurredAt,
       providerRequestId: input.providerRequestId,
     });
-    await recordHostedRuntimeUsageRecord({
-      boundUserId: input.memberId,
-      fetchImpl: fetch,
+    await recordHostedDirectRuntimeUsage({
+      env: input.env,
       record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
+      writeFence,
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
@@ -2132,6 +2177,172 @@ function recordHostedElevenLabsMusicUsage(input: {
       },
       level: "warn",
       message: "Hosted ElevenLabs Music usage recording failed; delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
+}
+
+async function maybeHandleGeminiRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  upstreamFetchImpl?: typeof fetch;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (input.url.origin !== DEFAULT_GEMINI_API_BASE_URL) {
+    return null;
+  }
+  if (
+    !isAllowedHostedGeminiVideoAnalysisRequest(
+      input.request.method,
+      input.url.pathname,
+    )
+    || input.url.search.length > 0
+    || input.request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
+      !== "application/json"
+    || input.request.headers.get("x-goog-api-key")
+      !== HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL
+  ) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "gemini",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "gemini",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const requestBody = await readBoundedRequestBody(
+    input.request,
+    HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
+  );
+  if (requestBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  let parsedBody: unknown;
+  try {
+    parsedBody = parseHostedGeminiVideoAnalysisRequestBody(
+      JSON.parse(new TextDecoder().decode(requestBody)),
+    );
+  } catch {
+    return disallowedProviderEgress();
+  }
+
+  const token = readRequiredInterceptSecret(
+    input.env.GEMINI_API_KEY,
+    "GEMINI_API_KEY",
+  );
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("content-type", "application/json");
+  headers.set("x-goog-api-key", token);
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
+    input.request,
+    input.url,
+    headers,
+    { body: JSON.stringify(parsedBody), redirect: "manual" },
+  );
+  const providerRequestStartedAt = Date.now();
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "gemini",
+    request: input.request,
+    startedAt,
+    upstreamRequest,
+    upstreamFetchImpl: input.upstreamFetchImpl,
+    url: input.url,
+  });
+  if (!response.ok) {
+    return response;
+  }
+
+  const responseBody = await readBoundedRequestBody(
+    response,
+    HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
+  );
+  if (responseBody === null) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        providerKind: "gemini",
+        responseStatus: response.status,
+      },
+      level: "warn",
+      message: "Hosted Gemini response exceeded the delivery body limit; no usage recorded.",
+      phase: "wake.running",
+    });
+    return new Response("Hosted Gemini response too large.", { status: 502 });
+  }
+  const usageRecording = recordHostedGeminiVideoAnalysisUsage({
+    authorization,
+    env: input.env,
+    model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+    occurredAt: new Date(providerRequestStartedAt).toISOString(),
+    providerRequestId:
+      response.headers.get("x-goog-request-id")
+      ?? response.headers.get("x-request-id"),
+    responseBody,
+  });
+  if (typeof input.ctx?.waitUntil === "function") {
+    input.ctx.waitUntil(usageRecording);
+  } else {
+    // Production container interception has no waitUntil. The recorder owns
+    // its catch/log path, so usage accounting cannot withhold the answer.
+    void usageRecording;
+  }
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.delete("content-encoding");
+  responseHeaders.delete("content-length");
+  return new Response(responseBody, {
+    headers: responseHeaders,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function recordHostedGeminiVideoAnalysisUsage(input: {
+  authorization: HostedProviderEgressAuthorization;
+  env: RunnerOutboundEnvironmentSource;
+  model: string;
+  occurredAt: string;
+  providerRequestId: string | null;
+  responseBody: ArrayBuffer;
+}): Promise<void> {
+  return (async () => {
+    const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
+    const record = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: writeFence.userId,
+      model: input.model,
+      occurredAt: input.occurredAt,
+      providerRequestId: input.providerRequestId,
+      usage: readHostedGeminiVideoAnalysisUsageMetadata(input.responseBody),
+    });
+    const result = await recordHostedDirectRuntimeUsage({
+      env: input.env,
+      record,
+      writeFence,
+    });
+    if (!result.recorded || result.usageId !== record.usageId) {
+      throw new Error("Hosted Gemini video usage was not durably accepted.");
+    }
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "gemini",
+      },
+      level: "warn",
+      message: "Hosted Gemini video usage recording failed; response delivery unaffected.",
       phase: "wake.running",
     });
   });
@@ -2243,8 +2454,8 @@ async function maybeHandleXaiRequest(input: {
   }
   const responseMetadata = readHostedXaiResponseMetadata(responseBody);
   const usageRecording = recordHostedXaiSearchUsage({
+    authorization,
     env: input.env,
-    memberId: authorization.userId,
     model: providerRequest.model,
     occurredAt: new Date(providerRequestStartedAt).toISOString(),
     providerRequestId: responseMetadata.providerRequestId,
@@ -2271,36 +2482,26 @@ async function maybeHandleXaiRequest(input: {
 }
 
 function recordHostedXaiSearchUsage(input: {
+  authorization: HostedProviderEgressAuthorization;
   env: RunnerOutboundEnvironmentSource;
-  memberId: string | null;
   model: string;
   occurredAt: string;
   providerRequestId: string | null;
   usage: Record<string, unknown> | null;
 }): Promise<void> {
   return (async () => {
-    if (!input.memberId) {
-      throw new TypeError("Hosted xAI search usage recording requires a member id.");
-    }
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
     const record = buildHostedXaiSearchUsageRecord({
-      memberId: input.memberId,
+      memberId: writeFence.userId,
       model: input.model,
       occurredAt: input.occurredAt,
       providerRequestId: input.providerRequestId,
       usage: input.usage,
     });
-    await recordHostedRuntimeUsageRecord({
-      boundUserId: input.memberId,
-      fetchImpl: fetch,
+    await recordHostedDirectRuntimeUsage({
+      env: input.env,
       record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
+      writeFence,
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({

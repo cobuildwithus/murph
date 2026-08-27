@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+  type HostedRuntimeMailboxPointer,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
 } from "@murphai/hosted-execution";
@@ -39,6 +42,8 @@ const modelFreeFrontierUserId =
   `member_local_temporal_model_free_frontier_${Date.now()}`;
 const defaultOwnedFrontierUserId =
   `member_local_temporal_default_owned_frontier_${Date.now()}`;
+const environmentInterviewUserId =
+  `member_local_temporal_environment_interview_${Date.now()}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -134,18 +139,129 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
   }, 300_000);
 
-  it("runs due retention for a paused member without assistant provider work", async () => {
+  it("routes an Environment interview through its model-free runtime owner", async () => {
     const activeScenario = requireScenario();
-
     await activeScenario.seedActiveHostedMember({
-      memberId: pausedRetentionUserId,
+      memberId: environmentInterviewUserId,
     });
     await activeScenario.runWake(
-      buildActivationWake(pausedRetentionUserId, "paused-retention"),
-      pausedRetentionUserId,
+      buildActivationWake(environmentInterviewUserId, "environment-interview"),
+      environmentInterviewUserId,
     );
-    await activeScenario.waitForHostedCompletion(pausedRetentionUserId);
+    const activationStatus = await activeScenario.waitForHostedCompletion(
+      environmentInterviewUserId,
+    );
+    const activationReplicaRef =
+      activationStatus.workspace?.browserVaultReplicaRef;
+    expect(activationReplicaRef).toBeDefined();
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
+    const completedAt = new Date().toISOString();
+    const completionId = randomUUID();
+    const eventId = `environment-interview:${completionId}`;
+    const append = await appendHostedExecutionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
+        completedAt,
+        completionId,
+        eventId,
+        memberId: environmentInterviewUserId,
+        occurredAt: completedAt,
+        topics: [{
+          answers: [{
+            aspectId: "sleep-environment",
+            indicatorId: "night_temp_c",
+            note: "The bedroom stays near 19 degrees at night.",
+            value: 19,
+          }],
+          topicId: "sleep:0",
+        }],
+      }),
+    });
+    const signalStartedAt = new Date();
+    const signal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: environmentInterviewUserId,
+      mailboxItemId: append.wake.id,
+    });
+
+    const workflowState = await waitForWorkflowExecutionState({
+      env: activeScenario.runtimeEnv,
+      executionNotBefore: signalStartedAt,
+      workflowId: signal.workflowId,
+    });
+    expect(workflowState.lastExecutionErrorCode).toBeNull();
+    expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
+
+    await waitForSystemMailboxHandledThrough({
+      expectedSeq: append.wake.seq,
+      userId: environmentInterviewUserId,
+    });
+    await expect.poll(async () =>
+      (await activeScenario.harness.readUserStatus(environmentInterviewUserId))
+        .workspace?.browserVaultReplicaRef, {
+      interval: 250,
+      timeout: 120_000,
+    }).not.toEqual(activationReplicaRef);
+    const finalStatus = await activeScenario.harness.readUserStatus(
+      environmentInterviewUserId,
+    );
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.workspace?.browserVaultReplicaRef).not.toBeNull();
+    expect(finalStatus.workspace?.browserVaultReplicaRef).not.toEqual(
+      activationReplicaRef,
+    );
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: eventId,
+      environment: activeScenario.runtimeEnv,
+      userId: environmentInterviewUserId,
+    })).resolves.toMatchObject({
+      kind: "environment-interview.completed",
+      lane: "system",
+    });
+    expect(activeScenario.assistantProviderRequests).toHaveLength(
+      providerRequestBaseline,
+    );
+  }, 300_000);
+
+  it("retires a stale pointer while running due retention for a paused member", async () => {
+    const activeScenario = requireScenario();
+
+    await seedEngagementPausedFrontierMember(
+      activeScenario,
+      pausedRetentionUserId,
+      "paused-retention",
+    );
+    const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
+
+    const retainedEventId =
+      `member.channels.updated:paused-retention:${Date.now()}`;
+    const retainedAppend = await appendHostedExecutionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+        eventId: retainedEventId,
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        memberId: pausedRetentionUserId,
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+    const retainedSignal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: pausedRetentionUserId,
+      mailboxItemId: retainedAppend.wake.id,
+    });
+    const retainedState = await waitForWorkflowBlockedState({
+      env: activeScenario.runtimeEnv,
+      workflowId: retainedSignal.workflowId,
+    });
+    expect(retainedState.latestMailboxPointer).toEqual({
+      lane: "system",
+      laneSeq: retainedAppend.wake.seq,
+      mailboxItemId: retainedAppend.wake.id,
+    });
 
     await updateHostedMemberBillingStatusForTest({
       billingStatus: "paused",
@@ -171,12 +287,38 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(workflowState.lastExecutionErrorCode).toBeNull();
     expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
     expect(workflowState.lastReconciliationBlockedReason).toBe("user_not_active");
+    expect(workflowState.latestMailboxPointer).toBeNull();
 
-    const finalStatus = await activeScenario.waitForHostedCompletion(
+    await expect.poll(async () => {
+      const status = await activeScenario.harness.readUserStatus(
+        pausedRetentionUserId,
+      );
+      return {
+        inFlight: status.inFlight,
+        retentionWakeAt:
+          status.workspace?.inboxMediaRetentionWakeAt ?? null,
+      };
+    }, {
+      interval: 250,
+      timeout: 120_000,
+    }).toEqual({
+      inFlight: false,
+      retentionWakeAt: null,
+    });
+    const finalStatus = await activeScenario.harness.readUserStatus(
       pausedRetentionUserId,
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.workspace?.inboxMediaRetentionWakeAt ?? null).toBeNull();
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: retainedEventId,
+      environment: activeScenario.runtimeEnv,
+      userId: pausedRetentionUserId,
+    })).resolves.toMatchObject({
+      consumedAt: null,
+      kind: "member.channels.updated",
+      lane: "system",
+    });
     expect(activeScenario.assistantProviderRequests).toHaveLength(
       providerRequestBaseline,
     );
@@ -434,6 +576,7 @@ interface ObservedHostedRuntimeWorkflowState {
   lastExecutionErrorCode: string | null;
   lastExecutionKind: string | null;
   lastReconciliationBlockedReason: string | null;
+  latestMailboxPointer: HostedRuntimeMailboxPointer | null;
   userId: string;
 }
 
@@ -452,6 +595,9 @@ function readObservedHostedRuntimeWorkflowState(
   const lastReconciliationBlockedReason = readNullableString(
     record.lastReconciliationBlockedReason,
   );
+  const latestMailboxPointer = readNullableMailboxPointer(
+    record.latestMailboxPointer,
+  );
   if (typeof record.userId !== "string" || record.userId.length === 0) {
     throw new TypeError("Hosted runtime Workflow query returned an invalid userId.");
   }
@@ -461,7 +607,38 @@ function readObservedHostedRuntimeWorkflowState(
     lastExecutionErrorCode,
     lastExecutionKind,
     lastReconciliationBlockedReason,
+    latestMailboxPointer,
     userId: record.userId,
+  };
+}
+
+function readNullableMailboxPointer(
+  value: unknown,
+): HostedRuntimeMailboxPointer | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(
+      "Hosted runtime Workflow query returned an invalid mailbox pointer.",
+    );
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    (record.lane !== "conversation" && record.lane !== "system")
+    || typeof record.laneSeq !== "string"
+    || !/^(0|[1-9]\d*)$/u.test(record.laneSeq)
+    || typeof record.mailboxItemId !== "string"
+    || record.mailboxItemId.length === 0
+  ) {
+    throw new TypeError(
+      "Hosted runtime Workflow query returned an invalid mailbox pointer.",
+    );
+  }
+  return {
+    lane: record.lane,
+    laneSeq: record.laneSeq,
+    mailboxItemId: record.mailboxItemId,
   };
 }
 

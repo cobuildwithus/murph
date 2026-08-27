@@ -31,8 +31,8 @@ export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the six owners below this caps
-// one hourly pass at 12 statements and 3,000 deleted rows.
+// high-volume diagnostic drain budget. Across the seven owners below this caps
+// one hourly pass at 14 statements and 3,500 deleted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -62,11 +62,14 @@ export interface HostedRetentionCleanupResult {
   expiredDeviceConnectIntentsDeleted: number;
   expiredDeviceOauthSessionsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
+  expiredEmailPublicBootstrapAttemptsDeleted: number;
+  expiredGroupParticipantObservationsDeleted: number;
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
   expiredSensitiveActionChallengesDeleted: number;
+  expiredSignupNotificationContextsRetired: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
@@ -99,6 +102,10 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredClinicalRecordOauthSessions({ now, prisma });
   const expiredClinicalRecordConnectIntentsDeleted =
     await deleteExpiredClinicalRecordConnectIntents({ now, prisma });
+  const expiredEmailPublicBootstrapAttemptsDeleted =
+    await deleteExpiredEmailPublicBootstrapAttempts({ now, prisma });
+  const expiredSignupNotificationContextsRetired =
+    await retireExpiredSignupNotificationContexts({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
@@ -109,6 +116,8 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const expiredGroupCurrentSenderClarificationsDeleted =
     await deleteExpiredGroupCurrentSenderClarifications({ now, prisma });
+  const expiredGroupParticipantObservationsDeleted =
+    await deleteExpiredGroupParticipantObservations({ now, prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
     now,
     prisma,
@@ -153,16 +162,49 @@ export async function runHostedRetentionCleanup(input: {
     expiredDeviceConnectIntentsDeleted,
     expiredDeviceOauthSessionsDeleted,
     expiredDeviceWebhookTracesDeleted,
+    expiredEmailPublicBootstrapAttemptsDeleted,
+    expiredGroupParticipantObservationsDeleted,
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredSensitiveActionChallengesDeleted,
+    expiredSignupNotificationContextsRetired,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted: 0,
     staleWebSessionsDeleted,
   };
+}
+
+// Signup context is optional notification projection data, not member history.
+// The partial expiry index keeps this bounded sweep off unrelated member rows.
+async function retireExpiredSignupNotificationContexts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH due AS MATERIALIZED (
+      SELECT member."id"
+      FROM "hosted_member" AS member
+      WHERE member."signup_notification_context_encrypted" IS NOT NULL
+        AND (
+          member."signup_notification_context_expires_at" IS NULL
+          OR member."signup_notification_context_expires_at" <= ${input.now}
+        )
+      ORDER BY
+        member."signup_notification_context_expires_at" ASC NULLS FIRST,
+        member."id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF member SKIP LOCKED
+    )
+    UPDATE "hosted_member" AS member
+    SET
+      "signup_notification_context_encrypted" = NULL,
+      "signup_notification_context_expires_at" = NULL
+    FROM due
+    WHERE member."id" = due."id"
+  `);
 }
 
 async function deleteExpiredGroupCurrentSenderClarifications(input: {
@@ -183,6 +225,25 @@ async function deleteExpiredGroupCurrentSenderClarifications(input: {
     WHERE clarification."group_runtime_member_id" =
         doomed."group_runtime_member_id"
       AND clarification."target_member_id" = doomed."target_member_id"
+  `);
+}
+
+async function deleteExpiredGroupParticipantObservations(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "contact_lookup_key"
+      FROM "hosted_group_participant_observation"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "contact_lookup_key" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM "hosted_group_participant_observation" AS observation
+    USING doomed
+    WHERE observation."contact_lookup_key" = doomed."contact_lookup_key"
   `);
 }
 
@@ -562,6 +623,25 @@ export async function deleteExpiredConnectedAppConnectIntents(input: {
     DELETE FROM "hosted_connected_app_connect_intent" AS intent
     USING doomed
     WHERE intent."claim_hash" = doomed."claim_hash"
+  `);
+}
+
+export async function deleteExpiredEmailPublicBootstrapAttempts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT attempt."id"
+      FROM "hosted_email_public_bootstrap_attempt" AS attempt
+      WHERE attempt."expires_at" <= ${input.now}
+      ORDER BY attempt."expires_at" ASC, attempt."id" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF attempt SKIP LOCKED
+    )
+    DELETE FROM "hosted_email_public_bootstrap_attempt" AS attempt
+    USING doomed
+    WHERE attempt."id" = doomed."id"
   `);
 }
 

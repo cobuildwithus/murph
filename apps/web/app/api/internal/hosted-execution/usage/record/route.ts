@@ -24,8 +24,12 @@ export const POST = withJsonError(async (request: Request) => {
     trustedUserId: userId,
     usage: [usage],
   });
+  if (result.platformAiUsageAllowedAfter === null) {
+    throw new TypeError("Hosted usage recording did not settle the managed AI allowance.");
+  }
 
   return jsonOk({
+    platformAiUsageAllowedAfter: result.platformAiUsageAllowedAfter,
     recorded: result.recordedIds.includes(usage.usageId),
     usageId: usage.usageId,
   });

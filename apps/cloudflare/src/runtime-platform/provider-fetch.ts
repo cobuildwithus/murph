@@ -351,6 +351,7 @@ const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
   "api.openai.com",
   "api.telegram.org",
   "api.x.ai",
+  "generativelanguage.googleapis.com",
 ]);
 
 export function readCloudflareHostedProviderFetchBaseUrls(

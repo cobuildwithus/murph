@@ -70,6 +70,7 @@ import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
+  prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   type HostedPrivyPhoneTransferProof,
   type HostedPrivyPhoneTransferSourceRetirementProof,
@@ -109,6 +110,7 @@ import type { HostedRunnerUserDataDeletionBestEffortResult } from "../hosted-exe
 import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
+import { runPrismaInteractiveTransaction } from "../prisma";
 import { decryptHostedWebNullableFields } from "../hosted-web/encryption";
 import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
@@ -202,6 +204,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes decrypted user-facing phone, Privy, and wallet identity fields while omitting lookup keys and active phone-code attempt IDs.",
   },
   {
+    slug: "prisma.hosted_group_participant_observation",
+    label: "Short-lived group roster attribution evidence",
+    deletion: "documented-retention",
+    note: "Global blinded roster evidence is not member-owned authority, is omitted from user exports, and expires no later than 14 days after its latest observation.",
+  },
+  {
     slug: "prisma.hosted_address_book_projection",
     label: "Optional address-book projection state",
     deletion: "live-delete",
@@ -230,6 +238,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Email authorization state",
     deletion: "live-delete",
     note: "Confirmed export includes verified-email and direct-public-sender addresses when available while omitting address lookup keys.",
+  },
+  {
+    slug: "prisma.hosted_email_public_bootstrap_attempt",
+    label: "Short-lived public-email bootstrap delivery attempts",
+    deletion: "live-delete",
+    note: "Deletes member-scoped cooldown, blinded candidate lookup, terminal provider outcome, and provider message metadata. The original public email body, headers, attachments, and address plaintext are never stored by this owner or included in export.",
   },
   {
     slug: "prisma.hosted_member_billing_ref",
@@ -494,6 +508,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Device provider connections and tokens",
     deletion: "live-delete",
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
+  },
+  {
+    slug: "prisma.device_source_no_data_outreach_preference",
+    label: "Wearable no-data outreach preferences",
+    deletion: "live-delete",
+    note: "Deletes member-scoped source-provider reminder intervals and opt-outs in the canonical account transaction.",
   },
   {
     slug: "prisma.device_provider_application",
@@ -1068,6 +1088,12 @@ async function deleteHostedAccountDataInternal(input: {
     ? await readHostedPrivyPhoneTransferTargetSession(phoneTransfer)
     : null;
   if (phoneTransfer && phoneTransferSessionBeforeBillingCleanup) {
+    const preparedRetirement =
+      await prepareHostedPrivyPhoneTransferSourceRetirement({
+        prisma: input.prisma,
+        sourceMemberId: phoneTransfer.transfer.sourceMemberId,
+        targetMemberId: phoneTransfer.targetMember.id,
+      });
     // Reclassify immediately before billing cleanup. Stripe can promptly write
     // the cancellation webhook back to this already-fenced source, so the
     // final deletion transaction verifies only the immutable transfer fence.
@@ -1077,6 +1103,7 @@ async function deleteHostedAccountDataInternal(input: {
           identity: phoneTransferSessionBeforeBillingCleanup.identity,
           member: phoneTransfer.targetMember,
           now: deletionStartedAt,
+          prepared: preparedRetirement,
           prisma: tx,
           targetPhoneNumberBeforeTransfer:
             phoneTransfer.targetPhoneNumberBeforeTransfer,
@@ -1127,7 +1154,13 @@ async function deleteHostedAccountDataInternal(input: {
           session: phoneTransferSession,
         })
       : null;
-  const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
+  const preparedHostedGroupIds = await listHostedAccountDeletionTargetGroupIds({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+  });
+  const deleteHostedAccountDataCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<HostedAccountDeletionDatabaseResult> => {
     if (input.phoneTransfer && phoneTransferSession) {
       await acquireHostedPrivyPhoneTransferPhoneLocksTx({
         prisma: tx,
@@ -1136,6 +1169,10 @@ async function deleteHostedAccountDataInternal(input: {
         transferPhoneNumber: input.phoneTransfer.transfer.phoneNumber,
       });
     }
+    await lockHostedGroupsForAccountDeletionTx({
+      groupIds: preparedHostedGroupIds,
+      prisma: tx,
+    });
     const lockedFamilyClaimOwnerIds =
       await lockHostedFamilyClaimOwnersForAccountDeletionTx({
         memberIds: deletionMemberIds,
@@ -1194,6 +1231,14 @@ async function deleteHostedAccountDataInternal(input: {
         (memberId) => memberId !== input.memberId,
       ),
     });
+    const transactionHostedGroupIds =
+      await listHostedAccountDeletionTargetGroupIds({
+        memberIds: transactionDeletionMemberIds,
+        prisma: tx,
+      });
+    if (!haveSameStrings(transactionHostedGroupIds, preparedHostedGroupIds)) {
+      throwHostedAccountDeletionGroupSetChanged();
+    }
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
@@ -1305,7 +1350,13 @@ async function deleteHostedAccountDataInternal(input: {
       deletedCounts,
       deletedRuntimeMemberIds: transactionDeletionMemberIds,
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  };
+  const databaseDeletion = await runPrismaInteractiveTransaction(
+    input.prisma,
+    "account_deletion.database_delete",
+    deleteHostedAccountDataCallback,
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
   const deletedCounts = databaseDeletion.deletedCounts;
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
@@ -1858,7 +1909,9 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   prisma: PrismaClient;
   providerAccessRemovalConfirmationToken: string | null;
 }): Promise<string[]> {
-  return input.prisma.$transaction(async (tx) => {
+  const suspendHostedMembersCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<string[]> => {
     const preparedMemberIds = uniqueStrings([
       input.ownerMemberId,
       ...await listOwnedHostedThreadContainerMemberIds({
@@ -1988,7 +2041,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
     // the suspended group runtime.
     await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
-  }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
+  };
+  return runPrismaInteractiveTransaction(
+    input.prisma,
+    "account_deletion.suspension_fence",
+    suspendHostedMembersCallback,
+    HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS,
+  );
 }
 
 export async function assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx(
@@ -2328,6 +2387,15 @@ function throwHostedAccountDeletionRuntimeSetChanged(): never {
     code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
     httpStatus: 503,
     message: "Your account changed during deletion. Retry so every hosted runtime is included.",
+    retryable: true,
+  });
+}
+
+function throwHostedAccountDeletionGroupSetChanged(): never {
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_GROUP_SET_CHANGED",
+    httpStatus: 503,
+    message: "Your account changed during deletion. Retry so every hosted group is included.",
     retryable: true,
   });
 }
@@ -3327,6 +3395,11 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE run.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
+        deleted_device_source_no_data_outreach_preferences AS (
+          DELETE FROM device_source_no_data_outreach_preference AS preference
+          WHERE preference.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
         deleted_device_connections AS (
           DELETE FROM device_connection AS connection
           WHERE connection.user_id IN (SELECT id FROM target_members)
@@ -3347,6 +3420,8 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_group_member",
           (SELECT count(*) FROM deleted_clinical_retrieval_runs)
             AS "prisma.clinical_record_retrieval_run",
+          (SELECT count(*) FROM deleted_device_source_no_data_outreach_preferences)
+            AS "prisma.device_source_no_data_outreach_preference",
           (SELECT count(*) FROM deleted_device_connections)
             AS "prisma.device_connection"
       `,
@@ -3527,6 +3602,11 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE phone_call.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
+        deleted_email_public_bootstrap_attempts AS (
+          DELETE FROM hosted_email_public_bootstrap_attempt AS bootstrap_attempt
+          WHERE bootstrap_attempt.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
         deleted_member_email_authorizations AS (
           DELETE FROM hosted_member_email_authorization AS email_authorization
           WHERE email_authorization.member_id IN (SELECT id FROM target_members)
@@ -3664,6 +3744,8 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_workspace",
           (SELECT count(*) FROM deleted_phone_calls)
             AS "prisma.hosted_phone_call",
+          (SELECT count(*) FROM deleted_email_public_bootstrap_attempts)
+            AS "prisma.hosted_email_public_bootstrap_attempt",
           (SELECT count(*) FROM deleted_member_email_authorizations)
             AS "prisma.hosted_member_email_authorization",
           (SELECT count(*) FROM deleted_subscription_checkouts)
@@ -3803,6 +3885,48 @@ async function listDeviceConnectionIdentities(input: {
     },
     where: { userId: input.memberId },
   });
+}
+
+async function listHostedAccountDeletionTargetGroupIds(input: {
+  memberIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<string[]> {
+  const memberIds = uniqueStrings(input.memberIds).sort();
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    /* hosted-account-deletion-target-groups */
+    SELECT id
+    FROM hosted_group
+    WHERE owner_member_id IN (${Prisma.join(memberIds)})
+       OR runtime_member_id IN (${Prisma.join(memberIds)})
+    ORDER BY id ASC
+  `;
+  return rows.map((row) => row.id);
+}
+
+async function lockHostedGroupsForAccountDeletionTx(input: {
+  groupIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const groupIds = uniqueStrings(input.groupIds).sort();
+  if (groupIds.length === 0) {
+    return;
+  }
+
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    /* hosted-account-deletion-target-group-lock */
+    SELECT id
+    FROM hosted_group
+    WHERE id IN (${Prisma.join(groupIds)})
+    ORDER BY id ASC
+    FOR UPDATE
+  `;
+  if (!haveSameStrings(rows.map((row) => row.id), groupIds)) {
+    throwHostedAccountDeletionGroupSetChanged();
+  }
 }
 
 async function lockHostedMembersForAccountDeletionTx(input: {
