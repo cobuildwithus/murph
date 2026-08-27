@@ -19,6 +19,7 @@ import {
 } from "@murphai/hosted-execution/side-effects";
 
 import {
+  assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
@@ -38,6 +39,110 @@ const cleanupTasks: Array<() => Promise<void>> = [];
 afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(cleanupTasks.splice(0).map((cleanup) => cleanup()));
+});
+
+it("checks exact Web ownership before a direct iMessage turn can commit", async () => {
+  const alreadyAnswered = Object.assign(
+    new Error("Web already answered the exact inbound"),
+    {
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      retryable: false as const,
+    },
+  );
+  const assertLinqRecentInboundEngagement = vi.fn(async () => {
+    throw alreadyAnswered;
+  });
+  const directContext = {
+    directRecipientPhoneNumber: "+15555550123",
+    fromPhoneNumber: null,
+    replyToMessageId: "linq_message_first_turn",
+    routeAuthority: null,
+    service: "iMessage",
+    target: "linq_chat_first_turn",
+    threadIsDirect: true,
+  };
+
+  await expect(assertHostedAssistantLinqTurnCommitAuthority({
+    effectsPort: createHostedRuntimeEffectsPortStub({
+      assertLinqRecentInboundEngagement,
+    }),
+    linqDeliveryContexts: [
+      directContext,
+      directContext,
+      { ...directContext, service: "SMS" },
+      { ...directContext, threadIsDirect: false },
+    ],
+    signal: null,
+  })).rejects.toMatchObject({
+    code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+    retryable: false,
+  });
+  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledOnce();
+  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorityCheckOnly: true,
+      idempotencyKey: null,
+      replyToMessageId: "linq_message_first_turn",
+      target: "linq_chat_first_turn",
+      targetKind: "thread",
+    }),
+    { signal: null },
+  );
+});
+
+it("terminally supersedes a stale runtime reply after Web answered the exact first turn", async () => {
+  const fixture = await createHostedLinqAttachmentFixture({
+    imageCount: 0,
+    key: "web-first-turn-already-answered",
+    target: "linq_chat_web_first_turn_already_answered",
+  });
+  const alreadyAnswered = Object.assign(
+    new Error("Web already answered the exact inbound"),
+    {
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    },
+  );
+  const assertLinqRecentInboundEngagement = vi.fn(async () => {
+    throw alreadyAnswered;
+  });
+  const providerFetch = vi.fn<typeof fetch>();
+  const publicInternetFetch = vi.fn<typeof fetch>();
+
+  const outcomes = await drainHostedPreparedAssistantDeliveries({
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch,
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({
+      assertLinqRecentInboundEngagement,
+    }),
+  });
+
+  expect(outcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(1);
+  expect(providerFetch).not.toHaveBeenCalled();
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    deliveryConfirmationPending: false,
+    lastError: {
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+    },
+    nextAttemptAt: null,
+    status: "abandoned",
+  });
 });
 
 it("freezes an accepted reaction's exact-consume set across callback retry and replay", async () => {

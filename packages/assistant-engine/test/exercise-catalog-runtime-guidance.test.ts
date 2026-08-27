@@ -17,6 +17,15 @@ describe('exercise catalog runtime guidance', () => {
     const compact = raw.replace(/\s+/gu, ' ')
 
     expect(compact).toContain(
+      'For a setup-only workout activation or logging turn, member-supplied exercise names are authoritative log input, not catalog selections.',
+    )
+    expect(compact).toContain(
+      'Preserve every distinct supplied name and follow the canonical workout owner without running `exercise list` or `exercise show`.',
+    )
+    expect(compact).toContain(
+      'A missing catalog match must never block, rename, merge, omit, or substitute a member-supplied exercise in the workout.',
+    )
+    expect(compact).toContain(
       'Exercise images are optional, but use them when available and helpful, especially for unfamiliar or technique-sensitive movements.',
     )
     expect(compact).toContain(

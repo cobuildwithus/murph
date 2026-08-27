@@ -155,7 +155,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`murph.group_data action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
-    expect(section).not.toContain('explicit current visibility of a consented shared metric')
+    expect(section).not.toContain(
+      'explicit current visibility or explicitly present-time attribution of a consented shared metric',
+    )
     expect(section).not.toContain('call exact-scope `read_shared` once first')
     expect(section).not.toContain('`pending` means permission is active')
     expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
@@ -307,7 +309,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('no cross-source winner')
     expect(prompt).toContain('`workouts.v0`: local start/duration/type/source')
     expect(prompt).toContain('event/vault zone')
-    expect(prompt).toContain('explicit current visibility of a consented shared metric')
+    expect(prompt).toContain(
+      'explicit current visibility or explicitly present-time attribution of a consented shared metric',
+    )
     expect(prompt).toContain('call exact-scope `read_shared` once first')
     expect(prompt).toContain('`pending` means permission is active')
     expect(prompt).toContain('never score or count it as zero, missing, disconnected, or non-consenting')

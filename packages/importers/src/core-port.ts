@@ -160,6 +160,7 @@ export interface DeviceBatchImportExecutionOptions {
 export interface CanonicalWritePort {
   importDocument(payload: DocumentImportPayload): unknown;
   addMeal(payload: MealImportPayload): unknown;
+  validateSampleImport(payload: SampleImportPayload): unknown;
   importSamples(payload: SampleImportPayload): unknown;
   importDeviceBatch(
     payload: DeviceBatchImportPayload,
@@ -174,6 +175,7 @@ type PortLike = Partial<Record<CanonicalWriteMethod, (...args: readonly unknown[
 const DEFAULT_REQUIRED_METHODS = Object.freeze([
   "importDocument",
   "addMeal",
+  "validateSampleImport",
   "importSamples",
   "importDeviceBatch",
 ] satisfies readonly CanonicalWriteMethod[]);

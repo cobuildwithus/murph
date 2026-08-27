@@ -3394,7 +3394,7 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
-  it('plans murph.analyze_video only for private accepted-input turns with the Gemini key', async () => {
+  it('plans murph.analyze_video for accepted direct and authenticated group turns with the Gemini key', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -3485,7 +3485,7 @@ describe('assistant Codex turn planning', () => {
       conversationScope: 'group',
       env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
     }))
-      .not.toContain('analyze_video')
+      .toContain('analyze_video')
   })
 
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
@@ -7331,10 +7331,13 @@ describe('assistant Codex turn planning', () => {
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
+          contentReceivedAt: '2026-07-12T12:54:00.000Z',
+          createdAt: '2026-07-12T12:55:00.000Z',
           kind: 'user',
           text: 'I want to make weekday lunches easier.',
         },
         {
+          createdAt: '2026-07-12T12:56:00.000Z',
           kind: 'assistant',
           text: 'We can keep that practical and low pressure.',
         },
@@ -7373,10 +7376,12 @@ describe('assistant Codex turn planning', () => {
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'I want to make weekday lunches easier.',
+          occurredAt: '2026-07-12T12:54:00.000Z',
           role: 'user',
         },
         {
           content: 'We can keep that practical and low pressure.',
+          occurredAt: '2026-07-12T12:56:00.000Z',
           role: 'assistant',
         },
       ])

@@ -1,6 +1,7 @@
 ---
 title: 'Fresh worktree Web typecheck cannot resolve the generated Prisma client'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2378'
 ---
 
 ## Expected Behavior

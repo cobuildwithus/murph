@@ -293,6 +293,13 @@ interface ImportSamplesResult {
   manifestPath: string;
 }
 
+interface PreparedSampleImport {
+  normalizedStream: SampleStream;
+  preparedRecords: Array<{ record: SampleRecord; relativePath: string }>;
+  source: string;
+  transformId: string;
+}
+
 interface DeviceEvidencePartInput extends LooseRecord {
   role?: string;
   fileName?: string;
@@ -1234,6 +1241,79 @@ function buildSampleRecord({
     seed: buildNormalizedSampleSeed(input),
     recordId: recordId ?? generateRecordId(ID_PREFIXES.sample),
   });
+}
+
+function buildIndexedSampleImportRecord({
+  index,
+  input,
+}: {
+  index: number;
+  input: BuildSampleRecordInput;
+}): SampleRecord {
+  try {
+    return buildSampleRecord(input);
+  } catch (error) {
+    const sampleField = error instanceof VaultError
+      ? resolveSampleImportRepairField(error)
+      : null;
+
+    if (!sampleField || !(error instanceof VaultError)) {
+      throw error;
+    }
+
+    throw new VaultError(
+      error.code,
+      `Sample ${index + 1} contains an invalid ${sampleField} field.`,
+      {
+        sampleIndex: index,
+        sampleField,
+      },
+    );
+  }
+}
+
+function resolveSampleImportRepairField(error: VaultError): string | null {
+  const fieldName = error.details.fieldName;
+  if (
+    typeof fieldName === "string"
+    && /^(?:recordedAt|startAt|endAt|timeZone)$/u.test(fieldName)
+  ) {
+    return fieldName;
+  }
+
+  if (error.code === "VAULT_INVALID_SAMPLE_UNIT") {
+    return "unit";
+  }
+  if (error.code === "VAULT_INVALID_EXTERNAL_REF") {
+    return "externalRef";
+  }
+  if (error.code === "VAULT_INVALID_DATA_ORIGIN") {
+    return "dataOrigin";
+  }
+  if (
+    error.code === "VAULT_INVALID_SAMPLE"
+    && error.message === "Sample value must be a finite number."
+  ) {
+    return "value";
+  }
+
+  const contractErrors = error.details.errors;
+  if (error.code !== "SAMPLE_INVALID" || !Array.isArray(contractErrors)) {
+    return null;
+  }
+
+  for (const contractError of contractErrors) {
+    if (typeof contractError !== "string") {
+      continue;
+    }
+
+    const match = /^\$\.([A-Za-z_][A-Za-z0-9_]*)\s*:/u.exec(contractError);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
 }
 
 async function readExistingRecordIds(
@@ -6713,7 +6793,7 @@ export async function addMeal({
   });
 }
 
-export async function importSamples({
+async function prepareSampleImport({
   vaultRoot,
   stream,
   unit,
@@ -6721,8 +6801,7 @@ export async function importSamples({
   sourcePath,
   source = "import",
   quality = "raw",
-  batchProvenance,
-}: ImportSamplesInput): Promise<ImportSamplesResult> {
+}: ImportSamplesInput): Promise<PreparedSampleImport> {
   const vault = await loadVault({ vaultRoot });
 
   if (!SAMPLE_STREAM_SET.has(stream as SampleStream)) {
@@ -6747,16 +6826,19 @@ export async function importSamples({
       "Each sample must be a plain object.",
     ),
   );
-  const transformFingerprint = normalizedSamples.map((sample) => {
-    const { id: _id, ...record } = buildSampleRecord({
-      stream: normalizedStream,
-      recordedAt: sample.recordedAt ?? sample.occurredAt,
-      timeZone: vault.metadata.timezone,
-      source,
-      quality,
-      sample,
-      unit,
-      recordId: `${ID_PREFIXES.sample}_00000000000000000000000000`,
+  const transformFingerprint = normalizedSamples.map((sample, index) => {
+    const { id: _id, ...record } = buildIndexedSampleImportRecord({
+      index,
+      input: {
+        stream: normalizedStream,
+        recordedAt: sample.recordedAt ?? sample.occurredAt,
+        timeZone: vault.metadata.timezone,
+        source,
+        quality,
+        sample,
+        unit,
+        recordId: `${ID_PREFIXES.sample}_00000000000000000000000000`,
+      },
     });
 
     return record;
@@ -6775,15 +6857,18 @@ export async function importSamples({
   const preparedRecords: Array<{ record: SampleRecord; relativePath: string }> = [];
 
   for (const [index, normalizedSample] of normalizedSamples.entries()) {
-    const record = buildSampleRecord({
-      stream: normalizedStream,
-      recordedAt: normalizedSample.recordedAt ?? normalizedSample.occurredAt,
-      timeZone: vault.metadata.timezone,
-      source,
-      quality,
-      sample: normalizedSample,
-      unit,
-      recordId: deterministicContractId(ID_PREFIXES.sample, `${transformId}:${index}`),
+    const record = buildIndexedSampleImportRecord({
+      index,
+      input: {
+        stream: normalizedStream,
+        recordedAt: normalizedSample.recordedAt ?? normalizedSample.occurredAt,
+        timeZone: vault.metadata.timezone,
+        source,
+        quality,
+        sample: normalizedSample,
+        unit,
+        recordId: deterministicContractId(ID_PREFIXES.sample, `${transformId}:${index}`),
+      },
     });
     const relativePath = toMonthlyShardRelativePath(
       `${VAULT_LAYOUT.sampleLedgerDirectory}/${normalizedStream}`,
@@ -6793,6 +6878,32 @@ export async function importSamples({
 
     preparedRecords.push({ record, relativePath });
   }
+
+  return {
+    normalizedStream,
+    preparedRecords,
+    source,
+    transformId,
+  };
+}
+
+export async function validateSampleImport(input: ImportSamplesInput): Promise<void> {
+  await prepareSampleImport(input);
+}
+
+export async function importSamples(input: ImportSamplesInput): Promise<ImportSamplesResult> {
+  const {
+    normalizedStream,
+    preparedRecords,
+    source,
+    transformId,
+  } = await prepareSampleImport(input);
+  const {
+    batchProvenance,
+    sourcePath,
+    unit,
+    vaultRoot,
+  } = input;
 
   const raw = sourcePath
     ? prepareRawArtifact({

@@ -273,7 +273,11 @@ export function toVaultCliError(
   error: unknown,
   mappings: Record<string, VaultErrorMapping> = {},
 ) {
-  if (error instanceof VaultCliError || !isVaultLikeError(error)) {
+  if (
+    error instanceof VaultCliError
+    || !isVaultLikeError(error)
+    || error.code === 'QUERY_SOURCE_INVALID'
+  ) {
     return error
   }
 

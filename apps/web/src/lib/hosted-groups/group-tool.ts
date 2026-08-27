@@ -129,6 +129,7 @@ import {
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupMembershipsForMember,
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
@@ -233,6 +234,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   joinCode: string;
   offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
+  repostOriginAssistantInputId?: string;
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.projectionScopes,
@@ -248,11 +250,26 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
     joinCode: input.joinCode,
     offerGeneration: input.offerGeneration,
     projectionScopeKeys,
+    ...(input.repostOriginAssistantInputId === undefined
+      ? {}
+      : {
+          repostOriginAssistantInputId: input.repostOriginAssistantInputId,
+        }),
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
     0,
     HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH,
   )}`;
+}
+
+function hostedGroupProjectionScopeSetsEqual(
+  left: readonly HostedVaultShareProjectionScope[],
+  right: readonly HostedVaultShareProjectionScope[],
+): boolean {
+  const leftKeys = new Set(left.map(buildHostedVaultShareProjectionScopeKey));
+  const rightKeys = new Set(right.map(buildHostedVaultShareProjectionScopeKey));
+  return leftKeys.size === rightKeys.size
+    && [...leftKeys].every((scopeKey) => rightKeys.has(scopeKey));
 }
 
 export type HostedRuntimeGroupToolAccessClassification =
@@ -474,6 +491,8 @@ export async function handleHostedRuntimeGroupTool(input: {
       joinOffer: input.request.joinOffer ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
+      repostOriginAssistantInputId:
+        input.request.repostOriginAssistantInputId ?? null,
     });
   }
 
@@ -1414,6 +1433,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   joinOffer: HostedRuntimeGroupPostJoinOfferRequest | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
+  repostOriginAssistantInputId: string | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "post_join_offer",
@@ -1434,10 +1454,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
-    input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds,
-  );
+  const requestedProjectionScopes = input.joinOffer?.projectionScopes
+    ?? input.joinOffer?.projectionKinds;
+  const newProjectionScopes = input.repostOriginAssistantInputId === null
+    ? resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes)
+    : null;
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -1446,18 +1467,40 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
-    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-      actorMemberId: ownerAccess.ownerMemberId,
-      containerMemberId: input.memberId,
-      displayName: input.joinOffer?.displayName ?? null,
-      now,
-      requestedVaultShareProjectionScopes: projectionScopes,
-      tx,
-    });
+    const result = input.repostOriginAssistantInputId === null
+      ? await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+          actorMemberId: ownerAccess.ownerMemberId,
+          containerMemberId: input.memberId,
+          displayName: input.joinOffer?.displayName ?? null,
+          now,
+          requestedVaultShareProjectionScopes: newProjectionScopes,
+          tx,
+        })
+      : await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
+          actorMemberId: ownerAccess.ownerMemberId,
+          containerMemberId: input.memberId,
+          tx,
+        });
+    const projectionScopes = newProjectionScopes
+      ?? result.group.requestedVaultShareProjectionScopes;
+    if (
+      input.repostOriginAssistantInputId !== null
+      && requestedProjectionScopes !== undefined
+      && requestedProjectionScopes !== null
+      && !hostedGroupProjectionScopeSetsEqual(
+        resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes),
+        projectionScopes,
+      )
+    ) {
+      return { kind: "repost_scope_change_unavailable" as const };
+    }
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
       now,
       projectionScopes,
+      ...(input.repostOriginAssistantInputId === null
+        ? {}
+        : { replaceActiveOffer: true }),
       tx,
     });
     if (offerPost.kind === "unavailable") {
@@ -1467,6 +1510,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       kind: "ok" as const,
       offerPost,
       ownerMemberId: ownerAccess.ownerMemberId,
+      projectionScopes,
       ...result,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -1496,7 +1540,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
-    projectionScopes,
+    projectionScopes: created.projectionScopes,
   });
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
@@ -1507,7 +1551,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
         offerGeneration,
-        projectionScopes,
+        projectionScopes: created.projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : {
+              repostOriginAssistantInputId:
+                input.repostOriginAssistantInputId,
+            }),
       }),
       message,
     });
@@ -1546,7 +1596,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
-        projectionScopes,
+        projectionScopes: created.projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : { replaceActiveOffersAt: providerSendCompletedAt }),
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);

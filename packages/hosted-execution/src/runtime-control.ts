@@ -940,7 +940,7 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 2_000;
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 5_000;
 
 const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
 
@@ -1592,6 +1592,8 @@ export type HostedRuntimeGroupToolRequest =
       action: "post_join_offer";
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      /** Exact accepted-input identity for an explicitly requested native repost. */
+      repostOriginAssistantInputId?: string;
     }
   | {
       action: "preflight_set_chat_avatar";

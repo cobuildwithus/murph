@@ -13,6 +13,7 @@ import type {
   CachedUnwrappedHostedDomainRoot,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  openHostedUserSecureBoxStrings,
   prewarmHostedUserSecureBoxStrings,
   openHostedUserSecureBoxStringsWithPreparedRoots,
   openHostedUserSecureBoxString,
@@ -104,23 +105,45 @@ export async function encryptHostedMailboxPayloadStringFromPreparedRoot(
   });
 }
 
-export async function decryptHostedMailboxPayloadString(input: HostedMailboxPayloadCryptoMetadata & {
-  prisma?: HostedMailboxEncryptionPrismaClient;
+type HostedMailboxPayloadDecryptEntry = HostedMailboxPayloadCryptoMetadata & {
   value: string | null | undefined;
+};
+
+export async function decryptHostedMailboxPayloadStrings(input: {
+  entries: readonly HostedMailboxPayloadDecryptEntry[];
+  prisma?: HostedMailboxEncryptionPrismaClient;
+}): Promise<Array<string | null>> {
+  return openHostedUserSecureBoxStrings({
+    entries: input.entries.map(buildHostedMailboxPayloadSecureBoxOpenEntry),
+    lane: "mailbox-payload",
+    prisma: input.prisma,
+  });
+}
+
+export async function decryptHostedMailboxPayloadString(input: HostedMailboxPayloadDecryptEntry & {
+  prisma?: HostedMailboxEncryptionPrismaClient;
 }): Promise<string | null> {
+  return openHostedUserSecureBoxString({
+    ...buildHostedMailboxPayloadSecureBoxOpenEntry(input),
+    lane: "mailbox-payload",
+    prisma: input.prisma,
+  });
+}
+
+function buildHostedMailboxPayloadSecureBoxOpenEntry(
+  input: HostedMailboxPayloadDecryptEntry,
+) {
   const prepared = typeof input.value === "string"
     && input.value.startsWith(
       HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX,
     );
-  return openHostedUserSecureBoxString({
+  return {
     aad: buildHostedMailboxPayloadSecureBoxAad({
       ...input,
       laneSeq: prepared
         ? HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE
         : input.laneSeq,
     }),
-    lane: "mailbox-payload",
-    prisma: input.prisma,
     scope: buildHostedMailboxPayloadScope(input.payloadStorage),
     userId: input.userId,
     value: prepared
@@ -128,7 +151,7 @@ export async function decryptHostedMailboxPayloadString(input: HostedMailboxPayl
         HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX.length,
       )
       : input.value,
-  });
+  };
 }
 
 export async function encryptPreparedHostedMailboxPayloadString(

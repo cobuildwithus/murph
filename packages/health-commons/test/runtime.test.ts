@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,11 +20,13 @@ import {
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
+  HealthCommonsProtocolArtifactError,
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
   isRunnableProtocolStatus,
+  isHealthCommonsProtocolArtifactError,
   loadGeneratedHealthCommonsBiomarkerDesiredDirections,
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
@@ -531,6 +533,63 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         delete process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
       } else {
         process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
+      }
+    }
+  });
+
+  it("classifies generated protocol artifact failures without exposing paths or contents", async () => {
+    const generatedRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-protocol-failures-"),
+    );
+    const privateArtifactValue = "private malformed artifact value";
+    const scenarios = [
+      {
+        artifact: "protocol_index",
+        fileName: "protocol-index.json",
+        load: (artifactPath: string) =>
+          loadGeneratedHealthCommonsProtocolIndex({ protocolIndexPath: artifactPath }),
+      },
+      {
+        artifact: "protocol_run_specs",
+        fileName: "protocol-run-specs.json",
+        load: (artifactPath: string) =>
+          loadGeneratedHealthCommonsProtocolRunSpecs({ protocolRunSpecsPath: artifactPath }),
+      },
+      {
+        artifact: "protocol_family_graph",
+        fileName: "protocol-family-graph.json",
+        load: (artifactPath: string) =>
+          loadGeneratedHealthCommonsProtocolFamilyGraph({ protocolFamilyGraphPath: artifactPath }),
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const artifactPath = path.join(generatedRoot, scenario.fileName);
+      for (const category of ["unavailable", "invalid"] as const) {
+        if (category === "invalid") {
+          await writeFile(artifactPath, `${privateArtifactValue} {not-json}`, "utf8");
+        }
+        let failure: unknown;
+        try {
+          scenario.load(artifactPath);
+        } catch (error) {
+          failure = error;
+        }
+
+        expect(isHealthCommonsProtocolArtifactError(failure)).toBe(true);
+        expect(failure).toBeInstanceOf(HealthCommonsProtocolArtifactError);
+        expect(failure).toMatchObject({
+          artifact: scenario.artifact,
+          category,
+          code: "HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE",
+        });
+        const serialized = JSON.stringify(failure, Object.getOwnPropertyNames(failure));
+        expect(serialized).not.toContain(generatedRoot);
+        expect(serialized).not.toContain(privateArtifactValue);
+
+        if (category === "invalid") {
+          await rm(artifactPath, { force: true });
+        }
       }
     }
   });

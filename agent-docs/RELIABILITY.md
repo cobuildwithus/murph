@@ -604,6 +604,67 @@ Last verified: 2026-08-26
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+  Before generation, Web claims the exact eligible chat/event only when the
+  provider payload contains one non-empty text part. Source-part cardinality is
+  preserved rather than deduplicated by type, so two text parts cannot enter
+  the fast path after their text is joined. Web then runs one bounded
+  tool-free Murph reply generation beside the admission classifier, enrollment,
+  and shell prewarm. After the planner converges and before any fallback side
+  effect, only an exact model-approved active direct wake retains that claim for
+  Web delivery; every other successfully planned outcome marks the same row
+  skipped. A caught planning failure also skips an attempted row before
+  rethrowing because no reply body exists to resume; the skip writer leaves
+  provider-started, failed-with-payload, and completed rows untouched. The
+  exact-event settlement reads the existing row under the chat lock and is
+  never gated by request-local generation state, so replay can finish a rolled
+  back settlement without creating a synthetic skipped row. The
+  active-member replan still owns route promotion, inbound accounting, and the
+  canonical inbound mailbox append before any generated reply can be sent.
+  A definite route-read or route-projection failure after generation confirms
+  that same attempted row was skipped before allowing ordinary-runtime
+  fallback; if the skip cannot be confirmed, Web retains ownership and the
+  activation wake stays suppressed. The bounded classifier prefix is eligible
+  for a Web reply only when it represents the complete normalized source text;
+  longer one-part text keeps its ordinary full-mailbox runtime path.
+  A reply claim extends the existing `HostedLinqDelivery` row with the exact
+  encrypted body in the same short database transaction that claims provider
+  dispatch. Linq receives the stable event-derived idempotency key. An
+  ambiguous or retryable send retains that ciphertext, suppresses both the
+  conversation and deferred activation wakes, and replays only the same body;
+  it never regenerates the reply. A skipped claim or definitive pre-acceptance
+  rejection with no retained payload is terminal for this template and cannot
+  be reopened by an exact webhook replay; the ordinary runtime remains the
+  reply owner. Provider acceptance is the irreversible sender boundary even
+  when it observes an already-buffered failed receipt: Web records the accepted
+  outbound and never transfers the same inbound to the runtime. Exact replay
+  and runtime dispatch derive ownership from one ordering: any provider
+  correlation is answered; only a definitive uncorrelated pre-provider
+  terminal row is fallback. Later receipts remain delivery evidence and cannot
+  authorize another response. Other delivery templates retain their existing
+  retry behavior.
+  After provider acceptance,
+  one short transaction records the delivery milestone, appends the ordinary
+  self-authored Linq conversation envelope, stamps both that row and the exact
+  inbound row consumed, and clears the encrypted delivery payload. The runtime
+  is then signaled from the consumed outbound checkpoint, so mailbox replay
+  imports both rows as context with null reply targets and the next member
+  message continues through the normal runtime without a duplicate first
+  response. A different inbound or direct-to-group transition waits behind an
+  unresolved first-turn obligation, and the exact route, direct audience,
+  active access, and unconsumed inbound are revalidated before send and
+  finalization. Generation timeout, unavailable configuration, unsafe output,
+  an incomplete bounded text representation, or an ineligible multipart
+  message leaves the existing inbound runtime path unchanged. Immediately
+  before runtime Linq provider dispatch, the existing egress route reopens the
+  validated source event's exact instant-delivery row under its existing chat
+  lock: unresolved ownership defers, accepted or delivered evidence ends the
+  stale runtime reply, and terminal fallback or absence permits the ordinary
+  runtime claim. The already-answered result terminally supersedes the stale
+  runtime outbox intent: it is neither retried nor recorded as a failed send,
+  and it schedules no failure-recovery input or wake. This adds no
+  second queue, transcript store, workflow kind, or runtime state owner; all
+  database work remains exact-event and single-row rather than collection
+  fanout.
 - Linq signup-link terminal failures recompute suppression under the existing
   member-row lock without reading delivery history into application memory.
   One scalar statement checks only the exact five source references for the
@@ -2252,8 +2313,9 @@ Last verified: 2026-08-26
   revenue, member, and message snapshot fields. After that write, the cron
   returns non-success so monitoring exposes the missed activity capture and the
   same authenticated endpoint can be manually rerun for that UTC date; Vercel
-  does not retry a failed cron invocation automatically. An ops-page read is an
-  additional same-date recovery attempt but is not the cron's retry guarantee.
+  does not retry a failed cron invocation automatically. That authenticated
+  endpoint is the sole same-date mutation and recovery owner; the ops page is
+  read-only and never captures a snapshot while rendering.
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Group-to-private growth attribution reuses that same snapshot pass and its
@@ -2286,7 +2348,10 @@ Last verified: 2026-08-26
   Provider, assistant, and ordinary runtime multi-row writers use the same
   trace-id lock order. This common order prevents cross-writer row-lock cycles,
   while the fresh checkpoint snapshot prevents an older waiting lease from
-  overwriting a newer one, without a broad transaction retry.
+  overwriting a newer one, without a broad transaction retry. Provider-start
+  and assistant-milestone writers additionally skip contended rows and report
+  them unmatched so their existing bounded 250 ms / 1 s caller retries own
+  recovery; writers without that retry contract keep ordinary ordered locking.
   Persistence failures emit only event type, source, input cardinality, query
   tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
   stay out of failure logs. The bounded transaction-local trace-id list passes
