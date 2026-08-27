@@ -233,30 +233,160 @@ interface VaultErrorMapping {
   preserveDetails?: boolean
 }
 
+const publicEventContractFields = new Set([
+  'id',
+  'occurredAt',
+  'recordedAt',
+  'source',
+  'title',
+  'note',
+  'tags',
+  'links',
+  'rawRefs',
+  'evidence',
+  'attachments',
+  'externalRef',
+  'dataOrigin',
+  'timeZone',
+  'kind',
+  'symptom',
+  'intensity',
+  'bodySite',
+  'experimentId',
+  'experimentSlug',
+  'noteType',
+  'authoredAt',
+  'signedAt',
+  'author',
+  'providerId',
+  'facility',
+  'encounterId',
+  'sections',
+  'metric',
+  'queryVisibility',
+  'qualifiers',
+  'value',
+  'visibility',
+  'canonicalFact',
+  'observationGrain',
+  'unit',
+  'assertion',
+  'domain',
+  'polarity',
+  'subject',
+  'assertionText',
+  'code',
+  'codeSystem',
+  'assertedOn',
+  'sourceLabel',
+  'exposureType',
+  'substance',
+  'duration',
+  'measurements',
+  'media',
+  'testName',
+  'resultStatus',
+  'summary',
+  'testCategory',
+  'specimenType',
+  'labName',
+  'labPanelId',
+  'collectedAt',
+  'reportedAt',
+  'fastingStatus',
+  'results',
+  'medicationName',
+  'dose',
+  'supplementName',
+  'activityType',
+  'durationMinutes',
+  'distanceKm',
+  'workout',
+  'startAt',
+  'endAt',
+  'sleepType',
+  'interventionType',
+  'protocolId',
+  'regimenId',
+  'sessionStatus',
+  'sessionLocalDate',
+  'scheduledLocalDate',
+  'timing',
+  'temperatureC',
+  'afterExercise',
+  'symptoms',
+  'confounders',
+  'fields',
+  'contextType',
+  'severity',
+])
+
+function contractValidationDetails(details: Record<string, unknown>) {
+  const errors = Array.isArray(details.errors) ? details.errors : []
+
+  return {
+    stage: details.stage === 'read' ? 'read' : 'validation',
+    issues: errors.map((issue) => ({
+      publicPath: contractIssuePublicPath(issue),
+      code: 'custom',
+    })),
+  }
+}
+
+function contractIssuePublicPath(issue: unknown): readonly string[] {
+  if (typeof issue !== 'string') {
+    return []
+  }
+
+  const topLevelPath = /^\$\.([A-Za-z_][A-Za-z0-9_-]*)(?=[:.\[])/u.exec(issue.trim())
+  const topLevelField = topLevelPath?.[1]
+  return topLevelField && publicEventContractFields.has(topLevelField)
+    ? [topLevelField]
+    : []
+}
+
 const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   EVENT_KIND_INVALID: {
     code: 'contract_invalid',
+    details: {
+      stage: 'validation',
+      issues: [{ code: 'invalid_value', publicPath: ['kind'] }],
+    },
   },
   EVENT_OCCURRED_AT_MISSING: {
     code: 'invalid_timestamp',
+    details: {
+      stage: 'validation',
+      issues: [{ code: 'invalid_type', publicPath: ['occurredAt'], expected: 'string' }],
+    },
   },
   EVENT_CONTRACT_INVALID: {
     code: 'contract_invalid',
+    details: contractValidationDetails,
+    preserveDetails: false,
   },
   EVENT_MISSING: {
     code: 'not_found',
+    details: { stage: 'read' },
   },
   EVENT_REVISION_CONFLICT: {
     code: 'conflict',
+    details: { stage: 'conflict' },
   },
   INVALID_TIMESTAMP: {
     code: 'invalid_timestamp',
+    details: {
+      stage: 'validation',
+      issues: [{ code: 'invalid_format', publicPath: [] }],
+    },
   },
   INVALID_INPUT: {
     code: 'contract_invalid',
+    details: { stage: 'validation' },
   },
   CAPTURE_MEDIA_MISSING: {
     code: 'invalid_option',
+    details: { stage: 'validation' },
   },
 }
 
@@ -314,7 +444,211 @@ export function toVaultCliError(
 }
 
 export function toEventUpsertVaultCliError(error: unknown) {
+  if (
+    isVaultLikeError(error)
+    && error.code === 'INVALID_INPUT'
+    && (error.message === 'Event draft requires a title.'
+      || error.message === 'Event payload requires a title.')
+  ) {
+    return toVaultCliError(error, {
+      ...eventUpsertVaultErrorMappings,
+      INVALID_INPUT: {
+        code: 'contract_invalid',
+        details: {
+          stage: 'validation',
+          issues: [{ code: 'invalid_type', publicPath: ['title'], expected: 'string' }],
+        },
+      },
+    })
+  }
+
   return toVaultCliError(error, eventUpsertVaultErrorMappings)
+}
+
+export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: string) {
+  if (error instanceof VaultCliError) {
+    return error
+  }
+
+  const errorCode = readErrorCode(error)
+  const targetsInputFile = errorTargetsInputFile(error, inputFilePath)
+  if (errorCode === 'ENOENT' && targetsInputFile) {
+    return new VaultCliError(
+      'not_found',
+      'The input file was not found.',
+      {
+        stage: 'filesystem',
+        issues: [{ code: 'custom', publicPath: ['file'] }],
+      },
+    )
+  }
+
+  if (
+    errorCode === 'ERR_IMPORT_PATH_NOT_FILE'
+    || ((errorCode === 'EISDIR' || errorCode === 'ENOTDIR') && targetsInputFile)
+  ) {
+    return new VaultCliError(
+      'invalid_path',
+      'The input path is not a regular file.',
+      {
+        stage: 'filesystem',
+        issues: [{ code: 'invalid_type', publicPath: ['file'], expected: 'string' }],
+      },
+    )
+  }
+
+  if ((errorCode === 'EACCES' || errorCode === 'EPERM') && targetsInputFile) {
+    return new VaultCliError(
+      'permission_denied',
+      'The input file could not be read.',
+      {
+        stage: 'filesystem',
+        issues: [{ code: 'custom', publicPath: ['file'] }],
+      },
+    )
+  }
+
+  return error
+}
+
+export function toVaultCliFilesystemError(
+  error: unknown,
+  input: {
+    message: string
+    fieldPath?: 'out' | 'vault'
+  },
+) {
+  if (error instanceof VaultCliError) {
+    return error
+  }
+
+  const errorCode = readErrorCode(error)
+  const classification = (() => {
+    if (errorCode === 'ENOENT') {
+      return {
+        code: 'not_found',
+        issueCode: 'custom',
+      }
+    }
+    if (errorCode === 'EACCES' || errorCode === 'EPERM' || errorCode === 'EROFS') {
+      return {
+        code: 'permission_denied',
+        issueCode: 'custom',
+      }
+    }
+    if (
+      errorCode === 'EEXIST'
+      || errorCode === 'EISDIR'
+      || errorCode === 'ENOTDIR'
+      || errorCode === 'ELOOP'
+    ) {
+      return {
+        code: 'invalid_path',
+        issueCode: 'invalid_type',
+      }
+    }
+    if (errorCode === 'ENOSPC' || errorCode === 'EDQUOT') {
+      return {
+        code: 'storage_unavailable',
+        issueCode: 'custom',
+      }
+    }
+    return null
+  })()
+
+  if (!classification) {
+    return error
+  }
+
+  return new VaultCliError(
+    classification.code,
+    input.message,
+    {
+      retryable: false,
+      stage: 'filesystem',
+      issues: input.fieldPath
+          ? [{
+            publicPath: [input.fieldPath],
+            code: classification.issueCode,
+          }]
+        : [],
+    },
+  )
+}
+
+export function toAssessmentImportVaultCliError(error: unknown, inputFilePath: string) {
+  const inputFileError = toImporterInputFileVaultCliError(error, inputFilePath)
+  if (inputFileError !== error) {
+    return inputFileError
+  }
+
+  return toVaultCliError(error, {
+    ASSESSMENT_INVALID_JSON: {
+      code: 'invalid_payload',
+      details: {
+        stage: 'validation',
+        issues: [{ code: 'invalid_format', publicPath: [] }],
+      },
+    },
+    ASSESSMENT_RESPONSE_INVALID: {
+      code: 'contract_invalid',
+      details: contractValidationDetails,
+      preserveDetails: false,
+    },
+  })
+}
+
+export function toAssessmentProjectVaultCliError(error: unknown) {
+  if (isVaultLikeError(error) && error.code === 'VAULT_INVALID_JSONL') {
+    return new VaultCliError(
+      'assessment_store_invalid',
+      'The stored assessment ledger is not valid JSONL.',
+      { retryable: false, stage: 'read', vaultCode: error.code },
+    )
+  }
+
+  if (isVaultLikeError(error) && error.code === 'ASSESSMENT_RESPONSE_INVALID') {
+    return new VaultCliError(
+      'assessment_store_invalid',
+      'Stored assessment data does not match the assessment contract.',
+      { retryable: false, stage: 'read', vaultCode: error.code },
+    )
+  }
+
+  return toVaultCliError(error, {
+    ASSESSMENT_RESPONSE_NOT_FOUND: {
+      code: 'not_found',
+      message: 'The requested assessment response was not found.',
+      details: {
+        stage: 'read',
+        issues: [{ code: 'custom', publicPath: ['id'] }],
+      },
+    },
+    ASSESSMENT_RESPONSE_PROJECT_INVALID: {
+      code: 'contract_invalid',
+      details: { stage: 'read' },
+    },
+  })
+}
+
+function readErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+
+  return typeof error.code === 'string' ? error.code : null
+}
+
+function errorTargetsInputFile(error: unknown, inputFilePath: string): boolean {
+  if (!error || typeof error !== 'object' || !('path' in error)) {
+    return false
+  }
+
+  if (typeof error.path !== 'string') {
+    return false
+  }
+
+  return path.resolve(error.path) === path.resolve(inputFilePath)
 }
 
 export function toVaultMetadataCliError(error: unknown) {

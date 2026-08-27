@@ -546,11 +546,30 @@ test.sequential(
 
       await assert.rejects(
         () => pruneStoredExportPack(vaultRoot, 'focus-pack'),
-        {
-          name: 'VaultCliError',
-          code: 'invalid_path',
-          message:
-            'Vault-relative path "exports/packs/focus-pack/manifest.json" may not traverse symbolic links inside the selected vault root.',
+        (error) => {
+          assert.equal(
+            typeof error === 'object' && error !== null && 'name' in error
+              ? error.name
+              : null,
+            'VaultCliError',
+          )
+          assert.equal(
+            typeof error === 'object' && error !== null && 'code' in error
+              ? error.code
+              : null,
+            'invalid_path',
+          )
+          assert.equal(
+            typeof error === 'object' && error !== null && 'message' in error
+              ? error.message
+              : null,
+            'The stored export pack manifest path is invalid.',
+          )
+          const serialized = JSON.stringify(error)
+          assert.equal(serialized.includes('focus-pack'), false)
+          assert.equal(serialized.includes(vaultRoot), false)
+          assert.equal(serialized.includes(outsideRoot), false)
+          return true
         },
       )
     } finally {
