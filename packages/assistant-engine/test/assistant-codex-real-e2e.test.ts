@@ -82,6 +82,7 @@ import {
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
   MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -117,6 +118,7 @@ import {
 import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedDeviceToolRequest,
+  AssistantHostedGroupSharedReadResponse,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
@@ -3731,6 +3733,213 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     720_000,
+  )
+
+  it(
+    'attributes a scheduled group comparison from labeled shared rows',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-labeled-summary-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildScheduledAutomationDeveloperInstructions(
+              'group',
+              'shared_read',
+            ),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return buildLabeledSharedStepsReadResponse({
+                  averyValue: 12_345,
+                  date: '2026-08-04',
+                  jordanValue: 4_321,
+                })
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation recipe:',
+            'Create one concise current-chat activity update. State each participant\'s latest completed-day shared steps as a participant-specific observation, then compare them using the exact returned totals.',
+            'The group did not request anonymization.',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
+        )
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+          },
+        })
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+        }])
+        expectTwoLabeledSharedValues({
+          first: { displayName: 'Avery', value: 12_345 },
+          message: result.finalMessage,
+          second: { displayName: 'Jordan', value: 4_321 },
+        })
+        expect(result.finalMessage).toMatch(
+          /\b(?:ahead|behind|compared|difference|exceeded|fewer|gap|higher|led|lower|more|outpaced|spread|trailed|versus|vs\.?|while)\b/iu,
+        )
+        expectNoSharedAttributionRefusal(result.finalMessage)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'refreshes labeled shared rows before an attribution follow-up',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-labeled-attribution-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions('shared_read'),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return buildLabeledSharedStepsReadResponse({
+                  averyValue: 13_579,
+                  date: '2026-07-28',
+                  jordanValue: 6_246,
+                })
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Earlier group update:',
+            '"The shared step totals were 12,345 and 4,321."',
+            'Current group message:',
+            '"Murph, who had which shared values?"',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const sharedReads = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name
+        )
+        const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
+          const record = readRecord(event)
+          if (readString(record?.method, record?.type) !== 'item/completed') {
+            return false
+          }
+          const item = readRecord(readRecord(record?.params)?.item)
+          return readString(item?.type) === 'agentMessage'
+            && readString(item?.text)?.trim() === result.finalMessage.trim()
+        })
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+          },
+        })
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+        }])
+        expect(finalAnswerEventIndex).toBeGreaterThan(
+          sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,
+        )
+        expectTwoLabeledSharedValues({
+          first: { displayName: 'Avery', value: 13_579 },
+          message: result.finalMessage,
+          second: { displayName: 'Jordan', value: 6_246 },
+        })
+        expect(result.finalMessage).not.toMatch(/12,?345|4,?321/u)
+        expectNoSharedAttributionRefusal(result.finalMessage)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 
   it(
@@ -14968,12 +15177,17 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
 
 function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
+  assistantHostedGroupToolSurface:
+    | 'families'
+    | 'shared_read'
+    | 'none' = 'families',
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
+    assistantHostedGroupToolSurface,
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
@@ -14991,12 +15205,129 @@ function buildScheduledAutomationDeveloperInstructions(
   })
 }
 
-function buildHostedGroupStatusDeveloperInstructions(): string {
+function buildLabeledSharedStepsReadResponse(input: {
+  averyValue: number
+  date: string
+  jordanValue: number
+}): AssistantHostedGroupSharedReadResponse {
+  const buildMember = (
+    displayName: string,
+    participantKey: string,
+    value: number,
+  ) => ({
+    currentTurnHandles: [],
+    displayName,
+    memberId: `member_${participantKey}`,
+    participantId: `participant_${participantKey}`,
+    projections: [{
+      dataStatus: 'available' as const,
+      grantedAt: '2026-07-01T12:00:00.000Z',
+      grantStatus: 'granted' as const,
+      projectionScope: {
+        projectionKind: 'steps-days.v0' as const,
+      },
+      projectionScopeKey: 'steps-days.v0',
+      records: [{
+        data: {
+          date: input.date,
+          metricKey: 'steps' as const,
+          unit: 'count' as const,
+          value,
+        },
+        occurredAt: `${input.date}T00:00:00.000Z`,
+        recordKey: input.date,
+      }],
+    }],
+  })
+
+  return {
+    members: [
+      buildMember('Avery', 'avery', input.averyValue),
+      buildMember('Jordan', 'jordan', input.jordanValue),
+    ],
+    requestedProjectionScopeKeys: ['steps-days.v0'],
+    status: 'ok',
+  }
+}
+
+function expectTwoLabeledSharedValues(input: {
+  first: { displayName: string; value: number }
+  message: string
+  second: { displayName: string; value: number }
+}): void {
+  const message = input.message.replaceAll(',', '')
+  const firstLabel = escapeRegExp(input.first.displayName)
+  const firstValue = String(input.first.value)
+  const secondLabel = escapeRegExp(input.second.displayName)
+  const secondValue = String(input.second.value)
+  const hasDirectAssociation = (
+    label: string,
+    value: string,
+    otherLabel: string,
+    otherValue: string,
+  ): boolean => {
+    const boundary = `(?:(?!${otherLabel}|${otherValue})[^.!?\\n]){0,120}`
+    return new RegExp(
+      `(?:${label}${boundary}${value}|${value}${boundary}${label})`,
+      'iu',
+    ).test(message)
+  }
+  const direct = hasDirectAssociation(
+    firstLabel,
+    firstValue,
+    secondLabel,
+    secondValue,
+  ) && hasDirectAssociation(
+    secondLabel,
+    secondValue,
+    firstLabel,
+    firstValue,
+  )
+  const labelsThenValuesRespectively = new RegExp(
+    `${firstLabel}[^.!?\\n]{0,100}${secondLabel}[^.!?\\n]{0,100}${firstValue}[^.!?\\n]{0,100}${secondValue}[^.!?\\n]{0,100}respectively`,
+    'iu',
+  ).test(message)
+  const valuesThenLabelsRespectively = new RegExp(
+    `${firstValue}[^.!?\\n]{0,100}${secondValue}[^.!?\\n]{0,100}${firstLabel}[^.!?\\n]{0,100}${secondLabel}[^.!?\\n]{0,100}respectively`,
+    'iu',
+  ).test(message)
+
+  expect(
+    direct || labelsThenValuesRespectively || valuesThenLabelsRespectively,
+  ).toBe(true)
+}
+
+function expectNoSharedAttributionRefusal(message: string): void {
+  expect(message).not.toMatch(
+    /(?:mapping|who had which|which (?:member|participant|person))[^.!?]{0,100}(?:unavailable|unknown|cannot|can't|need[^.!?]{0,30}confirm)/iu,
+  )
+  expect(message).not.toMatch(
+    /(?:cannot|can't|unable to|do not know|don't know)[^.!?\n]{0,80}(?:tell|determine|map|attribute|know)[^.!?\n]{0,80}(?:who|which|value|number)/iu,
+  )
+  expect(message).not.toMatch(
+    /(?:ask|check with|wait for)[^.!?\n]{0,50}(?:Avery|Jordan|members?|participants?|people|humans?)[^.!?\n]{0,50}(?:confirm|reconfirm|verify)/iu,
+  )
+  expect(message).not.toMatch(
+    /(?:Avery|Jordan|members?|participants?|people|humans?)[^.!?\n]{0,50}(?:must|need to|have to)[^.!?\n]{0,30}(?:confirm|reconfirm|verify)/iu,
+  )
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function buildHostedGroupStatusDeveloperInstructions(
+  assistantHostedGroupToolSurface:
+    | 'families'
+    | 'shared_read'
+    | 'none' = 'families',
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
+    assistantHostedGroupToolSurface,
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {

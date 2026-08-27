@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-08-22
+Last verified: 2026-08-27
 Status: Implemented
 
 ## Product
@@ -201,6 +201,11 @@ content rules are:
 - use human units and keep broad movement separate from workout duration;
 - never turn a completed-day average into a weekly total;
 - find one recognizable group story instead of dumping every returned field;
+- treat each `read_shared` member row as the atomic presentation unit: a
+  usable, unambiguous display name labels only that row's projections, and
+  labeled participant-specific observations and comparisons use those labels
+  unless the group requested anonymization; never map unlabeled or ambiguous
+  rows from order, values, or conversation;
 - avoid lowest-performer, missing-data, body, diagnosis, and illness jokes;
 - use only the current tool result, never private one-to-one data or raw share
   files.
