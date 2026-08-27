@@ -1831,7 +1831,10 @@ describe('assistant consumption lookup guidance', () => {
       'Read it before recommending exercises, rest, activity restriction, or load changes for pain',
     )
     expect(prompt).toContain(
-      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
+      'Private `start a live workout` is consent: read `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md`, then execute before replying.',
+    )
+    expect(prompt).toContain(
+      'Other movement selection/instruction: domain owner plus `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`.',
     )
     expect(prompt).toContain(
       'follow the owning skill\'s label or exercise-catalog workflow instead of estimating from memory or inventing details.',
@@ -2478,6 +2481,9 @@ describe('assistant experiment onboarding guidance', () => {
       '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
     )
     expect(prompt).toContain('run one `vault-cli commons knowledge search')
+    expect(prompt).toContain(
+      'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
+    )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')

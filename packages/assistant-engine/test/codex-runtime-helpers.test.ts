@@ -156,7 +156,6 @@ function completeTestCodexProtocolEvents(
       params: {
         ...completedParams,
         tokenUsage: {
-          modelContextWindow: null,
           ...tokenUsage,
           last,
           total,
@@ -191,7 +190,6 @@ function completeTestTokenUsageBreakdown(
     : 0
   return breakdown
     ? {
-        cacheWriteInputTokens: 0,
         cachedInputTokens: 0,
         inputTokens,
         outputTokens,
@@ -440,6 +438,81 @@ describe('Codex assistant registry helpers', () => {
       servedModel: 'codex-mini',
       tokenPricingBasis: 'standard',
       totalTokens: null,
+    })
+  })
+
+  it('retains raw current-shape token usage with optional fields omitted', () => {
+    const extracted = extractExactCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        modelProvider: 'openai',
+        oss: false,
+      }),
+      rawEvents: [
+        {
+          method: 'turn/started',
+          params: {
+            turn: { id: 'turn-current-token-usage-shape' },
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-current-token-usage-shape',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 7,
+                inputTokens: 41,
+                outputTokens: 11,
+                reasoningOutputTokens: 3,
+                totalTokens: 52,
+              },
+              total: {
+                cachedInputTokens: 7,
+                inputTokens: 41,
+                outputTokens: 11,
+                reasoningOutputTokens: 3,
+                totalTokens: 52,
+              },
+            },
+            turnId: 'turn-current-token-usage-shape',
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-current-token-usage-shape',
+              model: 'gpt-5.4',
+            },
+          },
+        },
+      ],
+    })
+
+    expect(extracted).toMatchObject({
+      cacheWriteTokens: 0,
+      cachedInputTokens: 7,
+      inputTokens: 41,
+      outputTokens: 11,
+      providerRequestId: 'turn-current-token-usage-shape',
+      rawUsageJson: {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 7,
+        inputTokens: 41,
+        outputTokens: 11,
+        reasoningOutputTokens: 3,
+        totalTokens: 52,
+      },
+      reasoningTokens: 3,
+      totalTokens: 52,
+      turnProfileJson: {
+        modelContextWindow: null,
+        requestCount: 1,
+        requests: [{ cachedInput: 7, input: 41, output: 11 }],
+      },
+      usageExtractionSourcePath: 'thread.tokenUsage.total.delta',
     })
   })
 
@@ -3218,6 +3291,36 @@ describe('Codex assistant registry helpers', () => {
         'Latest question.',
       ].join('\n'),
     )
+  })
+
+  it('serializes trusted occurrence times with committed conversation history', () => {
+    expect(
+      resolveAssistantProviderPrompt({
+        conversationHistoryMessages: [
+          {
+            content: 'Earlier completion.',
+            occurredAt: '2026-08-05T12:30:00.000Z',
+            role: 'user',
+          },
+          {
+            content: 'You completed the morning routine.',
+            occurredAt: '2026-08-05T12:31:00.000Z',
+            role: 'assistant',
+          },
+        ],
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        userPrompt: 'Run the scheduled occurrence.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toContain([
+      'User at 2026-08-05T12:30:00.000Z:',
+      'Earlier completion.',
+      '',
+      'Assistant at 2026-08-05T12:31:00.000Z:',
+      'You completed the morning routine.',
+    ].join('\n'))
   })
 
   it('keeps raw Linq delivery targets out of Codex prompt context', () => {

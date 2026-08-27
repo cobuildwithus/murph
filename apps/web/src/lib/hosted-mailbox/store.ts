@@ -65,6 +65,7 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
+  decryptHostedMailboxPayloadStrings,
   decryptHostedMailboxPayloadStringsWithPreparedRoots,
   decryptHostedMailboxPayloadString,
   encryptHostedMailboxPayloadString,
@@ -3145,7 +3146,7 @@ export function projectHostedMailboxPayload(
   };
 }
 
-export async function decodeHostedMailboxStoredPayload(input: {
+interface HostedMailboxStoredPayloadDecodeEntry {
   dedupeKey: string;
   kind: string;
   lane: string;
@@ -3155,15 +3156,53 @@ export async function decodeHostedMailboxStoredPayload(input: {
   payloadCiphertext?: string | null;
   payloadInlineCiphertext?: string | null;
   payloadSchema?: string | null;
-  prisma?: HostedMailboxStoreClient;
   userId: string;
-}): Promise<unknown | null> {
+}
+
+export async function decodeHostedMailboxStoredPayload(
+  input: HostedMailboxStoredPayloadDecodeEntry & {
+    prisma?: HostedMailboxStoreClient;
+  },
+): Promise<unknown | null> {
+  const encrypted = buildHostedMailboxStoredPayloadDecryptEntry(input);
+  if (!encrypted) {
+    return null;
+  }
+  const serialized = await decryptHostedMailboxPayloadString({
+    ...encrypted,
+    prisma: input.prisma,
+  });
+  return serialized ? JSON.parse(serialized) : null;
+}
+
+export async function decodeHostedMailboxStoredPayloads(input: {
+  entries: readonly HostedMailboxStoredPayloadDecodeEntry[];
+  prisma?: HostedMailboxStoreClient;
+}): Promise<Array<unknown | null>> {
+  const encrypted = input.entries.map(buildHostedMailboxStoredPayloadDecryptEntry);
+  const serialized = await decryptHostedMailboxPayloadStrings({
+    entries: encrypted.flatMap((entry) => entry ? [entry] : []),
+    prisma: input.prisma,
+  });
+  let serializedIndex = 0;
+  return encrypted.map((entry) => {
+    if (!entry) {
+      return null;
+    }
+    const value = serialized[serializedIndex++] ?? null;
+    return value ? JSON.parse(value) : null;
+  });
+}
+
+function buildHostedMailboxStoredPayloadDecryptEntry(
+  input: HostedMailboxStoredPayloadDecodeEntry,
+): (HostedMailboxPayloadCryptoMetadata & { value: string }) | null {
   const inlineCiphertext = normalizeNullableString(input.payloadInlineCiphertext);
   const refCiphertext = normalizeNullableString(input.payloadCiphertext);
   const payloadSchema = normalizeNullableString(input.payloadSchema)
     ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
-  const serialized = inlineCiphertext
-    ? await decryptHostedMailboxPayloadString({
+  if (inlineCiphertext) {
+    return {
       dedupeKey: input.dedupeKey,
       itemId: input.mailboxItemId,
       kind: input.kind,
@@ -3172,12 +3211,13 @@ export async function decodeHostedMailboxStoredPayload(input: {
       occurredAt: input.occurredAt,
       payloadSchema,
       payloadStorage: "inline",
-      prisma: input.prisma,
       userId: input.userId,
       value: inlineCiphertext,
-    })
-    : refCiphertext
-      ? await decryptHostedMailboxPayloadString({
+    };
+  }
+
+  return refCiphertext
+    ? {
         dedupeKey: input.dedupeKey,
         itemId: input.mailboxItemId,
         kind: input.kind,
@@ -3186,17 +3226,10 @@ export async function decodeHostedMailboxStoredPayload(input: {
         occurredAt: input.occurredAt,
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         payloadStorage: "sidecar",
-        prisma: input.prisma,
         userId: input.userId,
         value: refCiphertext,
-      })
-      : null;
-
-  if (!serialized) {
-    return null;
-  }
-
-  return JSON.parse(serialized);
+      }
+    : null;
 }
 
 export function resolveHostedMailboxLaneForKind(kind: string): HostedMailboxLane {

@@ -30,6 +30,7 @@ import {
   createHostedAssistantConfig,
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
+import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 const tempDirectories = new Set<string>()
 const originalCwd = process.cwd()
@@ -48,6 +49,18 @@ async function createTempHome(prefix: string): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), prefix))
   tempDirectories.add(directory)
   return directory
+}
+
+function assertMalformedConfigError(error: unknown): true {
+  assert.ok(error instanceof VaultCliError)
+  assert.equal(error.code, 'operator_config_invalid')
+  assert.equal(error.context?.retryable, false)
+  assert.equal(error.context?.stage, 'configuration')
+  assert.equal(Object.hasOwn(error, 'repair'), false)
+  assert.match(error.message, /Repair or restore/u)
+  assert.doesNotMatch(error.message, /mutation/u)
+  assert.equal(JSON.stringify(error).includes('private-marker'), false)
+  return true
 }
 
 test('operator config persists defaults, hosted config, and invalid hosted payload flags', async () => {
@@ -165,6 +178,248 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
     'utf8',
   )
   assert.equal(await readOperatorConfig(homeDirectory), null)
+})
+
+test('malformed operator config fails model and self-target mutations without overwrite', async () => {
+  const homeDirectory = await createTempHome('operator-config-malformed-mutation-')
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+  const malformed = '{"private-marker":"must-remain",'
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, malformed, 'utf8')
+
+  await assert.rejects(
+    () => saveAssistantOperatorDefaultsPatch({ identityId: 'new-identity' }, homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformed)
+
+  await assert.rejects(
+    () => saveAssistantSelfDeliveryTarget({
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'new-target',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }, homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformed)
+
+  await assert.rejects(
+    () => listAssistantSelfDeliveryTargets(homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformed)
+
+  const malformedNestedConfigs = [
+    {
+      assistant: {
+        account: null,
+        backend: null,
+        identityId: 42,
+        selfDeliveryTargets: null,
+      },
+      defaultVault: null,
+      hostedAssistant: null,
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    },
+    {
+      assistant: null,
+      defaultVault: null,
+      hostedAssistant: {
+        profiles: 'invalid',
+      },
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    },
+  ]
+
+  for (const malformedNestedConfig of malformedNestedConfigs) {
+    const rawNestedConfig = JSON.stringify(malformedNestedConfig)
+    await writeFile(configPath, rawNestedConfig, 'utf8')
+
+    await assert.rejects(
+      () => saveAssistantOperatorDefaultsPatch({ identityId: 'new-identity' }, homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
+
+    await assert.rejects(
+      () => saveAssistantSelfDeliveryTarget({
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'new-target',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      }, homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
+
+    await assert.rejects(
+      () => saveDefaultVaultConfig(path.join(homeDirectory, 'replacement-vault'), homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
+  }
+
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      assistant: {
+        account: null,
+        backend: {
+          adapter: 'unsupported-provider',
+        },
+        identityId: null,
+        selfDeliveryTargets: null,
+      },
+      defaultVault: null,
+      hostedAssistant: null,
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    }),
+    'utf8',
+  )
+  const migrated = await saveAssistantOperatorDefaultsPatch(
+    { identityId: 'new-identity' },
+    homeDirectory,
+  )
+  assert.equal(migrated.assistant?.backend, null)
+  assert.equal(migrated.assistant?.identityId, 'new-identity')
+})
+
+test('default vault reads validate the root without coupling to unrelated nested config', async () => {
+  const homeDirectory = await createTempHome('operator-config-vault-read-')
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+  const configuredVault = path.join(homeDirectory, 'configured-vault')
+  await mkdir(configuredVault, { recursive: true })
+  await mkdir(path.dirname(configPath), { recursive: true })
+
+  const malformedNestedConfigs = [
+    {
+      assistant: {
+        account: null,
+        backend: null,
+        identityId: 42,
+        selfDeliveryTargets: null,
+      },
+      hostedAssistant: null,
+    },
+    {
+      assistant: null,
+      hostedAssistant: {
+        profiles: 'invalid',
+      },
+    },
+  ]
+
+  for (const nestedConfig of malformedNestedConfigs) {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        ...nestedConfig,
+        defaultVault: configuredVault,
+        schema: 'murph.operator-config.v1',
+        updatedAt: '2026-08-25T12:00:00.000Z',
+      }),
+      'utf8',
+    )
+
+    assert.equal(await resolveDefaultVault(homeDirectory, {}), configuredVault)
+    assert.equal(await resolveConfiguredDefaultVault(homeDirectory), configuredVault)
+  }
+
+  const malformedRoot = JSON.stringify({
+    assistant: null,
+    defaultVault: 42,
+    hostedAssistant: null,
+    schema: 'murph.operator-config.v1',
+    updatedAt: '2026-08-25T12:00:00.000Z',
+  })
+  await writeFile(configPath, malformedRoot, 'utf8')
+
+  await assert.rejects(
+    () => resolveDefaultVault(homeDirectory, {}),
+    assertMalformedConfigError,
+  )
+  await assert.rejects(
+    () => resolveConfiguredDefaultVault(homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformedRoot)
+})
+
+test('hosted config replacement validates only the root and preserved assistant config', async () => {
+  const homeDirectory = await createTempHome('operator-config-hosted-replace-')
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+  const configuredVault = path.join(homeDirectory, 'configured-vault')
+  await mkdir(path.dirname(configPath), { recursive: true })
+  const replacement = createHostedAssistantConfig({
+    activeProfileId: null,
+    profiles: [],
+    updatedAt: '2026-08-26T12:00:00.000Z',
+  })
+  const validAssistant = {
+    account: null,
+    backend: null,
+    identityId: 'existing-identity',
+    selfDeliveryTargets: null,
+  }
+
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      assistant: validAssistant,
+      defaultVault: configuredVault,
+      hostedAssistant: {
+        profiles: 'invalid',
+      },
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    }),
+    'utf8',
+  )
+
+  const saved = await saveHostedAssistantConfig(replacement, homeDirectory)
+  assert.equal(saved.defaultVault, configuredVault)
+  assert.equal(saved.assistant?.identityId, 'existing-identity')
+  assert.deepEqual(saved.hostedAssistant, replacement)
+
+  const invalidPreservedConfigs = [
+    {
+      assistant: {
+        ...validAssistant,
+        identityId: 42,
+      },
+      defaultVault: configuredVault,
+    },
+    {
+      assistant: validAssistant,
+      defaultVault: 42,
+    },
+  ]
+
+  for (const invalidPreservedConfig of invalidPreservedConfigs) {
+    const rawConfig = JSON.stringify({
+      ...invalidPreservedConfig,
+      hostedAssistant: {
+        profiles: 'invalid',
+      },
+      schema: 'murph.operator-config.v1',
+      updatedAt: '2026-08-25T12:00:00.000Z',
+    })
+    await writeFile(configPath, rawConfig, 'utf8')
+
+    await assert.rejects(
+      () => saveHostedAssistantConfig(replacement, homeDirectory),
+      assertMalformedConfigError,
+    )
+    assert.equal(await readFile(configPath, 'utf8'), rawConfig)
+  }
 })
 
 test('operator config resolves default vaults without owning command argv mutation', async () => {

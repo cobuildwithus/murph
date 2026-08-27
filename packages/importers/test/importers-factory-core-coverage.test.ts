@@ -6,6 +6,7 @@ import {
   createDeviceProviderRegistry,
   createImporters,
   createSamplePresetRegistry,
+  CsvSampleImportError,
   importCsvSamples,
   importDocument,
   parseDelimitedRows,
@@ -23,12 +24,14 @@ const coreModuleCalls = vi.hoisted(
   (): {
     importDocument: unknown[];
     addMeal: unknown[];
+    validateSampleImport: unknown[];
     importSamples: unknown[];
     importDeviceBatch: unknown[];
     importAssessmentResponse: unknown[];
   } => ({
     importDocument: [],
     addMeal: [],
+    validateSampleImport: [],
     importSamples: [],
     importDeviceBatch: [],
     importAssessmentResponse: [],
@@ -48,6 +51,9 @@ vi.mock("@murphai/core", async (importOriginal) => {
     addMeal: async (payload: unknown) => {
       coreModuleCalls.addMeal.push(payload);
       return { ok: true, kind: "meal" as const };
+    },
+    validateSampleImport: async (payload: unknown) => {
+      coreModuleCalls.validateSampleImport.push(payload);
     },
     importSamples: async (payload: unknown) => {
       coreModuleCalls.importSamples.push(payload);
@@ -173,6 +179,7 @@ test("createImporters delegates through the default core runtime exports", async
   assert.deepEqual(deviceBatchResult, { ok: true, kind: "device-batch" });
   assert.equal(coreModuleCalls.importDocument.length, 1);
   assert.equal(coreModuleCalls.addMeal.length, 1);
+  assert.equal(coreModuleCalls.validateSampleImport.length, 1);
   assert.equal(coreModuleCalls.importSamples.length, 1);
   assert.equal(coreModuleCalls.importAssessmentResponse.length, 1);
   assert.equal(coreModuleCalls.importDeviceBatch.length, 1);
@@ -186,6 +193,9 @@ test("assertCanonicalWritePort binds methods and rejects invalid ports", () => {
       return this.label;
     },
     addMeal() {
+      return this.label;
+    },
+    validateSampleImport() {
       return this.label;
     },
     importSamples() {
@@ -203,6 +213,21 @@ test("assertCanonicalWritePort binds methods and rejects invalid ports", () => {
     "canonical-port",
   );
   assert.equal(resolved.addMeal({ note: "soup" }), "canonical-port");
+  assert.equal(
+    resolved.validateSampleImport({
+      stream: "steps",
+      unit: "count",
+      sourcePath: "samples.csv",
+      importConfig: {
+        delimiter: ",",
+        tsColumn: "timestamp",
+        valueColumn: "value",
+        metadataColumns: [],
+      },
+      samples: [],
+    }),
+    "canonical-port",
+  );
   assert.equal(
     resolved.importSamples({
       stream: "steps",
@@ -228,6 +253,9 @@ test("assertCanonicalWritePort binds methods and rejects invalid ports", () => {
           return "ok";
         },
         addMeal() {
+          return "ok";
+        },
+        validateSampleImport() {
           return "ok";
         },
         importSamples() {
@@ -567,7 +595,14 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
         },
         { corePort },
       ),
-    /did not contain any importable sample rows/,
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.deepEqual(error.failure, {
+        code: "no_importable_rows",
+        importIndexes: [0],
+      });
+      return true;
+    },
   );
 
   await assert.throws(

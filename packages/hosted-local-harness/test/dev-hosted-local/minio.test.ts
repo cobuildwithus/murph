@@ -355,6 +355,10 @@ describe("hosted-local MinIO sidecar", () => {
     });
 
     expect(server?.process).toBe(child);
+    const expectedControlHost = process.platform === "linux" ? "172.17.0.1" : "127.0.0.1";
+    const expectedEndpointHost = process.platform === "linux"
+      ? "172.17.0.1"
+      : "host.docker.internal";
     const dockerEnv = runtimeMocks.spawnChildProcess.mock.calls[0]?.[3] as Record<string, string>;
     expect(dockerEnv.MINIO_ROOT_USER).toMatch(/^murph-local-[a-f0-9]{24}$/u);
     expect(dockerEnv.MINIO_ROOT_PASSWORD).toMatch(/^[A-Za-z0-9_-]{43}$/u);
@@ -363,12 +367,22 @@ describe("hosted-local MinIO sidecar", () => {
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
-      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
-      HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT:
+        expect.stringMatching(new RegExp(`^http://${expectedControlHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
+      HOSTED_R2_PRESIGN_ENDPOINT:
+        expect.stringMatching(new RegExp(`^http://${expectedEndpointHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: dockerEnv.MINIO_ROOT_PASSWORD,
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
     }));
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED");
+    if (process.platform === "linux") {
+      expect(server?.env).toHaveProperty(
+        "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST",
+        "172.17.0.1",
+      );
+    } else {
+      expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST");
+    }
     expect(runtimeMocks.spawnChildProcess).toHaveBeenCalledWith(
       "minio",
       "docker",

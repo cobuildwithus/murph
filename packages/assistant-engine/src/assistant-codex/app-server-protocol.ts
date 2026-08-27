@@ -156,20 +156,13 @@ export function readCodexTokenUsageBreakdown(
   value: unknown,
 ): CodexTokenUsageBreakdown | null {
   const usage = readCodexRecord(value)
-  if (!usage || !hasOnlyOwn(usage, [
-    'cacheWriteInputTokens',
-    'cachedInputTokens',
-    'inputTokens',
-    'outputTokens',
-    'reasoningOutputTokens',
-    'totalTokens',
-  ])) {
+  if (!usage) {
     return null
   }
 
-  const cacheWriteInputTokens = readCodexNonNegativeInteger(
-    usage.cacheWriteInputTokens,
-  )
+  const cacheWriteInputTokens = Object.hasOwn(usage, 'cacheWriteInputTokens')
+    ? readCodexNonNegativeInteger(usage.cacheWriteInputTokens)
+    : 0
   const cachedInputTokens = readCodexNonNegativeInteger(usage.cachedInputTokens)
   const inputTokens = readCodexNonNegativeInteger(usage.inputTokens)
   const outputTokens = readCodexNonNegativeInteger(usage.outputTokens)
@@ -203,20 +196,24 @@ export function readCodexThreadTokenUsage(
   value: unknown,
 ): CodexThreadTokenUsage | null {
   const usage = readCodexRecord(value)
-  if (!usage || !hasOnlyOwn(usage, ['last', 'modelContextWindow', 'total'])) {
+  if (!usage) {
     return null
   }
 
   const last = readCodexTokenUsageBreakdown(usage.last)
   const total = readCodexTokenUsageBreakdown(usage.total)
-  const modelContextWindow = usage.modelContextWindow === null
+  const hasModelContextWindow = Object.hasOwn(usage, 'modelContextWindow')
+  const modelContextWindow = !hasModelContextWindow
+    || usage.modelContextWindow === null
     ? null
     : readCodexNonNegativeInteger(usage.modelContextWindow)
 
   if (
     !last ||
     !total ||
-    (modelContextWindow === null && usage.modelContextWindow !== null)
+    (hasModelContextWindow &&
+      modelContextWindow === null &&
+      usage.modelContextWindow !== null)
   ) {
     return null
   }

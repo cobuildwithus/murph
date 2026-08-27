@@ -46,6 +46,9 @@ import {
   notifyAssistantActiveTurnInputAvailableForInputIds,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
+import type {
+  AssistantModelTarget,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import {
   inferDirectEmailThreadFromParticipants,
@@ -74,9 +77,11 @@ import {
   enqueueHostedPendingAssistantInputId,
   isHostedAssistantInputAttachmentEvidenceSettled,
   requiresHostedAssistantInputAttachmentEvidence,
+  suppressHostedPendingLinqInputAnsweredByExternalReply,
 } from "./pending-input-index.ts";
 import {
   prepareHostedAssistantAutoReplyForWake,
+  readHostedAssistantExecutionDefaultTarget,
   requireHostedBootstrapForWake,
   type HostedAssistantAutoReplyReadinessState,
 } from "./context.ts";
@@ -196,6 +201,7 @@ export interface HostedConversationMailboxAssistantInputStageResult {
 }
 
 export type HostedConversationMailboxAssistantInputStager = (input: {
+  assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
@@ -245,6 +251,7 @@ export type HostedConversationMailboxImportOutcome =
     };
 
 export function createHostedConversationMailboxImportItem(input: {
+  assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
@@ -278,6 +285,7 @@ export function createHostedConversationMailboxImportItem(input: {
 }
 
 export async function importHostedConversationMailboxItem(input: {
+  assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
@@ -375,6 +383,26 @@ export async function importHostedConversationMailboxItem(input: {
       wake: decoded.wake,
     });
   }
+  if (
+    isHostedLinqConversationMessageWake(decoded.wake)
+    && decoded.wake.message.linqMessage.isFromMe === true
+  ) {
+    pendingReplyEligible = false;
+  }
+
+  const assistantTarget = isHostedLinqConversationMessageWake(decoded.wake)
+      && decoded.wake.message.linqMessage.isFromMe === true
+      && normalizeHostedAssistantInputSourceMetadataToken(
+        decoded.wake.message.linqMessage.replyToMessageId ?? null,
+      )
+    ? input.assistantTarget
+      ?? await readHostedAssistantExecutionDefaultTarget({
+        runtimeEnv: {
+          ...input.runtime.forwardedEnv,
+          ...input.runtime.userEnv,
+        },
+      })
+    : null;
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!pendingReplyEligible) {
@@ -386,6 +414,7 @@ export async function importHostedConversationMailboxItem(input: {
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const stagedInput = await stageAssistantInputEvent({
+    assistantTarget,
     item: input.item,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
@@ -957,6 +986,7 @@ function loadHostedConversationEventsModule(): Promise<HostedConversationEventsM
 }
 
 async function stageHostedConversationAssistantInputEvent(input: {
+  assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
@@ -989,6 +1019,30 @@ async function stageHostedConversationAssistantInputEvent(input: {
     }),
     vault: input.vaultRoot,
   });
+  const replyToMessageId = linqWake?.message.linqMessage.isFromMe === true
+    ? normalizeHostedAssistantInputSourceMetadataToken(
+        linqWake.message.linqMessage.replyToMessageId ?? null,
+      )
+    : null;
+  if (
+    replyToMessageId
+    && event.conversation?.source === "linq"
+    && event.conversation.threadId
+  ) {
+    if (!input.assistantTarget) {
+      throw new Error(
+        "Hosted assistant target is required to preserve an imported Linq reply.",
+      );
+    }
+    await suppressHostedPendingLinqInputAnsweredByExternalReply({
+      accountId: event.conversation.accountId,
+      assistantReplyEvent: event,
+      replyToMessageId,
+      target: input.assistantTarget,
+      threadId: event.conversation.threadId,
+      vaultRoot: input.vaultRoot,
+    });
+  }
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
