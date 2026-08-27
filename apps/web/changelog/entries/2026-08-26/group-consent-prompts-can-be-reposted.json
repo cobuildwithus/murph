@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "group-consent-prompts-can-be-reposted",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group consent prompts can be reposted",
+    "summary": "When a group asks Murph to post a fresh join-and-share prompt, Murph now sends a new native consent message even if an older prompt is still active.",
+    "details": "Retried delivery does not create a duplicate, and the older prompt remains usable if the replacement cannot be sent. Each person still approves their own access and sharing.",
+    "relevanceTags": ["assistant", "groups", "consent", "reliability"],
+    "sourcePullRequests": [2386]
+  }
+}
