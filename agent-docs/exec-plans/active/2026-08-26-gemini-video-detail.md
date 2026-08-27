@@ -83,8 +83,8 @@ Updated: 2026-08-26
   request with medium thinking and no output cap, and returns natural
   observational text.
 - The push-up-form path selects `detailed_motion` before egress, sends one 5 FPS
-  request with the same medium thinking and no output cap, and asks only the
-  focused form question.
+  request with the same medium thinking and no output cap, and preserves the
+  complete form question, including side, repetition range, and comparison.
 - Negative, unavailable, and failed outcomes remain honest without automatic
   second-pass analysis, diagnosis language, or routine policy recitals.
 - Result: `Hold` only because the real-Codex lane reached its usage limit before
@@ -103,7 +103,7 @@ Updated: 2026-08-26
 ## Local Evidence
 
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage
-  test/assistant-codex-analyze-video-tool.test.ts` from Assistant Engine: 26
+  test/assistant-codex-analyze-video-tool.test.ts` from Assistant Engine: 27
   tests passed.
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts
   --no-coverage apps/cloudflare/test/runner-egress-gemini.test.ts
@@ -119,13 +119,30 @@ Updated: 2026-08-26
   `text`, `tool_choice`, and `tools` fields, while excluding model selection,
   reasoning, storage/streaming, service-tier, cache/account, and transport
   metadata identically and normalizing volatile paths and identifiers.
-- The direct initial request changes from 25,107 tokens / 115,873 UTF-8 bytes
-  to 25,220 / 116,406: +113 tokens (+0.4501%) and +533 bytes (+0.4600%),
+- After the current-main reconciliation, the direct initial request changes
+  from 24,843 tokens / 114,825 UTF-8 bytes to 25,024 / 115,747: +181 tokens
+  (+0.7286%) and +922 bytes (+0.8030%),
   entirely from the focused video-tool description and sampling enum/schema.
-  The representative group request is byte-for-byte unchanged at 20,991
-  tokens / 97,243 bytes because the current private-direct authority boundary
+  The representative group request is byte-for-byte unchanged at 20,780
+  tokens / 96,405 bytes because the current private-direct authority boundary
   does not expose the tool there.
 - The focused real-Codex journey compiled and started against the default local
   subscription, but the lane returned `ASSISTANT_CODEX_USAGE_LIMIT` before any
   provider action. Live reply review remains `Hold` until one authorized
   alternate home or another exact journey run is available.
+- The production-shaped hosted-local roundtrip now covers a successful 5 FPS
+  request and its additional usage row. Its local run never reached the
+  scenario: both the default bundle build and the documented four-package
+  concurrency profile timed out while generating the assistant CLI manifest.
+  The public-safe Frog entry
+  `20260826200626-assistant-cli-manifest` records the reproducible repository
+  friction; no Gemini request occurred before either failure.
+- Preliminary ReviewGPT findings were resolved by preserving every
+  task-defining qualifier, distinguishing visual sampled-frame negatives from
+  audible negatives, and adding separate standard-speech and detailed-motion
+  journeys. Final ReviewGPT rounds 1 and 2 both passed without findings. Round
+  2 reviewed exact product head `4c35fac0eed535a365792157e59b1254562db25c`
+  after its single current-main merge and focused post-merge typecheck/tests.
+- Draft PR #2373 is mergeable. It remains draft because the Product UX result
+  is still `Hold` at the live real-Codex boundary above; broad exact-head CI,
+  merge, deployment proof, and guarded retirement have not started.
