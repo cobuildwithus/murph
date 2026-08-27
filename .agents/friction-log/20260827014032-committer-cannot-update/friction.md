@@ -1,6 +1,7 @@
 ---
 title: 'Committer cannot update tracked files under ignored directories'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2444'
 ---
 
 ## Expected Behavior

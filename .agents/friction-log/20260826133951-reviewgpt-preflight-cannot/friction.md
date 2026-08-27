@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT preflight cannot package a fresh task worktree'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2432'
 ---
 
 ## Expected Behavior
