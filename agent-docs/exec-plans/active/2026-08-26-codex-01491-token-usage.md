@@ -21,12 +21,14 @@ Updated: 2026-08-26
   fail closed.
 - A raw protocol event with both omissions reaches downstream provider-usage
   extraction with exact non-null counters.
+- The same current-shape event updates parent-thread vitals and reaches the
+  existing bounded idle-compaction owner without duplicate compact requests.
 - Focused tests, package typecheck, required review gates, and exact-head CI pass.
 
 ## Scope
 
 - In scope: the shared Codex App Server token-usage reader and deterministic
-  Assistant Engine protocol/accounting regressions.
+  Assistant Engine protocol, accounting, and warm-process regressions.
 - Out of scope: changing usage pricing, allowance policy, persistence schemas,
   Codex dependency versions, or unrelated protocol readers.
 
@@ -48,6 +50,11 @@ Updated: 2026-08-26
    and mask a regression again.
    Mitigation: stop synthesizing those optional fields in the shared fixture
    helper and add a raw extraction regression that bypasses fixture completion.
+3. Risk: accepting the valid event also restores warm parent-thread vitals, so
+   hosted idle maintenance can invoke its existing provider compaction path.
+   Mitigation: remove the process harness's synthetic context-window field and
+   prove one bounded compaction request with preserved usage attribution; keep
+   the existing single-record hosted maintenance proof.
 
 ## Tasks
 
@@ -57,7 +64,8 @@ Updated: 2026-08-26
 3. Replace the brittle complete-shape assertion with table-driven required,
    optional, invalid, and additive-field protocol coverage.
 4. Add raw downstream usage-extraction proof and run focused verification.
-5. Complete ReviewGPT, CI, parent review, plan closure, and scoped commit.
+5. Prove the restored warm-thread-vitals path reaches one bounded idle compact.
+6. Complete ReviewGPT, CI, parent review, plan closure, and scoped commit.
 
 ## Decisions
 
