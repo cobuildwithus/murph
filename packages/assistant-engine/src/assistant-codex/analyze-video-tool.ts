@@ -36,7 +36,6 @@ export interface AnalyzeVideoToolArgs {
   attachmentOrdinal?: number
   messageRef: string
   question: string
-  requestMessageRef?: string
 }
 
 export interface AnalyzeVideoToolResult {

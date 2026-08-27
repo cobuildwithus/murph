@@ -336,16 +336,17 @@ Last verified: 2026-08-23
 - Gemini video analysis is explicit cross-provider private-media egress. It may
   be offered only for a private direct turn or authenticated Linq/Telegram
   group turn with accepted user-action input and the Worker-held credential;
-  unverified external groups omit the tool. A group call must authorize the
-  exact accepted video message and exact accepted request message through the
-  existing route-bound participant owner, then prove both resolve to the same
-  provider sender before materializing or reading bytes. The two refs may be
-  identical. Another participant, Family-plan membership, and group membership
-  alone never authorize the egress. The schema may be
+  unverified external groups omit the tool. Any participant in an authenticated
+  group may explicitly request analysis of a video sent by any participant in
+  that same accepted group turn. The tool selects only the exact accepted video
+  message; current route authority, accepted-input membership, and frozen
+  attachment evidence bind it to the active group. It does not compare the
+  requester with the uploader. The schema may be
   present before that input has video authority because provider tools freeze
   at turn start and the first video may arrive through live steering. Group
-  sharing alone is not requester/uploader authorization. The tool may select
-  only an accepted-message video whose path, size, digest, MIME, message
+  participation does not authorize videos outside the current accepted group
+  turn. The tool may select only an accepted-message video whose path, size,
+  digest, MIME, message
   ref, and ordinal were snapshotted in turn-owned memory before Codex could act
   on that input. Freeze initial inputs before provider start and active-steered
   inputs in the accepted-input validator before forwarding the steer; never

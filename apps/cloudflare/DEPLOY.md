@@ -79,25 +79,26 @@ older Web would turn every otherwise successful analysis into a 502. Missing
 key configuration is fail-closed and
 omits `murph.analyze_video`. During an immediate rollout, old instances omit
 the tool and new instances expose it for private-direct turns and authenticated
-Linq/Telegram group turns with accepted user-action input. In a group, the
-requester must be the sender of the selected video; another participant and
-Family-plan membership grant no authority. Unverified external groups continue
-to omit it. An eligible turn may receive the schema before its accepted input
-has video authority because the provider tool set freezes at turn start; this
-lets the first live-steered video be frozen and authorized before tool execution
-in that same turn. There is no schema, backfill, dual-write, or stored
-compatibility state.
+Linq/Telegram group turns with accepted user-action input. Any authenticated
+group participant may request analysis of another participant's video in the
+same accepted group turn. Unverified external groups continue to omit it. An
+eligible turn may receive the schema before its accepted input has video
+authority because the provider tool set freezes at turn start; this lets the
+first live-steered video be frozen and authorized before tool execution in that
+same turn. There is no schema, backfill, dual-write, or stored compatibility
+state.
 
 Rollback the Worker/runner producer first, then remove the private secret
 mapping if desired; the Web reader and pricing branch are safe to leave in
 place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
 direct conversation to verify a single Gemini request, explicit 1 FPS
 metadata, bounded output, and one usage
-record. Then use one consented group video whose uploader explicitly requests
-analysis and verify one Gemini request plus one group-visible result; a request
-from a different participant must fail before provider egress. Inspect only
-bounded status/error aggregates, never media, prompts, paths, response bodies,
-sender handles, or credential values.
+record. Then use one consented group video and verify one Gemini request plus
+one group-visible result when its uploader requests analysis. Have a different
+authenticated participant request analysis of a second consented group video
+and verify the same single-request result. Inspect only bounded status/error
+aggregates, never media, prompts, paths, response bodies, sender handles, or
+credential values.
 
 ### Hosted inbox video transience rollout
 

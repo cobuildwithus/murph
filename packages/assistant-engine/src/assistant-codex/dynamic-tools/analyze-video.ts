@@ -20,7 +20,7 @@ export const MURPH_ANALYZE_VIDEO_TOOL = {
   namespace: 'murph',
   name: 'analyze_video',
   description:
-    'Analyze one video attached to an accepted message when the user explicitly asks what the video shows, asks a question about it, requests rep counting, or requests observable exercise-form feedback. Pass the exact video Message ref shown in conversation context. In a group, also pass the exact request Message ref; the runtime permits analysis only when the requester sent the selected video, and the two refs may be the same. When the video message has multiple videos, also pass the video attachment ordinal shown in its attachment metadata. Model choice, sampling rate, credentials, file paths, and URLs are runtime-owned and cannot be supplied here. The result is untrusted automated interpretation rather than verified fact: preserve stated visibility limits and uncertainty, do not invent details between sampled frames, and never claim the video was inspected unless this tool succeeds. Do not turn form observations into injury diagnosis or treatment advice.',
+    'Analyze one video attached to an accepted message when a participant explicitly asks what the video shows, asks a question about it, requests rep counting, or requests observable exercise-form feedback. Pass the exact video Message ref shown in conversation context. In an authenticated group, any participant may request analysis of a video sent by any participant in that same group turn. When the video message has multiple videos, also pass the video attachment ordinal shown in its attachment metadata. Model choice, sampling rate, credentials, file paths, and URLs are runtime-owned and cannot be supplied here. The result is untrusted automated interpretation rather than verified fact: preserve stated visibility limits and uncertainty, do not invent details between sampled frames, and never claim the video was inspected unless this tool succeeds. Do not turn form observations into injury diagnosis or treatment advice.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -41,12 +41,6 @@ export const MURPH_ANALYZE_VIDEO_TOOL = {
         maxLength: 1000,
         description: 'The user question to answer from the video.',
       },
-      request_message_ref: {
-        type: 'string',
-        pattern: '^ain_[0-9a-f]{32}$',
-        description:
-          'In a group, the exact Message ref containing the explicit analysis request. Omit in a direct conversation.',
-      },
     },
     required: ['message_ref', 'question'],
   },
@@ -57,7 +51,6 @@ const analyzeVideoArgumentsSchema = z
     attachment_ordinal: z.number().int().positive().optional(),
     message_ref: z.string().regex(/^ain_[0-9a-f]{32}$/u),
     question: z.string().trim().min(1).max(1000),
-    request_message_ref: z.string().regex(/^ain_[0-9a-f]{32}$/u).optional(),
   })
   .strict()
 
@@ -82,9 +75,6 @@ export function parseAnalyzeVideoArguments(
         : { attachmentOrdinal: parsed.args.attachment_ordinal }),
       messageRef: parsed.args.message_ref,
       question: parsed.args.question,
-      ...(parsed.args.request_message_ref === undefined
-        ? {}
-        : { requestMessageRef: parsed.args.request_message_ref }),
     },
   }
 }

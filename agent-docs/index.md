@@ -156,15 +156,17 @@ specified by `agent-docs/SECURITY.md`,
 On-demand hosted video analysis is one turn-scoped Gemini 3.7 Flash call over
 an exact accepted-message attachment authority. The tool is offered on
 private-direct turns and authenticated Linq/Telegram group turns with accepted
-user-action input and a configured Worker credential. Group analysis requires
-the exact video and request messages to resolve to the same provider sender;
-another participant, Family-plan membership, and group membership alone grant
-no authority. Unverified external groups omit it. The tool may be present before
-the input has video authority because provider tools freeze at turn start and
-the first video may arrive through live steering. Murph freezes attachment
-metadata before Codex can act on each initial or live-steered input, verifies
-the exact bytes before cross-provider egress, pins 1 FPS and bounded output,
-and keeps credentials at the Worker boundary. Ordinary inbound hosted video
+user-action input and a configured Worker credential. Any participant in an
+authenticated group may explicitly request analysis of any participant's video
+in that same accepted group turn. Current route authority, accepted-input
+membership, and frozen attachment evidence bind the selected video to the
+active group; no requester/uploader identity comparison exists. Unverified
+external groups omit it. The tool may be present before the input has video
+authority because provider tools freeze at turn start and the first video may
+arrive through live steering. Murph freezes attachment metadata before Codex
+can act on each initial or live-steered input, verifies the exact bytes before
+cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
+the Worker boundary. Ordinary inbound hosted video
 bytes stay outside workspace snapshots and become immediately
 retention-eligible when active input no longer needs them; explicit canonical
 durable references are the exception. The

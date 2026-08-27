@@ -3634,13 +3634,13 @@ cards already in transcripts remain readable but cannot open the direct editor.
 `murph.analyze_video` is an explicit, turn-scoped assistant capability for one
 video attached to an accepted message. It is offered in a private direct turn
 or an authenticated Linq/Telegram group turn with accepted user-action input
-when the Worker-held credential is configured. In a group, the call must name
-both the exact accepted video message and the exact accepted request message;
-the existing route-bound participant authorizer must resolve both to the same
-provider sender before any attachment is materialized or read. The refs may be
-the same when one message contains both the video and request. Another group
-participant, Family-plan membership, and group membership alone grant no video
-egress authority. Unverified external groups continue to omit the tool.
+when the Worker-held credential is configured. Any participant in an
+authenticated group may explicitly request analysis of a video sent by any
+participant in that same accepted group turn. The call names only the exact
+accepted video message; current group-route authority, accepted-input membership,
+and the frozen attachment record bind it to the active group before any bytes
+are materialized or read. No requester/uploader identity comparison exists.
+Unverified external groups continue to omit the tool.
 
 An eligible turn may receive the schema before its accepted input has video
 authority because the provider tool set freezes at turn start. Keeping the tool

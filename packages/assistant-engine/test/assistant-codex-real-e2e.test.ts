@@ -1237,13 +1237,14 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
-    'analyzes the requesting participant\'s own group video and reports only the tool result',
+    'analyzes one participant\'s group video when another participant requests it',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-video-analysis-e2e-'),
       )
-      const messageRef = `ain_${'a'.repeat(32)}`
+      const videoMessageRef = `ain_${'a'.repeat(32)}`
+      const questionMessageRef = `ain_${'b'.repeat(32)}`
       const rawPath = 'raw/inbox/group-movement.mp4'
       const videoBytes = Buffer.concat([
         Buffer.from([0, 0, 0, 16]),
@@ -1252,6 +1253,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         Buffer.from('synthetic-video-evidence'),
       ])
       const sha256 = createHash('sha256').update(videoBytes).digest('hex')
+      let acceptedMessageAuthorizationCallCount = 0
       let providerCallCount = 0
 
       try {
@@ -1290,13 +1292,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           },
           conversation: {
             accountId: null,
-            actorId: 'synthetic-participant',
+            actorId: 'synthetic-video-sender',
             actorIsSelf: false,
             source: 'telegram',
             threadId: 'synthetic-group-thread',
             threadIsDirect: false,
           },
-          inputId: messageRef,
+          inputId: videoMessageRef,
           occurredAt: '2026-08-26T12:00:00.000Z',
           projection: {
             optionalInboxCaptureId: 'synthetic-capture',
@@ -1315,12 +1317,51 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             kind: 'telegram',
             mediaGroupId: null,
             replyContext: null,
-            senderDisplayName: 'Sam',
-            senderHandle: 'synthetic-participant',
+            senderDisplayName: 'Taylor',
+            senderHandle: 'synthetic-video-sender',
+          },
+          telegramMetadata: null,
+          text: 'Here is the push-up set we were discussing.',
+        }, {
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [],
+            optionalInboxCaptureId: null,
+            reasonCode: null,
+            source: null,
+            status: 'not_attempted',
+            updatedAt: null,
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-requester',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'synthetic-group-thread',
+            threadIsDirect: false,
+          },
+          inputId: questionMessageRef,
+          occurredAt: '2026-08-26T12:00:02.000Z',
+          projection: null,
+          receivedAt: '2026-08-26T12:00:03.000Z',
+          replyTarget: {
+            channel: 'telegram',
+            messageId: '102',
+            threadId: 'synthetic-group-thread',
+          },
+          source: 'telegram',
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderDisplayName: 'Jordan',
+            senderHandle: 'synthetic-requester',
           },
           telegramMetadata: null,
           text:
-            'Murph, please analyze my video. How many push-ups do I complete, and what is visibly happening with my hip position?',
+            'Murph, analyze Taylor\'s video. How many push-ups are there, and what is visibly happening with the hip position?',
         }])
         expect(promptResult.kind).toBe('ready')
         if (promptResult.kind !== 'ready') {
@@ -1331,7 +1372,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           computerToolsAvailable: false,
           currentAnalyzeVideoAttachmentAuthorities: () => [{
             byteSize: videoBytes.byteLength,
-            messageRef,
+            messageRef: videoMessageRef,
             mimeType: 'video/mp4',
             ordinal: 1,
             rawPath,
@@ -1340,7 +1381,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           currentUserActionScope: () => ({
-            acceptedInputIds: [messageRef],
+            acceptedInputIds: [videoMessageRef, questionMessageRef],
             conversationId: 'conversation-group-video',
             conversationScope: 'group' as const,
             inboundMailboxItemIds: ['mailbox-group-video'],
@@ -1353,6 +1394,22 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           }),
           vaultFileSendAvailable: false,
         } satisfies AssistantHostedToolContext
+        const authorizeAcceptedMessageTarget = async (
+          { messageRef: requested }: { messageRef: string },
+        ) => {
+          acceptedMessageAuthorizationCallCount += 1
+          return {
+            participant: {
+              assistantInputId: requested,
+              senderHandle:
+                requested === videoMessageRef
+                  ? 'synthetic-video-sender'
+                  : 'synthetic-requester',
+              source: 'telegram' as const,
+            },
+            targetInputId: requested,
+          }
+        }
         const result = await executeRealCodexAppServerTurn({
           analyzeVideoRuntime: {
             apiKey: 'synthetic-gemini-key',
@@ -1373,17 +1430,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             },
           },
           approvalPolicy: 'never',
-          authorizeAcceptedMessageTarget: async ({ messageRef: requested }) =>
-            requested === messageRef
-              ? {
-                  participant: {
-                    assistantInputId: messageRef,
-                    senderHandle: 'synthetic-participant',
-                    source: 'telegram' as const,
-                  },
-                  targetInputId: messageRef,
-                }
-              : null,
+          authorizeAcceptedMessageTarget,
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
@@ -1414,18 +1461,18 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           `[group-video-analysis-e2e] ${JSON.stringify({
             finalMessage: result.finalMessage,
             providerCallCount,
-            scenario: 'authenticated participant requests own group video',
+            scenario: 'one authenticated participant requests another participant\'s group video',
             toolCallCount: videoCalls.length,
           })}\n`,
         )
         expect(videoCalls).toHaveLength(1)
         expect(videoCalls[0]).toMatchObject({
           argumentsValue: {
-            message_ref: messageRef,
-            request_message_ref: messageRef,
+            message_ref: videoMessageRef,
           },
           kind: 'dynamic',
         })
+        expect(acceptedMessageAuthorizationCallCount).toBe(0)
         expect(providerCallCount).toBe(1)
         expect(result.finalMessage).toMatch(/\b(?:eight|8)\b/iu)
         expect(result.finalMessage).toMatch(/hip/iu)
