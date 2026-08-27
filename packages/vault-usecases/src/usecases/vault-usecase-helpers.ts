@@ -263,9 +263,24 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
 const vaultMetadataVaultErrorMappings: Record<string, VaultErrorMapping> = {
   VAULT_INVALID_METADATA: {
     code: 'invalid_metadata',
+    message: 'Vault metadata is invalid. Run vault validate, then repair or restore the metadata before retrying.',
+    details: { stage: 'validation' },
   },
   VAULT_UNSUPPORTED_FORMAT: {
     code: 'unsupported_format',
+    message: 'Vault format is not supported by this CLI version. Use a compatible CLI version or the supported vault migration path.',
+    details: { stage: 'validation' },
+  },
+}
+
+const vaultInitializationVaultErrorMappings: Record<string, VaultErrorMapping> = {
+  VAULT_ALREADY_EXISTS: {
+    code: 'already_exists',
+    message: 'Vault is already initialized. Use vault show for the existing vault or choose a different vault root.',
+    details: {
+      issues: [{ code: 'custom', publicPath: ['vault'] }],
+      stage: 'conflict',
+    },
   },
 }
 
@@ -304,6 +319,10 @@ export function toEventUpsertVaultCliError(error: unknown) {
 
 export function toVaultMetadataCliError(error: unknown) {
   return toVaultCliError(error, vaultMetadataVaultErrorMappings)
+}
+
+export function toVaultInitializationCliError(error: unknown) {
+  return toVaultCliError(error, vaultInitializationVaultErrorMappings)
 }
 
 export function toRegimenUpsertVaultCliError(error: unknown) {

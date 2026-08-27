@@ -7,6 +7,11 @@ import { afterEach, test, vi } from "vitest";
 
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  automationAssistantTargetOverrideSchema,
+  automationContextReferencesSchema,
+  automationRouteSchema,
+  automationScaffoldPayloadSchema,
+  automationScheduleSchema,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 import { upsertAutomation } from "@murphai/core";
@@ -16,6 +21,7 @@ import {
   createAutomationScaffoldPayload,
   registerAutomationCommands,
 } from "../src/commands/automation.js";
+import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
 
 const LEGACY_ROUTE_CHANNEL_ENV_NAME = [
@@ -27,6 +33,7 @@ const LEGACY_ROUTE_TARGET_ENV_NAME = [
   "DELIVERY_ROUTE_TARGET",
 ].join("_");
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 
@@ -78,6 +85,16 @@ function optionDescription(schema: CommandSchemaEnvelope, optionName: string): s
     assert.fail(`missing ${optionName} description`);
   }
   return description;
+}
+
+function replaceFirstIssuePath(
+  issues: readonly { path: PropertyKey[] }[],
+  path: readonly PropertyKey[] | undefined,
+): void {
+  if (path === undefined) return;
+  const issue = issues[0];
+  assert.ok(issue, "validation fixture must produce an issue");
+  issue.path.splice(0, issue.path.length, ...path);
 }
 
 function hasCommandMap(value: unknown): value is { commands: Map<string, unknown> } {
@@ -310,6 +327,8 @@ test("automation save and edit schemas expose typed fields while automation impo
     "scheduleEveryMs",
     "scheduleCron",
     "scheduleLocalTime",
+    "scheduleTimeZone",
+    "triggerTimeZone",
     "channel",
     "deliveryTarget",
     "identityId",
@@ -361,6 +380,381 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("cursor" in listSchema.options.properties, true);
 });
 
+interface AutomationPublicPathCase {
+  expectedPaths: readonly string[];
+  invalidValue: () => unknown;
+  name: string;
+  overrideIssuePath?: readonly PropertyKey[];
+  saveOptions?: readonly string[];
+  schema: "context" | "payload" | "route" | "schedule" | "target";
+}
+
+const automationPublicPathCases = [
+  {
+    name: "permits the cron expression for a cron command",
+    schema: "schedule",
+    invalidValue: () => ({ kind: "cron", expression: "not-a-cron" }),
+    saveOptions: ["--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1"],
+    expectedPaths: ["schedule.expression"],
+  },
+  {
+    name: "rejects the cron expression for an at command",
+    schema: "schedule",
+    invalidValue: () => ({ kind: "cron", expression: "not-a-cron" }),
+    saveOptions: ["--trigger-kind", "at", "--trigger-at", "2099-01-01T00:00:00.000Z"],
+    expectedPaths: [],
+  },
+  {
+    name: "permits a route field",
+    schema: "route",
+    invalidValue: () => ({
+      channel: "",
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }),
+    saveOptions: ["--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1"],
+    expectedPaths: ["route.channel"],
+  },
+  {
+    name: "rejects a private nested route field",
+    schema: "route",
+    invalidValue: () => ({
+      channel: "linq",
+      deliverySource: { kind: "linq", fromPhoneNumber: "" },
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }),
+    saveOptions: ["--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1"],
+    expectedPaths: [],
+  },
+  {
+    name: "permits an assistant target field",
+    schema: "target",
+    invalidValue: () => ({ reasoningEffort: "not-an-effort" }),
+    saveOptions: [
+      "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
+      "--assistant-target-override-model", "gpt-5.6-sol",
+    ],
+    expectedPaths: ["assistantTargetOverride.reasoningEffort"],
+  },
+  {
+    name: "rejects an arbitrary assistant target field",
+    schema: "target",
+    invalidValue: () => ({ reasoningEffort: "not-an-effort" }),
+    overrideIssuePath: ["privateTargetField"],
+    saveOptions: [
+      "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
+      "--assistant-target-override-model", "gpt-5.6-sol",
+    ],
+    expectedPaths: [],
+  },
+  {
+    name: "permits a bounded context-reference index",
+    schema: "context",
+    invalidValue: () => [
+      { entityId: "wfmt_01", entityKind: "workout_format" },
+      { entityId: "invalid context id", entityKind: "experiment" },
+    ],
+    saveOptions: [
+      "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
+      "--context-reference", "workout_format=wfmt_01",
+    ],
+    expectedPaths: ["contextReference.1.entityId"],
+  },
+  {
+    name: "rejects a negative context-reference index",
+    schema: "context",
+    invalidValue: () => [{ entityId: "invalid context id", entityKind: "experiment" }],
+    overrideIssuePath: [-1, "entityId"],
+    saveOptions: [
+      "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
+      "--context-reference", "workout_format=wfmt_01",
+    ],
+    expectedPaths: [],
+  },
+  {
+    name: "uses the plural payload root for indexed context references",
+    schema: "payload",
+    invalidValue: () => ({
+      ...createAutomationScaffoldPayload(),
+      contextReferences: [
+        { entityId: "wfmt_01", entityKind: "workout_format" },
+        { entityId: "invalid context id", entityKind: "experiment" },
+      ],
+    }),
+    expectedPaths: ["payload.contextReferences.1.entityId"],
+  },
+  {
+    name: "permits a bounded tag index",
+    schema: "payload",
+    invalidValue: () => ({
+      ...createAutomationScaffoldPayload(),
+      tags: ["visible-tag", ""],
+    }),
+    expectedPaths: ["payload.tags.1"],
+  },
+  {
+    name: "permits an allowlisted top-level payload field",
+    schema: "payload",
+    invalidValue: () => ({
+      ...createAutomationScaffoldPayload(),
+      status: "not-a-status",
+    }),
+    expectedPaths: ["payload.status"],
+  },
+  {
+    name: "rejects an arbitrary top-level payload field",
+    schema: "payload",
+    invalidValue: () => ({
+      ...createAutomationScaffoldPayload(),
+      privatePayloadField: "private-value",
+    }),
+    expectedPaths: [],
+  },
+] satisfies readonly AutomationPublicPathCase[];
+
+test.each(automationPublicPathCases)(
+  "automation public validation paths $name",
+  async (testCase) => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "murph-automation-public-path-",
+    );
+    const importPath = path.join(parentRoot, "automation.json");
+
+    try {
+      const invalidValue = testCase.invalidValue();
+      switch (testCase.schema) {
+        case "schedule": {
+          const failure = automationScheduleSchema.safeParse(invalidValue);
+          assert.equal(failure.success, false);
+          if (failure.success) assert.fail("schedule fixture must fail validation");
+          replaceFirstIssuePath(failure.error.issues, testCase.overrideIssuePath);
+          vi.spyOn(automationScheduleSchema, "safeParse").mockReturnValue(failure);
+          break;
+        }
+        case "route": {
+          const failure = automationRouteSchema.safeParse(invalidValue);
+          assert.equal(failure.success, false);
+          if (failure.success) assert.fail("route fixture must fail validation");
+          replaceFirstIssuePath(failure.error.issues, testCase.overrideIssuePath);
+          vi.spyOn(automationRouteSchema, "safeParse").mockReturnValue(failure);
+          break;
+        }
+        case "target": {
+          const failure = automationAssistantTargetOverrideSchema.safeParse(invalidValue);
+          assert.equal(failure.success, false);
+          if (failure.success) assert.fail("target fixture must fail validation");
+          replaceFirstIssuePath(failure.error.issues, testCase.overrideIssuePath);
+          vi.spyOn(automationAssistantTargetOverrideSchema, "safeParse").mockReturnValue(failure);
+          break;
+        }
+        case "context": {
+          const failure = automationContextReferencesSchema.safeParse(invalidValue);
+          assert.equal(failure.success, false);
+          if (failure.success) assert.fail("context fixture must fail validation");
+          replaceFirstIssuePath(failure.error.issues, testCase.overrideIssuePath);
+          vi.spyOn(automationContextReferencesSchema, "safeParse").mockReturnValue(failure);
+          break;
+        }
+        case "payload": {
+          const failure = automationScaffoldPayloadSchema.safeParse(invalidValue);
+          assert.equal(failure.success, false);
+          if (failure.success) assert.fail("payload fixture must fail validation");
+          replaceFirstIssuePath(failure.error.issues, testCase.overrideIssuePath);
+          vi.spyOn(automationScaffoldPayloadSchema, "safeParse").mockReturnValue(failure);
+          await writeFile(importPath, JSON.stringify(createAutomationScaffoldPayload()));
+          break;
+        }
+      }
+
+      const cli = Cli.create("vault-cli", {
+        description: "automation test cli",
+        version: "0.0.0-test",
+      });
+      cli.use(incurErrorBridge);
+      registerAutomationCommands(cli);
+
+      const args = testCase.schema === "payload"
+        ? ["automation", "import-json", "--input", `@${importPath}`, "--vault", vaultRoot]
+        : [
+          "automation", "save", "Validation mapping",
+          "--instructions", "Do not expose private-validation-input.",
+          "--status", "paused",
+          "--channel", "linq",
+          "--delivery-target", "validation-thread",
+          ...(testCase.saveOptions ?? []),
+          "--vault", vaultRoot,
+        ];
+      const result = await runInProcessJsonCli(cli, args);
+
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.envelope.ok, false);
+      if (result.envelope.ok) assert.fail("validation fixture must return an error envelope");
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map((fieldError) => fieldError.path) ?? [],
+        testCase.expectedPaths,
+      );
+      assert.equal(
+        JSON.stringify(result.envelope).includes("private-validation-input"),
+        false,
+      );
+    } finally {
+      await rm(parentRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test("automation save persists a weekly wall-clock cron with an explicit timezone", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-weekly-wall-clock-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Sunday status pulse",
+      "--slug",
+      "sunday-status-pulse",
+      "--instructions",
+      "Collect a short weekly status update.",
+      "--support-kind",
+      "check_in",
+      "--trigger-kind",
+      "cron",
+      "--trigger-cron",
+      "0 19 * * 0",
+      "--trigger-time-zone",
+      "America/New_York",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "group-thread",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        schedule: unknown;
+        supportKind: string | null;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "sunday-status-pulse",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      kind: "cron",
+      expression: "0 19 * * 0",
+      timeZone: "America/New_York",
+    });
+    assert.equal(shown.envelope.data?.automation?.supportKind, "check_in");
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation internal validation returns field-specific non-echoing recovery envelopes", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-validation-envelope-",
+  );
+  const importPath = path.join(parentRoot, "invalid-automation.json");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+
+    const invalidSchedule = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Invalid weekly schedule",
+      "--instructions",
+      "Never echo private-schedule-input.",
+      "--status",
+      "paused",
+      "--trigger-kind",
+      "cron",
+      "--trigger-cron",
+      "0 19 * *",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "validation-thread",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidSchedule.exitCode, 1);
+    assert.equal(invalidSchedule.envelope.ok, false);
+    if (!invalidSchedule.envelope.ok) {
+      assert.equal(invalidSchedule.envelope.error.code, "invalid_schedule");
+      assert.equal(invalidSchedule.envelope.error.retryable, false);
+      assert.equal(invalidSchedule.envelope.error.stage, "validation");
+      assert.match(invalidSchedule.envelope.error.message ?? "", /five-field cron/u);
+      assert.equal(invalidSchedule.envelope.error.hint, undefined);
+      assert.equal(
+        invalidSchedule.envelope.error.fieldErrors?.[0]?.path,
+        "schedule.expression",
+      );
+      assert.equal(
+        JSON.stringify(invalidSchedule.envelope).includes("private-schedule-input"),
+        false,
+      );
+    }
+
+    await writeFile(importPath, JSON.stringify({
+      ...createAutomationScaffoldPayload(),
+      instructions: "Never echo private-import-input.",
+      status: "not-a-status",
+    }));
+    const invalidImport = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${importPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidImport.exitCode, 1);
+    assert.equal(invalidImport.envelope.ok, false);
+    if (!invalidImport.envelope.ok) {
+      assert.equal(invalidImport.envelope.error.code, "invalid_automation_payload");
+      assert.equal(invalidImport.envelope.error.retryable, false);
+      assert.equal(invalidImport.envelope.error.stage, "validation");
+      assert.equal(
+        invalidImport.envelope.error.fieldErrors?.[0]?.path,
+        "payload.status",
+      );
+      assert.equal(
+        JSON.stringify(invalidImport.envelope).includes("private-import-input"),
+        false,
+      );
+    }
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test("automation save and edit preserve exact canonical context references", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-context-references-");
 
@@ -369,6 +763,7 @@ test("automation save and edit preserve exact canonical context references", asy
       description: "automation test cli",
       version: "0.0.0-test",
     });
+    cli.use(incurErrorBridge);
     registerAutomationCommands(cli);
     const saved = await runInProcessJsonCli(cli, [
       "automation",
@@ -453,10 +848,17 @@ test("automation save and edit preserve exact canonical context references", asy
     ]);
     assert.equal(malformed.exitCode, 1);
     assert.equal(malformed.envelope.ok, false);
-    assert.match(
-      malformed.envelope.ok ? "" : malformed.envelope.error.message ?? "",
-      /entity-kind.*entity-id/u,
-    );
+    if (!malformed.envelope.ok) {
+      assert.match(malformed.envelope.error.message ?? "", /entity-kind.*entity-id/u);
+      assert.equal(
+        malformed.envelope.error.fieldErrors?.[0]?.path,
+        "contextReference",
+      );
+      assert.equal(
+        JSON.stringify(malformed.envelope).includes("missing-separator"),
+        false,
+      );
+    }
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }
@@ -1441,7 +1843,7 @@ test("automation support-series CLI pages exact matches and reconciles idempoten
       equalOneShotBound.envelope.ok
         ? ""
         : equalOneShotBound.envelope.error.message ?? "",
-      /activeUntil must be after schedule\.at/u,
+      /Automation definition is invalid/u,
     );
 
     const manualSeriesId = "experiment:exp_manual";
