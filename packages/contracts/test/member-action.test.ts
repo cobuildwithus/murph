@@ -60,6 +60,49 @@ describe("member action contract", () => {
     expect(parseMemberActionRequestV1(request)).toEqual(request);
   });
 
+  it("accepts a bounded rename for an existing exercise", () => {
+    const request = validRequest();
+    const renamed = {
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          exercisePosition: 1,
+          kind: "exercise.rename" as const,
+          name: "Machine leg press",
+        }],
+      },
+    };
+
+    expect(parseMemberActionRequestV1(renamed)).toEqual(renamed);
+  });
+
+  it("rejects no-op and out-of-snapshot exercise renames", () => {
+    const request = validRequest();
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          exercisePosition: 1,
+          kind: "exercise.rename",
+          name: "Leg press",
+        }],
+      },
+    }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          exercisePosition: 2,
+          kind: "exercise.rename",
+          name: "Machine leg press",
+        }],
+      },
+    }).success).toBe(false);
+  });
+
   it("accepts one bounded apply presentation and an apply-only success result", () => {
     const request = validRequest();
     const presentedRequest = {
