@@ -212,41 +212,29 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(directLayers.prompt).toContain('last-resort disambiguation check')
+    expect(directLayers.prompt).toContain('last resort for a generic group cue')
     expect(directSection).toContain(
       'call `murph.group_consult action="ask"` or `action="handoff"` directly with `participantTarget`',
     )
-    expect(directSection).toContain('do not call `list_memberships` first')
+    expect(directSection).toContain('Do not call `list_memberships` first')
     expect(directSection).toContain(
-      'only the other people besides the requesting member',
+      'include only other people, never the requester/self',
     )
-    expect(directSection).toContain('subtract the requester')
-    expect(directSection).toContain('omit `participantCount` rather than guessing')
-    expect(directSection).toContain('possible group cue')
-    expect(directSection).toContain('club, team, community, or shared challenge')
+    expect(directSection).toContain('convert total chat size only when clear')
     expect(directSection).toContain(
-      '`murph.group_membership action="list_memberships"` is available',
-    )
-    expect(directSection).toContain('last-resort disambiguation check')
-    expect(directSection).toContain(
-      'generic group reference only when exactly one membership exists',
+      'generic group cue without an exact title or participant evidence',
     )
     expect(directSection).toContain(
-      'name-like reference only when one exact normalized visible label matches',
+      'Accept only one membership or one exact visible-label match',
     )
-    expect(directSection).toContain('use `murph.group_consult action="ask"`')
-    expect(directSection).toContain('With no memberships')
+    expect(directSection).toContain('ask one narrow clarification')
     expect(directSection).toContain('paste-or-screenshot fallback')
     expect(directSection).toContain('distinct nonblank visible labels')
-    expect(directSection).toContain(
-      'duplicate or unnamed labels cannot be resolved by this lookup',
-    )
     expect(directSection).toContain('Never fuzzy-match')
-    expect(directSection).toContain('select by role or newness')
+    expect(directSection).toContain('use role/newness')
     expect(directSection).toContain('expose identifiers, or fan out')
-    expect(directSection).toContain('ordinary ambiguity without a group cue')
-    expect(groupPrompt).not.toContain('last-resort disambiguation check')
-    expect(unverifiedPrompt).not.toContain('last-resort disambiguation check')
+    expect(groupPrompt).not.toContain('last resort for a generic group cue')
+    expect(unverifiedPrompt).not.toContain('last resort for a generic group cue')
   })
 
   it('does not fork challenge behavior into a scheduled-only prompt', () => {

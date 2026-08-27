@@ -1064,7 +1064,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
             minimum: 1,
             maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
             description:
-              'The number of other people in the chat besides the requesting member. If the member gives a total chat size, subtract the requester. Omit this count when that conversion is unclear.',
+              'Other people in the chat, excluding the requesting member. Convert a stated total chat size only when clear.',
           },
           participants: {
             type: 'array',
@@ -1095,7 +1095,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
           },
         },
         description:
-          'Optional only for action="ask" or action="handoff" when the member describes a joined iMessage/SMS group by its people or participant count. Put each described person other than the requesting member in one participants item; never add the requester or a self/"me" cue. Use a contact displayName only when the member supplied it; use only area code and/or last four for phone clues, or emailParticipant=true for an unnamed email participant. Never send a full phone number, email address, internal ID, or guessed identity. This evidence must identify exactly one current joined group or Murph asks for clarification.',
+          'Optional for ask/handoff when a joined iMessage/SMS group is described by people. Include each non-requester once, using only user-supplied display names, area code/last four, or emailParticipant. Never include full handles, IDs, or guesses.',
       },
       displayName: {
         type: 'string',
@@ -1301,7 +1301,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask or hand off; the host binds group/member/sender authority. In a private conversation, target an exact supplied title with groupLabel or people in an existing joined iMessage/SMS group with participantTarget. Clarification options are safe human descriptions, not internal IDs: repeat them naturally. When the member chooses one, put only its exact title in groupLabel when present, reconstruct its masked people/count clues in participantTarget, and omit groupLabel when it has no title. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
+    'Ask or hand off; the host binds group/member/sender authority. Use message_current_sender for a complete private current-sender request. Call clarify_current_sender before a needed follow-up. Use continue_current_sender_privately or continue_current_sender_in_group only for a later reply to that clarification, never a fresh request. Accepted handoff is queued, not sent; never say told, shared, or posted.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({

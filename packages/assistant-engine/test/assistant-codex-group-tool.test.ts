@@ -211,9 +211,9 @@ describe("murph.group dynamic tool", () => {
     expect(
       GROUP_TOOL_INPUT_PROPERTIES.participantTarget.properties
         .participantCount.description,
-    ).toContain("other people in the chat besides the requesting member");
+    ).toContain("excluding the requesting member");
     expect(GROUP_TOOL_INPUT_PROPERTIES.participantTarget.description)
-      .toContain('never add the requester or a self/"me" cue');
+      .toContain("Include each non-requester once");
     expect(GROUP_TOOL_INPUT_PROPERTIES.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
     expect(
