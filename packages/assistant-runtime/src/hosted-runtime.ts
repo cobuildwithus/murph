@@ -2478,7 +2478,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const checkpointRedactedStatus =
           checkpoint.workspace.redactedStatus ?? redactedStatus;
         const immediateRecheckRequested =
-          immediateRecheckCandidate
+          (handoff !== undefined || immediateRecheckCandidate)
           && !isHostedRuntimeFutureMailboxContinuation({
             nextWakeAt: checkpointReturnedNextWake.nextWakeAt,
             nextWakeReason: checkpointReturnedNextWake.nextWakeReason,
@@ -2513,7 +2513,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
 
       const invocationResult = {
-        ...(!assistantExecutionBlocked && assistantCronWake?.dueNow
+        ...(handoff !== undefined
+          || (!assistantExecutionBlocked && assistantCronWake?.dueNow)
           ? { immediateRecheckRequested: true as const }
           : {}),
         nextWakeAt: returnedNextWake.nextWakeAt,

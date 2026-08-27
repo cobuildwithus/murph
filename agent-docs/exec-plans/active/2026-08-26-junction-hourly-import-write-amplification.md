@@ -70,7 +70,10 @@ Updated: 2026-08-26
 6. [x] Prove restored replyable input cannot sit behind the exact Ask barrier;
    hand the existing positive pending-input projection to the ordinary assistant
    owner without running the Ask or later device maintenance.
-7. [ ] Commit, push, run final review with required CI, deploy, and prove live
+7. [x] Prove that a positive restored-input handoff requests an immediate owner
+   recheck even when the durable assistant wake is unchanged, without forcing an
+   otherwise unnecessary checkpoint or making inherited wakes self-repeating.
+8. [ ] Commit, push, run final review with required CI, deploy, and prove live
    mailbox and device-sync convergence.
 
 ## Decisions
@@ -96,6 +99,12 @@ Updated: 2026-08-26
   candidate, persist an assistant wake ahead of the system wake, and leave both
   the Ask and later device maintenance pending. An incomplete empty index is not
   positive evidence and must preserve exact-Ask admission.
+- Accepted final-review finding: a positive restored-input handoff could reuse
+  an already-due assistant wake without changing durable state, leaving the Web
+  owner no observable reason to rerun until its roughly four-minute recovery
+  horizon. Emit the existing transient immediate-recheck edge for every positive
+  handoff, including same-key checkpoints, while leaving inherited assistant
+  wakes without positive input evidence edge-free.
 - Rejected: increasing hosted timeouts, changing resource admission, deleting
   queued work, or locally expiring the Ask without its Web-owned terminal result.
 
@@ -121,5 +130,6 @@ Updated: 2026-08-26
   the conversation proceeds.
 - A reply already present at restore schedules and runs through the ordinary
   assistant owner before the durable-head Ask or later device maintenance;
-  the next invocation proves the staged input is still serviceable.
+  the immediate owner edge avoids waiting for periodic recovery, and the next
+  invocation proves the staged input is still serviceable.
 - Provider failure preserves the same one-hour cursor and outer retry path.
