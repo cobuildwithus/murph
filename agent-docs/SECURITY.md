@@ -1208,6 +1208,29 @@ Last verified: 2026-08-26
   a compromised initiating account; any process that can already read a
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
+
+### Local production-secret stop boundary
+
+Local agents and local commands must treat production secret values as
+unavailable. Provider CLI or API output that lists a variable name, target, or
+scope is metadata only; it is never evidence that the value can or should be
+read locally. Do not download, copy, inject, echo, or reconstruct a production
+secret in a local process, file, worktree, test, or debugging session.
+
+When requested work would require a production secret, stop before
+implementation or execution. Explain the exact blocked operation, the class of
+secret or protected identity it requires, and why a secret-free path is
+insufficient, then discuss the decision with the user. The user may abandon the
+operation or authorize a separate repository-owned hosted or protected path.
+This decision gate precedes every task-specific production migration,
+deployment, rollout freeze, dry run, protected-identity proof, or write; reaching
+the unavailable credential is not the point at which to ask.
+That authorization is not implicit: do not prebuild a workflow, endpoint,
+credential mirror, or alternate execution path while waiting for the decision.
+Any approved path is a new trust-boundary change and follows normal security,
+verification, deployment, and review requirements without making the secret
+locally readable.
+
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
   GitHub App credential only through the protected `frog-reconciliation`

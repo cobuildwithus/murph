@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "meal-summaries-load-faster",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Meal summaries load faster",
+    "summary": "Meal and nutrient summaries now load faster by going straight to saved meal data instead of checking unrelated records first.",
+    "details": "Totals, date ranges, ordering, units, and freshness are unchanged. Edited, imported, or removed meals keep the same handling, along with existing privacy and access controls.",
+    "relevanceTags": ["nutrition", "meals", "performance"],
+    "sourcePullRequests": [2394]
+  }
+}

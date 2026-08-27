@@ -1172,6 +1172,22 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   short sequential repeatable-read transaction, so no dashboard transaction
   spans members and no off-page member receives gate work.
 
+  The Web-owned Growth dashboard also derives the recent-member retention
+  section as one bounded projection, not a second analytics owner. It selects
+  at most the 20 newest personal members in one added query. The dashboard's
+  existing personal-message groupings for rolling-seven-day and current-UTC-day
+  active users also select count and latest receipt fields, so the section adds
+  no mailbox query. It uses `HostedMailboxItem.createdAt` receipt time and
+  `conversation.message`, and every displayed activity fact stays within the
+  live rolling seven-day window instead of claiming lifetime history from
+  retention-bounded rows. It selects no billing relation, message content, or
+  decrypted identifier, excludes group and thread-container identities, and
+  leaves per-participant group activity in the anonymous Growth projection.
+  Composed with sponsorship reads, the page can queue at most 26 database
+  operations at its read peak (previously 25); the shared pool still caps live
+  connections at 15. This projection adds no transaction, decrypt, external
+  call, retry, or fallback.
+
   Hosted device-sync scheduling keeps one canonical connection timestamp:
   Web's `nextReconcileAt` is the provider cadence and the only timestamp the
   global due-reconcile sweep may consume. The encrypted system-mailbox item
@@ -3650,7 +3666,10 @@ V6 workout only, the
 Messages extension may use the separately enrolled Messages-scoped credential,
 renewing its 24-hour action bearer directly when needed, to submit a bounded
 member action derived from the visible snapshot without the containing app
-running. The URL
+running. That closed action may rename an existing exercise while retaining its
+original name as the optimistic coordinate for same-batch set edits; the
+canonical workout owner applies the rename last in the same write and rejects
+ambiguous resulting coordinates. The URL
 still carries no identity, canonical id, credential, or authority, and all other
 card kinds remain local presentation. This adds no mutable card state, card
 database, background synchronization owner, queue, or model turn. V4 workout

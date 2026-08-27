@@ -5,6 +5,7 @@ import { GroupPrivateConversions } from "./group-private-conversions";
 import { GrowthScorecard } from "./growth-scorecard";
 import { GrowthSponsorships } from "./growth-sponsorships";
 import { GrowthWeeklyTable } from "./growth-weekly-table";
+import { RecentMemberRetention } from "./recent-member-retention";
 import { ReferralLinkUsage } from "./referral-link-usage";
 import { TrialStartAttribution } from "./trial-start-attribution";
 import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
@@ -83,6 +84,8 @@ export default async function HostedOpsGrowthPage() {
         trialStarts={dashboard.trialStarts}
         usageTopUps={dashboard.usageTopUps}
       />
+
+      <RecentMemberRetention retention={dashboard.recentMemberRetention} />
 
       <GrowthCharts
         dailySeries={dashboard.dailySeries}

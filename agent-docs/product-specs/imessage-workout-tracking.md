@@ -310,11 +310,16 @@ reinterpreted as a new-routine completion.
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V6 workout snapshot and emits only closed `exercise.append`, `set.put`,
-`set.append`, and `set.remove` mutations. `set.put` addresses an original or
-in-batch exercise-placeholder coordinate. `set.append` addresses the contiguous
-final positions after all original-coordinate edits and descending removals,
-so deletion and creation never share one positional identity. A destructive
+V6 workout snapshot and emits only closed `exercise.append`, `exercise.rename`,
+`set.put`, `set.append`, and `set.remove` mutations. `exercise.rename` targets
+one existing presentation position with a bounded replacement name; the
+expected workout and any same-batch set mutations retain the original name.
+`set.put` addresses an original or in-batch exercise-placeholder coordinate.
+`set.append` addresses the contiguous final positions after all
+original-coordinate edits and descending removals, so deletion and creation
+never share one positional identity. The canonical owner applies all set
+mutations before renames in the same write and rejects a rename that would make
+future exercise coordinates ambiguous. A destructive
 batch also carries one opaque SHA-256 binding over the canonical workout id and
 complete ordered exercise/set state. The canonical owner recomputes that binding
 under its existing lock before removing a set, so any concurrent type, note,

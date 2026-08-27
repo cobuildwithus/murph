@@ -4628,6 +4628,11 @@ printf 'ZIP: %s (%s bytes)\n' \
         'agent-docs/operations/product-ux.md',
         'product UX workflow\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+        'assistant verification workflow\n',
+      )
       writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
       writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
@@ -4822,6 +4827,7 @@ printf 'ZIP: %s (%s bytes)\n' \
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
+          '.agents/skills/verify-murph-assistant/SKILL.md',
           packagedEvidencePath,
           supplementalSkillPath,
           supplementalProofPath,
