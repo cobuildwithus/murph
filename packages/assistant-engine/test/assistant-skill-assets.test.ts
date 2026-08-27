@@ -1725,7 +1725,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('ships Murph onboarding as a compact progressive-disclosure skill with single-owned rules', async () => {
+  it('ships Murph onboarding as a compact progressive-disclosure skill with single-owned composed rules', async () => {
     const murphOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'murph-onboarding',
     )
@@ -1797,6 +1797,27 @@ describe('assistant skill assets', () => {
       '## Completion',
     )
 
+    const onboardingSystemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+      ],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'linq',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      conversationScope: 'direct',
+      currentLocalDate: '2026-08-27',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: true,
+      turnTrigger: null,
+    })
     const ownedRules = [
       {
         owner: 'SKILL.md',
@@ -1813,6 +1834,10 @@ describe('assistant skill assets', () => {
       {
         owner: 'aspiration-foundation-delegation.md',
         rule: 'A foundation answer is still context, not permission to solve a parked thread.',
+      },
+      {
+        owner: 'aspiration-foundation-delegation.md',
+        rule: 'Identifying a data source resolves this checkpoint; connecting it is a separate optional action. When the user defers connection, do not issue another link: acknowledge that it can wait and continue to the next unresolved foundation beat unless they explicitly pause onboarding itself. Never say or imply that a connection exists until visible evidence proves it.',
       },
       {
         owner: 'persistence-recovery-follow-up.md',
@@ -1835,14 +1860,18 @@ describe('assistant skill assets', () => {
         rule: 'An experiment, plan, support loop, wearable connection, lab upload, group, or specific positive health fact is not required.',
       },
     ] as const
-    const files = new Map<string, string>([['SKILL.md', root], ...references])
+    const files = new Map<string, string>([
+      ['system-prompt', onboardingSystemPrompt],
+      ['SKILL.md', root],
+      ...references,
+    ])
     const compactFiles = new Map(
       [...files].map(([file, contents]) => [
         file,
         contents.replace(/\s+/gu, ' '),
       ]),
     )
-    const wholeSkill = [...compactFiles.values()].join('\n')
+    const composedPrompt = [...compactFiles.values()].join('\n')
 
     for (const { owner, rule } of ownedRules) {
       expect(
@@ -1850,8 +1879,8 @@ describe('assistant skill assets', () => {
         `${rule} must remain owned by ${owner}`,
       ).toContain(rule)
       expect(
-        wholeSkill.split(rule).length - 1,
-        `${rule} must have exactly one owner`,
+        composedPrompt.split(rule).length - 1,
+        `${rule} must have exactly one owner in the composed prompt`,
       ).toBe(1)
     }
   })
@@ -2157,7 +2186,7 @@ How old are you and what's your gender?
       'Do not call `murph.device` to connect Apple Health, claim permission was granted, or say steps are syncing until live evidence proves it.',
     )
     expect(compact).toContain(
-      'Declining this optional offer leaves the checkpoint resolved.',
+      'Declining or deferring this optional offer leaves the checkpoint resolved.',
     )
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')

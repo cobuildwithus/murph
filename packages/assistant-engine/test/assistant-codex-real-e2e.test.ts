@@ -127,6 +127,7 @@ import {
 } from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
+  AssistantHostedDeviceConnectProvider,
   AssistantHostedDeviceToolRequest,
   AssistantHostedGroupSharedReadResponse,
 } from '../src/assistant/execution-context.ts'
@@ -252,6 +253,11 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
     ONBOARDING_POLICY_PATHS[2][1],
   ],
   minimal_identity_prompt: [ONBOARDING_POLICY_PATHS[0][1]],
+  wearable_connection_deferred: [
+    ONBOARDING_POLICY_PATHS[0][1],
+    ONBOARDING_POLICY_PATHS[1][1],
+    ONBOARDING_POLICY_PATHS[2][1],
+  ],
 } as const
 type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
@@ -912,6 +918,145 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
       }
     },
     600_000,
+  )
+
+  it(
+    'continues foundation after a member defers an optional wearable connection',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        const resumeContext = buildRealCodexOnboardingResumeContext(
+          'ordinary_records',
+        )
+        if (resumeContext.memory.status !== 'ok') {
+          throw new Error('Expected available onboarding memory fixture.')
+        }
+        const memoryRecords = resumeContext.memory.records.filter((record) =>
+          typeof record !== 'object'
+          || record === null
+          || !('id' in record)
+          || record.id !== 'ordinary_health_context'
+        )
+        const emptySurface = {
+          count: 0,
+          items: [],
+          status: 'ok',
+          truncated: false,
+        } as const
+        await writeFile(
+          path.join(workingDirectory, 'onboarding-resume-context.json'),
+          `${JSON.stringify({
+            ...resumeContext,
+            allergies: emptySurface,
+            conditions: emptySurface,
+            deviceAccounts: emptySurface,
+            experiments: emptySurface,
+            memory: {
+              ...resumeContext.memory,
+              recordCount: memoryRecords.length,
+              records: memoryRecords,
+            },
+            regimens: emptySurface,
+            supplements: emptySurface,
+          })}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+        const deviceTool: NonNullable<
+          AssistantHostedToolContext['deviceTool']
+        > = {
+          async request(request) {
+            deviceRequests.push(request)
+            if (request.action !== 'list_accounts') {
+              throw new Error('No device write is expected in this journey.')
+            }
+            return {
+              accounts: [],
+              action: 'list_accounts',
+              provider: request.provider ?? null,
+              sourceProvider: request.sourceProvider ?? null,
+            }
+          },
+        }
+        const turnInput = buildRealCodexOnboardingTurnInput({
+          config,
+          workingDirectory,
+        })
+        const result = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the private welcome, minimal identity, aspiration readiness, reflection, save, and park are complete.',
+              'The latest visible Murph message asked whether the member uses a wearable or health app. No wearable connection is visible.',
+              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+            ].join('\n'),
+            [
+              { label: 'Oura', provider: 'oura' },
+            ],
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({
+              conversationScope: 'direct',
+              origin: {
+                assistantInputId:
+                  'ain_00000000000000000000000000000027',
+                kind: 'accepted_input',
+                sessionId: 'session-onboarding-wearable-defer',
+              },
+              originSessionId: 'session-onboarding-wearable-defer',
+            }),
+            deviceTool,
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt: "I use Oura, but I'd rather connect it later.",
+          scenario: 'wearable_connection_deferred',
+        })
+        const deviceWriteActions = result.actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_DEVICE_TOOL.name
+          && action.argumentsValue.action !== 'list_accounts'
+        )
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[onboarding-wearable-defer-e2e] ${JSON.stringify({ reply })}\n`,
+        )
+
+        expect(result.policyFiles).toEqual(expect.arrayContaining([
+          'aspiration-foundation-delegation.md',
+          'persistence-recovery-follow-up.md',
+        ]))
+        expect(deviceWriteActions).toHaveLength(0)
+        expect(
+          deviceRequests.filter((request) => request.action !== 'list_accounts'),
+        ).toHaveLength(0)
+        expect(reply).toMatch(/oura|connect/iu)
+        expect(reply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(reply).toMatch(/voice memo/iu)
+        expect(reply).toMatch(/typ(?:e|ing)/iu)
+        expect(reply).toMatch(/supplements|meds|conditions|allergies/iu)
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toContain('https://')
+        expect(reply).not.toMatch(
+          /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
   )
 })
 
@@ -17385,12 +17530,15 @@ function buildHostedUsageProgressDeveloperInstructions(
 function buildDirectConversationDeveloperInstructions(
   onboardingGuidance = false,
   assistantContextSnapshotPrompt: string | null = null,
+  assistantHostedDeviceConnectProviders:
+    readonly AssistantHostedDeviceConnectProvider[] = [],
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt,
-    assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [],
+    assistantHostedDeviceConnectAvailable:
+      assistantHostedDeviceConnectProviders.length > 0,
+    assistantHostedDeviceConnectProviders,
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {

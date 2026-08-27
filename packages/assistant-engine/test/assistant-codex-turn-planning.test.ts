@@ -1779,13 +1779,17 @@ describe('assistant Codex turn planning', () => {
       'During discovery, a stated health goal is context, not an action request.',
       'Only an immediate request or safety need moves problem-solving ahead of the park.',
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
-      'Honor pause, defer, skip, and decline.',
-      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     ] as const
     for (const clause of onboardingDecisionContract) {
       expect(plan.developerInstructions).toContain(clause)
       expect(plan.turnContextPrompt).not.toContain(clause)
     }
+    expect(plan.developerInstructions).not.toContain(
+      'Honor pause, defer, skip, and decline.',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+    )
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
     )

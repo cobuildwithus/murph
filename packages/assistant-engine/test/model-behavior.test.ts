@@ -2882,8 +2882,8 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
     )
-    expect(prompt).toContain('Honor pause, defer, skip, and decline.')
-    expect(prompt).toContain(
+    expect(prompt).not.toContain('Honor pause, defer, skip, and decline.')
+    expect(prompt).not.toContain(
       'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     )
     expect(prompt).toContain(
