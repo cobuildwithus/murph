@@ -118,6 +118,42 @@ describe("ensureHostedMemberStripeCustomer", () => {
         timeout: 5_000,
       },
     );
+    const claimId = prisma.tx.hostedMemberBillingRef.upsert.mock.calls[0]?.[0]
+      .create.stripeEffectClaimId;
+    expect(claimId).toEqual(
+      expect.stringMatching(/^member-customer-create:/),
+    );
+    expect(prisma.tx.hostedMemberBillingRef.upsert).toHaveBeenCalledWith({
+      create: expect.objectContaining({
+        memberId: "member_payer",
+        stripeEffectClaimId: claimId,
+        stripeEffectKind: "member.customer-create",
+      }),
+      update: expect.objectContaining({
+        stripeEffectClaimId: claimId,
+        stripeEffectKind: "member.customer-create",
+      }),
+      where: { memberId: "member_payer" },
+    });
+    expect(prisma.tx.hostedMemberBillingRef.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        stripeEffectClaimId: null,
+        stripeEffectKind: null,
+      }),
+      where: {
+        memberId: "member_payer",
+        stripeEffectClaimId: claimId,
+        stripeEffectKind: "member.customer-create",
+      },
+    });
+    expect(
+      prisma.tx.hostedMemberBillingRef.upsert.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.createStripeCustomer.mock.invocationCallOrder[0]!);
+    expect(
+      mocks.createStripeCustomer.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(
+      prisma.tx.hostedMemberBillingRef.updateMany.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
     expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).toHaveBeenCalledWith({
       memberId: "member_payer",
@@ -130,6 +166,7 @@ describe("ensureHostedMemberStripeCustomer", () => {
     const prisma = createPrisma({
       billingRefStates: [createBillingRef({
         stripeEffectClaimId: "member-customer:active-claim",
+        stripeEffectKind: "member.customer-create",
       })],
     });
 
@@ -201,9 +238,7 @@ describe("ensureHostedMemberStripeCustomer", () => {
   });
 
   it("reconciles an ambiguous provider success with the same stable identity", async () => {
-    const prisma = createPrisma({
-      billingRefStates: [null, null, null],
-    });
+    const prisma = createPrisma();
     const providerCustomers = new Map<string, string>();
     let firstResponse = true;
     mocks.createStripeCustomer.mockImplementation(async (
@@ -323,6 +358,7 @@ function createBillingRef(input: {
   currentBillingPhase?: string | null;
   stripeCustomerId?: string | null;
   stripeEffectClaimId?: string | null;
+  stripeEffectKind?: string | null;
   updatedAt?: Date;
 } = {}): Record<string, unknown> {
   const stripeCustomerId = input.stripeCustomerId ?? null;
@@ -337,6 +373,13 @@ function createBillingRef(input: {
       ? `lookup:${stripeCustomerId}`
       : null,
     stripeEffectClaimId: input.stripeEffectClaimId ?? null,
+    stripeEffectClaimedAt: input.stripeEffectClaimId
+      ? new Date("2026-07-20T12:00:00.000Z")
+      : null,
+    stripeEffectExecutionId: null,
+    stripeEffectExecutionStartedAt: null,
+    stripeEffectKind: input.stripeEffectKind ?? null,
+    stripeEffectTargetPlanCode: null,
     updatedAt: input.updatedAt ?? new Date("2026-07-20T12:00:00.000Z"),
   };
 }
@@ -345,9 +388,9 @@ function createPrisma(input: {
   billingRefStates?: Array<Record<string, unknown> | null>;
   memberStates?: Array<Record<string, unknown>>;
 } = {}) {
-  const billingRefStates = input.billingRefStates ?? [null, null];
+  const billingRefStates = [...(input.billingRefStates ?? [])];
   const memberStates = input.memberStates ?? [activeMemberState()];
-  let billingRefReadIndex = 0;
+  let billingRefState: Record<string, unknown> | null = null;
   let memberReadIndex = 0;
   let interactiveTransactionOpen = false;
   const tx = {
@@ -358,10 +401,40 @@ function createPrisma(input: {
       )),
     },
     hostedMemberBillingRef: {
-      findUnique: vi.fn(async () => readSequencedState(
-        billingRefStates,
-        billingRefReadIndex++,
-      )),
+      findUnique: vi.fn(async () => {
+        if (billingRefStates.length > 0) {
+          billingRefState = billingRefStates.shift() ?? null;
+        }
+        return billingRefState;
+      }),
+      updateMany: vi.fn(async (input: {
+        data: Record<string, unknown>;
+        where: {
+          memberId: string;
+          stripeEffectClaimId: string;
+          stripeEffectKind: string;
+        };
+      }) => {
+        if (
+          billingRefState?.memberId !== input.where.memberId
+          || billingRefState.stripeEffectClaimId
+            !== input.where.stripeEffectClaimId
+          || billingRefState.stripeEffectKind !== input.where.stripeEffectKind
+        ) {
+          return { count: 0 };
+        }
+        billingRefState = { ...billingRefState, ...input.data };
+        return { count: 1 };
+      }),
+      upsert: vi.fn(async (input: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => {
+        billingRefState = billingRefState
+          ? { ...billingRefState, ...input.update }
+          : { ...createBillingRef(), ...input.create };
+        return billingRefState;
+      }),
     },
   };
   const prisma = {

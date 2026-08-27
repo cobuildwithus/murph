@@ -46,6 +46,32 @@ If convergence or drain cannot be proven, stop before deploying a claim writer.
 Rollback of this expand release is safe only before any later release persists
 a claim. After that point, recovery is a forward fix or rollback to this floor.
 
+## Member Customer creation owner
+
+The first member claim writer moves reusable Stripe Customer creation out of
+the member-row transaction. It may be enabled only after deployment steps 1-5
+above are complete:
+
+- Preparation locks and revalidates the member, then persists one opaque
+  `member.customer-create` claim on the existing member billing row before
+  calling Stripe. Another active claim remains a retryable conflict.
+- Stripe Customer creation runs with no database transaction open and retains
+  the existing member-scoped provider idempotency key. A provider error leaves
+  the claim intact; replay recognizes only that exact claim shape and repeats
+  the same idempotent request.
+- Finalization locks and revalidates the member, requires that exact persisted
+  claim, and atomically binds the encrypted Customer identity and lookup key
+  while clearing every claim field. An already-bound Customer remains the
+  terminal replay result.
+- Account deletion already locks the same member owner and rejects any active
+  member claim before suspension or local deletion. It therefore cannot commit
+  between claim persistence and Customer binding.
+
+The claim is short-lived on an ordinary success path and intentionally durable
+after an ambiguous provider outcome. The first persisted member Customer claim
+activates the rollback floor in step 7; recovery must not serve a revision that
+does not understand member billing-row claims.
+
 ## Verification
 
 Run the unit and migration suite, then apply all Web migrations to an isolated
@@ -74,3 +100,9 @@ admission. An accepted direct `invoice.payment_failed` receipt that overlaps a
 claim-only owner group remains failed/retryable beyond the ordinary poison cap;
 after claim removal, the same receipt applies the canonical `past_due`
 projection and completes.
+
+The member Customer owner case pauses the provider after observing the
+committed claim, races the production account-deletion service through an
+independent PostgreSQL client, and proves deletion is rejected without partial
+suspension. It then completes Customer binding, verifies the exact claim is
+cleared, and replays the operation without another provider call.

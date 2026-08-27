@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isDeepStrictEqual } from "node:util";
+import { randomUUID } from "node:crypto";
 
 import type {
   HostedMemberBillingRef,
@@ -26,13 +26,16 @@ import {
 
 type HostedMemberStripeCustomerPreparation =
   | {
+      claimId: string;
       kind: "create";
-      expectedBillingRef: HostedMemberBillingRef | null;
     }
   | {
       kind: "existing";
       stripeCustomerId: string;
     };
+
+const HOSTED_MEMBER_STRIPE_CUSTOMER_EFFECT_KIND = "member.customer-create";
+const HOSTED_MEMBER_STRIPE_CUSTOMER_CLAIM_PREFIX = "member-customer-create:";
 
 /**
  * Reuses the member-scoped Stripe Customer identity and its existing provider
@@ -60,6 +63,9 @@ export async function ensureHostedMemberStripeCustomer(input: {
     return prepared.stripeCustomerId;
   }
 
+  // Keep the committed claim on any provider error. A later call reuses both
+  // the claim and Stripe idempotency key, so an ambiguous success is reconciled
+  // without admitting account deletion or a second Customer identity.
   const candidateStripeCustomerId = await createOrReconcileHostedMemberStripeCustomer({
     memberId: input.memberId,
     requestOptions: {
@@ -71,7 +77,7 @@ export async function ensureHostedMemberStripeCustomer(input: {
 
   return finalizeHostedMemberStripeCustomer({
     candidateStripeCustomerId,
-    expectedBillingRef: prepared.expectedBillingRef,
+    claimId: prepared.claimId,
     memberId: input.memberId,
     prisma,
   });
@@ -99,8 +105,36 @@ async function prepareHostedMemberStripeCustomer(input: {
       }
     }
 
+    if (billingRef?.stripeEffectClaimId) {
+      if (isExactHostedMemberStripeCustomerClaim(billingRef)) {
+        return {
+          claimId: billingRef.stripeEffectClaimId,
+          kind: "create",
+        } as const;
+      }
+      assertHostedStripeEffectClaimAbsent(billingRef.stripeEffectClaimId);
+    }
+
+    const claimId = `${HOSTED_MEMBER_STRIPE_CUSTOMER_CLAIM_PREFIX}${randomUUID()}`;
+    const claim = {
+      stripeEffectClaimedAt: new Date(),
+      stripeEffectClaimId: claimId,
+      stripeEffectExecutionId: null,
+      stripeEffectExecutionStartedAt: null,
+      stripeEffectKind: HOSTED_MEMBER_STRIPE_CUSTOMER_EFFECT_KIND,
+      stripeEffectTargetPlanCode: null,
+    } as const;
+    await tx.hostedMemberBillingRef.upsert({
+      create: {
+        memberId: input.memberId,
+        ...claim,
+      },
+      update: claim,
+      where: { memberId: input.memberId },
+    });
+
     return {
-      expectedBillingRef: billingRef,
+      claimId,
       kind: "create",
     } as const;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -108,7 +142,7 @@ async function prepareHostedMemberStripeCustomer(input: {
 
 async function finalizeHostedMemberStripeCustomer(input: {
   candidateStripeCustomerId: string;
-  expectedBillingRef: HostedMemberBillingRef | null;
+  claimId: string;
   memberId: string;
   prisma: PrismaClient;
 }): Promise<string> {
@@ -127,7 +161,13 @@ async function finalizeHostedMemberStripeCustomer(input: {
       }
     }
 
-    if (!isDeepStrictEqual(input.expectedBillingRef, currentBillingRef)) {
+    if (currentBillingRef?.stripeEffectClaimId !== input.claimId) {
+      assertHostedStripeEffectClaimAbsent(
+        currentBillingRef?.stripeEffectClaimId,
+      );
+      throw buildHostedUsageCreditCustomerBindFailedError();
+    }
+    if (!isExactHostedMemberStripeCustomerClaim(currentBillingRef)) {
       throw buildHostedUsageCreditCustomerBindFailedError();
     }
 
@@ -137,6 +177,24 @@ async function finalizeHostedMemberStripeCustomer(input: {
       tx,
     });
     if (!billingRef?.stripeCustomerId) {
+      throw buildHostedUsageCreditCustomerBindFailedError();
+    }
+    const clearedClaim = await tx.hostedMemberBillingRef.updateMany({
+      data: {
+        stripeEffectClaimedAt: null,
+        stripeEffectClaimId: null,
+        stripeEffectExecutionId: null,
+        stripeEffectExecutionStartedAt: null,
+        stripeEffectKind: null,
+        stripeEffectTargetPlanCode: null,
+      },
+      where: {
+        memberId: input.memberId,
+        stripeEffectClaimId: input.claimId,
+        stripeEffectKind: HOSTED_MEMBER_STRIPE_CUSTOMER_EFFECT_KIND,
+      },
+    });
+    if (clearedClaim.count !== 1) {
       throw buildHostedUsageCreditCustomerBindFailedError();
     }
     return billingRef.stripeCustomerId;
@@ -162,8 +220,22 @@ async function readHostedMemberStripeCustomerOwnerStateTx(input: {
   const billingRef = await input.tx.hostedMemberBillingRef.findUnique({
     where: { memberId: input.memberId },
   });
-  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
   return billingRef;
+}
+
+function isExactHostedMemberStripeCustomerClaim(
+  billingRef: HostedMemberBillingRef,
+): boolean {
+  return billingRef.stripeEffectClaimId !== null
+    && billingRef.stripeEffectClaimId.startsWith(
+      HOSTED_MEMBER_STRIPE_CUSTOMER_CLAIM_PREFIX,
+    )
+    && billingRef.stripeEffectKind
+      === HOSTED_MEMBER_STRIPE_CUSTOMER_EFFECT_KIND
+    && billingRef.stripeEffectClaimedAt !== null
+    && billingRef.stripeEffectExecutionId === null
+    && billingRef.stripeEffectExecutionStartedAt === null
+    && billingRef.stripeEffectTargetPlanCode === null;
 }
 
 type HostedMemberStripeCustomerRequestOptions = Pick<
