@@ -18,9 +18,10 @@ shared error projector and no partial writes or submitted-value echo.
   `ROUND_OUTCOME: PASS`.
 - The later foundation integration has local proof but has not received a
   post-`main` exact-head ReviewGPT round.
-- Current `main` was merged at `96c70a3d64`; the resulting tree differs from
-  `main` only in the samples/import slice, its authored plan history, and the
-  measured bundle allowance.
+- Current `main` through `8ee6b16f34` was merged at `72849c7692`. Its newer
+  exact-base lazy-bundle comparison supersedes this PR's absolute-cap ratchet,
+  so the conflict resolution deletes the obsolete PR delta instead of composing
+  two bundle-growth owners.
 - Focused verification passes: 268 sample and shared-boundary tests, 14 runner
   bundle tests, all six affected package typechecks, prepared runtime, CLI
   package shape, and both docs gates.
@@ -60,11 +61,11 @@ shared error projector and no partial writes or submitted-value echo.
 - Current `main` owns shared projection, CLI guidance, and generic diagnostics.
 - Sample/importer owners retain only their finite public-field mappings and
   pre-write validation.
-- Runner assembly retains its existing probe boundary unchanged. Only the
-  measured lazy bundle allowance required by sample recovery remains in scope.
-- Regenerate CLI artifacts and compose the measured lazy bundle allowance; add
-  no registry, repair channel, retry manager, state owner, or compatibility
-  layer.
+- Runner assembly retains its existing probe boundary unchanged. Current
+  `main` owns lazy-bundle growth through one exact-base comparison while the
+  existing entry/static budgets remain local guards.
+- Regenerate CLI artifacts without adding a second bundle-growth policy,
+  registry, repair channel, retry manager, state owner, or compatibility layer.
 
 ## Round-five anomaly retrospective
 
@@ -174,18 +175,42 @@ shared error projector and no partial writes or submitted-value echo.
   warning was reproduced as the CLI seeing the pre-change Vault Usecases build;
   the canonical prepared-runtime build refreshed that dependency, after which
   the same generator passed without a source change or compatibility shim.
-- The dedicated runner-bundle suite passes 14/14, and canonical hosted-runner
-  assembly passes all eight bundled-versus-unbundled parity probes. The Vault
-  CLI is 9,541,771 / 9,588,702 bytes with an 805-byte entry and 25,155-byte
-  static closure; runner total is 11,383,913 / 11,393,617 bytes. Docs drift and
-  gardening pass with zero issues.
+- After current-main integration, the dedicated runner-bundle suite still
+  passes 14/14, and affected typechecks, prepared-runtime generation,
+  config-schema generation, and package-shape verification pass. Two local
+  production assemblies reached the unchanged 60-second CLI manifest timeout
+  at `--llms-full --format json` under shared-host contention, so no timeout or
+  diagnostic machinery was reintroduced.
+- One bounded canonical Testbox acceptance run exercised immutable tree
+  `4748adaa76c49e55ab71ea21398732cd76b257b2` with the default 16-CPU profile.
+  It passed the repository typecheck, docs/prepared-runtime/package-shape work,
+  Web build, the Vault-usecase coverage containing the round-seven fix, and the
+  14 runner-bundle cases, then exited one after package coverage reported four
+  package failures. The Testbox stopped automatically.
+- Only Importers among those four packages is changed by this PR. Its full
+  coverage run exposed one stale coverage-only assertion that still matched the
+  deleted `no_importable_rows` prose. The assertion now checks the existing
+  typed `CsvSampleImportError.failure` contract, matching the primary importer
+  test without changing runtime code; the focused file passes 24/24 and full
+  Importers coverage passes 573/573 across 19 files.
+- Inbox Services, another remotely reported package with no PR diff, passes
+  locally at 67/67. Assistant Engine also has no PR diff; its local coverage
+  process was explicitly stopped after more than ten minutes of CPU-bound,
+  output-free shared-host contention. Hosted Local Harness likewise has no PR
+  diff and was not rerun locally. Required exact-head GitHub checks own the
+  remaining broad-suite proof.
+- Current-main conflict resolution is deletion-first: the old absolute Vault
+  CLI total allowance and its boundary delta are absent. Current `main` remains
+  the sole lazy-growth owner through exact-base comparison; this PR retains no
+  second cap, timeout, or compatibility mechanism.
 
 ## Tasks
 
 1. [done] Merge current `main`, resolving duplicate foundation history by ownership.
 2. [done] Prove the resulting tree is current `main` plus only the samples slice.
-3. [done] Run focused tests, affected typechecks, prepared/package-shape checks, docs
-   gates, and production runner bundle/parity proof.
+3. [done] Run focused tests, affected typechecks, prepared/package-shape checks,
+   docs gates, runner-bundle proof, and the in-scope full Importers coverage
+   suite; record the shared-host production-assembly timeout honestly.
 4. Push the exact candidate, update the PR contract, and run the sensitive
    post-integration ReviewGPT round with the prior finding ledger. [done through
    the round-four finding and local correction]

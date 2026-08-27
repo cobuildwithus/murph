@@ -6,6 +6,7 @@ import {
   createDeviceProviderRegistry,
   createImporters,
   createSamplePresetRegistry,
+  CsvSampleImportError,
   importCsvSamples,
   importDocument,
   parseDelimitedRows,
@@ -567,7 +568,14 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
         },
         { corePort },
       ),
-    /did not contain any importable sample rows/,
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.deepEqual(error.failure, {
+        code: "no_importable_rows",
+        importIndexes: [0],
+      });
+      return true;
+    },
   );
 
   await assert.throws(
