@@ -546,6 +546,12 @@ contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 
+Hosted growth observability keeps daily snapshot mutation and same-date recovery
+on its authenticated cron endpoint; the ops page is read-only. Dashboard reads
+run in explicit waves below the hosted Web pool ceiling, and retained mailbox
+payloads reuse the set-based root unwrap path. This contract is specified by
+`agent-docs/RELIABILITY.md`.
+
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |

@@ -18,7 +18,7 @@ import {
 } from "@prisma/client";
 
 import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
-import { decodeHostedMailboxStoredPayload } from "@/src/lib/hosted-mailbox/store";
+import { decodeHostedMailboxStoredPayloads } from "@/src/lib/hosted-mailbox/store";
 import {
   HOSTED_FAMILY_PLAN_CODES,
   getHostedBillingPlanDefinition,
@@ -982,11 +982,19 @@ async function decodeHostedGrowthGroupMessages(
         : []
     );
     const retainedRows = rows.filter((row) => !row.contentRetiredAt);
-    const messages = await Promise.all(retainedRows.map(async (row) => {
+    if (retainedRows.length === 0) {
+      return {
+        messages: [],
+        retiredMessageCreatedAt,
+      };
+    }
+    for (const row of retainedRows) {
       if (row.payloadRef && !row.payload) {
         throw new Error("Hosted growth group message sidecar payload is unavailable.");
       }
-      const decoded = await decodeHostedMailboxStoredPayload({
+    }
+    const decodedPayloads = await decodeHostedMailboxStoredPayloads({
+      entries: retainedRows.map((row) => ({
         dedupeKey: row.dedupeKey,
         kind: row.kind,
         lane: row.lane,
@@ -996,9 +1004,12 @@ async function decodeHostedGrowthGroupMessages(
         payloadCiphertext: row.payload?.payloadCiphertext ?? null,
         payloadInlineCiphertext: row.payloadInlineCiphertext,
         payloadSchema: row.payloadSchema,
-        prisma,
         userId: row.userId,
-      });
+      })),
+      prisma,
+    });
+    const messages = retainedRows.map((row, index) => {
+      const decoded = decodedPayloads[index] ?? null;
       if (!decoded) {
         throw new Error("Hosted growth group message payload is unavailable.");
       }
@@ -1018,7 +1029,7 @@ async function decodeHostedGrowthGroupMessages(
         createdAt: row.createdAt,
         evidence,
       };
-    }));
+    });
     return {
       messages: messages.filter(
         (message): message is HostedGrowthAttributedGroupMessage => message !== null,
@@ -1293,10 +1304,13 @@ export async function readHostedGrowthDashboard(
     MONTHLY_REVENUE_MONTHS - 1,
   );
 
+  // Database Load And Collection Fanout: current metrics peak at eight
+  // database operations, and each concurrent group below contains at most
+  // eight reads. Keep these waves sequenced; the hosted Web pool defaults to
+  // 15 clients.
+  const current = await readCurrentHostedGrowthMetrics(now, prisma);
   const [
-    current,
     memberRows,
-    recentMemberRows,
     rawTrialStartRows,
     snapshots,
     messagesBeforeSeries,
@@ -1304,16 +1318,7 @@ export async function readHostedGrowthDashboard(
     matureConverted,
     growthAggregate,
     activeUsersTrailing7DayDirectRows,
-    activeUsersPrevious7DayDirectRows,
-    activeUsersTrailing30DayDirectRows,
-    activeUsersGroupRows,
-    activeUsersTodayDirectRows,
-    monthlyRevenuePurchases,
-    referralLinkClaimRows,
-    groupPrivateConversionRows,
-    groupPrivateConversionTotal,
   ] = await Promise.all([
-    readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
       select: {
         createdAt: true,
@@ -1322,30 +1327,6 @@ export async function readHostedGrowthDashboard(
         ...realHostedMemberWhere,
         createdAt: {
           gte: recentStart,
-          lte: now,
-        },
-      },
-    }),
-    prisma.hostedMember.findMany({
-      orderBy: [
-        { createdAt: "desc" },
-        { id: "desc" },
-      ],
-      select: {
-        createdAt: true,
-        id: true,
-        identity: {
-          select: {
-            maskedPhoneNumberHint: true,
-          },
-        },
-        initialOnboardingCompletedAt: true,
-        suspendedAt: true,
-      },
-      take: HOSTED_RECENT_MEMBER_RETENTION_LIMIT,
-      where: {
-        ...realHostedMemberWhere,
-        createdAt: {
           lte: now,
         },
       },
@@ -1482,6 +1463,41 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+  ]);
+  const recentMemberRows = await prisma.hostedMember.findMany({
+    orderBy: [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ],
+    select: {
+      createdAt: true,
+      id: true,
+      identity: {
+        select: {
+          maskedPhoneNumberHint: true,
+        },
+      },
+      initialOnboardingCompletedAt: true,
+      suspendedAt: true,
+    },
+    take: HOSTED_RECENT_MEMBER_RETENTION_LIMIT,
+    where: {
+      ...realHostedMemberWhere,
+      createdAt: {
+        lte: now,
+      },
+    },
+  });
+  const [
+    activeUsersPrevious7DayDirectRows,
+    activeUsersTrailing30DayDirectRows,
+    activeUsersGroupRows,
+    activeUsersTodayDirectRows,
+    monthlyRevenuePurchases,
+    referralLinkClaimRows,
+    groupPrivateConversionRows,
+    groupPrivateConversionTotal,
+  ] = await Promise.all([
     prisma.hostedMailboxItem.groupBy({
       by: ["userId"],
       where: {
