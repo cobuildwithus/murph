@@ -96,9 +96,17 @@ with link parts retains the existing projection path. Email retains raw-message
 projection for direct messages because its staged preview is bounded;
 group-routed email remains intentionally raw-free. Attachment-bearing non-email
 input makes one best-effort inbox projection attempt while the decoded wake is
-still in memory so raw attachment paths remain inspectable and audio/video
-transcription jobs can drain before prompt construction when parser output is
-available. Ordinary video bytes remain warm-container-only: accepted input may
+still in memory. Staging and foreground-activity signals remain immediate.
+Projection-required attachment input waits for durable available, partial, or
+failed evidence before pending-index visibility and active-turn notification.
+Attachment-free text and privacy-preserving group email whose raw projection is
+intentionally omitted keep their immediate admission paths. Parser retries
+leave projection pending, intentional cancellation leaves the mailbox watermark
+unchanged, and evidence-write
+failures remain retryable unless a durable read proves terminal evidence was
+already preserved. This keeps raw attachment paths inspectable and available
+audio/video transcripts in the input snapshot used for prompt construction.
+Ordinary video bytes remain warm-container-only: accepted input may
 protect them locally while active, but snapshot planning excludes their
 validated canonical paths and idle maintenance deletes them atomically as soon
 as protection ends. Explicit canonical durable raw references remain outside

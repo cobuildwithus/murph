@@ -22,6 +22,7 @@ import {
   addLiveWorkoutExercise,
   applyLiveWorkoutMemberAction as applyLiveWorkoutMemberActionWithId,
   finishLiveWorkout,
+  hasLoggedWorkoutSet,
   logLiveWorkoutSet,
   readLiveWorkoutCardSnapshot,
   setLiveWorkoutExerciseReps,
@@ -320,6 +321,31 @@ function putFirstSetAction(input: {
   };
 }
 
+function preferenceOnlyAction(input: {
+  workout: WorkoutSession;
+  workoutId: string;
+}): WorkoutLiveApplyMemberActionV1 {
+  return {
+    expectedWorkout: {
+      actionBinding: deriveWorkoutActionBinding(input.workoutId, input.workout),
+      exercises: input.workout.exercises
+        .slice()
+        .sort((left, right) => left.order - right.order)
+        .map((exercise) => ({
+          name: exercise.name,
+          sets: exercise.sets
+            .slice()
+            .sort((left, right) => left.order - right.order)
+            .map((set) => ({ logged: hasLoggedWorkoutSet(set) })),
+        })),
+    },
+    kind: "workout.live.apply",
+    mutations: [],
+    version: 1,
+    weightUnitPreference: "kg",
+  };
+}
+
 function putSameNameExerciseAction(input: {
   actionBinding: string;
   exercisePosition: number;
@@ -400,6 +426,170 @@ async function expectStoredReps(
   );
 }
 
+test("a preference-only action stores its replay marker without advancing duration", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: ["durationMinutes=17"],
+      vault: fixture.vault,
+    });
+    const current = parseShownWorkout(
+      await showWorkoutRecord(fixture.vault, fixture.workoutId),
+    );
+    const action = preferenceOnlyAction({
+      workout: current,
+      workoutId: fixture.workoutId,
+    });
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "unchanged" });
+
+    const stored = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    expect(stored.entity.data.durationMinutes).toBe(17);
+    expect(parseShownWorkout(stored).lastMemberActionId).toBe(ACTION_ID);
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("a stale preference-only action preserves duration and writes no marker", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    const action = preferenceOnlyAction(fixture);
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: [
+        "durationMinutes=17",
+        `workout.exercises=${JSON.stringify([{
+          ...fixture.workout.exercises[0],
+          sets: [
+            { order: 1, reps: 10 },
+            { order: 2, reps: 10 },
+            { order: 3, reps: 12 },
+          ],
+        }])}`,
+      ],
+      vault: fixture.vault,
+    });
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+
+    const stored = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    expect(stored.entity.data.durationMinutes).toBe(17);
+    expect(parseShownWorkout(stored).lastMemberActionId).toBeUndefined();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("an ambiguous preference-only action preserves duration and writes no marker", async () => {
+  const fixture = await createAmbiguousSameNameWorkout([8], [8]);
+  try {
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: ["durationMinutes=17"],
+      vault: fixture.vault,
+    });
+    const current = parseShownWorkout(
+      await showWorkoutRecord(fixture.vault, fixture.workoutId),
+    );
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: preferenceOnlyAction({
+        workout: current,
+        workoutId: fixture.workoutId,
+      }),
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+
+    const stored = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    expect(stored.entity.data.durationMinutes).toBe(17);
+    expect(parseShownWorkout(stored).lastMemberActionId).toBeUndefined();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("a closed preference-only action preserves the completed duration", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    const action = preferenceOnlyAction(fixture);
+    await finishLiveWorkout({
+      endedAt: "2026-08-13T16:00:00.000Z",
+      vault: fixture.vault,
+      workoutId: fixture.workoutId,
+    });
+    const completed = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    const durationMinutes = completed.entity.data.durationMinutes;
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+
+    const stored = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    expect(stored.entity.data.durationMinutes).toBe(durationMinutes);
+    expect(parseShownWorkout(stored).lastMemberActionId).toBeUndefined();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("a mixed set and preference action advances duration with the set change", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: ["durationMinutes=17"],
+      vault: fixture.vault,
+    });
+    const current = parseShownWorkout(
+      await showWorkoutRecord(fixture.vault, fixture.workoutId),
+    );
+    const action = {
+      ...putFirstSetAction({
+        actionBinding: deriveWorkoutActionBinding(fixture.workoutId, current),
+        reps: 12,
+      }),
+      weightUnitPreference: "kg" as const,
+    };
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "applied" });
+
+    const stored = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    expect(stored.entity.data.durationMinutes).toBe(60);
+    expect(parseShownWorkout(stored)).toMatchObject({
+      lastMemberActionId: ACTION_ID,
+      exercises: [{ sets: [{ reps: 12 }, { reps: 10 }] }],
+    });
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
 test("the final native set write closes one finite workout at its accepted boundary", async () => {
   const vault = await mkdtemp(
     path.join(os.tmpdir(), "murph-member-action-final-set-"),
@@ -451,12 +641,12 @@ test("the final native set write closes one finite workout at its accepted bound
       vault,
     })).resolves.toEqual({ status: "applied" });
 
-    const stored = parseShownWorkout(
-      await showWorkoutRecord(vault, started.eventId),
-    );
+    const storedRecord = await showWorkoutRecord(vault, started.eventId);
+    const stored = parseShownWorkout(storedRecord);
     expect(stored.exercises[0]?.sets).toEqual([{ order: 1, reps: 12 }]);
     expect(stored.endedAt).toBe(ACCEPTED_AT);
     expect(stored.lastMemberActionId).toBe(ACTION_ID);
+    expect(storedRecord.entity.data.durationMinutes).toBe(60);
   } finally {
     await rm(vault, { force: true, recursive: true });
   }

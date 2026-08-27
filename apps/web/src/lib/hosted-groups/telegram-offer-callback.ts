@@ -192,10 +192,6 @@ function readHostedTelegramGroupOfferSkipText(reason: string): string | null {
   if (reason === "launch_consent_missing") {
     return "Open Murph on the web once to accept the terms, then tap again.";
   }
-  if (reason === "disclosure_grant_limit_reached") {
-    // The transaction declined to write a grant, so this must not read as success.
-    return "This group can't add another sharing permission right now. Nothing new was shared.";
-  }
   if (reason === "not_a_member") {
     return "Join the group first.";
   }

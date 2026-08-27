@@ -520,6 +520,14 @@ test.sequential(
       await rm(storedPackFile, { force: true })
       await symlink(outsideFile, storedPackFile)
 
+      const tolerantJournalDirectory = path.join(vaultRoot, 'journal', '2099')
+      await mkdir(tolerantJournalDirectory, { recursive: true })
+      await writeFile(
+        path.join(tolerantJournalDirectory, '2099-01-01.md'),
+        ['---', 'title broken', '---', '', 'Legacy note.'].join('\n'),
+        'utf8',
+      )
+
       const materialized = await materializeStoredExportPack({
         vault: vaultRoot,
         packId: 'focus-pack',

@@ -223,6 +223,7 @@ function createAssistantServiceMock(): AssistantLocalService {
       daemonStarted: false,
       failed: 0,
       lastError: null,
+      lastFailure: null,
       noAction: 0,
       reason: 'completed',
       replied: 0,

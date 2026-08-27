@@ -250,8 +250,12 @@ function validateLiveWorkoutExerciseUpdate(
   }
   assertTargetableLiveWorkout(parsed.data)
 
+  const exercisesChanged = JSON.stringify(parsed.data.exercises)
+    !== JSON.stringify(workout.exercises)
   const durationBoundary = endedAt
-    ?? (workout.endedAt === undefined ? observedAt : undefined)
+    ?? (exercisesChanged && workout.endedAt === undefined
+      ? observedAt
+      : undefined)
   return {
     durationMinutes:
       durationBoundary !== undefined && workout.startedAt !== undefined

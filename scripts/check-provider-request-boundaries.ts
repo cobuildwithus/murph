@@ -459,6 +459,7 @@ export const approvedProviderRawHttpOwners = Object.freeze([
 type ProviderRequestBoundaryViolationKind =
   | "approved-owner-overflow"
   | "invalid-approved-owner"
+  | "official-sdk-request-override"
   | "raw-provider-http";
 
 export interface ProviderRequestBoundaryViolation {
@@ -537,8 +538,28 @@ export function findProviderRequestBoundaryViolations(
   const violations = new Map<string, ProviderRequestBoundaryViolation>();
 
   traverse(sourceFile, {
+    AssignmentExpression(assignmentPath) {
+      inspectOfficialSdkRequestOverride(
+        assignmentPath,
+        readStaticMemberName(assignmentPath.node.left),
+      );
+    },
     CallExpression(callPath) {
       inspectCall(callPath);
+    },
+    ObjectProperty(propertyPath) {
+      if (!propertyPath.parentPath.isObjectExpression()) {
+        return;
+      }
+      const key = propertyPath.node.key;
+      inspectOfficialSdkRequestOverride(
+        propertyPath,
+        !propertyPath.node.computed && key.type === "Identifier"
+          ? key.name
+          : key.type === "StringLiteral"
+            ? key.value
+            : null,
+      );
     },
     OptionalCallExpression(callPath) {
       inspectCall(callPath);
@@ -611,6 +632,24 @@ export function findProviderRequestBoundaryViolations(
       boundary: `Direct ${labels.join(" / ")} provider HTTP in ${ownerName}`,
       kind: "raw-provider-http",
       node: callPath.node,
+    });
+  }
+
+  function inspectOfficialSdkRequestOverride(
+    nodePath: NodePath<Node>,
+    optionName: string | null,
+  ): void {
+    if (
+      normalizedPath !== "apps/web/src/lib/physical-notes/lob-runtime.ts"
+      || !hasRuntimeModule(runtimeModules, "@lob/lob-typescript-sdk")
+      || optionName !== "params"
+    ) {
+      return;
+    }
+    recordViolation({
+      boundary: "Lob official SDK low-level request params",
+      kind: "official-sdk-request-override",
+      node: nodePath.node,
     });
   }
 
@@ -1376,6 +1415,8 @@ function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string
       return "contains more raw transport calls than its approval permits";
     case "invalid-approved-owner":
       return "lost its required runtime SDK import";
+    case "official-sdk-request-override":
+      return "overrides low-level official SDK request options";
     case "raw-provider-http":
       return "uses raw provider HTTP";
   }

@@ -358,6 +358,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveWearableCanonicalMetricKey("muscle_mass_percentage"), "muscleMassPercentage");
   assert.equal(resolveWearableCanonicalMetricKey("visceral_fat_index"), "visceralFatIndex");
   assert.equal(resolveWearableCanonicalMetricKey("water_percentage"), "bodyWaterPercentage");
+  assert.equal(resolveWearableCanonicalMetricKey("activity-lowest-heart-rate"), "minimumHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("skin-temp"), "temperatureDeviation");
+  assert.equal(resolveWearableCanonicalMetricKey("session-count"), "sessionCount");
+  assert.equal(resolveWearableCanonicalMetricKey("workout-minutes"), "sessionMinutes");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],

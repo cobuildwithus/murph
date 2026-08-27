@@ -8,11 +8,8 @@ import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
 } from "@/src/lib/hosted-vault-share/delivery-limits";
-import {
-  findActiveHostedVaultShares,
-} from "@/src/lib/hosted-vault-share/projection-store";
 import {
   grantHostedVaultShareTx,
 } from "@/src/lib/hosted-vault-share/share-grant-store";
@@ -29,14 +26,14 @@ if (
   && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))
 ) {
   throw new Error(
-    "The hosted vault-share grant-limit proof requires a local DATABASE_URL.",
+    "The hosted vault-share grant lifecycle proof requires a local DATABASE_URL.",
   );
 }
 
 describe.skipIf(!runPostgresProof)(
-  "hosted vault-share grant-limit PostgreSQL concurrency proof",
+  "hosted vault-share grant lifecycle PostgreSQL concurrency proof",
   () => {
-    it("atomically admits only the 25th grant and fails closed on a corrupt 26th row", async () => {
+    it("admits concurrent destinations beyond 25 and preserves exact-tuple regrant lifecycle", async () => {
       const first = createPrismaClient({ databaseUrl, poolMax: 1 });
       const second = createPrismaClient({ databaseUrl, poolMax: 1 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -45,7 +42,7 @@ describe.skipIf(!runPostgresProof)(
       const existingDestinationMemberIds = Array.from(
         {
           length:
-            HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION - 1,
+            HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE - 1,
         },
         (_, index) =>
           `member_vault_existing_${String(index).padStart(2, "0")}_${suffix}`,
@@ -102,25 +99,15 @@ describe.skipIf(!runPostgresProof)(
             ? `${attempt.reason.name}: ${attempt.reason.message}`
             : "Unknown rejection"];
         }).join("; ");
-        expect(fulfilled, failureSummary).toHaveLength(1);
-        const rejected = attempts.filter(
-          (attempt): attempt is PromiseRejectedResult => attempt.status === "rejected",
-        );
-        expect(rejected).toHaveLength(1);
-        expect(rejected[0]?.reason).toMatchObject({
-          code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-          httpStatus: 409,
-        });
+        expect(fulfilled, failureSummary).toHaveLength(2);
         expect(await observer.hostedVaultShare.count({
           where: {
             grantorMemberId,
             projectionScopeKey: SLEEP_SCOPE_KEY,
             status: "granted",
           },
-        })).toBe(HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION);
-        const admittedDestinationMemberId = candidateDestinationMemberIds[
-          attempts.findIndex((attempt) => attempt.status === "fulfilled")
-        ];
+        })).toBe(HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1);
+        const admittedDestinationMemberId = candidateDestinationMemberIds[0];
         if (!admittedDestinationMemberId) {
           throw new Error("Expected an admitted vault-share destination.");
         }
@@ -150,38 +137,7 @@ describe.skipIf(!runPostgresProof)(
             projectionScopeKey: SLEEP_SCOPE_KEY,
             status: "granted",
           },
-        })).toBe(HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION);
-
-        const rejectedAttemptIndex = attempts.findIndex(
-          (attempt) => attempt.status === "rejected",
-        );
-        const corruptDestinationMemberId =
-          candidateDestinationMemberIds[rejectedAttemptIndex];
-        if (!corruptDestinationMemberId) {
-          throw new Error("Expected a rejected vault-share destination.");
-        }
-        await observer.hostedVaultShare.create({
-          data: {
-            destinationMemberId: corruptDestinationMemberId,
-            grantedAt: new Date("2026-08-12T12:00:02.000Z"),
-            grantorMemberId,
-            id: `share_vault_corrupt_${suffix}`,
-            projectionKind: SLEEP_SCOPE.projectionKind,
-            projectionScopeJson: JSON.parse(
-              JSON.stringify(SLEEP_SCOPE),
-            ) as Prisma.InputJsonValue,
-            projectionScopeKey: SLEEP_SCOPE_KEY,
-            status: "granted",
-          },
-        });
-        await expect(findActiveHostedVaultShares({
-          grantorMemberId,
-          prisma: observer,
-          projectionScope: SLEEP_SCOPE,
-        })).rejects.toMatchObject({
-          code: "HOSTED_VAULT_SHARE_GRANT_LIMIT_INVARIANT_VIOLATION",
-          httpStatus: 503,
-        });
+        })).toBe(HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1);
       } finally {
         await observer.hostedVaultShare.deleteMany({
           where: { grantorMemberId },

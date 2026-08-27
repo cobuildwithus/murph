@@ -1365,6 +1365,11 @@
                           "type": "string",
                           "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
                         },
+                        "triggerTimeZone": {
+                          "description": "Optional IANA timezone for cron or dailyLocal wall-clock fields.",
+                          "type": "string",
+                          "minLength": 3
+                        },
                         "deviceSource": {
                           "description": "Optional device activity source filter.",
                           "type": "string",
@@ -1409,6 +1414,11 @@
                           "description": "Required HH:MM local time when --schedule-kind=dailyLocal.",
                           "type": "string",
                           "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "scheduleTimeZone": {
+                          "description": "Legacy alias for --trigger-time-zone.",
+                          "type": "string",
+                          "minLength": 3
                         },
                         "channel": {
                           "description": "Optional outbound route channel.",
@@ -1602,6 +1612,11 @@
                           "type": "string",
                           "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
                         },
+                        "triggerTimeZone": {
+                          "description": "Optional IANA timezone for cron or dailyLocal wall-clock fields.",
+                          "type": "string",
+                          "minLength": 3
+                        },
                         "deviceSource": {
                           "description": "Optional device activity source filter.",
                           "type": "string",
@@ -1646,6 +1661,11 @@
                           "description": "Required HH:MM local time when --schedule-kind=dailyLocal.",
                           "type": "string",
                           "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "scheduleTimeZone": {
+                          "description": "Legacy alias for --trigger-time-zone.",
+                          "type": "string",
+                          "minLength": 3
                         },
                         "channel": {
                           "description": "Optional outbound route channel.",
@@ -5944,7 +5964,7 @@
                           "minLength": 1
                         },
                         "exercise": {
-                          "description": "Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
+                          "description": "Initial exercise grammar: name=... with optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/mode/unitOverride/note. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {
