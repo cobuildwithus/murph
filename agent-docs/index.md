@@ -24,6 +24,13 @@ reuse, and focused proof are specified by
 Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
 expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
 
+Kernel browser-session authority is independent of the optional Live View
+capability. Web-owned automation may continue when that viewer cannot be safely
+embedded. One code-owned Kernel host policy derives validation and CSP, while
+direct handoff publication and Managed Auth fallback remain fail-closed human
+exposure boundaries. This split is specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, and `apps/web/README.md`.
+
 Large hand-authored runtime and provider suites are partitioned into
 behavior-owned test modules backed by adjacent owner-specific harnesses. Root,
 diff-aware, package, and release coverage lanes run those owners on the ordinary
@@ -61,7 +68,10 @@ are specified by
 Changes that can alter Murph's interpretation, tool behavior, silence
 decision, or user-visible reply require deterministic boundary proof plus one
 focused production-derived real-Codex journey and manual review of the actual
-synthetic replies. The one-command local subscription runner, provider-key
+synthetic replies. When the default subscription is usage-limited before any
+provider action, the repository grants one bounded retry through a discovered
+already-authenticated alternate Codex home without reading or copying auth or
+cycling profiles. The one-command local subscription runner, provider-key
 boundary, UX verdict, and PR evidence contract are specified by
 `.agents/skills/verify-murph-assistant/SKILL.md`,
 `agent-docs/operations/completion-workflow.md`,
@@ -74,6 +84,12 @@ searches for or guesses a run, and every later polling, identity, reader, and
 attestation failure remains fail-closed. This boundary and its focused proof
 are specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/testing-ci-map.md`.
+
+Direct iMessage workout apply may carry bounded rendering context and return an
+optional authoritative post-write V4/V6 card in the existing terminal receipt.
+Mutation authority remains with the locked canonical workout, and response-card
+construction adds no reread, queue, or persisted projection. This contract is
+specified by `agent-docs/RELIABILITY.md`.
 
 Direct and authenticated-group Telegram model-authored rich-content admission,
 optional semantic-card selection, closed HTML, disabled automatic Telegram

@@ -58,6 +58,12 @@ import {
   type HostedGrowthResolvedGroupMessage,
 } from "@/src/lib/hosted-ops/growth-group-private-attribution";
 import {
+  HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_DAYS,
+} from "@/src/lib/hosted-groups/group-private-attribution-policy";
+import {
+  recordHostedGrowthGroupPrivateRosterConversions,
+} from "@/src/lib/hosted-ops/growth-group-private-observations";
+import {
   MONTHLY_REVENUE_MONTHS,
   buildHostedGrowthMonthlyRevenueSeries,
   startOfUtcMonthsAgo,
@@ -78,7 +84,6 @@ export type {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
-const GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_DAYS = 14;
 const WEEKLY_ROWS = 8;
 const SNAPSHOT_COMPARE_TARGET_DAYS = 7;
 const SNAPSHOT_COMPARE_MIN_DAYS = 6;
@@ -1759,7 +1764,7 @@ export async function captureHostedGrowthDailySnapshot(
   const trailing7DayStart = addUtcDays(snapshotDate, -7);
   const groupPrivateAttributionStart = addUtcDays(
     now,
-    -GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_DAYS,
+    -HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_DAYS,
   );
   const activityCountsPromise = (async () => {
     const [
@@ -1896,6 +1901,14 @@ export async function captureHostedGrowthDailySnapshot(
       }),
       activityCountsPromise,
     ]);
+  await recordHostedGrowthGroupPrivateRosterConversions({
+    prisma,
+    trackedAt: now,
+  }).catch(() => {
+    console.error(
+      "Hosted growth roster-to-private attribution failed; a later snapshot will retry retained evidence.",
+    );
+  });
   if (activityCounts.available) {
     await recordHostedGrowthGroupPrivateConversions({
       messages: activityCounts.resolvedGroupMessages,

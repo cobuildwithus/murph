@@ -274,6 +274,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
       .array(workoutMemberActionMutationV1Schema)
       .min(1)
       .max(memberActionV1Bounds.mutations),
+    presentation: workoutSessionPresentationV1Schema.optional(),
     version: z.literal(1),
   })
   .strict()
@@ -479,7 +480,20 @@ export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionResultV1Schema
 >;
 
+export const workoutLiveApplyMemberActionResultV1Schema = z
+  .object({
+    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
+    kind: z.literal("workout.live.apply"),
+    version: z.literal(1),
+  })
+  .strict();
+
+export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
+  typeof workoutLiveApplyMemberActionResultV1Schema
+>;
+
 export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
+  workoutLiveApplyMemberActionResultV1Schema,
   workoutLiveSnapshotMemberActionResultV1Schema,
 ]);
 
@@ -503,10 +517,19 @@ export const memberActionOutcomeV1Schema = z
         path: ["reason"],
       });
     }
-    if (outcome.result !== undefined && outcome.status !== "unchanged") {
+    if (
+      outcome.result !== undefined
+      && (
+        outcome.status === "rejected"
+        || (
+          outcome.result.kind === "workout.live.snapshot"
+          && outcome.status !== "unchanged"
+        )
+      )
+    ) {
       context.addIssue({
         code: "custom",
-        message: "A member-action result requires a successful read-only outcome.",
+        message: "The member-action result is not valid for this terminal status.",
         path: ["result"],
       });
     }
