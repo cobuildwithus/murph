@@ -174,6 +174,9 @@ import {
   isHostedLinqInstantStartCandidate,
   isHostedLinqInstantStartEligible,
 } from "./linq-instant-start";
+import {
+  hasConflictingHostedLinqInstantFirstTurnForChatTx,
+} from "./linq-delivery-store";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   readHostedGroupJoinOutreachReplyContextTx,
@@ -226,6 +229,7 @@ const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
 const HOSTED_LINQ_TEXT_PART_MAX_CHARS = 20_000;
 const HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS = 20_000;
+const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TEXT_MAX_CHARS = 2_000;
 const HOSTED_LINQ_ATTACHMENT_ID_MAX_CHARS = 256;
 const HOSTED_LINQ_ATTACHMENT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_LINQ_ATTACHMENT_MIME_TYPE_MAX_CHARS = 120;
@@ -2340,6 +2344,21 @@ export async function planHostedOnboardingLinqWebhook(input: {
       recipientPhone: bindingResult.recipientPhone,
     }) ?? participantContact;
 
+    if (await hasConflictingHostedLinqInstantFirstTurnForChatTx({
+      eventId: input.event.event_id,
+      linqChatId: summary.chatId,
+      prisma: input.prisma,
+    })) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+        details: { reason: "earlier-chat-reply-unresolved" },
+        httpStatus: 503,
+        message:
+          "An earlier Web-owned reply is still reconciling for this chat.",
+        retryable: true,
+      });
+    }
+
     if (groupJoinContext) {
       const invite = await issueHostedInviteTx({
         channel: "linq",
@@ -4119,30 +4138,34 @@ function buildFirstContactAdmissionRequiredPlan(input: {
   };
 }
 
-function buildHostedLinqFirstContactAdmissionRequest(input: {
+export function buildHostedLinqFirstContactAdmissionRequest(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   participantContact: HostedLinqParticipantContact;
 }): HostedLinqFirstContactAdmissionRequest {
+  const text = buildHostedLinqFirstContactAdmissionText(
+    input.context.messageEvent.data.message.parts,
+  );
   return {
     eventId: input.event.event_id,
     participantContactKind: input.participantContact.kind,
     partTypes: buildHostedLinqFirstContactAdmissionPartTypes(input.context.messageEvent.data.message.parts),
     service: normalizeHostedLinqFirstContactAdmissionService(input.context.messageEvent.data.service),
-    text: buildHostedLinqFirstContactAdmissionText(input.context.messageEvent.data.message.parts),
+    text: text.value,
+    textWasTruncated: text.truncated,
   };
 }
 
 function buildHostedLinqFirstContactAdmissionPartTypes(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
 ): string[] {
-  return [...new Set(parts.map((part) => part.type))].sort();
+  return parts.map((part) => part.type);
 }
 
 function buildHostedLinqFirstContactAdmissionText(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
-): string | null {
-  const text = parts
+): { truncated: boolean; value: string | null } {
+  const normalized = parts
     .filter((part) =>
       part.type === "text"
       || part.type === "link"
@@ -4153,10 +4176,16 @@ function buildHostedLinqFirstContactAdmissionText(
       : normalizeHostedLinqPartText(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
-    .slice(0, 2_000)
+    .trim();
+  const text = normalized
+    .slice(0, HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TEXT_MAX_CHARS)
     .trim();
 
-  return text.length > 0 ? text : null;
+  return {
+    truncated:
+      normalized.length > HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TEXT_MAX_CHARS,
+    value: text.length > 0 ? text : null,
+  };
 }
 
 function normalizeHostedLinqFirstContactAdmissionService(

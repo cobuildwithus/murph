@@ -31,7 +31,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
-  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeAssistantAskControlResponse,
   type HostedRuntimeGroupAskResult,
@@ -347,6 +347,7 @@ async function requestHostedGroupAssistantAskByLabel(input: {
     const memberships = await readHostedAssistantAskMemberships({
       memberId: input.memberId,
       prisma: tx,
+      requestedLabel,
     });
     const resolution = resolveHostedAssistantAskMembership({
       memberships,
@@ -894,6 +895,7 @@ async function selectHostedGroupContextHandoffMembershipTx(input: {
   const memberships = await readHostedAssistantAskMemberships({
     memberId: input.memberId,
     prisma: input.tx,
+    requestedLabel: input.requestedLabel,
   });
   const resolution = resolveHostedAssistantAskMembership({
     memberships,
@@ -2960,6 +2962,7 @@ function hostedAssistantAskCompletionMatchesAuthority(input: {
 async function readHostedAssistantAskMemberships(input: {
   memberId: string;
   prisma: Pick<PrismaClient, "hostedGroupMember"> | Prisma.TransactionClient;
+  requestedLabel: string | null;
 }): Promise<HostedAssistantAskMembership[]> {
   return input.prisma.hostedGroupMember.findMany({
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -2973,7 +2976,9 @@ async function readHostedAssistantAskMemberships(input: {
       id: true,
       memberId: true,
     },
-    take: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1,
+    ...(input.requestedLabel === null
+      ? { take: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX + 1 }
+      : {}),
     where: { memberId: input.memberId },
   });
 }
@@ -2987,12 +2992,6 @@ function resolveHostedAssistantAskMembership(input: {
 } {
   if (input.memberships.length === 0) {
     return { membership: null, result: { status: "no_groups" } };
-  }
-  if (input.memberships.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX) {
-    return {
-      membership: null,
-      result: { status: "unavailable", unavailableReason: "too_many_groups" },
-    };
   }
 
   if (input.requestedLabel === null && input.memberships.length === 1) {
@@ -3051,6 +3050,9 @@ function readHostedAssistantAskClarificationLabels(
     }
     seen.add(selector);
     result.push(displayLabel);
+    if (result.length === HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX) {
+      break;
+    }
   }
   return result;
 }

@@ -253,6 +253,55 @@ test('importCsvSamples resets the cached runtime after loader failures', async (
   assert.deepEqual(retried.lookupIds, ['smp_retry'])
 })
 
+test('sample CSV runtime failures retain the exact invoking command leaf', async () => {
+  const loadRuntimeModule = vi.fn(async () => {
+    throw new Error('missing importers runtime')
+  })
+  const createRuntimeUnavailableError = vi.fn(
+    (operationType: string, error: unknown) =>
+      Object.assign(new Error(`runtime unavailable: ${operationType}`), {
+        code: 'runtime_unavailable',
+        operationType,
+        cause: error,
+      }),
+  )
+
+  vi.doMock('@murphai/vault-usecases/runtime', () => ({
+    createRuntimeUnavailableError,
+    loadRuntimeModule,
+  }))
+
+  const { importCsvSamples, profileCsvSampleFile } = await loadSampleImportHelpers()
+
+  await assert.rejects(
+    () => importCsvSamples({
+      commandName: 'samples csv import',
+      file: '/tmp/samples.csv',
+      vault: '/vaults/main',
+    }),
+    (error) =>
+      error instanceof Error
+      && 'operationType' in error
+      && error.operationType === 'samples csv import',
+  )
+  await assert.rejects(
+    () => profileCsvSampleFile({
+      commandName: 'samples csv profile',
+      file: '/tmp/samples.csv',
+      vault: '/vaults/main',
+    }),
+    (error) =>
+      error instanceof Error
+      && 'operationType' in error
+      && error.operationType === 'samples csv profile',
+  )
+
+  assert.deepEqual(
+    createRuntimeUnavailableError.mock.calls.map(([operationType]) => operationType),
+    ['samples csv import', 'samples csv profile'],
+  )
+})
+
 test('profileCsvSampleFile normalizes runtime profile output', async () => {
   const loadRuntimeModule = vi.fn(async () => ({
     createImporters() {

@@ -1,6 +1,10 @@
 import { Cli, z } from 'incur'
-import { wearablePreferenceProviderValues } from '@murphai/contracts'
 import {
+  isStrictIsoDate,
+  wearablePreferenceProviderValues,
+} from '@murphai/contracts'
+import {
+  resolveWearableCanonicalMetricKey,
   wearableCanonicalMetricKeys,
 } from '@murphai/importers/device-providers/metric-catalog'
 import {
@@ -19,6 +23,7 @@ import {
   timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { publicValidationIssue } from './public-validation-issue.js'
 
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()
@@ -57,17 +62,25 @@ const repeatableProviderOptionSchema = z
   .describe(
     'Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.',
   )
+const wearableInputDateSchema = localDateSchema.refine(
+  isStrictIsoDate,
+  'Expected a real calendar date in YYYY-MM-DD form.',
+)
 const wearableMetricArgSchema = z.object({
   metric: z
     .string()
     .trim()
     .min(1)
+    .refine(
+      isSupportedWearableMetricRequest,
+      'Unsupported wearable metric. Use a canonical metric key or supported alias such as hrv, resting-heart-rate, steps, sleep-score, or skin-temp.',
+    )
     .describe(
       'Wearable metric key or alias such as hrv, resting-heart-rate, steps, sleep-score, or skin-temp.',
     ),
 })
 const wearableDayArgSchema = z.object({
-  date: localDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
+  date: wearableInputDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
 })
 
 const wearableMetricConfidenceSummarySchema = z.object({
@@ -611,11 +624,11 @@ function requireAdditiveWearablesQueryMethod<
 
 function withWearableListOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     limit: z
       .number()
@@ -629,22 +642,22 @@ function withWearableListOptions() {
 
 function withWearableSurfaceOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
   })
 }
 
 function withWearableComparisonOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     windowDays: wearableWindowDaysOptionSchema,
   })
@@ -652,11 +665,11 @@ function withWearableComparisonOptions() {
 
 function withWearableSleepPatternOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     timeZone: timeZoneSchema
       .optional()
@@ -667,7 +680,7 @@ function withWearableSleepPatternOptions() {
 
 function withPersonalPatternOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional last action date in YYYY-MM-DD form. Defaults to today.'),
     windowDays: personalPatternWindowDaysOptionSchema,
@@ -680,6 +693,34 @@ function normalizeWearableProviders(value: readonly string[] | undefined): strin
     'provider',
     wearablePreferenceProviderValues,
   ) ?? []
+}
+
+function isSupportedWearableMetricRequest(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/[\s_]+/gu, '-')
+  return resolveWearableCanonicalMetricKey(value) !== null ||
+    resolveWearableCanonicalMetricKey(normalized) !== null
+}
+
+function assertWearableDateRangeOrdered(value: {
+  from?: string
+  to?: string
+}): void {
+  if (
+    value.from === undefined ||
+    value.to === undefined ||
+    value.from <= value.to
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'The wearable date range is invalid.',
+    {
+      retryable: false,
+      issues: [publicValidationIssue({ code: 'custom' }, ['to'])],
+    },
+  )
 }
 
 function withoutWearableVaultPath<TResult extends object>(
@@ -718,6 +759,7 @@ export function registerWearablesCommands(
       'Use `wearables latest` for a compact cross-category snapshot, then drill into `wearables metric latest <metric>` or `wearables metric trend <metric>` for one metric.',
     output: wearablesLatestResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableLatest = requireAdditiveWearablesQueryMethod<
         WearablesLatestResult,
         WearablesLatestInput
@@ -793,6 +835,7 @@ export function registerWearablesCommands(
       'Use aliases such as `hrv`, `sleep-score`, `activity-average-heart-rate`, or `activity-lowest-heart-rate`; the shared wearable metric catalog resolves them to canonical keys.',
     output: wearablesMetricLatestResultSchema,
     async run({ args, options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableMetricLatest = requireAdditiveWearablesQueryMethod<
         WearablesMetricLatestResult,
         WearablesMetricInput
@@ -832,6 +875,7 @@ export function registerWearablesCommands(
       'Use `wearables metric trend <metric>` when you need a compact normalized window rather than a raw per-provider record dump.',
     output: wearablesMetricTrendResultSchema,
     async run({ args, options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableMetricTrend = requireAdditiveWearablesQueryMethod<
         WearablesMetricTrendResult,
         WearablesMetricInput
@@ -863,6 +907,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesSleepListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableSleep({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -894,6 +939,7 @@ export function registerWearablesCommands(
       'Use `wearables sleep pattern` for longitudinal sleep questions. Check summary.notes before interpreting missing dates, mixed providers, stale sources, naps, or clock timing.',
     output: wearablesSleepPatternResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableSleepPattern = requireAdditiveWearablesQueryMethod<
         WearablesSleepPatternResult,
         WearablesSleepPatternInput
@@ -925,6 +971,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesActivityListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableActivity({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -951,6 +998,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesBodyStateListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableBodyState({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -977,6 +1025,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesRecoveryListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableRecovery({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -1003,6 +1052,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesSourcesListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableSources({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -1035,6 +1085,7 @@ export function registerWearablesCommands(
       'Use `wearables drift` when the question is “what changed?” across wearable surfaces rather than “what is the exact latest value?”.',
     output: wearablesDriftResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableDrift = requireAdditiveWearablesQueryMethod<
         WearablesDriftResult,
         WearablesDriftInput

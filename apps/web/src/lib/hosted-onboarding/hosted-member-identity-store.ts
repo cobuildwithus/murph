@@ -16,6 +16,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
+  readHostedMemberIdentityPhoneNumbers,
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
@@ -322,7 +323,7 @@ export async function readHostedMemberIdentity(input: {
 
 /**
  * Reads the exact encrypted identity row without projecting private fields.
- * Prepared webhook paths use this to bind an outside-transaction projection
+ * Prepared transaction paths use this to bind an outside-transaction projection
  * to the row re-read while the member lock is held.
  */
 export async function readHostedMemberIdentityRecord(input: {
@@ -334,6 +335,50 @@ export async function readHostedMemberIdentityRecord(input: {
       memberId: input.memberId,
     },
   });
+}
+
+export async function prepareHostedMemberInvitePhoneIdentity(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}) {
+  const identityRecord = await readHostedMemberIdentityRecord(input);
+  if (!identityRecord) {
+    return null;
+  }
+  const phoneNumbers = await readHostedMemberIdentityPhoneNumbers(
+    identityRecord,
+    input.prisma,
+  );
+
+  return {
+    identityRecord,
+    identityState: {
+      maskedPhoneNumberHint: identityRecord.maskedPhoneNumberHint,
+      ...phoneNumbers,
+    },
+  } as const;
+}
+
+export async function readHostedMemberSignupPhoneCodeAttempt(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<{ signupPhoneCodeSendAttemptId: string | null } | null> {
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      signupPhoneCodeSendAttemptId: true,
+    },
+  });
+
+  return identity
+    ? {
+        signupPhoneCodeSendAttemptId: normalizeNullableString(
+          identity.signupPhoneCodeSendAttemptId,
+        ),
+      }
+    : null;
 }
 
 export async function lockHostedMemberIdentityStateTx(input: {

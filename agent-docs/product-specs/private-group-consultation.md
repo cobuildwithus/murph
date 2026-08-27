@@ -227,8 +227,17 @@ existing encrypted target field. Handoff replay instead reuses the stored
 membership and route selected by the first accepted input and performs no
 second title or participant lookup.
 
+The visible-label bound admits at most 64 labels and limits only one
+clarification response. It is not a membership or availability limit: when the
+member names a group, Web compares that normalized label against every current
+membership so the total number of joined groups can never make a unique exact
+target unavailable. The heavier `list_memberships` summary keeps its separate
+25-row page bound and exposes stable continuation instead of making later
+memberships unreachable.
+
 Never fuzzy-match, pick the newest or owned group, consult another member's
-Contacts, guess, or fan out. `list_memberships` is not required, and the model never
+Contacts, guess from roster identities, or fan out. `list_memberships` is not
+required, and the model never
 receives a membership id for an ask.
 
 The exact membership row is a hidden generation fence. Web checks it at

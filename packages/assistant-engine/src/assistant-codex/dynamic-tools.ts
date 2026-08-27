@@ -31,8 +31,10 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
@@ -670,6 +672,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -778,6 +786,18 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('list_memberships'),
+      cursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS)
+        .optional(),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -844,6 +864,10 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         )
         .optional(),
       standaloneLink: z.boolean().optional(),
+      message_ref: z
+        .string()
+        .regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'))
+        .optional(),
     })
     .strict(),
   z
@@ -1292,6 +1316,7 @@ type MurphGroupToolRequest =
   | {
       action: 'offer_access'
       displayName?: string
+      messageRef?: string
       projectionScopes?: readonly HostedVaultShareSelectableProjectionScope[]
       standaloneLink?: boolean
     }
@@ -3528,10 +3553,13 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'analyze-video': {
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (userActionScope?.conversationScope !== 'direct') {
+      if (
+        userActionScope?.conversationScope === 'unverified-external'
+        || !userActionScope
+      ) {
         return toolTextResult(
           false,
-          'video analysis requires a verified private direct conversation',
+          'video analysis requires a verified direct or authenticated group conversation',
         )
       }
       return await executeAnalyzeVideoDynamicTool({
@@ -4820,6 +4848,7 @@ function hasExactStringEntries(
 
 function buildGroupAccessOfferHostRequest(
   request: Extract<MurphGroupToolRequest, { action: 'offer_access' }>,
+  repostOriginAssistantInputId: string | null,
 ): Extract<
   HostedRuntimeGroupToolRequest,
   { action: 'create_join_link' | 'post_join_offer' }
@@ -4852,6 +4881,9 @@ function buildGroupAccessOfferHostRequest(
         ? {}
         : { projectionScopes: [...request.projectionScopes] }),
     },
+    ...(repostOriginAssistantInputId === null
+      ? {}
+      : { repostOriginAssistantInputId }),
   }
 }
 
@@ -4928,7 +4960,25 @@ async function executeGroupTool(input: {
     | { savedCaptureId: string | null; savedImageRef: string }
     | null = null
   if (input.request.action === 'offer_access') {
-    request = buildGroupAccessOfferHostRequest(input.request)
+    let repostOriginAssistantInputId: string | null = null
+    if (input.request.messageRef !== undefined) {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (
+        userActionScope?.conversationScope !== 'group'
+        || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+      ) {
+        return toolTextResult(
+          false,
+          'reposting group access requires the exact current accepted Message ref from this group conversation',
+        )
+      }
+      repostOriginAssistantInputId = input.request.messageRef
+    }
+    request = buildGroupAccessOfferHostRequest(
+      input.request,
+      repostOriginAssistantInputId,
+    )
   } else if (isPreparedContactCardRequest(input.request)) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
@@ -6817,7 +6867,7 @@ function invalidDynamicToolArgumentsResult(
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     false,
-    buildToolCallValidationFeedback(validationDigest, { error }),
+    buildToolCallValidationFeedback(validationDigest, error),
   )
 }
 
@@ -7257,7 +7307,24 @@ function parseGroupArguments(
     return { ok: true, request: parsed.data }
   }
   if (parsed.data.action === 'offer_access') {
-    return { ok: true, request: parsed.data }
+    return {
+      ok: true,
+      request: {
+        action: 'offer_access',
+        ...(parsed.data.displayName === undefined
+          ? {}
+          : { displayName: parsed.data.displayName }),
+        ...(parsed.data.message_ref === undefined
+          ? {}
+          : { messageRef: parsed.data.message_ref }),
+        ...(parsed.data.projectionScopes === undefined
+          ? {}
+          : { projectionScopes: parsed.data.projectionScopes }),
+        ...(parsed.data.standaloneLink === undefined
+          ? {}
+          : { standaloneLink: parsed.data.standaloneLink }),
+      },
+    }
   }
   if (parsed.data.action === 'update_display_name') {
     return {
@@ -7386,14 +7453,27 @@ function parseGroupArguments(
     }
   }
   if (
-    parsed.data.action === 'list_memberships'
-    || parsed.data.action === 'read_next_group'
+    parsed.data.action === 'read_next_group'
     || parsed.data.action === 'cancel_next_group'
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
+  }
+  if (parsed.data.action === 'list_memberships') {
+    return {
+      ok: true,
+      request: {
+        action: 'list_memberships',
+        ...(parsed.data.cursor === undefined
+          ? {}
+          : { cursor: parsed.data.cursor }),
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   if (parsed.data.action === 'create_signup_referral_link') {
     return {
@@ -7427,7 +7507,15 @@ function parseGroupArguments(
     }
   }
   if (parsed.data.action === 'read_current') {
-    return { ok: true, request: { action: 'read_current' } }
+    return {
+      ok: true,
+      request: {
+        action: 'read_current',
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   return {
     ok: false,

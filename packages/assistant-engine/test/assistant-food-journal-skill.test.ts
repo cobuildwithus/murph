@@ -169,6 +169,63 @@ describe('assistant food journal skill', () => {
       'concise truthful fallback. Never narrate individual safety, totals, estimation,\nor target-resolution mechanics.',
     )
     expect(skill).toContain(
+      '### Complete an interactive day before attaching its card',
+    )
+    expect(skill).toContain(
+      "compare every\nmetric's `mealCount` with the top-level `mealCount`",
+    )
+    expect(skill).toContain(
+      'List only that selected date, show the exact meals that lack\nnutrition',
+    )
+    expect(skill).toContain(
+      "A member's current statement that the\nmeal is equivalent to a specific prior meal is usable evidence.",
+    )
+    expect(skill).toContain(
+      'Use only the canonical meal surface for this recovery: `vault-cli meal list',
+    )
+    expect(skill).toContain(
+      '`vault-cli meal show\n<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed',
+    )
+    expect(skill).toContain(
+      '`--nutrition-calories`, `--nutrition-protein-grams`,',
+    )
+    expect(skill).toContain(
+      '`--nutrition-confidence`, and `--nutrition-source-detail` flags.',
+    )
+    expect(skill).toContain(
+      'Never inspect\nor modify raw vault files.',
+    )
+    expect(skill).toContain(
+      'show the\nselected prior meal before copying its saved totals.',
+    )
+    expect(skill).toContain(
+      'Use `--nutrition-source inherited` for\ncopied prior-meal totals',
+    )
+    expect(skill).toContain(
+      'Use this all-meal recovery only when the member explicitly requests a daily\nnutrition card or daily summary',
+    )
+    expect(skill).toContain(
+      'Default\nattachment intent after a meal mutation does not authorize reading, editing,\nor asking about another meal.',
+    )
+    expect(skill).toContain(
+      'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',
+    )
+    expect(skill).toContain(
+      'edit and read\nback the exact existing meal, then rerun fresh same-date totals before any card',
+    )
+    expect(skill).toContain(
+      'ask one compact question for only\nthat missing detail and stop without a card',
+    )
+    expect(skill).toContain(
+      'Do not ask merely to\nenable numeric output for an intuitive-eating, eating-disorder-risk, or\nnumber-sensitive member.',
+    )
+    expect(skill).toContain(
+      'This generic recovery question is interactive-only.',
+    )
+    expect(skill).toContain(
+      'partial-card schema and\nrendering remain compatibility surfaces, not the normal interactive closeout.',
+    )
+    expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',
     )
     expect(skill).toContain('does not attach a goal-less card')
@@ -180,6 +237,33 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')
+    expect(skill).toContain(
+      'When the user names a restaurant and recognizable menu item, and known context\ndoes not trigger one of the numeric safety exceptions below, resolve nutrition\nbefore the meal mutation.',
+    )
+    expect(skill).toContain(
+      'Use a normal exact restaurant/menu search rather\nthan a generic substitute.',
+    )
+    expect(skill).toContain(
+      'Run this database search first even when the user\nsupplies an official restaurant URL.',
+    )
+    expect(skill).toContain(
+      'When a numeric safety exception already applies, save the meal without calorie\nor macro estimates.',
+    )
+    expect(skill).toContain(
+      'Do not force a nutrition lookup, clarification, or safety\npreflight just to capture the meal.',
+    )
+    expect(skill).toContain(
+      "If that search has no exact result, read\n`computer-use` and inspect the restaurant's official nutrition or menu source.",
+    )
+    expect(skill).toContain(
+      'When using that official source, retain its URL in nutrition source detail.',
+    )
+    expect(skill).toContain(
+      'Only after the database result, official source, or clearly marked last-resort\nestimate is resolved may you call `meal add` or `meal edit`',
+    )
+    expect(skill).toContain(
+      'Do not save a nutrition-free restaurant meal first\nand then ask the member to repeat the item.',
+    )
     expect(skill).toContain('Use `--generic` for ordinary ingredients')
     expect(skill).toContain(
       'For a fridge or pantry photo, enumerate distinct visible products and resolve\nthem in one batch.',

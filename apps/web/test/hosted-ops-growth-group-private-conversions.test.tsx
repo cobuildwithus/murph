@@ -21,10 +21,11 @@ describe("growth group-to-private conversions", () => {
     expect(markup).toContain("Tracked conversions");
     expect(markup).toContain(">7<");
     expect(markup).toContain(
-      "Counts a member once when Murph still has a group message from the prior 14 days",
+      "Counts a member once when Murph has a live group-roster observation or retained group message from the prior 14 days",
     );
-    expect(markup).toContain("sequence-based attribution, not proof");
-    expect(markup).toContain("outside that rolling evidence window are not counted");
+    expect(markup).toContain("sequence-based exposure attribution");
+    expect(markup).toContain("not proof of engagement or causation");
+    expect(markup).toContain("outside that rolling window are not counted");
     expect(markup).toContain("Tracked total among retained members");
     expect(markup).toContain("Tracking date");
     expect(markup).toContain(

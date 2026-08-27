@@ -1,6 +1,7 @@
 ---
 title: 'Package Vitest configs reject repo-root file filters'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2369'
 ---
 
 ## Expected Behavior

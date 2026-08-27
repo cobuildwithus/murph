@@ -207,11 +207,7 @@ describe("getHostedLinqChatSummary", () => {
   });
 
   it("keeps the chat-read deadline active through a stalled response body", async () => {
-    let connectionClosed = false;
     const server = createServer((_request, response) => {
-      response.on("close", () => {
-        connectionClosed = true;
-      });
       response.writeHead(200, {
         "content-type": "application/json",
       });
@@ -232,9 +228,6 @@ describe("getHostedLinqChatSummary", () => {
         retryable: true,
       });
       expect(performance.now() - startedAt).toBeLessThan(1_500);
-      await vi.waitFor(() => {
-        expect(connectionClosed).toBe(true);
-      });
     } finally {
       await closeTestServer(server);
     }

@@ -93,6 +93,9 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+} from "./group-private-attribution-policy";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   requestHostedGroupAssistantAsk,
@@ -109,6 +112,7 @@ import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
+  type HostedGroupDisclosureGrantSummary,
   readActiveHostedGroupDisclosureGrantsForGroup,
   readActiveHostedGroupDisclosureGrantsForMember,
   recordHostedGroupDisclosurePermissionTx,
@@ -126,6 +130,7 @@ import {
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupMembershipsForMember,
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
@@ -230,6 +235,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   joinCode: string;
   offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
+  repostOriginAssistantInputId?: string;
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.projectionScopes,
@@ -245,11 +251,26 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
     joinCode: input.joinCode,
     offerGeneration: input.offerGeneration,
     projectionScopeKeys,
+    ...(input.repostOriginAssistantInputId === undefined
+      ? {}
+      : {
+          repostOriginAssistantInputId: input.repostOriginAssistantInputId,
+        }),
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
     0,
     HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH,
   )}`;
+}
+
+function hostedGroupProjectionScopeSetsEqual(
+  left: readonly HostedVaultShareProjectionScope[],
+  right: readonly HostedVaultShareProjectionScope[],
+): boolean {
+  const leftKeys = new Set(left.map(buildHostedVaultShareProjectionScopeKey));
+  const rightKeys = new Set(right.map(buildHostedVaultShareProjectionScopeKey));
+  return leftKeys.size === rightKeys.size
+    && [...leftKeys].every((scopeKey) => rightKeys.has(scopeKey));
 }
 
 export type HostedRuntimeGroupToolAccessClassification =
@@ -408,7 +429,11 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "list_memberships") {
-    return handleHostedRuntimeGroupListMemberships({ memberId: input.memberId });
+    return handleHostedRuntimeGroupListMemberships({
+      cursor: input.request.cursor ?? null,
+      disclosureGrantCursor: input.request.disclosureGrantCursor ?? null,
+      memberId: input.memberId,
+    });
   }
 
   if (input.request.action === "leave_membership") {
@@ -469,6 +494,8 @@ export async function handleHostedRuntimeGroupTool(input: {
       joinOffer: input.request.joinOffer ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
+      repostOriginAssistantInputId:
+        input.request.repostOriginAssistantInputId ?? null,
     });
   }
 
@@ -610,18 +637,36 @@ export async function handleHostedRuntimeGroupTool(input: {
   const group = await readHostedGroupByRuntimeMemberId({
     runtimeMemberId: input.memberId,
   });
-  const disclosureGrants = group
+  const disclosureGrantPage = group
     ? await readActiveHostedGroupDisclosureGrantsForGroup({
+        cursor: input.request.disclosureGrantCursor ?? null,
         groupId: group.id,
       })
-    : [];
+    : null;
+  if (disclosureGrantPage?.kind === "cursor_invalid") {
+    return {
+      action: "read_current",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "disclosure_cursor_invalid",
+      },
+    };
+  }
 
   return {
     action: "read_current",
     result: group
       ? {
+          disclosureGrantsTruncated:
+            disclosureGrantPage?.truncated ?? false,
           status: "ok",
-          group: toHostedRuntimeGroupSummary(group, disclosureGrants),
+          group: toHostedRuntimeGroupSummary(
+            group,
+            disclosureGrantPage?.grants ?? [],
+          ),
+          nextDisclosureGrantCursor:
+            disclosureGrantPage?.nextCursor ?? null,
         }
       : { status: "none", group: null },
   };
@@ -810,6 +855,8 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
 }
 
 async function handleHostedRuntimeGroupListMemberships(input: {
+  cursor: string | null;
+  disclosureGrantCursor: string | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
@@ -824,13 +871,26 @@ async function handleHostedRuntimeGroupListMemberships(input: {
     };
   }
 
-  const { memberships, truncated } = await readHostedGroupMembershipsForMember({
+  const membershipPage = await readHostedGroupMembershipsForMember({
+    cursor: input.cursor,
     memberId: input.memberId,
     prisma: access.prisma,
   });
+  if (membershipPage.cursorInvalid) {
+    return {
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "membership_cursor_invalid",
+      },
+    };
+  }
+  const { memberships, nextCursor, truncated } = membershipPage;
   let grants: Awaited<ReturnType<typeof readActiveHostedGroupDisclosureGrantsForMember>>;
   try {
     grants = await readActiveHostedGroupDisclosureGrantsForMember({
+      cursor: input.disclosureGrantCursor,
       memberId: input.memberId,
       prisma: access.prisma,
     });
@@ -844,15 +904,28 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       },
     };
   }
+  if (grants.kind === "cursor_invalid") {
+    return {
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "disclosure_cursor_invalid",
+      },
+    };
+  }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   return {
     action: "list_memberships",
     result: {
-      disclosureGrants: grants.map(({ grantId, groupLabel, permissionText }) => ({
-        grantId,
-        groupLabel,
-        permissionText,
-      })),
+      disclosureGrants: grants.grants.map(
+        ({ grantId, groupLabel, permissionText }) => ({
+          grantId,
+          groupLabel,
+          permissionText,
+        }),
+      ),
+      disclosureGrantsTruncated: grants.truncated,
       memberships: memberships.map(({
         ownerJoinCode,
         runtimeMemberId,
@@ -867,6 +940,8 @@ async function handleHostedRuntimeGroupListMemberships(input: {
           runtimeMemberId,
         }),
       })),
+      nextCursor,
+      nextDisclosureGrantCursor: grants.nextCursor,
       status: "ok",
       truncated,
     },
@@ -952,9 +1027,7 @@ async function readHostedRuntimePersonalActiveAccess(
 
 function toHostedRuntimeGroupSummary(
   group: HostedGroupSummary,
-  disclosureGrants: Awaited<
-    ReturnType<typeof readActiveHostedGroupDisclosureGrantsForGroup>
-  >,
+  disclosureGrants: HostedGroupDisclosureGrantSummary[],
 ): HostedRuntimeGroupSummary {
   const disclosureGrantsByMemberId = new Map<
     string,
@@ -1284,15 +1357,13 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
     if (!groupId) {
       return { kind: "group_not_found" as const };
     }
-    const admission = await admitHostedGroupDisclosurePermissionAppendTx({
+    await admitHostedGroupDisclosurePermissionAppendTx({
       groupId,
       originAssistantInputId: input.originAssistantInputId,
       permissionText,
       tx,
     });
-    return admission.kind === "limit_reached"
-      ? { kind: "permission_history_limit_reached" as const }
-      : { groupId, kind: "ok" as const };
+    return { groupId, kind: "ok" as const };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   if (authority.kind !== "ok") {
     return unavailable(authority.kind);
@@ -1345,10 +1416,6 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
   } catch {
     return unavailable("permission_binding_failed");
   }
-  if (binding.kind === "limit_reached") {
-    return unavailable("permission_history_limit_reached");
-  }
-
   return {
     action: "post_disclosure_request",
     result: { status: "sent" },
@@ -1369,6 +1436,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   joinOffer: HostedRuntimeGroupPostJoinOfferRequest | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
+  repostOriginAssistantInputId: string | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "post_join_offer",
@@ -1389,10 +1457,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
-    input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds,
-  );
+  const requestedProjectionScopes = input.joinOffer?.projectionScopes
+    ?? input.joinOffer?.projectionKinds;
+  const newProjectionScopes = input.repostOriginAssistantInputId === null
+    ? resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes)
+    : null;
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -1401,18 +1470,40 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
-    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-      actorMemberId: ownerAccess.ownerMemberId,
-      containerMemberId: input.memberId,
-      displayName: input.joinOffer?.displayName ?? null,
-      now,
-      requestedVaultShareProjectionScopes: projectionScopes,
-      tx,
-    });
+    const result = input.repostOriginAssistantInputId === null
+      ? await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+          actorMemberId: ownerAccess.ownerMemberId,
+          containerMemberId: input.memberId,
+          displayName: input.joinOffer?.displayName ?? null,
+          now,
+          requestedVaultShareProjectionScopes: newProjectionScopes,
+          tx,
+        })
+      : await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
+          actorMemberId: ownerAccess.ownerMemberId,
+          containerMemberId: input.memberId,
+          tx,
+        });
+    const projectionScopes = newProjectionScopes
+      ?? result.group.requestedVaultShareProjectionScopes;
+    if (
+      input.repostOriginAssistantInputId !== null
+      && requestedProjectionScopes !== undefined
+      && requestedProjectionScopes !== null
+      && !hostedGroupProjectionScopeSetsEqual(
+        resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes),
+        projectionScopes,
+      )
+    ) {
+      return { kind: "repost_scope_change_unavailable" as const };
+    }
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
       now,
       projectionScopes,
+      ...(input.repostOriginAssistantInputId === null
+        ? {}
+        : { replaceActiveOffer: true }),
       tx,
     });
     if (offerPost.kind === "unavailable") {
@@ -1422,6 +1513,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       kind: "ok" as const,
       offerPost,
       ownerMemberId: ownerAccess.ownerMemberId,
+      projectionScopes,
       ...result,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -1451,7 +1543,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
-    projectionScopes,
+    projectionScopes: created.projectionScopes,
   });
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
@@ -1462,7 +1554,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
         offerGeneration,
-        projectionScopes,
+        projectionScopes: created.projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : {
+              repostOriginAssistantInputId:
+                input.repostOriginAssistantInputId,
+            }),
       }),
       message,
     });
@@ -1501,7 +1599,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
-        projectionScopes,
+        projectionScopes: created.projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : { replaceActiveOffersAt: providerSendCompletedAt }),
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -2255,6 +2356,15 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         prisma: input.prisma,
       })).filter((participant) => boundedHandleValues.has(participant.handle));
     const now = new Date();
+    const observationExpiresAt = new Date(
+      now.getTime() + HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+    );
+    const observationLookupKeys = [...new Set(participantHandles.flatMap((handle) => {
+      const lookupKey = createHostedThreadContainerParticipantHandleLookupKey(
+        handle.handle,
+      );
+      return lookupKey ? [lookupKey] : [];
+    }))];
     const seenByMemberId = new Map<string, {
       handleLookupKey: string;
       participantMemberId: string;
@@ -2274,6 +2384,16 @@ export async function reconcileHostedThreadContainerParticipants(input: {
     }
 
     const seenParticipants = [...seenByMemberId.values()];
+    const inputObservationRows = observationLookupKeys.length === 0
+      ? Prisma.sql`
+          SELECT NULL::text
+          WHERE FALSE
+        `
+      : Prisma.sql`
+          VALUES ${Prisma.join(observationLookupKeys.map((lookupKey) => Prisma.sql`
+            (${lookupKey}::text)
+          `))}
+        `;
     const inputParticipantRows = seenParticipants.length === 0
       ? Prisma.sql`
           SELECT NULL::text, NULL::text
@@ -2286,7 +2406,38 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         `;
 
     await input.prisma.$executeRaw(Prisma.sql`
-      WITH input_participant(participant_member_id, handle_lookup_key) AS (
+      WITH input_observation(contact_lookup_key) AS (
+        ${inputObservationRows}
+      ),
+      upserted_observation AS (
+        INSERT INTO hosted_group_participant_observation (
+          contact_lookup_key,
+          first_observed_at,
+          expires_at
+        )
+        SELECT
+          input_observation.contact_lookup_key,
+          ${now},
+          ${observationExpiresAt}
+        FROM input_observation
+        ORDER BY input_observation.contact_lookup_key
+        ON CONFLICT (contact_lookup_key)
+        DO UPDATE SET
+          first_observed_at = CASE
+            WHEN hosted_group_participant_observation.expires_at <= EXCLUDED.first_observed_at
+              THEN EXCLUDED.first_observed_at
+            ELSE LEAST(
+              hosted_group_participant_observation.first_observed_at,
+              EXCLUDED.first_observed_at
+            )
+          END,
+          expires_at = GREATEST(
+            hosted_group_participant_observation.expires_at,
+            EXCLUDED.expires_at
+          )
+        RETURNING contact_lookup_key
+      ),
+      input_participant(participant_member_id, handle_lookup_key) AS (
         ${inputParticipantRows}
       ),
       upserted AS (
@@ -2310,6 +2461,7 @@ export async function reconcileHostedThreadContainerParticipants(input: {
           ${now},
           ${now}
         FROM input_participant
+        CROSS JOIN (SELECT COUNT(*) FROM upserted_observation) AS observation_barrier
         ON CONFLICT (container_member_id, participant_member_id)
         DO UPDATE SET
           handle_lookup_key = EXCLUDED.handle_lookup_key,

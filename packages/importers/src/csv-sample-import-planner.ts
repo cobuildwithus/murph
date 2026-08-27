@@ -51,6 +51,34 @@ export interface CsvSampleImportSkipReasonCount {
   reason: string;
 }
 
+type CsvSampleImportFailure =
+  | { code: "timestamp_column_inference_failed" }
+  | { code: "value_column_inference_failed" }
+  | {
+    code: "no_importable_rows";
+    importIndexes: readonly number[];
+  }
+  | {
+    code: "invalid_sample";
+    importIndex: number;
+    sampleField: string;
+    stream: SampleStream;
+  };
+
+export class CsvSampleImportError extends Error {
+  readonly failure: CsvSampleImportFailure;
+
+  constructor(failure: CsvSampleImportFailure) {
+    super(failure.code);
+    this.name = "CsvSampleImportError";
+    this.failure = failure;
+  }
+
+  get code(): CsvSampleImportFailure["code"] {
+    return this.failure.code;
+  }
+}
+
 export interface PreparedCsvSampleImportPayload extends Omit<SampleImportPayload, "samples"> {
   samples: SampleImportRecord[];
 }
@@ -373,7 +401,10 @@ export async function prepareCsvSampleImport(
   const imports = collectors.map((collector) => finalizeImportCollector(collector));
 
   if (imports.every((entry) => entry.importedCount === 0)) {
-    throw new Error("sample CSV did not contain any importable sample rows");
+    throw new CsvSampleImportError({
+      code: "no_importable_rows",
+      importIndexes: imports.map((_, index) => index),
+    });
   }
 
   return stripUndefined({
@@ -674,7 +705,12 @@ function resolvePlannedImports(
     return [{
       stream,
       unit: normalizeRequiredString(config.unit ?? DEFAULT_SAMPLE_UNITS[stream], "unit"),
-      valueColumn: resolveValueColumnName(header, config.valueColumn, stream, recognizedSampleColumns),
+      valueColumn: resolveValueColumnName(
+        header,
+        config.valueColumn,
+        stream,
+        recognizedSampleColumns,
+      ),
     }];
   }
 
@@ -687,7 +723,7 @@ function resolvePlannedImports(
   }
 
   if (groups.size === 0) {
-    throw new Error("sample CSV does not contain a recognizable sample value column");
+    throw createCsvInferenceError("valueColumn");
   }
 
   for (const [stream, columns] of groups) {
@@ -719,7 +755,10 @@ function resolveRequestedStream(value: string): SampleStream {
   return stream;
 }
 
-function resolveTimestampColumnName(header: readonly string[], requestedColumn: string | undefined): string {
+function resolveTimestampColumnName(
+  header: readonly string[],
+  requestedColumn: string | undefined,
+): string {
   if (requestedColumn) {
     const exactMatch = findHeaderName(header, [requestedColumn]);
 
@@ -744,7 +783,7 @@ function resolveTimestampColumnName(header: readonly string[], requestedColumn: 
     );
   }
 
-  throw new Error("sample CSV is missing a recognizable timestamp column");
+  throw createCsvInferenceError("tsColumn");
 }
 
 function resolveValueColumnName(
@@ -783,7 +822,7 @@ function resolveValueColumnName(
     );
   }
 
-  throw new Error(`sample CSV is missing a recognizable value column for stream "${stream}"`);
+  throw createCsvInferenceError("valueColumn");
 }
 
 function resolveStreamForRequestedValueColumn(
@@ -887,6 +926,15 @@ function resolveSkipReason(recordedAt: string | undefined, value: number | undef
   ].filter((entry): entry is string => entry !== null);
 
   return reasons.join("; ");
+}
+
+function createCsvInferenceError(field: "tsColumn" | "valueColumn"): CsvSampleImportError {
+  const isTimestamp = field === "tsColumn";
+  const code = isTimestamp
+    ? "timestamp_column_inference_failed"
+    : "value_column_inference_failed";
+
+  return new CsvSampleImportError({ code });
 }
 
 function normalizeOptionalNumber(value: unknown, stream: SampleStream): number | undefined {

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_LOCAL_MINIO_MIRROR_IMAGE } from "../../src/dev-hosted-local/minio-image-contract.ts";
+import { buildHostedLocalMinioDockerUserArgs } from "../../src/dev-hosted-local/minio.ts";
 
 const runtimeMocks = vi.hoisted(() => ({
   spawnChildProcess: vi.fn(),
@@ -146,6 +147,19 @@ describe("hosted-local MinIO sidecar", () => {
     netMocks.listens = [];
   });
 
+  it("applies host UID/GID only to Linux containers", () => {
+    const identity = {
+      getgid: () => 501,
+      getuid: () => 502,
+    };
+
+    expect(buildHostedLocalMinioDockerUserArgs("linux", identity)).toEqual([
+      "--user",
+      "502:501",
+    ]);
+    expect(buildHostedLocalMinioDockerUserArgs("darwin", identity)).toEqual([]);
+  });
+
   it("starts a container-reachable S3-compatible endpoint for hosted-local E2E", async () => {
     const child = {
       child: new EventEmitter(),
@@ -219,11 +233,17 @@ describe("hosted-local MinIO sidecar", () => {
     expect(dockerArgs).toContain("MINIO_REGION_NAME");
     // GHCR first; the upstream ref is only the fallback when that is unreachable.
     expect(dockerArgs).toContain(HOSTED_LOCAL_MINIO_MIRROR_IMAGE);
-    if (typeof process.getuid === "function" && typeof process.getgid === "function") {
+    if (
+      process.platform === "linux"
+      && typeof process.getuid === "function"
+      && typeof process.getgid === "function"
+    ) {
       expect(dockerArgs).toEqual(expect.arrayContaining([
         "--user",
         `${process.getuid()}:${process.getgid()}`,
       ]));
+    } else {
+      expect(dockerArgs).not.toContain("--user");
     }
     expect(runtimeMocks.spawnChildProcess.mock.calls[0]?.[3]).toEqual(expect.objectContaining({
       MINIO_REGION_NAME: "auto",
@@ -335,6 +355,10 @@ describe("hosted-local MinIO sidecar", () => {
     });
 
     expect(server?.process).toBe(child);
+    const expectedControlHost = process.platform === "linux" ? "172.17.0.1" : "127.0.0.1";
+    const expectedEndpointHost = process.platform === "linux"
+      ? "172.17.0.1"
+      : "host.docker.internal";
     const dockerEnv = runtimeMocks.spawnChildProcess.mock.calls[0]?.[3] as Record<string, string>;
     expect(dockerEnv.MINIO_ROOT_USER).toMatch(/^murph-local-[a-f0-9]{24}$/u);
     expect(dockerEnv.MINIO_ROOT_PASSWORD).toMatch(/^[A-Za-z0-9_-]{43}$/u);
@@ -343,12 +367,22 @@ describe("hosted-local MinIO sidecar", () => {
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
-      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
-      HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT:
+        expect.stringMatching(new RegExp(`^http://${expectedControlHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
+      HOSTED_R2_PRESIGN_ENDPOINT:
+        expect.stringMatching(new RegExp(`^http://${expectedEndpointHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: dockerEnv.MINIO_ROOT_PASSWORD,
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
     }));
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED");
+    if (process.platform === "linux") {
+      expect(server?.env).toHaveProperty(
+        "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST",
+        "172.17.0.1",
+      );
+    } else {
+      expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST");
+    }
     expect(runtimeMocks.spawnChildProcess).toHaveBeenCalledWith(
       "minio",
       "docker",

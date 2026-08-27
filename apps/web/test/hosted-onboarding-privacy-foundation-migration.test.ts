@@ -3,6 +3,11 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const HOSTED_MEMBER_SCHEMA_GUARD = {
+  HostedGroupParticipantObservation: [
+    'contactLookupKey String @id @map("contact_lookup_key")',
+    'firstObservedAt DateTime @map("first_observed_at")',
+    'expiresAt DateTime @map("expires_at")',
+  ],
   HostedSensitiveActionChallenge: [
     'tokenHash String @id @map("token_hash")',
     'memberId String @map("member_id")',
@@ -85,6 +90,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "inferenceConnection HostedInferenceConnection?",
     'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
+    'linqDeliveryPayloads HostedLinqDelivery[] @relation("HostedLinqDeliveryPayloadOwner")',
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'operatorTasks HostedOperatorTask[] @relation("HostedOperatorTaskMember")',
     'operatorTasksRequested HostedOperatorTask[] @relation("HostedOperatorTaskRequester")',
@@ -965,6 +971,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260812030200_whoop_capacity_index",
       "20260812030300_referral_handoff_indexes",
       "20260812050000_hosted_sensitive_action_transient_retention_index",
+      "20260826190000_hosted_vault_share_delivery_cursor_index",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1163,11 +1170,14 @@ describe("hosted Prisma baseline migration", () => {
       "20260820170000_hosted_physical_note_recovery",
       "20260820190000_hosted_ops_usage_reset_receipt",
       "20260821120000_hosted_group_sponsorship_fifty_cap",
+      "20260822210000_hosted_linq_delivery_payload",
       "20260824010000_rearm_hosted_inbox_video_retention",
       "20260824120000_hosted_runtime_issue_attempt_provenance",
       "20260825050000_device_source_no_data_outreach_preference",
       "20260825180000_hosted_operator_task",
       "20260825193000_hosted_group_private_conversion",
+      "20260826120000_hosted_group_participant_observation",
+      "20260826201500_imessage_mini_app_renewal_credential",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
@@ -2643,7 +2653,7 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|EmailPublicBootstrapAttempt|MealPhotoCaptureEnrollment|Member\w*|PendingGroupSetup|SensitiveActionChallenge))\s+\{/gmu)]
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|EmailPublicBootstrapAttempt|GroupParticipantObservation|MealPhotoCaptureEnrollment|Member\w*|PendingGroupSetup|SensitiveActionChallenge))\s+\{/gmu)]
     .map((match) => match[1]);
 }
 

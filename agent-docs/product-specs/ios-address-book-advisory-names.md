@@ -147,7 +147,7 @@ becomes profile, contact, membership, or effect authority. Full cache,
 deadline, and rollout semantics live in
 `agent-docs/references/hosted-runtime-protocol.md`.
 The model-facing prompt renders the owner-contact result as
-`Address-book name (display only):`; its internal source remains
+`Address-book name:`; its internal source remains
 `unverified-owner-contact` so presentation trust cannot erase provenance.
 
 The third consumer is an exact provider-authenticated Linq

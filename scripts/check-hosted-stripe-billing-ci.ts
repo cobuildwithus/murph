@@ -88,8 +88,8 @@ export function inspectHostedStripeBillingWorkflow(
   }
   requireText(
     "missing-live-if",
-    "if: ${{ github.event_name == 'push' }}",
-    "The secret-bearing live job must run only on trusted push events, never on pull request code.",
+    "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+    "The secret-bearing live job must bypass a skipped PR-only ancestor only for trusted pushes with successful hermetic proof.",
   );
   requireText(
     "missing-dedicated-environment",
