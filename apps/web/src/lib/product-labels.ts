@@ -60,6 +60,20 @@ export type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
 
+export type ProductLabelsSearchFailureStage =
+  | "search_rows"
+  | "contaminant_summary";
+
+export class ProductLabelsSearchFailureError extends Error {
+  constructor(
+    readonly failureStage: ProductLabelsSearchFailureStage,
+    cause: unknown,
+  ) {
+    super("product label search failed", { cause });
+    this.name = "ProductLabelsSearchFailureError";
+  }
+}
+
 export class ProductContaminantSchemaMissingError extends Error {
   constructor() {
     super(
@@ -540,11 +554,34 @@ export function createProductLabelsQueries(
     },
 
     async search(input) {
-      return await attachProductContaminantSummaries(
-        client,
-        tableSql,
-        await searchRows(input),
-      );
+      let rows: ProductLabelSearchRow[];
+      try {
+        rows = await searchRows(input);
+      } catch (error) {
+        if (table === "foods") {
+          throw new ProductLabelsSearchFailureError("search_rows", error);
+        }
+        throw error;
+      }
+
+      try {
+        return await attachProductContaminantSummaries(
+          client,
+          tableSql,
+          rows,
+        );
+      } catch (error) {
+        if (
+          table === "foods"
+          && !isProductContaminantSchemaMissingError(error)
+        ) {
+          throw new ProductLabelsSearchFailureError(
+            "contaminant_summary",
+            error,
+          );
+        }
+        throw error;
+      }
     },
   };
 }

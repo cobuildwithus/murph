@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createFoodsQueries,
@@ -9,8 +9,12 @@ import {
 } from "../src/lib/foods";
 import {
   createProductLabelsQueries,
+  isProductContaminantSchemaMissingError,
   normalizeProductLabelsConnectionString,
 } from "../src/lib/product-labels";
+import {
+  createProductLabelsRouteHandlers,
+} from "../src/lib/product-labels-route";
 
 const emptyContaminants = {
   status: "no_known_product_tests",
@@ -266,6 +270,120 @@ describe("foods query helpers", () => {
     expect(isProductTestsQuery(calls[1]!.text)).toBe(true);
     expect(calls[1]!.values).toEqual([["fdc:123"]]);
   });
+
+  it.each([
+    { failureStage: "search_rows" as const, failingQuery: 1 },
+    { failureStage: "contaminant_summary" as const, failingQuery: 2 },
+  ])(
+    "classifies $failureStage database cancellations without changing the foods API failure contract",
+    async ({ failureStage, failingQuery }) => {
+      class DatabaseError extends Error {
+        readonly code = "57014";
+      }
+
+      const privateQuery = "private-search-value";
+      const privateProductName = "private product fact";
+      const privateProductId = "fdc:private-product-id";
+      const privateUpc = "123456789012";
+      const privateSqlText = "SELECT private_product_payload";
+      const databaseError = new DatabaseError(
+        `database canceled ${privateQuery} for ${privateProductId}: ${privateSqlText}`,
+      );
+      let queryCount = 0;
+      const queries = createFoodsQueries({
+        async query<T>() {
+          queryCount += 1;
+          if (queryCount === failingQuery) {
+            throw databaseError;
+          }
+          return {
+            rows: [
+              {
+                id: privateProductId,
+                dataOrigin: "usda_foundation",
+                dataOriginId: "private-data-origin-id",
+                name: privateProductName,
+                brand: "private brand fact",
+                upc: privateUpc,
+                offMarket: false,
+                label: { privateLabelFact: true },
+              },
+            ] as T[],
+          };
+        },
+      });
+      const handlers = createProductLabelsRouteHandlers({
+        bareGtinQueryPriority: "upc",
+        getById: queries.getFoodById,
+        getByUpc: queries.getFoodByUpc,
+        numericExactIdPrefix: "fdc:",
+        projectNutritionItem: toFoodNutritionSearchItem,
+        search: queries.searchFoods,
+        errorCodes: {
+          failed: "foods_api_failed",
+          unconfigured: "foods_api_unconfigured",
+        },
+        isUnconfiguredError: isProductContaminantSchemaMissingError,
+        supportsGenericOnly: true,
+      });
+      const previousDataApiKey = process.env.MURPH_DATA_API_KEY;
+      process.env.MURPH_DATA_API_KEY = "test-data-api-key";
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        const response = await handlers.GET(
+          new Request(
+            `https://web.example.test/api/foods?q=${privateQuery}`,
+            {
+              headers: {
+                authorization: "Bearer test-data-api-key",
+              },
+            },
+          ),
+        );
+
+        expect(queryCount).toBe(failingQuery);
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+          error: "foods_api_failed",
+        });
+        expect(consoleError).toHaveBeenCalledTimes(1);
+        expect(consoleError).toHaveBeenCalledWith(
+          "foods_api_failed",
+          expect.objectContaining({
+            databaseErrorCode: "57014",
+            errorCode: "foods_api_failed",
+            errorType: "DatabaseError",
+            failureStage,
+            method: "GET",
+            operation: "search",
+          }),
+        );
+        const logDetails = consoleError.mock.calls[0]?.[1];
+        expect(logDetails).not.toHaveProperty("causeDatabaseErrorCode");
+        const serializedLog = JSON.stringify(consoleError.mock.calls);
+        expect(serializedLog).not.toContain(privateQuery);
+        expect(serializedLog).not.toContain(privateProductName);
+        expect(serializedLog).not.toContain(privateProductId);
+        expect(serializedLog).not.toContain(privateUpc);
+        expect(serializedLog).not.toContain(privateSqlText);
+        expect(serializedLog).not.toContain("private-data-origin-id");
+        expect(serializedLog).not.toContain("private brand fact");
+        expect(serializedLog).not.toContain("privateLabelFact");
+        expect(serializedLog).not.toContain(databaseError.message);
+        expect(serializedLog).not.toContain("stack");
+      } finally {
+        consoleError.mockRestore();
+        if (previousDataApiKey === undefined) {
+          delete process.env.MURPH_DATA_API_KEY;
+        } else {
+          process.env.MURPH_DATA_API_KEY = previousDataApiKey;
+        }
+      }
+    },
+  );
 
   it("normalizes shared labels database connection strings for pg", () => {
     expect(
