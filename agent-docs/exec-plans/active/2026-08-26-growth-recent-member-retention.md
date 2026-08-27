@@ -108,6 +108,15 @@ and ReviewGPT loop.
   complexity-collapse correction folds the newest-20 projection into that owner
   and deletes both redundant mailbox operations. The composed focused test
   proves the new rows and unchanged active-user totals from the shared reads.
+- Final ReviewGPT round 3 verified both prior remediation rounds and required
+  the workflow's mandatory convergence retrospective before another substantive
+  review. The completed retrospective chooses justified continuation at the
+  current single-Growth-owner shape: the final requirement remains the bounded
+  newest-20 projection without lifetime or plan semantics; the one incremental
+  member lookup is necessary to identify those signups; and the pure section is
+  necessary to render and prove the requested responsive operator view. Further
+  splitting, abstraction, redesign, or reversion would either remove the
+  requested capability or add an owner with no demonstrated need.
 - `pnpm --dir apps/web test:prepared
   test/hosted-ops-recent-member-retention.test.tsx
   test/hosted-ops-growth.test.ts` — pass after owner collapse, 58 tests.
@@ -123,7 +132,8 @@ and ReviewGPT loop.
   passed 800 test files / 11,183 tests, full lint with zero errors, isolated dev
   smoke, and the optimized Next.js production build, plus the repository architecture,
   privacy, dependency, and workspace-boundary guards.
-- Exact pushed-head CI passed for the first candidate except the separately
-  pending native mobile E2Es. Final ReviewGPT rounds 1 and 2 returned accepted
-  findings; the newest-owner correction, refreshed evidence, CI, and final
-  round 3 remain.
+- Exact pushed-head CI is green across the completed checks for the owner-collapse
+  candidate; package coverage and Vercel remain in progress. Final ReviewGPT
+  rounds 1 and 2 returned accepted findings, and round 3 returned only the
+  required retrospective gate after verifying those remediations. A substantive
+  round 4 on the documented-retrospective head remains.
