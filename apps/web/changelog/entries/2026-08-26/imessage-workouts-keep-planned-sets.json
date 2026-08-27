@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "imessage-workouts-keep-planned-sets",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout plans open ready to log",
+    "summary": "Exact sets, reps, and weights now open prefilled in the iMessage workout editor, with consistent unit changes across an exercise.",
+    "details": "Planned values stay incomplete until you mark a set done, and a selected lb or kg unit becomes the preferred workout unit for later entries.",
+    "relevanceTags": ["imessage", "workouts"],
+    "sourcePullRequests": [2333]
+  }
+}

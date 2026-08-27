@@ -59,15 +59,15 @@ supported note, reps, or weight/reps family; duration, distance, RPE,
 bodyweight, assistance, added-load, or mixed-result sets keep their original
 readable actual on V4 instead of entering a lossy editor. Duration, cardio,
 assisted-bodyweight, and weighted-bodyweight exercise modes remain V4 even
-before a result is logged because V6 cannot produce their native set shape. A read failure,
-mismatch, completed workout, hidden or unsupported result, or oversized V6
+before a result is logged because the direct editor cannot produce their native
+set shape. A read failure, mismatch, completed workout, or hidden or unsupported result
 leaves the card as the existing readable V4 snapshot.
 
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
-installed native editor uses schema version 6, which adds that compact typed
-projection and one opaque 64-character workout-revision binding while still
-staying under the existing 2,048-character URL ceiling. The revision binds the
+installed native editor keeps schema version 6, whose compact typed projection
+and opaque 64-character bindings stay under the existing 2,048-character URL
+ceiling. The revision binds the
 canonical workout identity to its ordered hidden exercise/set-slot identity and
 last applied member-action generation without exposing any of those values.
 Mutable set results and annotations are intentionally excluded so their closed
@@ -88,7 +88,10 @@ note/reps/weight-reps tuple, while a pending set carries `null`. Native derives
 display and optimistic preconditions from that typed tuple. Removing repeated
 wire keys keeps realistic six-exercise, four-set initial and late-active
 snapshots below the same URL ceiling without adding another projection owner;
-completed cards remain V4/read-only.
+completed cards remain V4/read-only. Exact canonical pending plans remain in
+the bounded V6 target string, while completed actuals retain their typed tuple.
+The native form recognizes only the producer's exact numeric weight/reps or
+reps target grammar and keeps every other target display-only.
 
 ## Static fallback
 
@@ -452,6 +455,39 @@ Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store
 affordance. Provider acceptance, direct route renders, and delivery receipts do
 not prove those device behaviors.
+
+## Backward-compatible exact-plan rollout
+
+This is Product-level UX work because one member request crosses assistant
+interpretation, canonical workout persistence, V6 presentation, the closed
+member action, and the native editor. Release proof covers an exact ad-hoc
+plan, saved-routine target ownership, historical V4/V6 cards, stale actions,
+preference-only and mixed submissions, localized partial input, and all
+unfinished rows changing units together. The exact-plan release remains on
+Product UX Hold until the real assistant successfully creates the requested
+canonical plan and a physical Messages-extension smoke confirms the native
+flow; deterministic contract and simulator proof do not replace those gates.
+
+Workout cards continue to emit the permanent V6 editor wire. Exact ad-hoc
+planned weight and repetitions are canonical fields on the workout exercise and
+render deterministically into each pending V6 target as `<weight> <unit> ×
+<reps>`. Current native readers recognize only that exact bounded grammar as an
+incomplete default; ranges, qualitative instructions, AMRAP, and unknown target
+text remain display-only. Completed results still use the existing typed V6
+tuple, and V4 remains the complete read-only/static fallback.
+
+This preserves every installed V6 reader without device-version negotiation,
+rollout flags, or a second protocol. Deploy all current server readers and the
+optional unit-preference action consumer before releasing the new iOS behavior.
+Old clients then continue sending the historical V6 action shape, while the new
+client may add `weightUnitPreference`. The producer never emits a new schema.
+
+The canonical workout-event rollback floor still applies. All strict event
+readers must understand the optional planned-load fields before the first such
+event is written; after that write, recovery requires a compatible reader or a
+forward fix. Focused proof must pin the exact V6 TypeScript/Swift fixture,
+exercise-reorder continuity, incompatible-unit rejection, planned defaults as
+incomplete until explicit completion, and preference-only/mixed action outcomes.
 
 ## V4/V6 live refresh
 

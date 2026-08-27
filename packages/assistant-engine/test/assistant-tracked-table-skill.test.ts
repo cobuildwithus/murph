@@ -185,8 +185,16 @@ describe('assistant tracked workout table skill', () => {
       'Starting a new workout is independent of every older unfinished workout',
     )
     expect(skill).toContain(
-      "one repeated `--exercise 'name=...;sets=...;reps=...'` value per ordered ad-hoc exercise",
+      "one repeated `--exercise 'name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise",
     )
+    expect(skill).toContain(
+      '`targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load',
+    )
+    expect(skill).toContain('An explicit unit in the current request wins.')
+    expect(skill).toContain(
+      'read `vault-cli workout units show --format json` and use the saved strength unit',
+    )
+    expect(skill).toContain('when no preference exists, ask which unit they mean')
     expect(skill).not.toContain('vault-cli workout replace')
     expect(skill).not.toContain('--confirm-delete')
     expect(skill).toContain('The start command must')

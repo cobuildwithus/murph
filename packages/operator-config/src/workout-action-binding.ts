@@ -1,17 +1,8 @@
 import { createHash } from 'node:crypto'
 
-import type { WorkoutExercise, WorkoutSession, WorkoutSet } from '@murphai/contracts'
+import type { WorkoutExercise, WorkoutSession } from '@murphai/contracts'
 
 const WORKOUT_ACTION_BINDING_PATTERN = /^[0-9a-f]{64}$/u
-
-type CompleteNullableProjection<T> = {
-  [Key in keyof Required<T>]: T[Key] | null
-}
-
-type CanonicalWorkoutSet = CompleteNullableProjection<WorkoutSet>
-type CanonicalWorkoutExercise = CompleteNullableProjection<
-  Omit<WorkoutExercise, 'sets'>
-> & { sets: CanonicalWorkoutSet[] }
 
 function projectWorkoutActionExerciseCoordinate(exercise: WorkoutExercise) {
   return {
@@ -29,6 +20,8 @@ function projectWorkoutActionExerciseCoordinate(exercise: WorkoutExercise) {
         type: set.type ?? null,
       })),
     sourceExerciseId: exercise.sourceExerciseId ?? null,
+    targetWeightPerSet: exercise.targetWeightPerSet ?? null,
+    targetWeightUnit: exercise.targetWeightUnit ?? null,
     unitOverride: exercise.unitOverride ?? null,
   }
 }
@@ -115,12 +108,16 @@ export function deriveLegacyWorkoutActionBindingV4(
 function workoutActionPositionalIdentity(
   exercises: WorkoutExercise[],
 ) {
-  return exercises
+  const orderedExercises = exercises
     .slice()
     .sort((left, right) => left.order - right.order)
+  const includesPlannedWeightTargets = orderedExercises.some(
+    (exercise) => exercise.targetWeightPerSet !== undefined,
+  )
+  const positionalIdentity = orderedExercises
     .map((exercise) => {
       const coordinate = projectWorkoutActionExerciseCoordinate(exercise)
-      return {
+      const baseCoordinate = {
         groupId: coordinate.groupId,
         memberRepsPerSet: coordinate.memberRepsPerSet,
         mode: coordinate.mode,
@@ -132,48 +129,68 @@ function workoutActionPositionalIdentity(
         sourceExerciseId: coordinate.sourceExerciseId,
         unitOverride: coordinate.unitOverride,
       }
+      return includesPlannedWeightTargets
+        ? {
+            ...baseCoordinate,
+            targetWeightPerSet: coordinate.targetWeightPerSet,
+            targetWeightUnit: coordinate.targetWeightUnit,
+          }
+        : baseCoordinate
     })
+  return positionalIdentity
 }
 
 export function deriveWorkoutSetRemovalBinding(
   workoutEntityId: string,
   exercises: WorkoutExercise[],
 ): string {
-  const canonicalExercises: CanonicalWorkoutExercise[] = exercises
+  const includesPlannedWeightTargets = exercises.some(
+    (exercise) => exercise.targetWeightPerSet !== undefined,
+  )
+  const canonicalExercises = exercises
     .slice()
     .sort((left, right) => left.order - right.order)
-    .map((exercise) => ({
-      groupId: exercise.groupId ?? null,
-      memberRepsPerSet: exercise.memberRepsPerSet ?? null,
-      mode: exercise.mode ?? null,
-      name: exercise.name,
-      note: exercise.note ?? null,
-      order: exercise.order,
-      setPlanIsFinite: exercise.setPlanIsFinite ?? null,
-      sets: exercise.sets
-        .slice()
-        .sort((left, right) => left.order - right.order)
-        .map((set) => ({
-          addedWeightKg: set.addedWeightKg ?? null,
-          assistanceKg: set.assistanceKg ?? null,
-          bodyweightKg: set.bodyweightKg ?? null,
-          distanceMeters: set.distanceMeters ?? null,
-          durationSeconds: set.durationSeconds ?? null,
-          note: set.note ?? null,
-          order: set.order,
-          reps: set.reps ?? null,
-          rpe: set.rpe ?? null,
-          type: set.type ?? null,
-          weight: set.weight ?? null,
-          weightUnit: set.weightUnit ?? null,
-        })),
-      sourceExerciseId: exercise.sourceExerciseId ?? null,
-      unitOverride: exercise.unitOverride ?? null,
-    }))
+    .map((exercise) => {
+      const baseExercise = {
+        groupId: exercise.groupId ?? null,
+        memberRepsPerSet: exercise.memberRepsPerSet ?? null,
+        mode: exercise.mode ?? null,
+        name: exercise.name,
+        note: exercise.note ?? null,
+        order: exercise.order,
+        setPlanIsFinite: exercise.setPlanIsFinite ?? null,
+        sets: exercise.sets
+          .slice()
+          .sort((left, right) => left.order - right.order)
+          .map((set) => ({
+            addedWeightKg: set.addedWeightKg ?? null,
+            assistanceKg: set.assistanceKg ?? null,
+            bodyweightKg: set.bodyweightKg ?? null,
+            distanceMeters: set.distanceMeters ?? null,
+            durationSeconds: set.durationSeconds ?? null,
+            note: set.note ?? null,
+            order: set.order,
+            reps: set.reps ?? null,
+            rpe: set.rpe ?? null,
+            type: set.type ?? null,
+            weight: set.weight ?? null,
+            weightUnit: set.weightUnit ?? null,
+          })),
+        sourceExerciseId: exercise.sourceExerciseId ?? null,
+        unitOverride: exercise.unitOverride ?? null,
+      }
+      return includesPlannedWeightTargets
+        ? {
+            ...baseExercise,
+            targetWeightPerSet: exercise.targetWeightPerSet ?? null,
+            targetWeightUnit: exercise.targetWeightUnit ?? null,
+          }
+        : baseExercise
+    })
 
   return createHash('sha256')
     .update(
-      `workout-set-removal:v2:${workoutEntityId}:${JSON.stringify(canonicalExercises)}`,
+      `workout-set-removal:v${includesPlannedWeightTargets ? 3 : 2}:${workoutEntityId}:${JSON.stringify(canonicalExercises)}`,
     )
     .digest('hex')
 }

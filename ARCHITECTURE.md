@@ -2674,20 +2674,21 @@ envelope whose `action` is a closed discriminated union. The first action family
 typed exercise/set mutations; it is not an arbitrary path, patch, database, or
 tool-call surface. At the existing response-card attachment boundary, runtime
 re-reads the exact canonical workout and may add one trusted typed editor
-projection to an active card. The native V6 wire carries that projection plus
-one opaque SHA-256 workout-revision binding derived from the canonical workout
+projection to an active V6 card. V6 carries that projection inline with one
+opaque SHA-256 workout-revision binding derived from the canonical workout
 identity and its last applied member-action marker. It contains neither value
 and grants no authority, but preserves exact nullable prior fields while letting
 the workout owner prove under its existing lock that an old card still names
 the exact unfinished workout and predates no direct action. Note-shaped results
-enter V6 only when the exact canonical note
+enter the editor only when the exact canonical note
 fits the visible card result; longer hidden notes cannot enter persisted or
 provider payloads and leave the card V4/read-only. Every other completed set
 must fit exactly one complete note, reps, or weight/reps family; duration,
 distance, RPE, bodyweight, assistance, added-load, and mixed results preserve
 the original V4 actual. Unsupported exercise modes remain V4 before their first
-result as well. A failed read, presentation mismatch, completed workout,
-or oversized V6 likewise stays V4/read-only instead of guessing. Web authenticates and validates the request, locks and
+result as well. A failed read, presentation mismatch, completed workout, or V6
+envelope that exceeds the URL ceiling stays V4/read-only instead of guessing.
+Web authenticates and validates the request, locks and
 re-checks member access and consent, then appends one encrypted
 `member.action.requested:<actionId>` item to the existing system mailbox before
 signaling the existing Temporal runtime. Runtime dispatches the action directly
@@ -3651,9 +3652,8 @@ Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
 versioned delivery contract. V1-V4 carry private-direct presentation values;
-V5 uses the identity-free public challenge projection, and native-only V6 adds
-the opaque workout-revision binding plus a bounded typed editable-set projection
-derived from values already visible in that private-direct workout card. None may
+V5 uses the identity-free public challenge projection, and V6 carries its
+inline opaque-binding and bounded typed editable-set projection. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
 Generic V3 tables use compact grid typography and choose their one shared-header

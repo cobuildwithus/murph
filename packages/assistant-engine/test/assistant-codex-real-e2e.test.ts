@@ -1093,6 +1093,157 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
+    'starts one exact ad-hoc planned workout without logging its sets',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-exact-planned-workout-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic planned workout proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] [--exercise <name=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=...>]',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout units show --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: 'Start a workout: bench press, 3 sets of 8 reps at 135 lb.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const matching = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          const exercise = parsed.success
+            ? parsed.data.exercises.find((entry) => entry.name === 'Bench press')
+            : undefined
+          return parsed.success
+            && exercise?.memberRepsPerSet === 8
+            && exercise.targetWeightPerSet === 135
+            && exercise.targetWeightUnit === 'lb'
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const workoutCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const startCommands = workoutCommands.filter((command) =>
+          command.startsWith('workout start ')
+        )
+
+        process.stdout.write(
+          `[workout-planned-prefill-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            scenario: 'three exact bench sets at a member-stated load',
+          })}\n`,
+        )
+        expect(matching).toHaveLength(1)
+        const workout = matching[0]!
+        expect(workout.workout.exercises[0]).toMatchObject({
+          memberRepsPerSet: 8,
+          mode: 'weight_reps',
+          name: 'Bench press',
+          setPlanIsFinite: true,
+          targetWeightPerSet: 135,
+          targetWeightUnit: 'lb',
+          unitOverride: 'lb',
+        })
+        expect(workout.workout.exercises[0]?.sets).toEqual([
+          { order: 1 },
+          { order: 2 },
+          { order: 3 },
+        ])
+        expect(startCommands).toHaveLength(1)
+        expect(startCommands[0]).toContain(
+          '--exercise name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
+        )
+        expect(workoutCommands.join('\n')).not.toMatch(
+          /workout (?:exercise (?:add|set-reps)|set log)/u,
+        )
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: workout.id,
+            kind: 'workout',
+          },
+          workout: {
+            exercises: [{
+              name: 'Bench press',
+              sets: [
+                { actual: null, status: 'pending', target: '135 lb × 8' },
+                { actual: null, status: 'pending', target: '135 lb × 8' },
+                { actual: null, status: 'pending', target: '135 lb × 8' },
+              ],
+            }],
+            state: 'active',
+          },
+        })
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
     async () => {
       const config = await resolveRealCodexE2eConfig()

@@ -671,10 +671,48 @@ export const workoutExerciseSchema = z
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
     memberRepsPerSet: integerSchema(1, 999).optional(),
+    targetWeightPerSet: numberSchema(0.01, 9999).multipleOf(0.01).optional(),
+    targetWeightUnit: workoutLoadUnitSchema.optional(),
     setPlanIsFinite: z.boolean().optional(),
     sets: z.array(workoutSetSchema).min(1).max(150),
   })
-  .strict();
+  .strict()
+  .superRefine((exercise, context) => {
+    if (
+      (exercise.targetWeightPerSet === undefined)
+      !== (exercise.targetWeightUnit === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight requires its unit.",
+        path: exercise.targetWeightPerSet === undefined
+          ? ["targetWeightPerSet"]
+          : ["targetWeightUnit"],
+      });
+    }
+    if (
+      exercise.targetWeightPerSet !== undefined
+      && exercise.mode !== undefined
+      && exercise.mode !== "weight_reps"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight requires weight/reps exercise mode.",
+        path: ["mode"],
+      });
+    }
+    if (
+      exercise.targetWeightUnit !== undefined
+      && exercise.unitOverride !== undefined
+      && exercise.targetWeightUnit !== exercise.unitOverride
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight must use the exercise weight unit.",
+        path: ["targetWeightUnit"],
+      });
+    }
+  });
 
 export const workoutSessionMetricsSchema = z
   .object({
