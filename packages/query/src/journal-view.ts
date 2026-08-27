@@ -470,6 +470,16 @@ function eventLabel(event: CanonicalEntity): string {
         "activity",
     );
   }
+  if (event.kind === "experiment_context") {
+    const status = readString(event.attributes.status) ?? event.status;
+    if (status === "completed") return "Experiment completed";
+    if (
+      status === "active" &&
+      readString(event.attributes.summary)?.includes("Day 1")
+    ) {
+      return "Experiment started";
+    }
+  }
   if (event.title) return event.title;
   if (event.kind === "intervention_session") {
     return humanize(
@@ -491,6 +501,12 @@ function eventSummary(event: CanonicalEntity): string | null {
   const note = readString(event.attributes.note);
   if (note) return note;
   const summary = readString(event.attributes.summary);
+  if (event.kind === "experiment_context") {
+    const result =
+      readString(event.attributes.resultSummary) ??
+      readString(event.attributes.result);
+    return uniqueStrings([event.title, result ?? summary]).join(" · ") || null;
+  }
   if (summary) return summary;
   if (event.kind === "meal") return mealSummary(event.attributes);
   if (event.kind === "observation") {
@@ -521,16 +537,7 @@ function mealSummary(attributes: Record<string, unknown>): string | null {
         .filter((value): value is string => value !== null)
         .slice(0, 3)
     : [];
-  const nutrition = readRecord(attributes.nutrition);
-  const totals = readRecord(nutrition?.totals);
-  const calories = readNumber(totals?.calories);
-  const protein = readNumber(totals?.proteinGrams);
-  const parts = [
-    ingredients.length > 0 ? ingredients.join(", ") : null,
-    calories === null ? null : `${formatNumber(calories)} kcal`,
-    protein === null ? null : `${formatNumber(protein)} g protein`,
-  ].filter((value): value is string => value !== null);
-  return parts.length > 0 ? parts.join(" · ") : "Meal recorded";
+  return ingredients.length > 0 ? ingredients.join(", ") : "Meal recorded";
 }
 
 function journalEventDetailItems(event: CanonicalEntity): string[] {
@@ -540,19 +547,67 @@ function journalEventDetailItems(event: CanonicalEntity): string[] {
 
   if (event.kind === "experiment_context") {
     const status = readString(event.attributes.status) ?? event.status;
+    const progress = readString(event.attributes.progress);
     const result =
       readString(event.attributes.resultSummary) ??
       readString(event.attributes.result);
-    return uniqueStrings([status ? humanize(status) : null, result]);
+    return uniqueStrings([
+      `Experiment: ${event.title ?? "Personal experiment"}`,
+      status ? `Status: ${humanize(status)}` : null,
+      progress ? `Progress: ${progress}` : null,
+      result ? `Result: ${result}` : null,
+    ]);
   }
 
   if (event.kind === "meal") {
     const nutrition = readRecord(event.attributes.nutrition);
     const totals = readRecord(nutrition?.totals);
     return uniqueStrings([
-      formatOptionalMetric(readNumber(totals?.calories), "kcal"),
-      formatOptionalMetric(readNumber(totals?.proteinGrams), "g protein"),
-      formatOptionalMetric(readNumber(totals?.carbohydrateGrams), "g carbs"),
+      formatJournalDetail("Energy", readNumber(totals?.calories), "kcal"),
+      formatJournalDetail("Protein", readNumber(totals?.proteinGrams), "g"),
+      formatJournalDetail(
+        "Carbohydrates",
+        readNumber(totals?.carbohydrateGrams),
+        "g",
+      ),
+    ]);
+  }
+
+  if (event.kind === "test") {
+    return uniqueStrings([
+      readNumber(event.attributes.markerCount) === null
+        ? null
+        : `Markers: ${readNumber(event.attributes.markerCount)}`,
+      readNumber(event.attributes.flaggedCount) === null
+        ? null
+        : `Flagged: ${readNumber(event.attributes.flaggedCount)}`,
+      readString(event.attributes.resultSummary)
+        ? `Summary: ${readString(event.attributes.resultSummary)}`
+        : null,
+    ]);
+  }
+
+  if (event.kind === "note") {
+    return uniqueStrings([
+      readString(event.attributes.detail),
+      readString(event.attributes.destination)
+        ? `Destination: ${readString(event.attributes.destination)}`
+        : null,
+      readString(event.attributes.location)
+        ? `Location: ${readString(event.attributes.location)}`
+        : null,
+      readString(event.attributes.duration)
+        ? `Duration: ${readString(event.attributes.duration)}`
+        : null,
+      readString(event.attributes.timeZoneChange)
+        ? `Time zones: ${readString(event.attributes.timeZoneChange)}`
+        : null,
+      readString(event.attributes.platform)
+        ? `Platform: ${humanize(readString(event.attributes.platform) ?? "")}`
+        : null,
+      readString(event.attributes.groupName)
+        ? `Group: ${readString(event.attributes.groupName)}`
+        : null,
     ]);
   }
 
@@ -566,11 +621,16 @@ function activityDetailItems(attributes: Record<string, unknown>): string[] {
     readNumber(attributes.distanceKm) ?? readNumber(workout?.distanceKm);
   const averageHeartRate =
     readNumber(metrics?.averageHeartRate) ??
-    readNumber(metrics?.averageHeartRateBpm);
+    readNumber(metrics?.averageHeartRateBpm) ??
+    readNumber(attributes.averageHeartRate);
   const maxHeartRate =
-    readNumber(metrics?.maxHeartRate) ?? readNumber(metrics?.maxHeartRateBpm);
+    readNumber(metrics?.maxHeartRate) ??
+    readNumber(metrics?.maxHeartRateBpm) ??
+    readNumber(attributes.maxHeartRate);
   const strain =
-    readNumber(metrics?.workoutStrain) ?? readNumber(attributes.workoutStrain);
+    readNumber(metrics?.workoutStrain) ??
+    readNumber(attributes.workoutStrain) ??
+    readNumber(attributes.strain);
   const activeCalories =
     readNumber(metrics?.activeCalories) ??
     readNumber(attributes.activeCalories);
@@ -620,13 +680,6 @@ function formatJournalDetail(
 
 function formatDetailNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function formatOptionalMetric(
-  value: number | null,
-  unit: string,
-): string | null {
-  return value === null ? null : `${formatNumber(value)} ${unit}`;
 }
 
 function readEventSource(event: CanonicalEntity): string | null {

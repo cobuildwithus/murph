@@ -529,12 +529,11 @@ export function EnvironmentEmptyState({
             id="environment-empty-title"
             className="max-w-[19ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-foreground"
           >
-            Fill in your report to review your setup for sleep, air quality and
-            focus.
+            Review how your home supports you.
           </h2>
           <p className="mt-5 max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground">
-            Answer one short topic at a time. Murph turns your answers into a
-            grade and practical next checks.
+            Answer a few short questions. Murph will grade your setup and show
+            what to check next.
           </p>
 
           <div className="mt-8 flex flex-col items-start gap-4">

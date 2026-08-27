@@ -108,10 +108,11 @@ function buildJournalInsights(
   if (!cell) return [];
   const factor = report.factors.find((entry) => entry.id === cell.factorId);
   const outcome = report.outcomes.find((entry) => entry.id === cell.outcomeId);
-  if (!factor || !outcome) return [];
+  if (!factor || !outcome || !cell.lastExposedDate) return [];
   const classification = cell.classification ?? "observation";
   return [
     {
+      date: cell.lastExposedDate,
       detail: `${factor.label} and ${sentenceCase(
         outcome.label,
       )} moved together in your data.`,

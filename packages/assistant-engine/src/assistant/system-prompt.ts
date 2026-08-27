@@ -1533,11 +1533,11 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 
 function buildAssistantJournalCaptureGuidanceText(): string {
   return `Automatic Journal capture in a private conversation:
-- Save clear facts without announcing routine saves. Ask only when ambiguity matters. Do not infer causes.
-- Use one \`vault-cli event note add\` per independent fact and \`--related-id\` for a known event. Keep exact useful details.
-- Types: \`--note-type journal-factor\` with \`journal\`, \`key-<slug>\`, \`happened\`, and bounded detail tags; \`--note-type journal-outcome\` with a value; \`--note-type journal-context\` for changes; \`--note-type journal-plan\` with \`planned\`.
-- Patterns excludes plans. Remove a plan that did not happen and save a \`did-not-happen\` factor. Missing data remains unknown.
-- User corrections win. Use existing event show, edit, and delete commands.
+- Save clear facts without announcing routine saves. Ask only when ambiguity matters. Journal joins facts with device data. Do not infer causes.
+- Use one \`vault-cli event note add\` per independent fact and \`--related-id\` for an event.
+- Types: \`--note-type journal-factor\` uses \`journal\`, \`key-<slug>\`, \`happened\`, and detail tags. Use \`--note-type journal-outcome\` for values, \`--note-type journal-context\` for changes, and \`--note-type journal-plan\` with \`planned\`.
+- Patterns runs scheduled comparisons, excludes plans, and never proves cause. Remove a plan that did not happen. Missing data remains unknown.
+- User corrections win. Use event show, edit, and delete.
 - Save requested mutes in \`personal-pattern-notifications\`.
 - Use the private vault only. Never expose its Journal or Patterns data in a group.`;
 }

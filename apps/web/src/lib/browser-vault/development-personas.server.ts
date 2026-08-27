@@ -590,22 +590,30 @@ function addContextRichEvents(asOfDate: string, entities: CanonicalEntity[]) {
       title: "Bedroom and sleep",
     }),
     journalNote({
+      attributes: {
+        destination: "Berlin",
+        detail: "Hotel stay with two work meetings and one travel day.",
+        duration: "Four nights",
+      },
       date: tripStart,
       id: "oura_trip",
-      note: "Four-night work trip. Staying away from home.",
+      note: "Berlin · four nights",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "episode-work-trip"],
       title: "Work trip",
     }),
     journalNote({
+      attributes: {
+        detail: "Bedroom temperature changed from 21 C to 18 C.",
+      },
       date: addDays(asOfDate, -12),
       id: "oura_environment",
-      note: "Bedroom temperature changed to 18 C.",
+      note: "21 C to 18 C",
       occurredAt: null,
       source: "environment",
       tags: ["key-bedroom-temperature"],
-      title: "Bedroom temperature",
+      title: "Bedroom temperature changed",
     }),
     eventEntity({
       attributes: {
@@ -619,6 +627,20 @@ function addContextRichEvents(asOfDate: string, entities: CanonicalEntity[]) {
       occurredAt: `${addDays(asOfDate, -1)}T19:10:00.000Z`,
       title: "Meal",
     }),
+    eventEntity({
+      attributes: {
+        activityType: "sauna",
+        durationMinutes: 18,
+        source: "manual",
+        temperatureCelsius: 82,
+      },
+      date: addDays(asOfDate, -4),
+      id: "oura_sauna",
+      kind: "activity_session",
+      occurredAt: `${addDays(asOfDate, -4)}T19:20:00.000Z`,
+      tags: ["key-sauna", "temperature-82-c"],
+      title: "Sauna",
+    }),
   );
 }
 
@@ -630,9 +652,13 @@ function addWhoopJournalExamples(
 
   entities.push(
     journalNote({
+      attributes: {
+        detail: "Evening tennis session at the local club.",
+        location: "Riverside Tennis Club",
+      },
       date: date(1),
       id: "whoop_calendar_tennis",
-      note: "Planned for 18:30.",
+      note: "Planned for 18:30",
       noteType: "journal-plan",
       occurredAt: `${date(1)}T16:30:00.000Z`,
       source: "calendar",
@@ -647,7 +673,7 @@ function addWhoopJournalExamples(
         durationMinutes: 52,
         maxHeartRate: 164,
         source: "whoop",
-        strain: 11.8,
+        workoutStrain: 11.8,
         summary: "Completed the Lower Body A session from Strength Base.",
         workout: {
           exercises: [
@@ -667,18 +693,27 @@ function addWhoopJournalExamples(
       title: "Strength training",
     }),
     journalNote({
+      attributes: {
+        destination: "Lisbon",
+        detail: "Hotel stay during a three-day work trip.",
+        duration: "Three days",
+      },
       date: date(3),
       id: "whoop_multi_day_trip",
-      note: "Day 2 of 3 · Staying away from home.",
+      note: "Lisbon · day 2 of 3",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "episode-work-trip"],
       title: "Work trip",
     }),
     journalNote({
+      attributes: {
+        detail: "Local time moved two hours earlier during the trip.",
+        timeZoneChange: "Europe/Warsaw to Europe/Lisbon",
+      },
       date: date(4),
       id: "whoop_timezone_change",
-      note: "Local time changed by two hours during travel.",
+      note: "Warsaw to Lisbon",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "timezone-change"],
@@ -686,8 +721,11 @@ function addWhoopJournalExamples(
     }),
     eventEntity({
       attributes: {
+        flaggedCount: 3,
+        markerCount: 18,
+        resultSummary: "Vitamin D improved. Ferritin and LDL need attention.",
         source: "laboratory",
-        summary: "A new blood panel is ready with 18 measured markers.",
+        summary: "18 markers · 3 need attention",
       },
       date: date(5),
       id: "whoop_lab_result",
@@ -697,6 +735,9 @@ function addWhoopJournalExamples(
     }),
     eventEntity({
       attributes: {
+        progress: "Day 6 of 14",
+        resultSummary:
+          "Sleep duration is 18 minutes above the baseline so far.",
         source: "murph",
         status: "active",
         summary: "Day 6 of 14",
@@ -708,16 +749,20 @@ function addWhoopJournalExamples(
       title: "Magnesium for Sleep",
     }),
     journalNote({
+      attributes: {
+        detail: "The bedroom target changed after the environment review.",
+      },
       date: date(7),
       id: "whoop_environment_change",
       note: "Changed from 21 C to 18 C.",
       occurredAt: null,
       source: "environment",
       tags: ["key-bedroom-temperature"],
-      title: "Bedroom temperature",
+      title: "Bedroom temperature changed",
     }),
     eventEntity({
       attributes: {
+        progress: "14 of 14 days",
         resultSummary: "Sleep timing became more consistent.",
         source: "murph",
         status: "completed",
@@ -730,9 +775,14 @@ function addWhoopJournalExamples(
       title: "Consistent Wake Time",
     }),
     journalNote({
+      attributes: {
+        destination: "Gdansk",
+        detail: "Morning train and return home the same evening.",
+        duration: "One day",
+      },
       date: date(9),
       id: "whoop_day_trip",
-      note: "Day trip by train. Home again the same evening.",
+      note: "Gdansk · home the same evening",
       occurredAt: null,
       source: "calendar",
       tags: ["key-travel", "day-trip"],
@@ -740,9 +790,10 @@ function addWhoopJournalExamples(
     }),
     eventEntity({
       attributes: {
+        progress: "Day 1 of 7",
         source: "murph",
-        status: "planned",
-        summary: "Started · Day 1 of 7",
+        status: "active",
+        summary: "Day 1 of 7",
       },
       date: date(10),
       id: "whoop_experiment_new",
@@ -751,12 +802,34 @@ function addWhoopJournalExamples(
       title: "No Late Caffeine",
     }),
     journalNote({
+      attributes: {
+        detail: "Private coaching group for strength sessions and recovery.",
+        groupName: "Strength Crew",
+        platform: "telegram",
+      },
       date: date(11),
       id: "whoop_group_joined",
-      note: "Joined a private strength training group.",
+      note: "Private strength training group on Telegram",
       source: "group",
       tags: ["group-membership"],
       title: "Joined Strength Crew",
+    }),
+    eventEntity({
+      attributes: {
+        activityType: "sauna",
+        averageHeartRate: 92,
+        durationMinutes: 20,
+        maxHeartRate: 118,
+        source: "whoop",
+        strain: 4.2,
+        temperatureCelsius: 84,
+      },
+      date: date(12),
+      id: "whoop_sauna",
+      kind: "activity_session",
+      occurredAt: `${date(12)}T18:30:00.000Z`,
+      tags: ["key-sauna", "temperature-84-c"],
+      title: "Sauna",
     }),
   );
 }
@@ -838,14 +911,44 @@ function activityEntity(
   durationMinutes: number,
   source: string,
 ): CanonicalEntity {
+  const providerDetails =
+    source === "whoop" || source === "oura"
+      ? {
+          activeCalories: Math.round(durationMinutes * 6.1),
+          averageHeartRate: 118 + (durationMinutes % 17),
+          maxHeartRate: 151 + (durationMinutes % 21),
+          workoutStrain:
+            source === "whoop"
+              ? Number((8 + durationMinutes / 12).toFixed(1))
+              : undefined,
+          distanceKm: activityDistanceKm(activityType, durationMinutes),
+        }
+      : {};
   return eventEntity({
-    attributes: { activityType, durationMinutes, source },
+    attributes: { activityType, durationMinutes, source, ...providerDetails },
     date,
     id: `${personaId}_${activityType}_${date}`,
     kind: "activity_session",
     occurredAt: `${date}T17:00:00.000Z`,
     title: activityType,
   });
+}
+
+function activityDistanceKm(
+  activityType: string,
+  durationMinutes: number,
+): number | undefined {
+  const kilometersPerHour =
+    activityType === "cycling"
+      ? 24
+      : activityType === "running"
+      ? 9.5
+      : activityType === "walking" || activityType === "hiking"
+      ? 5
+      : null;
+  return kilometersPerHour === null
+    ? undefined
+    : Number(((durationMinutes / 60) * kilometersPerHour).toFixed(1));
 }
 
 function addWhoopWorkoutMetricPoints(
@@ -934,6 +1037,7 @@ function observationEntity(
 }
 
 function journalNote(input: {
+  attributes?: Record<string, unknown>;
   date: string;
   id: string;
   note: string;
@@ -945,6 +1049,7 @@ function journalNote(input: {
 }): CanonicalEntity {
   return eventEntity({
     attributes: {
+      ...input.attributes,
       note: input.note,
       noteType: input.noteType ?? "journal-context",
       source: input.source ?? "murph",

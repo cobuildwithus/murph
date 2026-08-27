@@ -181,7 +181,8 @@ test("Journal includes canonical meals with a concise nutrition summary", () => 
   const meal = view.days[0]?.events[0];
   assert.equal(meal?.kind, "meal");
   assert.equal(meal?.title, "Meal");
-  assert.equal(meal?.summary, "Eggs, Spinach, Toast · 540 kcal · 31 g protein");
+  assert.equal(meal?.summary, "Eggs, Spinach, Toast");
+  assert.deepEqual(meal?.details, ["Energy: 540 kcal", "Protein: 31 g"]);
 });
 
 test("Journal turns dense wearable records into main sleep, naps, and grouped activity", () => {

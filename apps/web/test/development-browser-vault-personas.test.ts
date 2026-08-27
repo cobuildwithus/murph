@@ -179,10 +179,10 @@ test("Whoop persona covers the Journal connections used across the product", asy
     "Time zone change",
     "Blood test results",
     "Magnesium for Sleep",
-    "Bedroom temperature",
-    "Consistent Wake Time",
+    "Bedroom temperature changed",
+    "Experiment completed",
     "Day trip",
-    "No Late Caffeine",
+    "Experiment started",
     "Joined Strength Crew",
   ]) {
     assert.ok(titles.has(expected), `${expected}: ${[...titles].join(", ")}`);
@@ -218,7 +218,7 @@ test("Oura persona joins meals, travel, and environment context into one private
     true,
   );
   assert.equal(
-    events.some((event) => event.title === "Bedroom temperature"),
+    events.some((event) => event.title === "Bedroom temperature changed"),
     true,
   );
   assert.equal(

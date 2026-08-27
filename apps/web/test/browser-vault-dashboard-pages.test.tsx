@@ -757,15 +757,12 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
 
   const markup = renderToStaticMarkup(await EnvironmentPage());
 
-  assert.match(
-    markup,
-    /Fill in your report to review your setup for sleep, air quality and focus/,
-  );
+  assert.match(markup, /Review how your home supports you/);
   assert.match(markup, /Fill in my report/);
   assert.match(markup, /Prefer typing\? Use chat/);
   assert.match(
     markup,
-    /Murph turns your answers into a grade and practical next checks/,
+    /Murph will grade your setup and show what to check next/,
   );
   assert.doesNotMatch(markup, /Habitat/);
   assert.doesNotMatch(markup, /Private to you/);

@@ -12,8 +12,15 @@ import {
   JournalUnavailableState,
   JournalViewContent,
 } from "@/src/components/journal/journal-view";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const STUDY_WEEK_START = "2026-06-08";
+
+const STUDY_CONTACT_OPTION: MurphContactOption = {
+  href: "sms:+15555550100?body=Tell%20me%20about%20Journal.",
+  kind: "text",
+  label: "Text Murph",
+};
 
 const JOURNAL_STUDY_DATA: JournalView = {
   days: [
@@ -138,6 +145,7 @@ export function JournalStudy() {
           asOfDate="2026-06-13"
           insights={[
             {
+              date: "2026-06-12",
               detail:
                 "Late caffeine and shorter sleep moved together in your data.",
               href: "/patterns",
@@ -155,6 +163,7 @@ export function JournalStudy() {
       <section aria-label="Journal empty state" inert>
         <JournalViewContent
           asOfDate="2026-06-13"
+          contactOptions={[STUDY_CONTACT_OPTION]}
           journal={{
             days: [],
             eventCount: 0,
