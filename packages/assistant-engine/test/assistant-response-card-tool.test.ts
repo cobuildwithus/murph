@@ -1020,7 +1020,19 @@ describe('murph.attach_response_card', () => {
       'A routine card with complete accepted goals needs no repeated screening unless new context raises a concern.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'ask one compact question covering every unresolved category',
+      'run vault-cli memory show --format json once for the canonical Identity, Preferences, Instructions, and Context record',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Do not re-ask or recite established categories.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or merely restate it.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'If suitability is clear, proceed and state only the request-relevant outcome.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Otherwise ask one compact question covering every unresolved category',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'underweight, frailty, or malnutrition',
@@ -1041,7 +1053,7 @@ describe('murph.attach_response_card', () => {
       'documented clinician-managed constraints that materially change or conflict with the card targets',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Read only the context needed to resolve a concrete concern.',
+      'Read another clinical record family only when the conversation or canonical memory raises one concrete concern.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A missing unrelated fact or failed unrelated read does not block a routine card.',
@@ -1049,8 +1061,31 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card.',
     )
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description.split(
+        'vault-cli memory show --format json',
+      ).length - 1,
+    ).toBe(1)
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toMatch(
-      /memory show|condition list|regimen list|measurement entry list|event list --kind (?:procedure|encounter|test)/u,
+      /condition list|regimen list|measurement entry list|event list --kind (?:procedure|encounter|test)/u,
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Only on a member-explicit interactive daily-card or daily-summary request, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before attaching a card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Default attachment intent after a meal mutation does not authorize reading, editing, or asking about another meal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      "Scheduled closeout keeps automatic-meal-capture's existing question authority.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'nutrition-strategy/references/daily-nutrition-card-goals.md',

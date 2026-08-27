@@ -237,6 +237,7 @@ export async function executeCodexAssistantTurnAttempt(
     ...codexProcessLaunchInput,
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
     automationRelativeDateReferenceWindow:
       input.automationRelativeDateReferenceWindow ?? null,
     authorizeAcceptedMessageTarget:

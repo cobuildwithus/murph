@@ -1570,7 +1570,12 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "post_join_offer") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "joinOffer", "linqThread"]),
+      new Set([
+        "action",
+        "joinOffer",
+        "linqThread",
+        "repostOriginAssistantInputId",
+      ]),
       "Hosted runtime group tool post_join_offer request",
     );
     return {
@@ -1586,6 +1591,15 @@ export function parseHostedRuntimeGroupToolRequest(
               "Hosted runtime group tool post_join_offer request linqThread",
             ),
       }),
+      ...(record.repostOriginAssistantInputId === undefined
+        ? {}
+        : {
+            repostOriginAssistantInputId:
+              parseHostedExecutionAssistantAskOriginInputId(
+                record.repostOriginAssistantInputId,
+                "Hosted runtime group tool post_join_offer request repostOriginAssistantInputId",
+              ),
+          }),
     };
   }
   if (action === "set_chat_avatar") {

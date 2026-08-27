@@ -14,7 +14,9 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
+  hasConflictingHostedLinqInstantFirstTurnForChatTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
+  HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -25,6 +27,7 @@ import {
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -1403,8 +1406,297 @@ describe("hosted Linq observability stores", () => {
         linqChatLookupKey: {
           in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
         },
+        OR: expect.arrayContaining([
+          {
+            failedAt: null,
+            status: "provider_dispatch_started",
+          },
+          expect.objectContaining({
+            template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it("detects another unresolved instant first-turn obligation in the chat", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_earlier_first_turn",
+    });
+
+    await expect(hasConflictingHostedLinqInstantFirstTurnForChatTx({
+      eventId: "evt_current",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: expect.objectContaining({
+        acceptedAt: null,
+        deliveredAt: null,
+        linqChatLookupKey: {
+          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
+        },
+        skippedAt: null,
+        sourceRef: {
+          not: createHostedLinqDeliverySourceRefLookupKey("evt_current"),
+        },
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+        OR: [
+          { failedAt: null, status: "attempted" },
+          {
+            payloadCiphertext: { not: null },
+            status: { in: ["provider_dispatch_started", "failed"] },
+          },
+        ],
+      }),
+    });
+  });
+
+  it.each([
+    {
+      expected: "defer",
+      label: "attempted Web ownership",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
         failedAt: null,
-        status: "provider_dispatch_started",
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "attempted",
+      },
+    },
+    {
+      expected: "defer",
+      label: "ambiguous encrypted Web ownership",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "LINQ_SEND_FAILED",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: "sealed-reply",
+        payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+    {
+      expected: "already_answered",
+      label: "accepted Web delivery",
+      row: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: "hbidx:linq-message:accepted",
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "accepted",
+      },
+    },
+    {
+      expected: "available",
+      label: "skipped Web fallback",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: new Date("2026-03-26T12:00:01.000Z"),
+        status: "skipped",
+      },
+    },
+    {
+      expected: "available",
+      label: "definitive failed Web fallback",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "LINQ_REJECTED",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+  ] as const)("returns $expected for $label", async ({ expected, row }) => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(row);
+
+    await expect(
+      resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+        eventId: "evt_exact_first_turn",
+        linqChatId: "chat_123",
+        prisma: fixture.prisma as never,
+      }),
+    ).resolves.toBe(expected);
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        payloadCiphertext: true,
+        status: true,
+      }),
+      where: {
+        linqChatLookupKey: {
+          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
+        },
+        sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+          "evt_exact_first_turn",
+        ),
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      },
+    });
+  });
+
+  it.each([
+    {
+      expectedReplay: "completed",
+      expectedRuntime: "already_answered",
+      label: "provider-accepted buffered failure",
+      overrides: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        lastReceiptAt: new Date("2026-03-26T12:00:02.000Z"),
+        messageLookupKey: "hbidx:linq-message:failed",
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+    {
+      expectedReplay: "completed",
+      expectedRuntime: "already_answered",
+      label: "provider-accepted delivery despite a stale fallback marker",
+      overrides: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        deliveredAt: new Date("2026-03-26T12:00:03.000Z"),
+        lastReceiptAt: new Date("2026-03-26T12:00:03.000Z"),
+        messageLookupKey: "hbidx:linq-message:delivered",
+        skippedAt: new Date("2026-03-26T12:00:01.000Z"),
+        status: "delivered",
+      },
+    },
+  ] as const)("keeps runtime and exact replay aligned for $label", async ({
+    expectedReplay,
+    expectedRuntime,
+    overrides,
+  }) => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildInstantFirstTurnDeliveryFixture(overrides);
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(delivery);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+
+    await expect(
+      resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+        eventId: "evt_first_turn",
+        linqChatId: "chat_123",
+        prisma: fixture.prisma as never,
+      }),
+    ).resolves.toBe(expectedRuntime);
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-instant-first-turn-v1:event",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: "evt_first_turn",
+      status: "attempted",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_instant_first_turn",
+      outcome: expectedReplay,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("leaves an inbound with no exact Web delivery available to the runtime", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await expect(
+      resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+        eventId: "evt_next_inbound",
+        linqChatId: "chat_123",
+        prisma: fixture.prisma as never,
+      }),
+    ).resolves.toBe("available");
+  });
+
+  it("advances only the exact owned pre-provider attempt before sending", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const updatedAt = new Date("2026-03-26T12:00:00.100Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt,
+      deliveredAt: null,
+      failureCode: null,
+      failedAt: null,
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_instant_first_turn",
+      lastReceiptAt: null,
+      linqChatLookupKey:
+        createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_web_instant_first_turn",
+      sourceRef:
+        createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
+      status: "attempted",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      updatedAt,
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      advancePreProviderAttempt: true,
+      attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      idempotencyKey: "linq-instant-first-turn-v1:event",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: "evt_first_turn",
+      status: "provider_dispatch_started",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_instant_first_turn",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: "provider_dispatch_started" }),
+      where: expect.objectContaining({
+        attemptedAt,
+        id: "hld_instant_first_turn",
+        sourceRef:
+          createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
+        status: "attempted",
+        updatedAt,
       }),
     });
   });
@@ -2789,6 +3081,89 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           id: "hld_stale_attempt",
         }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      failedAt: null,
+      label: "skipped",
+      skippedAt: new Date("2026-03-26T12:00:01.000Z"),
+      status: "skipped",
+    },
+    {
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      label: "definitively failed",
+      skippedAt: null,
+      status: "failed",
+    },
+  ])("does not reopen a $label instant first-turn fallback", async ({
+    failedAt,
+    skippedAt,
+    status,
+  }) => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildInstantFirstTurnDeliveryFixture({
+        failedAt,
+        skippedAt,
+        status,
+      }),
+    );
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-instant-first-turn-v1:event",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: "evt_first_turn",
+      status: "attempted",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_instant_first_turn",
+      outcome: "terminal",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("reclaims an ambiguous instant first-turn failure with its encrypted reply", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildInstantFirstTurnDeliveryFixture({
+        failureCode: "provider-timeout",
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        payloadSchema:
+          "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+        status: "failed",
+      }),
+    );
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-instant-first-turn-v1:event",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: "evt_first_turn",
+      status: "attempted",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_instant_first_turn",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({ payloadSchema: expect.anything() }),
       }),
     );
   });
@@ -5856,6 +6231,46 @@ function createOwnedDeliveryReceiptPrismaFixture(
   return {
     hostedLinqDeliveryUpdate,
     prisma,
+  };
+}
+
+function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failureCode: string | null;
+  failedAt: Date | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  payloadCiphertext: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  status: string;
+}> = {}) {
+  return {
+    acceptedAt: null,
+    attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+    deliveredAt: null,
+    failureCode: null,
+    failedAt: null,
+    groupJoinOutreachId: null,
+    groupJoinReplyOccurredAt: null,
+    id: "hld_instant_first_turn",
+    lastReceiptAt: null,
+    linqChatLookupKey:
+      createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
+    messageLookupKey: null,
+    payloadCiphertext: null,
+    payloadSchema: null,
+    phoneNumberLookupKey: null,
+    retryAfterAt: null,
+    skippedAt: null,
+    source: "hosted_web_instant_first_turn",
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
+    status: "attempted",
+    targetKind: "thread",
+    template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    updatedAt: new Date("2026-03-26T12:00:01.000Z"),
+    ...overrides,
   };
 }
 

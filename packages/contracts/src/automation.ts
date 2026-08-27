@@ -28,10 +28,12 @@ export const automationContinuityPolicyValues = [
 ] as const;
 
 /**
- * The exact member-authorized support purpose carried by a plan-owned
- * automation. The automation record itself is the persisted consent owner for
- * habit and supplement support; experiment support additionally rechecks the
- * matching `assistantSupport` switch on the experiment owner.
+ * The delivery-consent category carried by a plan-owned automation. The saved
+ * automation instructions remain the provider-visible task authority; this
+ * field selects lifecycle and consent checks without rewriting that task.
+ * Habit and supplement automations persist consent on the automation record;
+ * experiment support additionally rechecks the matching `assistantSupport`
+ * switch on the experiment owner.
  */
 export const automationSupportKindValues = [
   "reminder",

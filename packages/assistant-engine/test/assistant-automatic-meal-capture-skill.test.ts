@@ -59,7 +59,10 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'A nutrition card blocked by an unresolved device meal is an interactive recovery turn, not a blank-totals dead end: load both skills; import itself does not start a model turn.',
+      'Food-journal owns requested-card incomplete-meal recovery: edit the exact meal from accepted evidence or ask one missing-detail question.',
+    )
+    expect(prompt).toContain(
+      'Load automatic-meal-capture for device meals; imports are canonical, never duplicate them, and do not start model turns.',
     )
     expect(prompt).not.toContain(
       'For a requested daily nutrition card, never answer unavailable from inference:',
@@ -304,6 +307,12 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSkill).toContain('There is no universal percentage threshold')
     expect(compactSkill).toContain(
       'A metric whose total is missing or whose `mealCount` is below the top-level `mealCount` must use `unavailable`',
+    )
+    expect(compactSkill).toContain(
+      "On an interactive card request, apply food-journal's selected-date incomplete-meal recovery to every saved meal whose nutrition coverage blocks the card, including a manual, conversation, provider, or device meal not selected by this closeout.",
+    )
+    expect(compactSkill).toContain(
+      'Do not widen the scheduled-question exception above: a scheduled run follows its existing compact closeout when an unselected meal remains incomplete.',
     )
     expect(skill).toContain('Do not author a second nutrition summary')
     expect(skill).toMatch(/For\s+multi-date catch-up, missing calories/u)

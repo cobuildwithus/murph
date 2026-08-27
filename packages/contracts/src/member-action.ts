@@ -136,6 +136,13 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
       .strict(),
     z
       .object({
+        exercisePosition: workoutExercisePositionSchema,
+        kind: z.literal("exercise.rename"),
+        name: singleLineText(memberActionV1Bounds.exerciseName),
+      })
+      .strict(),
+    z
+      .object({
         exerciseName: singleLineText(memberActionV1Bounds.exerciseName),
         exercisePosition: workoutExercisePositionSchema,
         expectedResult: workoutMemberActionExpectedSetResultV1Schema.nullable(),
@@ -274,6 +281,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
       .array(workoutMemberActionMutationV1Schema)
       .min(1)
       .max(memberActionV1Bounds.mutations),
+    presentation: workoutSessionPresentationV1Schema.optional(),
     version: z.literal(1),
   })
   .strict()
@@ -285,6 +293,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
     >();
     action.mutations.forEach((mutation, index) => {
       const target = mutation.kind === "exercise.append"
+          || mutation.kind === "exercise.rename"
         ? `exercise:${mutation.exercisePosition}`
         : mutation.kind === "set.append"
           ? `set-append:${mutation.exercisePosition}:${mutation.setPosition}`
@@ -299,6 +308,25 @@ export const workoutLiveApplyMemberActionV1Schema = z
         return;
       }
       targets.set(target, mutation);
+
+      if (mutation.kind === "exercise.rename") {
+        const expectedExercise = action.expectedWorkout.exercises[
+          mutation.exercisePosition - 1
+        ];
+        if (expectedExercise === undefined) {
+          context.addIssue({
+            code: "custom",
+            message: "An exercise rename must target an expected exercise.",
+            path: ["mutations", index],
+          });
+        } else if (expectedExercise.name === mutation.name) {
+          context.addIssue({
+            code: "custom",
+            message: "An exercise rename must change the visible name.",
+            path: ["mutations", index, "name"],
+          });
+        }
+      }
 
       if (mutation.kind === "set.remove") {
         const snapshot = {
@@ -479,7 +507,20 @@ export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionResultV1Schema
 >;
 
+export const workoutLiveApplyMemberActionResultV1Schema = z
+  .object({
+    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
+    kind: z.literal("workout.live.apply"),
+    version: z.literal(1),
+  })
+  .strict();
+
+export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
+  typeof workoutLiveApplyMemberActionResultV1Schema
+>;
+
 export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
+  workoutLiveApplyMemberActionResultV1Schema,
   workoutLiveSnapshotMemberActionResultV1Schema,
 ]);
 
@@ -503,10 +544,19 @@ export const memberActionOutcomeV1Schema = z
         path: ["reason"],
       });
     }
-    if (outcome.result !== undefined && outcome.status !== "unchanged") {
+    if (
+      outcome.result !== undefined
+      && (
+        outcome.status === "rejected"
+        || (
+          outcome.result.kind === "workout.live.snapshot"
+          && outcome.status !== "unchanged"
+        )
+      )
+    ) {
       context.addIssue({
         code: "custom",
-        message: "A member-action result requires a successful read-only outcome.",
+        message: "The member-action result is not valid for this terminal status.",
         path: ["result"],
       });
     }

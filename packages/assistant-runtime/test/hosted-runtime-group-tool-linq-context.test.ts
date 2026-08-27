@@ -464,6 +464,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
+      repostOriginAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
@@ -472,6 +473,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
+      repostOriginAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",

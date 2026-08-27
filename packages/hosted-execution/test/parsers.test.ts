@@ -1080,6 +1080,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
+      repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
@@ -1088,6 +1089,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         projectionKinds: null,
         projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
+      repostOriginAssistantInputId: `ain_${"a".repeat(32)}`,
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
@@ -1300,6 +1302,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinLink: { displayName: "   " },
       })
     ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        repostOriginAssistantInputId: "provider-message-id",
+      })
+    ).toThrow(/repostOriginAssistantInputId/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",

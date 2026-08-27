@@ -1327,13 +1327,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.136')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.138')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.136'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.138'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -4628,6 +4628,11 @@ printf 'ZIP: %s (%s bytes)\n' \
         'agent-docs/operations/product-ux.md',
         'product UX workflow\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+        'assistant verification workflow\n',
+      )
       writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
       writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
@@ -4822,6 +4827,7 @@ printf 'ZIP: %s (%s bytes)\n' \
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
+          '.agents/skills/verify-murph-assistant/SKILL.md',
           packagedEvidencePath,
           supplementalSkillPath,
           supplementalProofPath,
