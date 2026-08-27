@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   HostedBillingStatus,
   HostedStripeEventStatus,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -1528,25 +1529,40 @@ describe.skipIf(!runPostgresProof)(
             planResetAt: eventCreatedAt,
             spentUsdMicros: 0n,
           });
-        await expect(readStripeReceiptProof({
+        const activationMailboxItems = await readAccessRestorationMailboxProof({
+          memberIds: [memberId, ownerMemberId],
+          prisma,
+        });
+        expect(activationMailboxItems).toHaveLength(2);
+        const completedReceipt = await readStripeReceiptProof({
           eventId: stripeEventId,
           prisma,
-        })).resolves.toMatchObject({
+        });
+        expect(completedReceipt).toMatchObject({
           attemptCount: 2,
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });
+        const activationMailboxItemIds = readStripeActivationMailboxItemIds(
+          completedReceipt.activationResultJson,
+        );
+        expect(activationMailboxItemIds).toHaveLength(2);
+        expect(activationMailboxItemIds).toEqual(expect.arrayContaining(
+          activationMailboxItems.map((item) => item.id),
+        ));
         expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
         expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
           expect.objectContaining({ userId: memberId }),
         );
         expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(2);
-        expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
-          expect.objectContaining({ expectedUserId: memberId }),
-        );
-        expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
-          expect.objectContaining({ expectedUserId: ownerMemberId }),
-        );
+        for (const item of activationMailboxItems) {
+          expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
+            expect.objectContaining({
+              expectedUserId: item.userId,
+              mailboxItemId: item.id,
+            }),
+          );
+        }
       } finally {
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
         await stripeFixture.stop();
@@ -1747,18 +1763,35 @@ describe.skipIf(!runPostgresProof)(
           aiUsageDeniedAt: expect.any(Date),
           consumedAt: null,
         });
-        await expect(readStripeReceiptProof({
+        const activationMailboxItems =
+          await readAccessRestorationMailboxProof({
+            memberIds: [ownerMemberId],
+            prisma,
+          });
+        expect(activationMailboxItems).toHaveLength(1);
+        const [activationMailboxItem] = activationMailboxItems;
+        if (!activationMailboxItem) {
+          throw new Error("Expected a Family access-restoration mailbox item.");
+        }
+        const completedReceipt = await readStripeReceiptProof({
           eventId: stripeEventId,
           prisma,
-        })).resolves.toMatchObject({
+        });
+        expect(completedReceipt).toMatchObject({
           attemptCount: 1,
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });
+        expect(readStripeActivationMailboxItemIds(
+          completedReceipt.activationResultJson,
+        )).toEqual([activationMailboxItem.id]);
         expect(runtimeRecheckBoundary.signal).not.toHaveBeenCalled();
         expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(1);
         expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
-          expect.objectContaining({ expectedUserId: ownerMemberId }),
+          expect.objectContaining({
+            expectedUserId: ownerMemberId,
+            mailboxItemId: activationMailboxItem.id,
+          }),
         );
 
         await postSignedHostedStripeEvent({
@@ -1819,7 +1852,10 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(2);
         expect(activationWakeBoundary.signal).toHaveBeenLastCalledWith(
-          expect.objectContaining({ expectedUserId: ownerMemberId }),
+          expect.objectContaining({
+            expectedUserId: ownerMemberId,
+            mailboxItemId: activationMailboxItem.id,
+          }),
         );
       } finally {
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
@@ -2300,12 +2336,51 @@ function readStripeReceiptProof(input: {
 }) {
   return input.prisma.hostedStripeEvent.findUniqueOrThrow({
     select: {
+      activationResultJson: true,
       attemptCount: true,
       processedAt: true,
       status: true,
     },
     where: { eventId: input.eventId },
   });
+}
+
+function readAccessRestorationMailboxProof(input: {
+  memberIds: string[];
+  prisma: PrismaClient;
+}) {
+  return input.prisma.hostedMailboxItem.findMany({
+    select: {
+      id: true,
+      userId: true,
+    },
+    where: {
+      kind: "runtime.maintenance-requested",
+      userId: { in: input.memberIds },
+    },
+  });
+}
+
+function readStripeActivationMailboxItemIds(
+  value: Prisma.JsonValue | null,
+): string[] {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || value.schema !== "hosted.stripe.activation-result.v1"
+    || !Array.isArray(value.activationMailboxItemIds)
+  ) {
+    throw new Error("Expected persisted Stripe activation mailbox pointers.");
+  }
+  const mailboxItemIds = value.activationMailboxItemIds;
+  if (!mailboxItemIds.every(
+    (mailboxItemId): mailboxItemId is string =>
+      typeof mailboxItemId === "string",
+  )) {
+    throw new Error("Expected Stripe activation mailbox pointer strings.");
+  }
+  return mailboxItemIds;
 }
 
 function readFamilyCheckoutAttemptProof(input: {
