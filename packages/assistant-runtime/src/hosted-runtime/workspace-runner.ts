@@ -288,6 +288,10 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   // this invocation. This is never persisted; the runner and outer hot-wake
   // gate use it instead of inferring ownership from a merged wake timestamp.
   invocationLocalAssistantWakeAt?: string | null;
+  // One later exact scheduled connection-loss retry proven by the same pass
+  // after an earlier invocation-local assistant wake. This is also ephemeral
+  // and may only become the projected hot successor after that earlier wake.
+  invocationLocalAssistantCronRetrySuccessorWakeAt?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;

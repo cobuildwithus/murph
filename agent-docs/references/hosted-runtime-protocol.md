@@ -41,7 +41,10 @@ The live ownership split is:
   invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
-  assistant phase may run once before that floor without checkpointing. The
+  assistant phase may run before that floor without checkpointing, and when the
+  same phase proves one later exact scheduled connection-loss retry behind an
+  earlier invocation-local assistant wake, that retry may remain as the single
+  projected successor after the earlier wake is serviced. The
   exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
   current `aask_private_*` private
   Assistant Ask notification families may also run queue-only through their
@@ -3202,9 +3205,12 @@ post-upload local wake checks must not discard a valid snapshot on its behalf.
 In production, the configured idle checkpoint delay is at least 180 seconds,
 and every dirty foreground pass restarts that hard lower bound. The exact
 assistant wake projected directly by the current foreground assistant phase may
-run once per dirty checkpoint generation before that boundary against the warm
-projected state, without entering maintenance or publishing a snapshot. A
-no-progress hot attempt preserves its exact wake without replaying it again in
+run before that boundary against the warm projected state, without entering
+maintenance or publishing a snapshot. When that same phase proves one later
+exact scheduled connection-loss retry behind an earlier invocation-local
+assistant wake, servicing the earlier wake preserves that retry as the single
+projected hot successor; no aggregate future cron wake inherits this provenance.
+A no-progress hot attempt preserves its exact wake without replaying it again in
 the same invocation; a dirty progressed attempt restarts the full idle window.
 Mailbox budget exhaustion, pending durable checkpoint effects, staged durable
 follow-ups, and inherited, committed, or otherwise unproven wake keys remain

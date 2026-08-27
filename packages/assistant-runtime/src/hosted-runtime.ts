@@ -3860,6 +3860,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     // checkpointed and serviced.
     let pendingWakeAfterDueAssistantService: HostedRuntimeHeldDurableWake | null = null;
     let invocationLocalProjectedAssistantWakeKey: string | null = null;
+    let projectedAssistantCronRetrySuccessorWakeKey: string | null = null;
     let hotProjectedAssistantWakeAttemptedKey: string | null = null;
     let durableCheckpointFollowUpPending = false;
     let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> =
@@ -4160,6 +4161,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         nextWakeReason: workspace.nextWakeReason ?? null,
       };
       invocationLocalProjectedAssistantWakeKey = null;
+      projectedAssistantCronRetrySuccessorWakeKey = null;
       redactedStatus = workspace.redactedStatus
         ?? omitHostedCanonicalWriteReceiptLogStatusFields(redactedStatus)
         ?? {};
@@ -4208,6 +4210,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         : null;
       invocationLocalProjectedAssistantWakeKey = null;
+      projectedAssistantCronRetrySuccessorWakeKey = null;
       durableCheckpointFollowUpPending = true;
       runtimeStateDirty = true;
       ensureIdleCheckpointStartBy(Date.now());
@@ -4870,6 +4873,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const checkpointPendingBeforePass = runtimeStateDirty;
         const previousInvocationLocalProjectedAssistantWakeKey =
           invocationLocalProjectedAssistantWakeKey;
+        const previousCronRetrySuccessorWakeKey =
+          projectedAssistantCronRetrySuccessorWakeKey;
         const previousPendingWakeKey = buildHostedRuntimeWakeKey(previousPendingWake);
         pendingDurableCheckpointEffects.push(...passResult.afterDurableCheckpoint);
         if (passResult.runtimeStateDirty) {
@@ -4913,6 +4918,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             ? buildHostedRuntimeWakeKey({
                 nextWakeAt: invocationLocalAssistantWakeAt,
                 nextWakeReason: passResult.assistantPhaseResult.nextWakeReason ?? null,
+              })
+            : null;
+        const invocationLocalAssistantCronRetrySuccessorWakeAt =
+          passResult.assistantPhaseResult?.invocationLocalAssistantCronRetrySuccessorWakeAt ?? null;
+        const passCronRetrySuccessorWakeKey =
+          passProjectedAssistantWakeKey !== null
+          && invocationLocalAssistantCronRetrySuccessorWakeAt !== null
+          && Date.parse(invocationLocalAssistantCronRetrySuccessorWakeAt)
+            > Date.parse(invocationLocalAssistantWakeAt ?? "")
+            ? buildHostedRuntimeWakeKey({
+                nextWakeAt: invocationLocalAssistantCronRetrySuccessorWakeAt,
+                nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
               })
             : null;
         const passProducedDefaultWake =
@@ -4992,6 +5009,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && pendingWakeKey !== null
           && pendingWakeKey === passProjectedAssistantWakeKey
           && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason);
+        const promotedCronRetrySuccessor =
+          presentedProjectedAssistantWakeKey !== null
+          && presentedProjectedAssistantWakeKey
+            === previousInvocationLocalProjectedAssistantWakeKey
+          && previousCronRetrySuccessorWakeKey !== null
+          && pendingWakeKey === previousCronRetrySuccessorWakeKey
+          && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason);
         if (passProjectedAssistantWake) {
           const preservesUnprovenPreviousWake =
             pendingWakeKey === previousPendingWakeKey
@@ -5002,8 +5026,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && !preservesUnprovenPreviousWake
               ? pendingWakeKey
               : null;
+          projectedAssistantCronRetrySuccessorWakeKey =
+            invocationLocalProjectedAssistantWakeKey !== null
+              ? passCronRetrySuccessorWakeKey
+              : null;
+        } else if (promotedCronRetrySuccessor) {
+          invocationLocalProjectedAssistantWakeKey =
+            previousCronRetrySuccessorWakeKey;
+          projectedAssistantCronRetrySuccessorWakeKey = null;
+          // The first projected wake has been serviced. Allow only its exact
+          // same-pass successor to reuse the hot gate before the idle floor.
+          hotProjectedAssistantWakeAttemptedKey = null;
         } else if (pendingWakeKey !== invocationLocalProjectedAssistantWakeKey) {
           invocationLocalProjectedAssistantWakeKey = null;
+          projectedAssistantCronRetrySuccessorWakeKey = null;
         }
         redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
           redactedStatus,

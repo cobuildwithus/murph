@@ -2744,14 +2744,11 @@ export async function runHostedWorkspaceAssistantPhase(
         backgroundMaintenanceYielded
         || deferredPendingSystemMailboxMaintenance.backgroundMaintenanceYielded;
     }
-    const invocationLocalAssistantWakeAt =
-      resolveHostedInvocationLocalAssistantWakeAt({
+    const invocationLocalAssistantWake =
+      resolveHostedInvocationLocalAssistantWakeProjection({
         assistantMetrics,
         input,
       });
-    const invocationLocalAssistantWake = invocationLocalAssistantWakeAt
-      ? { invocationLocalAssistantWakeAt }
-      : {};
     const shadowedDeviceSyncMaintenance =
       await runShadowedDeviceSyncAfterNoProgressAssistantWake({
         assistantMetrics,
@@ -3937,6 +3934,7 @@ function stripHostedAssistantPhaseWake(
   }
 
   const stripped: HostedWorkspaceRunnerAssistantPhaseResult = { ...result };
+  delete stripped.invocationLocalAssistantCronRetrySuccessorWakeAt;
   delete stripped.invocationLocalAssistantWakeAt;
   delete stripped.nextWakeAt;
   delete stripped.nextWakeReason;
@@ -4018,6 +4016,8 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const foregroundReplyFailed = input.assistantResult.foregroundReplyFailed;
   const invocationLocalAssistantWakeAt =
     input.assistantResult.invocationLocalAssistantWakeAt ?? null;
+  const invocationLocalAssistantCronRetrySuccessorWakeAt =
+    input.assistantResult.invocationLocalAssistantCronRetrySuccessorWakeAt ?? null;
   if (progressedResult) {
     return {
       ...(afterCheckpoint ? { afterCheckpoint } : {}),
@@ -4035,6 +4035,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         : {}),
       ...(invocationLocalAssistantWakeAt
         ? { invocationLocalAssistantWakeAt }
+        : {}),
+      ...(invocationLocalAssistantCronRetrySuccessorWakeAt
+        ? { invocationLocalAssistantCronRetrySuccessorWakeAt }
         : {}),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
@@ -4057,6 +4060,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       : {}),
     ...(invocationLocalAssistantWakeAt
       ? { invocationLocalAssistantWakeAt }
+      : {}),
+    ...(invocationLocalAssistantCronRetrySuccessorWakeAt
+      ? { invocationLocalAssistantCronRetrySuccessorWakeAt }
       : {}),
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
@@ -6792,14 +6798,11 @@ async function runForegroundAssistantReplyPhase(input: {
     assistantOutboxOnlyNextWakeAt:
       input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
-  const invocationLocalAssistantWakeAt =
-    resolveHostedInvocationLocalAssistantWakeAt({
+  const invocationLocalAssistantWake =
+    resolveHostedInvocationLocalAssistantWakeProjection({
       assistantMetrics: input.assistantMetrics,
       input: input.input,
     });
-  const invocationLocalAssistantWake = invocationLocalAssistantWakeAt
-    ? { invocationLocalAssistantWakeAt }
-    : {};
 
   if (
     shouldFastDispatchAssistantDeliveryEffects({
@@ -9854,28 +9857,49 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
   );
 }
 
-function resolveHostedInvocationLocalAssistantWakeAt(input: {
+function resolveHostedInvocationLocalAssistantWakeProjection(input: {
   assistantMetrics: HostedAssistantMetrics;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): string | null {
-  return selectHostedRuntimeWakeCandidate([
+}): Pick<
+  HostedWorkspaceRunnerAssistantPhaseResult,
+  "invocationLocalAssistantWakeAt" | "invocationLocalAssistantCronRetrySuccessorWakeAt"
+> {
+  const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt:
+      input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
+  });
+  const cronRetryWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt:
+      input.assistantMetrics.assistantAutomationCronRetryWakeAt ?? null,
+  });
+  const invocationLocalAssistantWakeAt = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(
-      resolveHostedAssistantAutomationNextWakeAt({
-        input: input.input,
-        nextWakeAt:
-          input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
-      }),
+      selectedInputWakeAt,
       HOSTED_ASSISTANT_WAKE_REASON,
     ),
     createHostedRuntimeWakeCandidate(
-      resolveHostedAssistantAutomationNextWakeAt({
-        input: input.input,
-        nextWakeAt:
-          input.assistantMetrics.assistantAutomationCronRetryWakeAt ?? null,
-      }),
+      cronRetryWakeAt,
       HOSTED_ASSISTANT_WAKE_REASON,
     ),
   ]).at;
+  const invocationLocalAssistantCronRetrySuccessorWakeAt =
+    invocationLocalAssistantWakeAt !== null
+    && invocationLocalAssistantWakeAt === selectedInputWakeAt
+    && cronRetryWakeAt !== null
+    && cronRetryWakeAt !== invocationLocalAssistantWakeAt
+      ? cronRetryWakeAt
+      : null;
+
+  return {
+    ...(invocationLocalAssistantWakeAt
+      ? { invocationLocalAssistantWakeAt }
+      : {}),
+    ...(invocationLocalAssistantCronRetrySuccessorWakeAt
+      ? { invocationLocalAssistantCronRetrySuccessorWakeAt }
+      : {}),
+  };
 }
 
 function buildHostedWorkspaceAssistantPhaseRedactedStatus(input: {
