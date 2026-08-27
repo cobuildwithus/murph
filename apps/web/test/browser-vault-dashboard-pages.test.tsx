@@ -174,6 +174,8 @@ test("PatternsPage renders personal comparisons on their own route", () => {
   assert.match(markup, />Patterns</);
   assert.doesNotMatch(markup, /What tends to move together/);
   assert.match(markup, /Find what changes your sleep and recovery/);
+  assert.match(markup, /Connect a device/);
+  assert.doesNotMatch(markup, /Connect health data/);
   assert.doesNotMatch(markup, /Weekly changes/);
 });
 

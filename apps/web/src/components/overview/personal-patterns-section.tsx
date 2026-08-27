@@ -159,14 +159,14 @@ function PatternsEmptyState({
             ? "Murph has useful data and is waiting for enough comparable days. Keep wearing your device and sharing what happened."
             : needsContext
             ? "Your device records the result. Tell Murph about training, travel, caffeine, meals, and other things that may explain it."
-            : "Connect a health device. Murph will compare sleep and recovery with the things that happen in your life."}
+            : "Connect a device. Murph will compare sleep and recovery with the things that happen in your life."}
         </p>
         <Button
           className="mt-6 rounded-full"
           nativeButton={false}
           render={<Link href={hasHealthData ? "/journal" : "/connect"} />}
         >
-          {hasHealthData ? "Open Journal" : "Connect health data"}
+          {hasHealthData ? "Open Journal" : "Connect a device"}
           <ArrowRight aria-hidden="true" />
         </Button>
       </div>
