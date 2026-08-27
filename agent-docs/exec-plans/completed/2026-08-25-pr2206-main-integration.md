@@ -1,8 +1,8 @@
 # PR 2206 current-main integration
 
-Status: active
+Status: completed
 Created: 2026-08-25
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -225,6 +225,19 @@ shared error projector and no partial writes or submitted-value echo.
   importing one CSV with multiple recognized sample streams. The walkthrough
   proves the rejected file can be corrected in place without hidden partial
   state, value echo, or a duplicate first-stream retry.
+- ReviewGPT round nine returned a valid full-snapshot `ROUND_OUTCOME: PASS` at
+  `d7fc7c16bb017c5b348d919ec7223948c8383702`. It verified the round-eight
+  correction, every prior finding, same-file recovery, and the absence of a
+  duplicate validator, rollback owner, retry lifecycle, or other qualifying
+  correctness or complexity issue.
+- Trust evidence is complete despite the response text reporting
+  `MODEL_CONFIRMATION: UNKNOWN`: the exact committed turn, guarded ZIP, pushed
+  head, completion marker, and substantive full-snapshot response are captured;
+  persisted browser metadata identifies the compatible `gpt-5-6-pro` model;
+  and the response elapsed well beyond the 7.5-minute final-gate trust floor.
+- Every required GitHub check passes on the reviewed head. A current-base
+  `git merge-tree --write-tree` succeeds with tree
+  `d26fd091a43d46b4c15758889b0c4fd577f9f57e`, and the task worktree is clean.
 
 ## Tasks
 
@@ -239,5 +252,6 @@ shared error projector and no partial writes or submitted-value echo.
 5. [done] Record the round-five retrospective and remove the unrelated parity
    timeout/diagnostic expansion while retaining the sample behavior and measured
    bundle ratchet.
-6. Resolve any later accepted finding, close the plan, admit the PR to CI, and
-   merge.
+6. [done] Resolve later accepted findings, close the plan, admit the PR to CI,
+   and prove the reviewed head is merge-ready.
+Completed: 2026-08-27
