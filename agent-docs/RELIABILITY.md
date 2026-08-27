@@ -1240,28 +1240,37 @@ Last verified: 2026-08-26
   snapshots refresh only after the canonical write checkpoints and projection
   failures reuse the existing recording retry. There is no new scheduler,
   correction queue, projection watermark, or Web health-value owner.
-- The composed maximum for one projection opportunity is one active-scope read,
-  at most 98 sequential projectable-scope deliveries from the closed registry,
-  and at most 25 sequential share-replacement transactions per delivery under
-  the existing grant cap: 2,450 replacement transactions at maximum admitted
-  cardinality. There is at most one active scope-resolution or delivery request
-  per opportunity. One destination's typed missing-root failure continues to
-  later scopes sequentially and leaves the aggregate attempt failed. An unknown
-  or shared-infrastructure error stops the remaining destinations and scopes,
-  bounding a dependency outage to the current failed replacement attempt.
+- One projection opportunity performs one active-scope read and at most 98
+  sequential projectable-scope deliveries from the closed registry. Each Web
+  delivery request replaces at most 25 destination snapshots. A larger exact
+  scope continues through stable destination-ordered pages; the runtime keeps
+  at most one scope-resolution or delivery request in flight, so destination
+  cardinality increases total sequential work without increasing transaction,
+  crypto, or request concurrency. One destination's typed missing-root failure
+  continues to later scopes sequentially and leaves the aggregate attempt
+  failed. An unknown or shared-infrastructure error stops the remaining
+  destinations and scopes, bounding a dependency outage to the current failed
+  replacement attempt.
   Deadline exhaustion, foreground wake, exact host abort, or shutdown finishes
   only the already-started scope; and the
   existing continuation cannot retry until that request reaches its server-owned
   terminal boundary. Repeated
   wakes may admit conversation work but cannot start another projection. Each
-  replacement adds one source-workspace row lock/check at its final write
-  boundary. The runtime starts no concurrent per-scope or per-share transactions,
-  and publication wakes no destination group runtime. Ordinary load is
-  proportional only to scopes and destinations with active grants. Boundary
-  tests derive the 98-scope and 25-destination composition from the owning
-  registries, prove ordered peak-one delivery/replacement work, and assert the
-  per-replacement encryption, two access checks, source lock, and exact-generation
-  update.
+  successful replacement records the exact source-workspace version on its
+  share row. A retry that restarts without a cursor therefore skips only rows
+  already replaced from that same source version, while a newer checkpoint
+  makes every older marker stale. First materialization independently advances
+  through the existing null-snapshot marker. The full active generation token
+  remains cohort-wide on every page, and revoke or regrant clears the progress
+  marker, so pagination never weakens authority or generation freshness. Each
+  replacement still adds one source-workspace row lock/check at its final write
+  boundary. The runtime starts no concurrent per-scope or per-share
+  transactions, and publication wakes no destination group runtime. Ordinary
+  load is proportional only to scopes and destinations with active grants.
+  Boundary tests derive the 98-scope and 25-replacement page bounds from the
+  owning registries, prove ordered peak-one delivery/replacement work and retry
+  progress, and assert the per-replacement encryption, two access checks,
+  source lock, exact-generation update, and stored source-version marker.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

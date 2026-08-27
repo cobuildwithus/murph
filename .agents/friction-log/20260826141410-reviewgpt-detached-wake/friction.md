@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT detached wake rejects its emitted capture identity'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2440'
 ---
 
 ## Expected Behavior

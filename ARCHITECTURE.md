@@ -1730,7 +1730,7 @@ Participant selection remains independent of durable `hasOwnMurph` activation.
 Roster matches are exposed to the model as current-turn participant
 `displayName` text. Automatic transcript matches keep explicit internal
 `unverified-owner-contact` provenance but render to the model as
-`Address-book name (display only):`; participant-change labels remain weak
+`Address-book name:`; participant-change labels remain weak
 one-shot context. The stable group prompt treats these values as familiar names
 for natural conversational reference without turning them into identity,
 membership, consent, routing, profile, invite, signup, delivery, or effect

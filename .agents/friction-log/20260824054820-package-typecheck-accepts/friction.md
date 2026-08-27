@@ -1,6 +1,7 @@
 ---
 title: 'Package typecheck accepts a sibling source import that package build rejects'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2434'
 ---
 
 ## Observed
