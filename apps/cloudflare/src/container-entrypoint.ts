@@ -126,6 +126,7 @@ interface HostedContainerRuntimeOptions {
   runDirectR2PresignedPutSmoke?: HostedContainerHeavyRuntime["runDirectR2PresignedPutSmoke"];
   runCodexShellSmoke?: HostedContainerHeavyRuntime["runCodexShellSmoke"];
   runLiveModelTurnSmoke?: HostedContainerHeavyRuntime["runLiveModelTurnSmoke"];
+  shutdownDrainTimeoutMs?: number;
   stopWarmCodex?: HostedContainerHeavyRuntime["stopWarmCodex"];
   waitForBackgroundAssistantWork?: HostedContainerHeavyRuntime["waitForBackgroundAssistantWork"];
 }
@@ -138,6 +139,7 @@ interface HostedContainerRuntimeDependencies {
     HostedContainerRuntimeOptions["prepareWorkspaceRestore"]
   >;
   processApi: HostedContainerProcessApi;
+  shutdownDrainTimeoutMs: number;
   startupConfig: HostedContainerStartupConfig;
 }
 
@@ -214,9 +216,41 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.processApi,
     runtime.startupConfig.runnerBundleManifestPath,
   );
+  let containerTerminalExitScheduled = false;
+  let hostedContainerTerminalFailureHandled = false;
+  const poisonHostedContainerAndScheduleExitOnce = (
+    error: unknown,
+    message: string,
+  ): void => {
+    hostedContainerProcessFatalObserved = true;
+    if (hostedContainerTerminalFailureHandled) {
+      return;
+    }
+    hostedContainerTerminalFailureHandled = true;
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message,
+      phase: "failed",
+    });
+    if (containerTerminalExitScheduled) {
+      return;
+    }
+    containerTerminalExitScheduled = true;
+    runtime.exitScheduler();
+  };
   let heavyRuntimeHydrationPromise: Promise<HostedContainerHeavyRuntime> | null = null;
   const hydrateHeavyRuntime = (): Promise<HostedContainerHeavyRuntime> => {
-    heavyRuntimeHydrationPromise ??= runtime.loadHeavyRuntime();
+    if (!heavyRuntimeHydrationPromise) {
+      heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime();
+      void heavyRuntimeHydrationPromise.catch((error) => {
+        poisonHostedContainerAndScheduleExitOnce(
+          error,
+          "Hosted container entrypoint failed to hydrate the heavy runtime.",
+        );
+      });
+    }
     return heavyRuntimeHydrationPromise;
   };
   const fatalRuntimeDrainOwner = async (): Promise<void> => {
@@ -898,9 +932,11 @@ export async function startHostedContainerEntrypoint(input: {
               "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
             reason: "workspace-invocation-abort",
           });
-        } catch {
-          hostedContainerProcessFatalObserved = true;
-          runtime.exitScheduler();
+        } catch (error) {
+          poisonHostedContainerAndScheduleExitOnce(
+            error,
+            "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
+          );
         }
       }
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
@@ -961,16 +997,39 @@ export async function startHostedContainerEntrypoint(input: {
     }
     containerShutdownExitStarted = true;
     void (async () => {
+      let resolveShutdownDeadline!: () => void;
+      const shutdownDeadline = new Promise<void>((resolve) => {
+        resolveShutdownDeadline = resolve;
+      });
+      const issueCleanExitOnce = (): void => {
+        if (containerTerminalExitScheduled) {
+          return;
+        }
+        containerTerminalExitScheduled = true;
+        process.exit(0);
+      };
+      const cleanExitBackstop = setTimeout(() => {
+        issueCleanExitOnce();
+        resolveShutdownDeadline();
+      }, runtime.shutdownDrainTimeoutMs);
+      cleanExitBackstop.unref();
       const hydration = heavyRuntimeHydrationPromise;
-      if (hydration) {
-        await hydration.then(
+      const hydrationAndDrain = hydration
+        ? hydration.then(
           async (heavyRuntime) => {
             await heavyRuntime.drainShutdownRuntimeBestEffort({
-              timeoutMs: HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
+              timeoutMs: runtime.shutdownDrainTimeoutMs,
             });
           },
           () => undefined,
-        );
+        ).catch(() => undefined)
+        : Promise.resolve();
+      await Promise.race([hydrationAndDrain, shutdownDeadline]);
+      if (hostedContainerProcessFatalObserved) {
+        server.close(() => {
+          clearTimeout(cleanExitBackstop);
+        });
+        return;
       }
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -978,13 +1037,9 @@ export async function startHostedContainerEntrypoint(input: {
         message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
         phase: "wake.running",
       });
-      const cleanExitBackstop = setTimeout(() => {
-        process.exit(0);
-      }, 5_000);
-      cleanExitBackstop.unref();
       server.close(() => {
         clearTimeout(cleanExitBackstop);
-        process.exit(0);
+        issueCleanExitOnce();
       });
     })();
   };
@@ -1019,17 +1074,8 @@ export async function startHostedContainerEntrypoint(input: {
       // races server startup still observes the cold nodeStartupMs. Heavy runtime
       // hydration starts only after this measurement and never changes readiness.
       pendingColdNodeStartupMs = Date.now() - HOSTED_CONTAINER_PROCESS_START_MS;
-      const hydration = hydrateHeavyRuntime();
+      hydrateHeavyRuntime();
       hostedContainerFatalRuntimeDrain = fatalRuntimeDrainOwner;
-      void hydration.catch((error) => {
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          error,
-          level: "error",
-          message: "Hosted container entrypoint failed to hydrate the heavy runtime.",
-          phase: "failed",
-        });
-      });
       resolve();
     });
   }).catch((error) => {
@@ -1470,6 +1516,9 @@ function resolveHostedContainerRuntimeDependencies(
         ...runtime.processApi,
       }
       : defaultHostedContainerProcessApi,
+    shutdownDrainTimeoutMs:
+      runtime?.shutdownDrainTimeoutMs
+      ?? HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
     startupConfig,
   };
 }

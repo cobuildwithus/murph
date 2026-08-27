@@ -550,12 +550,13 @@ describe("startHostedContainerEntrypoint", () => {
     expect(
       entrypointSource.match(/import\("\.\/container-workspace-restore-preparation\.ts"\)/g),
     ).toHaveLength(1);
+    expect(entrypointSource).toContain("if (!heavyRuntimeHydrationPromise)");
     expect(entrypointSource).toContain(
-      "heavyRuntimeHydrationPromise ??= runtime.loadHeavyRuntime()",
+      "heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime()",
     );
     const listenOffset = entrypointSource.indexOf("server.listen(");
     const eagerHydrationOffset = entrypointSource.indexOf(
-      "const hydration = hydrateHeavyRuntime();",
+      "hydrateHeavyRuntime();",
       listenOffset,
     );
     expect(listenOffset).toBeGreaterThanOrEqual(0);
@@ -3003,6 +3004,101 @@ describe("startHostedContainerEntrypoint", () => {
     );
 
     controller.cleanup();
+  });
+
+  it("bounds shutdown while heavy runtime hydration remains pending", async () => {
+    const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
+    const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);
+    const prepareWorkspaceRestore = createTestHostedWorkspaceRestorePreparer();
+    const exitScheduler = vi.fn();
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const sigtermListenersBeforeStart = new Set(process.listeners("SIGTERM"));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler,
+        loadHeavyRuntime,
+        prepareWorkspaceRestore,
+        shutdownDrainTimeoutMs: 10,
+      },
+    });
+    servers.push(server);
+    const serverClosed = new Promise<void>((resolve) => {
+      server.once("close", () => resolve());
+    });
+    const shutdownSignalHandler = process.listeners("SIGTERM").find(
+      (listener) => !sigtermListenersBeforeStart.has(listener),
+    );
+    if (!shutdownSignalHandler) {
+      throw new Error("Expected the hosted container entrypoint to register SIGTERM handling.");
+    }
+
+    shutdownSignalHandler("SIGTERM");
+
+    expect(exit).not.toHaveBeenCalled();
+    await serverClosed;
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+    expect(exitScheduler).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+  });
+
+  it("poisons and exits once when heavy runtime hydration fails", async () => {
+    const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
+    const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);
+    const prepareWorkspaceRestore = createTestHostedWorkspaceRestorePreparer();
+    const exitScheduler = vi.fn();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler,
+        loadHeavyRuntime,
+        prepareWorkspaceRestore,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    heavyRuntimeHydration.reject(new Error("synthetic heavy hydration failure"));
+    await vi.waitFor(() => {
+      expect(exitScheduler).toHaveBeenCalledTimes(1);
+    });
+
+    const health = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(health).toMatchObject({
+      json: {
+        ok: true,
+        poisoned: true,
+      },
+      status: 200,
+    });
+
+    const invocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(invocation).toMatchObject({
+      json: {
+        error: "Hosted runner container is poisoned.",
+      },
+      status: 503,
+    });
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+    expect(exitScheduler).toHaveBeenCalledTimes(1);
   });
 
 });
