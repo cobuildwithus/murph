@@ -441,7 +441,8 @@ Automatic meal-photo schema-v2 enrollment ordering, including the one-row
 per-installation revision fence, credential-free revocation tombstone,
 prepared-before-active iOS credential handoff, bodyless scoped activation,
 member-plus-Family-sponsorship authority serialization,
-schema-v1 revision-zero compatibility, expand/contract migration sequence, and
+schema-v1 revision-zero compatibility with row-owned revocation generations,
+expand/contract migration sequence, and
 the independent identity-authenticated foreground camera/Photos submission
 path with member-bound UUID retry identity and shared private ingestion, plus
 the focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,

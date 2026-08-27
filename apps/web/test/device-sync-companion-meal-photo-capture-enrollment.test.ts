@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lockHostedMemberSponsoredAccessRows: vi.fn(),
+  prepareRootDelay: null as (() => Promise<void>) | null,
+  prewarmDelay: null as (() => Promise<void>) | null,
   readHostedHealthDataConsentState: vi.fn(),
 }));
 
@@ -39,6 +41,85 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
     ...actual,
     lockHostedMemberRow: mocks.lockHostedMemberRow,
     lockHostedMemberSponsoredAccessRows: mocks.lockHostedMemberSponsoredAccessRows,
+  };
+});
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  return {
+    ...actual,
+    prepareHostedDomainRootForWeb: vi.fn(async (input: {
+      domain: "device";
+      userId: string;
+    }) => {
+      await mocks.prepareRootDelay?.();
+      return Object.freeze({
+        domain: input.domain,
+        rootKeyId: "test-device-root",
+        userId: input.userId,
+      });
+    }),
+    readPreparedHostedDomainRootForWebLocal: vi.fn((prepared: {
+      domain: "device";
+      rootKeyId: string;
+      userId: string;
+    }) => ({
+      root: Promise.resolve({
+        envelope: prepared,
+        rootKey: new Uint8Array([1, 2, 3, 4]),
+      }),
+      rootKeyId: prepared.rootKeyId,
+    })),
+    revalidatePreparedHostedDomainRootForWebTx: vi.fn(async (input: {
+      prepared: {
+        domain: "device";
+        rootKeyId: string;
+        userId: string;
+      };
+    }) => ({
+      root: Promise.resolve({
+        envelope: input.prepared,
+        rootKey: new Uint8Array([1, 2, 3, 4]),
+      }),
+      rootKeyId: input.prepared.rootKeyId,
+    })),
+  };
+});
+
+vi.mock("@/src/lib/hosted-crypto/secure-box", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/secure-box")
+  >();
+  return {
+    ...actual,
+    openHostedUserSecureBoxStringFromPreparedRoot: vi.fn(async (input: {
+      value: string;
+    }) => input.value.startsWith("hsb-test:")
+      ? input.value.slice("hsb-test:".length)
+      : null),
+    prewarmHostedUserSecureBoxStrings: vi.fn(async () => {
+      await mocks.prewarmDelay?.();
+    }),
+    readHostedUserSecureBoxStringRootReference: vi.fn((input: {
+      value: string | null | undefined;
+    }) => input.value?.startsWith("hsb-test:")
+      ? { domain: "device", rootKeyId: "test-device-root" }
+      : null),
+    sealHostedUserSecureBoxStringFromPreparedRoot: vi.fn(async (input: {
+      preparedRoot: Promise<{
+        envelope: { rootKeyId: string };
+      }>;
+      preparedRootKeyId: string;
+      value: string;
+    }) => {
+      const preparedRoot = await input.preparedRoot;
+      if (preparedRoot.envelope.rootKeyId !== input.preparedRootKeyId) {
+        throw new Error("Test prepared root does not match the requested root.");
+      }
+      return `hsb-test:${input.value}`;
+    }),
   };
 });
 
@@ -74,6 +155,8 @@ describe("meal photo capture enrollment credentials", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
+    mocks.prepareRootDelay = null;
+    mocks.prewarmDelay = null;
     mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
   });
 
@@ -199,6 +282,212 @@ describe("meal photo capture enrollment credentials", () => {
     expect(second.uploadToken).not.toBe(first.uploadToken);
     expect(second.idempotencySecret).not.toBe(first.idempotencySecret);
     expect(prisma.getRecord()).toMatchObject({ revokedAt: null, revokeReason: null });
+  });
+
+  it("rejects fresh schema-v1 preparation overtaken by missing-row revocation", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const preparationStarted = createDeferred();
+    const releasePreparation = createDeferred();
+    let preparationCount = 0;
+    mocks.prepareRootDelay = async () => {
+      preparationCount += 1;
+      preparationStarted.resolve();
+      await releasePreparation.promise;
+    };
+
+    const issuing = issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await preparationStarted.promise;
+
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: {
+        appInstallationId: INSTALLATION_ID,
+        schemaVersion: 1,
+      },
+    })).resolves.toEqual({ revoked: true });
+    const tombstoneId = requireStoredEnrollment(prisma.getRecord()).id;
+
+    releasePreparation.resolve();
+    await expect(issuing).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: {
+        currentAuthorityRevision: 0,
+        currentAuthorityState: "revoked",
+        requestedOperation: "enroll",
+      },
+      retryable: false,
+    });
+
+    expect(preparationCount).toBe(1);
+    expect(prisma.getRecord()).toMatchObject({
+      id: tombstoneId,
+      revokedAt: expect.any(Date),
+      uploadTokenHash: null,
+    });
+  });
+
+  it("rejects existing-secret preparation overtaken by scoped revocation", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    const originalId = requireStoredEnrollment(prisma.getRecord()).id;
+    const preparationStarted = createDeferred();
+    const releasePreparation = createDeferred();
+    let preparationCount = 0;
+    mocks.prewarmDelay = async () => {
+      preparationCount += 1;
+      preparationStarted.resolve();
+      await releasePreparation.promise;
+    };
+    mocks.prepareRootDelay = async () => {
+      preparationCount += 1;
+    };
+
+    const renewing = issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await preparationStarted.promise;
+
+    await expect(revokeMealPhotoCaptureEnrollmentForScopedToken({
+      prisma: prisma.client,
+      token: issued.uploadToken,
+    })).resolves.toEqual({ revoked: true });
+    const tombstoneId = requireStoredEnrollment(prisma.getRecord()).id;
+    expect(tombstoneId).not.toBe(originalId);
+
+    releasePreparation.resolve();
+    await expect(renewing).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      retryable: false,
+    });
+    expect(preparationCount).toBe(1);
+    expect(prisma.getRecord()).toMatchObject({
+      id: tombstoneId,
+      revokeReason: "scoped_token_revoked",
+      revokedAt: expect.any(Date),
+    });
+  });
+
+  it("advances a repeated schema-v1 revocation past an in-flight re-enrollment", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: {
+        appInstallationId: INSTALLATION_ID,
+        schemaVersion: 1,
+      },
+    });
+    const firstTombstoneId = requireStoredEnrollment(prisma.getRecord()).id;
+    const preparationStarted = createDeferred();
+    const releasePreparation = createDeferred();
+    let preparationCount = 0;
+    mocks.prepareRootDelay = async () => {
+      preparationCount += 1;
+      preparationStarted.resolve();
+      await releasePreparation.promise;
+    };
+
+    const issuing = issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await preparationStarted.promise;
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: {
+        appInstallationId: INSTALLATION_ID,
+        schemaVersion: 1,
+      },
+    })).resolves.toEqual({ revoked: true });
+    const secondTombstoneId = requireStoredEnrollment(prisma.getRecord()).id;
+    expect(secondTombstoneId).not.toBe(firstTombstoneId);
+
+    releasePreparation.resolve();
+    await expect(issuing).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      retryable: false,
+    });
+    expect(preparationCount).toBe(1);
+    expect(prisma.getRecord()).toMatchObject({
+      id: secondTombstoneId,
+      revokedAt: expect.any(Date),
+    });
+  });
+
+  it("rejects stale schema-v1 preparation across revoked-enabled-revoked ABA", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    const originalId = requireStoredEnrollment(prisma.getRecord()).id;
+    const preparationStarted = createDeferred();
+    const releasePreparation = createDeferred();
+    let preparationCount = 0;
+    mocks.prewarmDelay = async () => {
+      preparationCount += 1;
+      preparationStarted.resolve();
+      await releasePreparation.promise;
+    };
+    mocks.prepareRootDelay = async () => {
+      preparationCount += 1;
+    };
+
+    const staleRenewal = issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await preparationStarted.promise;
+    await revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: {
+        appInstallationId: INSTALLATION_ID,
+        schemaVersion: 1,
+      },
+    });
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    await revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: {
+        appInstallationId: INSTALLATION_ID,
+        schemaVersion: 1,
+      },
+    });
+    const finalTombstoneId = requireStoredEnrollment(prisma.getRecord()).id;
+    expect(finalTombstoneId).not.toBe(originalId);
+
+    releasePreparation.resolve();
+    await expect(staleRenewal).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      retryable: false,
+    });
+    expect(preparationCount).toBe(2);
+    expect(prisma.getRecord()).toMatchObject({
+      id: finalTombstoneId,
+      revokedAt: expect.any(Date),
+      uploadTokenHash: null,
+    });
   });
 
   it("keeps a newer schema-v2 tombstone when a delayed enrollment arrives", async () => {

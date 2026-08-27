@@ -43,7 +43,6 @@ const mocks = vi.hoisted(() => {
     runWithFreshHostedDomainRootUnwrapCache: vi.fn(),
     runWithHostedDomainRootProviderCallsDisabled: vi.fn(),
     runWithHostedDomainRootUnwrapCache: vi.fn(),
-    sealHostedUserSecureBoxString: vi.fn(),
     sealHostedUserSecureBoxStringFromPreparedRoot: vi.fn(),
   };
 });
@@ -68,7 +67,6 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
-  isHostedSecureBoxStringTestCodecConfiguredForTests: () => false,
   openHostedUserSecureBoxStringFromPreparedRoot: vi.fn(async (input: {
     preparedRootKeyId: string | null;
     value: string;
@@ -108,7 +106,6 @@ vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
     const parsed = parseSyntheticCiphertext(input.value);
     return { domain: "device", rootKeyId: parsed.rootKeyId };
   },
-  sealHostedUserSecureBoxString: mocks.sealHostedUserSecureBoxString,
   sealHostedUserSecureBoxStringFromPreparedRoot:
     mocks.sealHostedUserSecureBoxStringFromPreparedRoot,
 }));
@@ -253,10 +250,6 @@ beforeEach(() => {
       return mocks.readPreparedHostedDomainRootForWebLocal(input.prepared);
     },
   );
-  mocks.sealHostedUserSecureBoxString.mockImplementation(async () => {
-    recordProviderEvent("provider-capable-seal-fallback");
-    throw new Error("Provider-capable secure-box seal fallback was called.");
-  });
   mocks.sealHostedUserSecureBoxStringFromPreparedRoot.mockImplementation(
     async (input: {
       preparedRoot: Promise<{
@@ -303,7 +296,6 @@ describe("meal photo enrollment crypto preparation boundary", () => {
     expect(prisma.transactionCount()).toBe(1);
     expect(prisma.lockCount()).toBe(1);
     expect(mocks.prepareHostedDomainRootForWeb).toHaveBeenCalledOnce();
-    expect(mocks.sealHostedUserSecureBoxString).not.toHaveBeenCalled();
     expectProvidersOutsideCriticalSection();
   });
 
