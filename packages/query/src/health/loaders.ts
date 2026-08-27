@@ -2,6 +2,12 @@ import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { VAULT_LAYOUT } from "@murphai/contracts";
+import {
+  listEventLedgerShardSources,
+  readEventLedgerShardText,
+} from "@murphai/core/event-ledger-storage";
+
 import {
   parseFrontmatterDocument,
   type MarkdownDocumentRecord,
@@ -394,16 +400,19 @@ export async function readJsonlRecordOutcomes(
   relativeRoot: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<JsonlRecordOutcome[]> {
-  const shardPaths = await walkRelativeFiles(vaultRoot, relativeRoot, ".jsonl", options);
+  const shardPaths = relativeRoot === VAULT_LAYOUT.eventLedgerDirectory
+    ? (await listEventLedgerShardSources(vaultRoot)).map((source) => source.logicalPath)
+    : await walkRelativeFiles(vaultRoot, relativeRoot, ".jsonl", options);
   const records: JsonlRecordOutcome[] = [];
 
   for (const relativePath of shardPaths) {
     options.signal?.throwIfAborted();
-    const absolutePath = path.join(vaultRoot, relativePath);
-    const raw = await readFile(absolutePath, {
-      encoding: "utf8",
-      signal: options.signal,
-    });
+    const raw = relativeRoot === VAULT_LAYOUT.eventLedgerDirectory
+      ? await readEventLedgerShardText({ vaultRoot, relativePath })
+      : await readFile(path.join(vaultRoot, relativePath), {
+          encoding: "utf8",
+          signal: options.signal,
+        });
     records.push(...await parseJsonlRecordOutcomesCooperatively(
       relativePath,
       raw,

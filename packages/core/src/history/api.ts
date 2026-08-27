@@ -30,6 +30,7 @@ import {
   listEventLedgerShardPaths,
   listEventLedgerShardPathsInterruptible,
   readEventLedgerShardRecords,
+  readEventLedgerShardText,
   visitEventLedgerShardRecordsInterruptible,
 } from "../event-ledger-storage.ts";
 import {
@@ -38,9 +39,6 @@ import {
 import { generateRecordId } from "../ids.ts";
 import { runCanonicalWrite } from "../operations/index.ts";
 import { normalizeTimeZone, toDateOnly } from "../time.ts";
-import {
-  readUtf8File,
-} from "../fs.ts";
 import { loadVault } from "../vault.ts";
 import { buildMeasurementEventDraft } from "../domains/events.ts";
 import { buildTypedEventRecord } from "../domains/events/drafts.ts";
@@ -899,7 +897,9 @@ async function historyEventIdExists(vaultRoot: string, eventId: string): Promise
   const shardPaths = await listEventLedgerShardPaths(vaultRoot);
 
   for (const relativePath of shardPaths) {
-    const lines = (await readUtf8File(vaultRoot, relativePath)).split("\n").filter(Boolean);
+    const lines = (await readEventLedgerShardText({ vaultRoot, relativePath }))
+      .split("\n")
+      .filter(Boolean);
 
     for (const line of lines) {
       let parsed: unknown;

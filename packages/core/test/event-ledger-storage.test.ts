@@ -8,6 +8,7 @@ import { test } from "vitest";
 
 import {
   applyHostedCanonicalWriteReceipt,
+  appendHistoryEvent,
   archiveClosedEventLedgerShards,
   initializeVault,
   listEventLedgerShardSources,
@@ -81,10 +82,31 @@ test("backdated writes and hosted replay amend archived event shards exactly onc
       title: "First event",
     },
   });
+  const archivedHistoryId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1D3";
+  await appendHistoryEvent({
+    vaultRoot,
+    eventId: archivedHistoryId,
+    kind: "encounter",
+    occurredAt: "2026-01-09T09:00:00.000Z",
+    title: "Archived visit",
+    encounterType: "office_visit",
+  });
   await archiveClosedEventLedgerShards({
     now: new Date("2026-02-01T00:00:00.000Z"),
     vaultRoot,
   });
+  await assert.rejects(
+    appendHistoryEvent({
+      vaultRoot,
+      eventId: archivedHistoryId,
+      kind: "encounter",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      title: "Duplicate archived visit",
+      encounterType: "office_visit",
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_ALREADY_EXISTS",
+  );
   await fs.cp(vaultRoot, replayRoot, { recursive: true });
 
   const capture: { persisted?: HostedCanonicalWritePersistenceInput } = {};
