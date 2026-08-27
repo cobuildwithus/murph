@@ -1530,7 +1530,13 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const { vault, from, to, experiment, out } = input
       const query = await loadQueryRuntime()
-      const readModel = await query.readVaultTolerant(vault)
+      const [readModel, audits] = await Promise.all([
+        query.readVaultTolerant(vault),
+        query.readCanonicalEntityFamilySource(vault, 'audit'),
+      ])
+      readModel.entities = [...readModel.entities, ...audits].sort(
+        query.compareCanonicalEntities,
+      )
       const pack = query.buildExportPack(readModel, {
         from,
         to,

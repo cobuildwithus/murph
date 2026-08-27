@@ -14,7 +14,10 @@ import {
   normalizeCanonicalEventLinks,
 } from "../../event-links.ts";
 import { VaultError } from "../../errors.ts";
-import { walkVaultFiles } from "../../fs.ts";
+import {
+  listEventLedgerShardPaths,
+  readEventLedgerShardRecords,
+} from "../../event-ledger-storage.ts";
 import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
@@ -25,7 +28,7 @@ import {
   parseEventSpineEvidence,
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../../jsonl.ts";
+import { toMonthlyShardRelativePath } from "../../jsonl.ts";
 import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import { loadVault } from "../../vault.ts";
 import {
@@ -361,13 +364,11 @@ function externalRefMatches(record: EventRecord, input: FindEventByExternalRefIn
 export async function findEventByExternalRef(
   input: FindEventByExternalRefInput,
 ): Promise<EventRecord | null> {
-  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const candidateIds = new Set<string>();
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({
+    const records = await readEventLedgerShardRecords({
       vaultRoot: input.vaultRoot,
       relativePath,
     });
@@ -387,7 +388,7 @@ export async function findEventByExternalRef(
 
   const latestByCandidateId = new Map<string, MatchedEventRecord>();
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({
+    const records = await readEventLedgerShardRecords({
       vaultRoot: input.vaultRoot,
       relativePath,
     });
@@ -438,9 +439,7 @@ export async function findEventsByRawRefs(
     return [];
   }
 
-  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const refIndexesByRawRef = new Map<string, number[]>();
   const attachmentsByRefIndex = input.rawRefs.map(
     () => new Map<string, MatchedEventRecord>(),
@@ -452,7 +451,7 @@ export async function findEventsByRawRefs(
   });
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
       for (const rawRef of collectEventRawReferencePaths(record)) {
@@ -479,7 +478,7 @@ export async function findEventsByRawRefs(
 
   const latestByCandidateId = new Map<string, MatchedEventRecord>();
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
       if (!candidateIds.has(record.id)) {
@@ -526,13 +525,11 @@ export async function loadEventLedgerShardsById(
   vaultRoot: string,
   eventId: string,
 ): Promise<LoadedEventLedgerShard[]> {
-  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const relativePaths = await listEventLedgerShardPaths(vaultRoot);
   const matches: LoadedEventLedgerShard[] = [];
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({
+    const records = await readEventLedgerShardRecords({
       vaultRoot,
       relativePath,
     });
@@ -599,16 +596,12 @@ export async function readEvent(input: ReadEventInput): Promise<ReadEventResult>
 export async function readOwnedEvent(
   input: ReadOwnedEventInput,
 ): Promise<ReadEventResult> {
-  const relativePaths = await walkVaultFiles(
-    input.vaultRoot,
-    VAULT_LAYOUT.eventLedgerDirectory,
-    { extension: ".jsonl" },
-  );
+  const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const candidateIds = new Set<string>();
   const ownerField = input.kind === "document" ? "documentId" : "mealId";
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const candidate = rawRecord as JsonObject;
       if (
@@ -629,7 +622,7 @@ export async function readOwnedEvent(
 
   const matchesById = new Map<string, MatchedEventRecord[]>();
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const rawId = (rawRecord as JsonObject).id;
       if (typeof rawId !== "string" || !candidateIds.has(rawId)) {

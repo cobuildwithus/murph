@@ -11,6 +11,10 @@ import {
   VAULT_LAYOUT,
   VAULT_QUERY_SOURCE,
 } from "@murphai/contracts";
+import {
+  listEventLedgerShardSources,
+  readEventLedgerShardRows,
+} from "@murphai/core/event-ledger-storage";
 
 import {
   compareCanonicalEntities,
@@ -203,7 +207,9 @@ export async function readCanonicalEntityFamilySource(
       break;
   }
 
-  return entities.filter(isDefaultProjectedQueryEntity);
+  return family === "audit"
+    ? entities
+    : entities.filter(isDefaultProjectedQueryEntity);
 }
 
 /**
@@ -253,12 +259,10 @@ export async function listCanonicalSourceManifest(
   }
 
   for (const root of CANONICAL_JSONL_ROOTS) {
-    for (const relativePath of await walkRelativeFiles(
-      vaultRoot,
-      root,
-      ".jsonl",
-      options,
-    )) {
+    const sourcePaths = root === VAULT_LAYOUT.eventLedgerDirectory
+      ? (await listEventLedgerShardSources(vaultRoot)).map((source) => source.sourcePath)
+      : await walkRelativeFiles(vaultRoot, root, ".jsonl", options);
+    for (const relativePath of sourcePaths) {
       relativePaths.add(relativePath);
     }
     options.signal?.throwIfAborted();
@@ -314,6 +318,12 @@ export function isCanonicalQuerySourcePath(relativePath: string): boolean {
   }
 
   for (const root of CANONICAL_JSONL_ROOTS) {
+    if (
+      root === VAULT_LAYOUT.eventLedgerDirectory
+      && isCanonicalPathUnderRoot(normalized, root, ".jsonl.gz")
+    ) {
+      return true;
+    }
     if (isCanonicalPathUnderRoot(normalized, root, ".jsonl")) {
       return true;
     }
@@ -952,6 +962,19 @@ async function forEachJsonlPayload(
   ) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (relativeDir === VAULT_LAYOUT.eventLedgerDirectory) {
+    for (const source of await listEventLedgerShardSources(vaultRoot)) {
+      signal?.throwIfAborted();
+      for (const row of await readEventLedgerShardRows({
+        vaultRoot,
+        relativePath: source.logicalPath,
+      })) {
+        signal?.throwIfAborted();
+        visit(source.logicalPath, row.lineNumber, row.value as QueryRecordData);
+      }
+    }
+    return;
+  }
   const targetDir = path.join(vaultRoot, relativeDir);
 
   for (const filePath of await listFilesByExtension(targetDir, ".jsonl", signal)) {

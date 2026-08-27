@@ -8,7 +8,10 @@ import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerAuditCommands } from '../src/commands/audit.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
-import { createUnwiredVaultServices } from '@murphai/vault-usecases'
+import {
+  createIntegratedVaultServices,
+  createUnwiredVaultServices,
+} from '@murphai/vault-usecases'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -525,6 +528,12 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
 
   try {
     await initializeVault({ vaultRoot })
+    const services = createIntegratedVaultServices()
+    const statsBefore = await services.query.showVaultStats({
+      vault: vaultRoot,
+      requestId: 'audit-stats-before',
+    })
+
     await mkdir(path.join(vaultRoot, 'audit/2026'), { recursive: true })
     await writeFile(
       path.join(vaultRoot, 'audit/2026/2026-03.jsonl'),
@@ -736,6 +745,43 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
 
     const auditFile = await readFile(path.join(vaultRoot, 'audit/2026/2026-03.jsonl'), 'utf8')
     assert.match(auditFile, /samples_import_csv/u)
+
+    const statsAfter = await services.query.showVaultStats({
+      vault: vaultRoot,
+      requestId: 'audit-stats-after',
+    })
+    assert.equal(statsAfter.counts.audits, statsBefore.counts.audits + 3)
+    assert.equal(statsAfter.counts.totalRecords, statsBefore.counts.totalRecords + 3)
+
+    const exportResult = await services.query.exportPack({
+      vault: vaultRoot,
+      requestId: 'audit-export',
+      from: '2026-03-12',
+      to: '2026-03-12',
+    })
+    const exportedEntities = JSON.parse(
+      await readFile(
+        path.join(
+          vaultRoot,
+          'exports',
+          'packs',
+          exportResult.packId,
+          'entities.json',
+        ),
+        'utf8',
+      ),
+    ) as Array<{ entityId: string; family: string }>
+    assert.deepEqual(
+      exportedEntities
+        .filter((entity) => entity.family === 'audit')
+        .map((entity) => entity.entityId)
+        .sort(),
+      [
+        'aud_01JNW00000000000000000001',
+        'aud_01JNW00000000000000000002',
+        'aud_01JNW00000000000000000003',
+      ],
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

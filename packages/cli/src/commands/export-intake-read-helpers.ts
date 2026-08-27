@@ -309,9 +309,15 @@ async function rebuildStoredExportPackFiles(
   manifest: ExportPackManifest,
 ) {
   const query = await loadQueryRuntime()
-  const readModel = query.readVaultTolerant
-    ? await query.readVaultTolerant(vaultRoot)
-    : await query.readVault(vaultRoot)
+  const [readModel, audits] = await Promise.all([
+    query.readVaultTolerant
+      ? query.readVaultTolerant(vaultRoot)
+      : query.readVault(vaultRoot),
+    query.readCanonicalEntityFamilySource(vaultRoot, 'audit'),
+  ])
+  readModel.entities = [...readModel.entities, ...audits].sort(
+    query.compareCanonicalEntities,
+  )
   const rebuilt = query.buildExportPack(readModel, {
     from: manifest.filters.from ?? undefined,
     to: manifest.filters.to ?? undefined,
