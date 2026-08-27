@@ -77,14 +77,21 @@ Updated: 2026-08-27
   only an explicit onboarding-level pause stops the overall flow.
 - This is prompt-primary and product-owned, so Product UX, prompt, and coverage
   lenses apply. No independent cross-cutting trigger is currently present.
+- ReviewGPT's patch was accepted except for its new explicit "connect now"
+  gate. The current automatic link handoff remains when a supported source is
+  named without a deferral; a same-turn or later connection deferral skips the
+  link write and continues onboarding.
 
 ## Verification
 
-- Commands to run: focused Assistant Engine Vitest files selected from the
-  touched tests, the Assistant Engine typecheck, and
-  `pnpm test:assistant:live -- --test <unique journey name>`.
-- Expected outcomes: deterministic contracts pass; the live reply acknowledges
-  the delayed connection without claiming success, advances to the bundled
-  foundation memo, asks exactly one question, and makes no connection action.
-- PR proof: required exact-head checks green, preliminary specialist result
-  resolved, and current-base merge-tree clean.
+- Passed: Assistant Engine prompt/model asset tests, 100 passed and 7 skipped.
+- Passed: Assistant Engine route-planning tests, 100 passed.
+- Passed: Assistant Engine typecheck after the final TypeScript test edit.
+- Passed: focused real-Codex journey on `gpt-5.6-terra`, 1 passed and 132
+  skipped. The reply acknowledged that the wearable could wait, continued to
+  the bundled voice-or-typing foundation memo, asked one question, made no
+  device write, included no link, and claimed no connection or syncing state.
+  Product UX verdict: Ready.
+- Passed: focused changelog page test, 9 passed, and Web typecheck.
+- Draft PR: #2457. Remaining proof: preliminary specialist ReviewGPT result,
+  required exact-head CI, parent final review, and current-base merge-tree.
