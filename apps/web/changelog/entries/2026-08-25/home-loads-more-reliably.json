@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "home-loads-more-reliably",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Home loads more reliably",
+    "summary": "Home now reduces overlapping data work so dashboard details are less likely to fall back during busy periods.",
+    "details": "Independent sections still recover separately if one optional detail is unavailable.",
+    "relevanceTags": ["dashboard", "reliability"],
+    "sourcePullRequests": [2289]
+  }
+}

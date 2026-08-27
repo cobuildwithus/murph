@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -17,6 +17,7 @@ import {
   initializeVault,
   readHabitatAspect,
   removeAutomaticMealPhoto,
+  upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
 } from '@murphai/core'
@@ -25,6 +26,7 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import {
   listEntitySchema,
   showResultSchema,
@@ -39,6 +41,10 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantRealCodexRunEnv,
+  parseAssistantRealCodexRunArgs,
+} from '../../../scripts/run-assistant-real-codex-e2e.ts'
+import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
@@ -51,7 +57,11 @@ import {
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -70,6 +80,7 @@ import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+  MURPH_GROUP_CONSULT_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -96,6 +107,9 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
+  sendAssistantMessageLocal,
+} from '../src/assistant/service.ts'
+import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -113,7 +127,17 @@ import {
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+  buildAssistantCronExecutionInstructions,
 } from '../src/assistant/cron/execution.ts'
+import {
+  findCanonicalAssistantCronRecordInList,
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  resolveCanonicalAssistantCronJobId,
+} from '../src/assistant/cron/canonical-jobs.ts'
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+} from '../src/assistant/cron/runtime-state.ts'
 import {
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
@@ -140,14 +164,21 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
-import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import {
+  extractCodexAssistantProviderUsage,
+  resolveAssistantProviderPrompt,
+} from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
 } from '../src/assistant/providers/types.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
-const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
+const REAL_CODEX_E2E_TAG = 'real-codex-live'
+function describeRealCodex(name: string, factory: () => void): void {
+  const suite = RUN_REAL_CODEX_E2E ? describe : describe.skip
+  suite(name, { tags: [REAL_CODEX_E2E_TAG] }, factory)
+}
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
 const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
@@ -200,6 +231,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
 type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
 const OPENAI_ENV_MODEL_PROVIDER = 'openai-env'
+const OPENAI_SUBSCRIPTION_MODEL_PROVIDER = 'openai'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
 const VERCEL_AI_GATEWAY_MODEL_PROVIDER = 'vercel-ai-gateway'
@@ -218,9 +250,15 @@ const REAL_CODEX_E2E_ENV_ALLOWLIST = [
   'NODE_EXTRA_CA_CERTS',
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 ] as const
+const REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST = [
+  ...REAL_CODEX_E2E_ENV_ALLOWLIST,
+  'HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+] as const
 
 interface RealCodexE2eConfig {
-  codexHome: string
+  codexHome: string | null
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
@@ -300,14 +338,160 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+const HABITAT_VOICE_E2E_TSX_LOADER = path.resolve(
+  path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+  '../tsx/dist/loader.mjs',
+)
+const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
+  'features.multi_agent_v2.enabled=true',
+  'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
+  'features.multi_agent_v2.max_concurrent_threads_per_session=4',
+] as const
+
+describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+  it(
+    'answers from an early detail retained across sixty committed messages',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-cold-conversation-reconstruction-e2e-'),
+      )
+      const conversationHistoryMessages = Array.from(
+        { length: 30 },
+        (_, index) => index === 0
+          ? [
+              {
+                content:
+                  'For the synthetic packing checklist, put the train tickets in the cobalt folder.',
+                role: 'user' as const,
+              },
+              {
+                content:
+                  'Got it. The train tickets go in the cobalt folder.',
+                role: 'assistant' as const,
+              },
+            ]
+          : [
+              {
+                content:
+                  `Synthetic checklist item ${index + 1}: ${'routine packing note '.repeat(8)}`,
+                role: 'user' as const,
+              },
+              {
+                content:
+                  `Synthetic checklist response ${index + 1}: ${'routine confirmation '.repeat(8)}`,
+                role: 'assistant' as const,
+              },
+            ],
+      ).flat()
+      const userPrompt = 'Which folder did we pick for the train tickets?'
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'telegram',
+            conversationKey: 'telegram:direct:cold-reconstruction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-cold-reconstruction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-cold-reconstruction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'read-only',
+          },
+          turnCount: 30,
+          updatedAt: '2026-08-26T12:30:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          conversationHistoryMessages.map((message) => ({
+            kind: message.role,
+            text: message.content,
+          })),
+        )
+        const historyBytes = conversationHistoryMessages.reduce(
+          (total, message) =>
+            total + Buffer.byteLength(message.content, 'utf8'),
+          0,
+        )
+        expect(historyBytes).toBeLessThanOrEqual(12_000)
+
+        const result = await sendAssistantMessageLocal({
+          channel: 'telegram',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          persistUserPromptOnFailure: false,
+          prompt: userPrompt,
+          provider: 'codex-cli',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          sessionId: session.sessionId,
+          threadId: 'thread-cold-reconstruction',
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          vault: workingDirectory,
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyBytes,
+            historyMessages: conversationHistoryMessages.length,
+            reply: result.response.trim(),
+          })}\n`,
+        )
+        expect(result.response).toMatch(/cobalt/iu)
+        expect(result.response).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
     'runs a Luna child through native collaboration',
     async () => {
-      const config = await resolveRealCodexE2eConfig({
-        multiAgentV2: true,
-      })
+      const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-codex-luna-child-e2e-'),
       )
@@ -321,9 +505,10 @@ describeRealCodex('real Codex child model selection e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
+          configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
           env: config.env,
           excludeResumeTurns: true,
-          model: DEFAULT_REAL_CODEX_MODEL,
+          model: config.model,
           modelProvider: config.modelProvider,
           onAdditionalUsage: async (usage) => {
             childUsages.push(usage)
@@ -342,7 +527,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
         const parentUsage = extractCodexAssistantProviderUsage({
           providerConfig: normalizeAssistantProviderConfig({
             provider: 'codex-cli',
-            model: DEFAULT_REAL_CODEX_MODEL,
+            model: config.model,
             modelProvider: config.modelProvider,
             oss: false,
           }),
@@ -635,6 +820,271 @@ describe('onboarding policy read detection', () => {
   })
 })
 
+describeRealCodex('real Codex coordinated workout exercise e2e', () => {
+  it(
+    'expands coordinated workout exercise modifiers',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-coordinated-workout-exercise-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic coordinated workout proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] [--routine <format>]',
+              'vault-cli workout show <event-id> --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-20',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          groupConversation: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start a live workout called Position circuit with standing seated and kneeling cable presses two sets of 10 reps each none are complete yet',
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const workouts = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const observedExerciseNames = workouts.flatMap(({ workout }) =>
+          workout.exercises.map((exercise) => exercise.name.toLowerCase())
+        )
+        const hasUnexpectedDelivery =
+          (result.providerAuthoredFinalMessage ?? '').trim() !== ''
+          || result.responseCard === null
+          || result.runtimeIssueInputs.length > 0
+        const failedTurnActions =
+          workouts.length !== 1 || hasUnexpectedDelivery
+          ? readCapabilityRoutingActions(result.jsonEvents).map((action) =>
+            action.kind === 'command'
+              ? {
+                command: redactRealCodexDiagnosticText(action.command),
+                kind: action.kind,
+                outputHead: redactRealCodexDiagnosticText(action.output).slice(0, 1_500),
+                outputLength: action.output.length,
+                outputTail: redactRealCodexDiagnosticText(action.output).slice(-1_500),
+              }
+              : {
+                argumentsValue: action.argumentsValue,
+                kind: action.kind,
+                tool: action.tool,
+              }
+          )
+          : undefined
+        const failedRuntimeIssues =
+          workouts.length !== 1 || hasUnexpectedDelivery
+            ? result.runtimeIssueInputs.map((issue) => ({
+              component: issue.component,
+              details: issue.details,
+              errorCode: issue.errorCode,
+              issueKind: issue.issueKind,
+              operation: issue.operation,
+              phase: issue.phase,
+              summary: issue.summary,
+            }))
+            : undefined
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            exerciseNames: observedExerciseNames,
+            finalMessage: result.finalMessage,
+            providerAuthoredFinalMessage:
+              result.providerAuthoredFinalMessage ?? null,
+            responseCardKind: result.responseCard?.kind ?? null,
+            providerActionCount: result.providerActionCount,
+            runtimeIssueCount: result.runtimeIssueInputs.length,
+            runtimeIssues: failedRuntimeIssues,
+            scenario: 'clear-shared-head',
+            turnActions: failedTurnActions,
+          })}\n`,
+        )
+
+        expect(workouts).toHaveLength(1)
+        const workout = workouts[0]!
+        const normalizedNames = workout.workout.exercises.map((exercise) =>
+          exercise.name.toLowerCase()
+        )
+
+        expect(normalizedNames).toHaveLength(3)
+        expect(normalizedNames[0]).toMatch(/standing.*cable press/u)
+        expect(normalizedNames[1]).toMatch(/seated.*cable press/u)
+        expect(normalizedNames[2]).toMatch(/kneeling.*cable press/u)
+        expect(
+          workout.workout.exercises.map((exercise) => ({
+            memberRepsPerSet: exercise.memberRepsPerSet,
+            setCount: exercise.sets.length,
+            setPlanIsFinite: exercise.setPlanIsFinite,
+          })),
+        ).toEqual(Array.from({ length: 3 }, () => ({
+          memberRepsPerSet: 10,
+          setCount: 2,
+          setPlanIsFinite: true,
+        })))
+        const responseCard = result.responseCard
+        expect(responseCard).not.toBeNull()
+        if (responseCard === null) {
+          throw new Error('Expected the verified workout response card.')
+        }
+        expect(responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: workout.id,
+            kind: 'workout',
+          },
+          workout: {
+            state: 'active',
+          },
+        })
+        if (
+          responseCard.kind !== 'compact_table'
+          || !('workout' in responseCard)
+        ) {
+          throw new Error('Expected a structured workout compact table.')
+        }
+        expect(
+          responseCard.workout.exercises.flatMap((exercise) =>
+            exercise.sets.map((set) => set.target)
+          ),
+        ).toEqual(Array.from({ length: 6 }, () => '10 reps'))
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+        expect(result.finalMessage).toBe(
+          renderAssistantResponseCardText(responseCard),
+        )
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: workout.id,
+          events: result.jsonEvents,
+          state: 'active',
+        })
+        expect(result.runtimeIssueInputs).toEqual([])
+
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands.match(/--exercise /gu)).toHaveLength(3)
+        expect(commands).not.toContain('workout exercise add')
+
+        const commandCountBeforeAmbiguousTurn = commands
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .length
+        const ambiguousResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start another live workout called Allocation question with standing and seated cable presses three sets of 10 reps total',
+        })
+        const afterAmbiguousTurn = await readVaultRawTolerant(workingDirectory)
+        const workoutsAfterAmbiguousTurn = afterAmbiguousTurn.events.filter(
+          (event) =>
+            workoutSessionSchema.safeParse(event.attributes.workout).success,
+        )
+        const ambiguousTurnCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .slice(commandCountBeforeAmbiguousTurn)
+        const ambiguousMutationCommands = ambiguousTurnCommands.filter(
+          (command) =>
+            !command.includes('--help')
+            && /workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))/u.test(
+              command,
+            ),
+        )
+
+        process.stdout.write(
+          `[coordinated-workout-exercise-e2e] ${JSON.stringify({
+            finalMessage: ambiguousResult.finalMessage,
+            mutationCommands: ambiguousMutationCommands,
+            providerAuthoredFinalMessage:
+              ambiguousResult.providerAuthoredFinalMessage ?? null,
+            scenario: 'ambiguous-quantity-allocation',
+            workoutCount: workoutsAfterAmbiguousTurn.length,
+          })}\n`,
+        )
+        expect(workoutsAfterAmbiguousTurn).toHaveLength(1)
+        expect(ambiguousResult.responseCard).toBeNull()
+        expect(ambiguousResult.finalMessage.match(/\?/gu)).toHaveLength(1)
+        expect(ambiguousResult.finalMessage).toMatch(/3|three/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/sets?/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/standing/iu)
+        expect(ambiguousResult.finalMessage).toMatch(/seated/iu)
+        expect(ambiguousResult.finalMessage).toMatch(
+          /split|divide|allocate|how many.*(?:each|per)/iu,
+        )
+        expect(ambiguousResult.finalMessage).not.toMatch(
+          /what (?:is|does).*standing|what (?:is|does).*seated|what.*cable press|which exercise (?:do you mean|is this)/iu,
+        )
+        expect(ambiguousResult.runtimeIssueInputs).toEqual([])
+        expect(ambiguousMutationCommands).toEqual([])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+})
+
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
     'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
@@ -658,7 +1108,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
@@ -732,11 +1190,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -776,6 +1231,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'active' },
         })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: finiteWorkout.id,
+          events: started.jsonEvents,
+          state: 'active',
+        })
+        expect(started.runtimeIssueInputs).toEqual([])
         expect(started.transcriptMessage).toContain(
           `[Murph tracked workout source: ${finiteWorkout.id};`,
         )
@@ -907,6 +1368,12 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'completed' },
         })
+        expectStructuredWorkoutAuthoringAttempt({
+          entityId: finiteWorkout.id,
+          events: finalSet.jsonEvents,
+          state: 'completed',
+        })
+        expect(finalSet.runtimeIssueInputs).toEqual([])
         expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual(
           Array.from({ length: 8 }, () => 9),
         )
@@ -1047,9 +1514,18 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 })
 
+const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
+  'Additional group messages joined this turn.',
+  'Replace the draft with one final result under the group turn rules.',
+  'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
+  'If the latest accepted message gives another human the floor, finish without a reply.',
+  'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result. Response text is not a completed effect.',
+  'Do not repeat completed effects or mention the draft or this instruction.',
+].join(' ')
+
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
-    'answers every still-relevant request after same-thread reconsideration',
+    'answers every human request after same-thread reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -1066,37 +1542,158 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [],
           env: config.env,
           excludeResumeTurns: true,
-          model: 'gpt-5.6-sol',
+          model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
           sandbox: 'workspace-write' as const,
           workingDirectory,
         }
+        const providerConfig = normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          oss: false,
+        })
         const first = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: 'Murph, what is 13 plus 8?',
+          prompt: 'Murph, what is 17 plus 14?',
         })
-        expect(first.finalMessage).toMatch(/\b21\b/u)
-
-        const reconsiderationInstruction = [
-          'New messages arrived before delivery.',
-          'Re-evaluate all accepted messages under the group turn rules and return one final result.',
-          'Do not mention this review or repeat completed effects.',
-        ].join(' ')
+        expect(first.finalMessage).toMatch(/\b31\b/u)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: first.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
         const second = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: `${reconsiderationInstruction}\n\nMurph, what is 7 times 6?`,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            'Murph, what is 8 times 9?',
+          ].join('\n\n'),
           resumeSessionId: first.sessionId,
         })
+        process.stdout.write(
+          `[group-reconsideration-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'two human requests',
+          })}\n`,
+        )
 
         expect(second.sessionId).toBe(first.sessionId)
-        expect(second.finalMessage).toMatch(/\b21\b/u)
-        expect(second.finalMessage).toMatch(/\b42\b/u)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: second.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
+        expect(second.finalMessage).toMatch(/\b31\b/u)
+        expect(second.finalMessage).toMatch(/\b72\b/u)
         expect(second.finalMessage).not.toMatch(
-          /held|not sent|previous response|re-?evaluat|review/iu,
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'yields when another human takes the floor during reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-floor-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const providerConfig = normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          oss: false,
+        })
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 17 plus 14?',
+        })
+        expect(first.finalMessage).toMatch(/\b31\b/u)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: first.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
+
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            '@roommate, did you find the missing keys?',
+          ].join('\n\n'),
+          resumeSessionId: first.sessionId,
+        })
+        process.stdout.write(
+          `[group-reconsideration-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'another human takes the floor',
+          })}\n`,
+        )
+        const finishCalls = readCapabilityRoutingActions(second.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+          )
+
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: second.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
+        expect(second.finalMessage.trim()).toBe('')
+        expect(finishCalls).toHaveLength(1)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -3402,6 +3999,168 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'uses the saved preferred name in a private-to-group handoff',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-handoff-name-e2e-'),
+      )
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const vaultCliPath = path.join(workingDirectory, 'vault-cli')
+        const memoryPayload = JSON.stringify({
+          document: {
+            records: [{
+              id: 'memory_preferred_name',
+              section: 'Identity',
+              text: 'Preferred display name: Member Delta',
+              updatedAt: '2026-07-29T12:00:00.000Z',
+            }],
+          },
+          memory: null,
+          vault: 'synthetic-vault',
+        })
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'group-chat',
+          }),
+          writeFile(commandLogPath, '', 'utf8'),
+          writeFile(
+            vaultCliPath,
+            [
+              '#!/bin/sh',
+              'set -eu',
+              'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
+              'printf \'%s\\n\' "$*" >> "$script_dir/vault-commands.log"',
+              'case "$*" in',
+              `  memory\\ show*) printf '%s\\n' '${memoryPayload}' ;;`,
+              '  *) printf \'unsupported synthetic vault command: %s\\n\' "$*" >&2; exit 64 ;;',
+              'esac',
+              '',
+            ].join('\n'),
+            { encoding: 'utf8', mode: 0o700 },
+          ),
+        ])
+        await chmod(vaultCliPath, 0o700)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_handoff_name',
+              recipientKey: 'recipient_private_group_handoff_name',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_handoff_name'],
+              conversationId: 'conversation_private_group_handoff_name',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_handoff_name'],
+              originSessionId: 'session_private_group_handoff_name',
+              recipientKey: 'recipient_private_group_handoff_name',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'handoff',
+                  result: {
+                    status: 'accepted',
+                    targetLabel: 'Training Circle',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Tell Training Circle that I completed the planned session.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+
+        const memoryCommands = (await readFile(commandLogPath, 'utf8'))
+          .split('\n')
+          .map((command) => command.trim())
+          .filter(Boolean)
+        const observedContext = groupRequests.find((request) =>
+          request !== null
+          && typeof request === 'object'
+          && 'context' in request
+          && typeof request.context === 'string'
+        )
+        process.stdout.write(
+          `[group-handoff-name-e2e] ${JSON.stringify({
+            context:
+              observedContext
+                && typeof observedContext === 'object'
+                && 'context' in observedContext
+                ? observedContext.context
+                : null,
+            memoryCommands,
+            reply: result.finalMessage.trim(),
+            toolCallCount: groupRequests.length,
+          })}\n`,
+        )
+
+        expect(groupRequests).toHaveLength(1)
+        const handoffRequest = groupRequests[0]
+        expect(handoffRequest).toMatchObject({
+          action: 'handoff',
+          groupLabel: 'Training Circle',
+        })
+        if (
+          !handoffRequest
+          || typeof handoffRequest !== 'object'
+          || !('context' in handoffRequest)
+          || typeof handoffRequest.context !== 'string'
+        ) {
+          throw new Error('Expected one named group handoff context.')
+        }
+        expect(handoffRequest.context).toContain('Member Delta')
+        expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
+        expect(
+          memoryCommands.filter((command) => command.startsWith('memory show')),
+        ).toHaveLength(1)
+        expect(result.finalMessage).toMatch(/queu/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'places one bounded group call from the current request without a group-only preview turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -4172,6 +4931,12 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
               action.kind === 'dynamic'
               && action.argumentsValue.action === 'connect'
             )
+            process.stdout.write(
+              `[adaptive-wearable-outreach-e2e] ${JSON.stringify({
+                finalMessage: result.finalMessage,
+                scenario: probe.kind,
+              })}\n`,
+            )
 
             if (probe.kind === 'wait-ten-days') {
               expect(configureActions).toHaveLength(1)
@@ -4206,10 +4971,10 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                 sourceProvider: 'garmin',
               }])
               expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
-            } else if (
-              probe.kind === 'group-preference'
-              || probe.kind === 'unsupported-provider'
-            ) {
+            } else if (probe.kind === 'group-preference') {
+              expect(deviceRequests, probe.kind).toHaveLength(0)
+              expect(result.finalMessage).toMatch(/direct|private|message me/iu)
+            } else if (probe.kind === 'unsupported-provider') {
               expect(deviceActions, probe.kind).toHaveLength(0)
               expect(deviceRequests, probe.kind).toHaveLength(0)
             } else if (probe.kind === 'scheduled-stale-only') {
@@ -4810,6 +5575,119 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
+describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', () => {
+  it(
+    'keeps a current-day readout on the saved automation task',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-weekly-digest-prompt-only-e2e-'),
+      )
+
+      try {
+        await initializeVault({ vaultRoot: workingDirectory })
+        const savedInstructions = [
+          'Send one concise current-day hydration readout from the supplied evidence.',
+          'Mention the measured intake and whether the current status is on track.',
+          'Do not compare against earlier days.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-05T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-current-day-readout',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-current-day-readout',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '08:00' },
+          slug: 'synthetic-current-day-readout',
+          status: 'active',
+          supportKind: 'weekly_digest',
+          tags: [
+            'system:support-series:experiment:exp_synthetic_hydration',
+          ],
+          title: 'Synthetic current-day readout',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical automation source.')
+        }
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-05T12:00:00.000Z',
+        })
+        const prompt = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        expect(prompt).toContain(savedInstructions)
+        expect(prompt).not.toContain('Accepted support scope (engine-supplied')
+        expect(prompt).not.toContain('agreed weekly summary shape')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            prompt,
+            'Current trusted evidence for this scheduled occurrence:',
+            '- Today\'s measured fluid intake is 1.4 liters.',
+            '- The current status is on track toward the established 2.3-liter target.',
+          ].join('\n\n'),
+          reasoningEffort: 'medium',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/1\.4 liters?/iu)
+          expect(decision.text).toMatch(/on track/iu)
+          expect(decision.text).not.toMatch(
+            /weekly?|recap|earlier days|past seven days/iu,
+          )
+          console.info(
+            `[real-codex weekly-digest prompt-only] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -4859,7 +5737,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
           ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -4976,7 +5854,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions:
-          buildIndependentReminderDeveloperInstructions(scope),
+          buildScheduledAutomationDeveloperInstructions(scope),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5024,7 +5902,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildIndependentReminderDeveloperInstructions('group'),
+        buildScheduledAutomationDeveloperInstructions('group'),
       dynamicTools: [],
       env: config.env,
       excludeResumeTurns: true,
@@ -7337,6 +8215,179 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
 
 describeRealCodex('real Codex support escalation e2e', () => {
   it(
+    'product-feedback schema recovery contract accepts one corrected support call',
+    async () => {
+      const recordedFeedback: Array<{
+        kind: string
+        summary: string
+      }> = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push({
+              kind: feedback.kind,
+              summary: feedback.summary,
+            })
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic validation-recovery probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const firstCall = calls[0]
+      const correctedCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected two product-feedback dynamic tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.kind).toBe('frustration')
+      expect(correctedCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+      expect(correctedCall.argumentsValue.summary).toMatch(
+        /^Support escalation: \S/iu,
+      )
+      expect(readString(correctedCall.argumentsValue.summary)?.length)
+        .toBeLessThanOrEqual(5_000)
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+      expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract stops after a second support rejection',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-terminal-e2e-',
+        probeDeveloperInstructions: [
+          'Synthetic terminal-validation probe contract:',
+          'On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+          'On a second call only, if one occurs, omit supportArea and include an unsupported top-level supportProblem field with the value classification.',
+        ].join(' '),
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic terminal-validation probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-terminal-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'two rejected calls and no third attempt').toHaveLength(2)
+      const firstCall = calls[0]
+      const secondCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || secondCall?.kind !== 'dynamic') {
+        throw new Error('Expected two rejected product-feedback tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(secondCall.argumentsValue.supportArea).toBeUndefined()
+      expect(secondCall.argumentsValue.supportProblem).toBe('classification')
+      expect(recordedFeedback).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).not.toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract keeps ordinary acceptance silent',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-ordinary-feedback-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value dashboard.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic ordinary-feedback probe in a verified private conversation.',
+          'Murph keeps classifying a pinned generic dashboard item as inactive, which is frustrating. Give me the smallest safe workaround.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[ordinary-product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const correctedCall = calls[1]
+      if (correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected one corrected ordinary-feedback call.')
+      }
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.summary).not.toMatch(
+        /^Support escalation:/iu,
+      )
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).not.toMatch(
+        /feedback|recorded|logged|triage|account-linked escalation|direct notification|support@/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
     'sends once from an explicit private request and never from a group',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -7519,6 +8570,193 @@ describeRealCodex('real Codex support escalation e2e', () => {
       }
     },
     720_000,
+  )
+})
+
+describeRealCodex('real Codex Kernel browser continuation e2e', () => {
+  it(
+    'opens an account portal, reports setup readiness, and does not enter private information',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-kernel-browser-inspection-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const requests: Array<{
+        body: Record<string, unknown>
+        url: string
+      }> = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'computer-use',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          fetchImpl: async (
+            request: string | URL | Request,
+            init?: RequestInit,
+          ): Promise<Response> => {
+            const url = request instanceof Request
+              ? request.url
+              : String(request)
+            const body = JSON.parse(String(init?.body)) as Record<
+              string,
+              unknown
+            >
+            requests.push({ body, url })
+
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs'
+            ) {
+              return new Response(JSON.stringify({
+                expiresAt: '2026-08-26T19:00:00.000Z',
+                reused: false,
+                runId: 'run_synthetic_portal',
+                status: 'running',
+                title: 'Account portal',
+                url: 'https://portal.example.test/setup',
+                visibleText: [
+                  'Account portal loaded.',
+                  'Setup is ready.',
+                  'A mailing address is required to continue.',
+                ].join('\n'),
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish'
+            ) {
+              return new Response(JSON.stringify({
+                ok: true,
+                runId: 'run_synthetic_portal',
+                status: 'completed',
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            throw new Error(`Unexpected hosted computer request: ${url}`)
+          },
+          hostedToolContext: createRealCodexComputerHostedToolContext(),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Open https://portal.example.test/setup and tell me whether account setup is ready.',
+            'Do not enter or submit personal or payment information.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const computerToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_FINISH_RUN_TOOL.name,
+          MURPH_COMPUTER_OPEN_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const prohibitedToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('computer-use/SKILL.md')
+          && action.output.includes('# Computer Use')
+        )
+        const computerCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && computerToolNames.has(action.tool)
+        )
+        const openCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_OPEN_TOOL.name
+        )
+        const finishCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_FINISH_RUN_TOOL.name
+        )
+        const prohibitedCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && prohibitedToolNames.has(action.tool)
+        )
+
+        expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(openCalls).toHaveLength(1)
+        expect(finishCalls).toHaveLength(1)
+        expect(prohibitedCalls).toHaveLength(0)
+        expect(openCalls[0]?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(openCalls[0]).toMatchObject({
+          argumentsValue: {
+            startUrl: 'https://portal.example.test/setup',
+          },
+        })
+        expect(finishCalls[0]).toMatchObject({
+          argumentsValue: {
+            outcome: 'completed',
+            runId: 'run_synthetic_portal',
+          },
+        })
+        expect(requests).toEqual([
+          {
+            body: {
+              goal: 'Hosted computer task.',
+              resumeAfterMailboxItemId: null,
+              resumeDeliveryContext: null,
+              startUrl: 'https://portal.example.test/setup',
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs',
+          },
+          {
+            body: {
+              outcome: 'completed',
+              summary: null,
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish',
+          },
+        ])
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/setup/iu)
+        expect(reply).toMatch(/ready/iu)
+        expect(reply).not.toMatch(
+          /setup (?:is )?complete|information (?:was|has been) submitted/iu,
+        )
+        expect(reply).not.toMatch(/HOSTED_COMPUTER|LIVE_VIEW_ORIGIN/iu)
+        process.stdout.write(
+          `[kernel-browser-continuation-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'account-setup-readiness',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
@@ -8386,20 +9624,82 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
     expect(configToml).not.toContain('[features.multi_agent_v2]')
+    expect(CHILD_MODEL_SELECTION_CONFIG_OVERRIDES).toEqual([
+      'features.multi_agent_v2.enabled=true',
+      'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
+      'features.multi_agent_v2.max_concurrent_threads_per_session=4',
+    ])
+  })
 
-    const multiAgentConfigToml = buildRealCodexConfigToml({
-      apiKeyEnv: 'PROVIDER_KEY',
-      model: 'gpt-5.6-terra',
-      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
-      multiAgentV2: true,
+  it('uses normal Codex home only in explicit subscription mode', async () => {
+    const config = await resolveRealCodexE2eConfig({
+      sourceEnv: {
+        DATABASE_URL: 'ignored-database-url',
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_AUTH: 'subscription',
+        OPENAI_API_KEY: 'ignored-provider-value',
+        PATH: '/usr/bin:/bin',
+        XDG_CONFIG_HOME: '/synthetic-config',
+      },
     })
-    expect(multiAgentConfigToml).toContain('[features.multi_agent_v2]')
-    expect(multiAgentConfigToml).toContain('enabled = true')
-    expect(multiAgentConfigToml).toContain(
-      'expose_spawn_agent_model_overrides = true',
+
+    expect(config).toEqual({
+      codexHome: null,
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+        XDG_CONFIG_HOME: '/synthetic-config',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+  })
+
+  it('composes one explicit runner Codex home only in subscription mode', async () => {
+    const sourceEnv = buildAssistantRealCodexRunEnv({
+      options: parseAssistantRealCodexRunArgs([
+        'focused journey',
+        '--codex-home',
+        '/alternate-codex-home',
+      ]),
+      sourceEnv: {
+        CODEX_HOME: '/ambient-codex-home',
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+    })
+    const config = await resolveRealCodexE2eConfig({ sourceEnv })
+
+    expect(config).toEqual({
+      codexHome: '/alternate-codex-home',
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+    await expect(resolveRealCodexE2eConfig({
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+      },
+    })).rejects.toThrow(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
     )
-    expect(multiAgentConfigToml).toContain(
-      'max_concurrent_threads_per_session = 4',
+  })
+
+  it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
+    await expect(resolveRealCodexE2eConfig({
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_MODEL_PROVIDER: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      },
+    })).rejects.toThrow(
+      `Use ${OPENAI_ENV_MODEL_PROVIDER} for provider-key real Codex e2e.`,
     )
   })
 
@@ -8911,6 +10211,236 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
 
 describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () => {
   it(
+    'reuses canonical nutrition suitability without repeating established screening',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealNumericSuitabilityMemoryRecovery({ config })
+        process.stdout.write(
+          `[numeric-suitability-memory-recovery-e2e] ${JSON.stringify({
+            commands: result.commands,
+            message: result.message,
+            providerActionCount: result.providerActionCount,
+          })}\n`,
+        )
+        expect(result.commands.filter(
+          (command) => command === 'memory show --format json',
+        )).toHaveLength(1)
+        expect(result.commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(
+            /^(?:condition|regimen|measurement|event) (?:list|entry list)\b/u,
+          ),
+        ]))
+        expect(result.commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(/^(?:commons|knowledge)\b/u),
+        ]))
+        expect(result.commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(/^goal (?:save|import-json)\b/u),
+        ]))
+        expect(result.message).not.toMatch(/\?/u)
+        expect(result.message).toMatch(/saved|already|context|clear/iu)
+        expect(result.message).toMatch(/protein|target/iu)
+        expect(result.message).not.toMatch(
+          /pregnan|breastfeed|eating disorder|kidney|liver|bariatric/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'grounds a known suitability rationale in one Health Commons search',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealNumericContextJourney({
+          config,
+          scenario: 'health-rationale',
+        })
+        const commands = expandRecordedVaultCommands(result.commands)
+        expect(commands.filter((command) => command === 'memory show')).toHaveLength(1)
+        expect(commands.filter((command) =>
+          /^(?:commons )?knowledge search\b/u.test(command)
+        )).toHaveLength(1)
+        expect(commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(/^goal (?:save|import-json)\b/u),
+        ]))
+        expect(result.card).toBeNull()
+        expect(result.message).toMatch(/kidney|renal/iu)
+        expect(result.message).toMatch(/protein/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'changes a numeric nutrition target from saved suitability context without repeated screening',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealNumericContextJourney({
+          config,
+          scenario: 'target-change',
+        })
+        const commands = expandRecordedVaultCommands(result.commands)
+        const memoryIndex = commands.findIndex((command) => command === 'memory show')
+        const writeIndexes = commands.flatMap((command, index) =>
+          command.startsWith('goal import-json ')
+            ? [index]
+            : [],
+        )
+        expect(writeIndexes).toHaveLength(1)
+        const writeIndex = writeIndexes[0] ?? -1
+        const readbackIndex = commands.findIndex(
+          (command, index) =>
+            index > writeIndex
+            && command === `goal show ${result.goalId}`,
+        )
+        expect(memoryIndex).toBeGreaterThanOrEqual(0)
+        expect(writeIndex).toBeGreaterThan(memoryIndex)
+        expect(readbackIndex).toBeGreaterThan(writeIndex)
+        expect(commands).not.toEqual(expect.arrayContaining([
+          expect.stringMatching(
+            /^(?:condition|regimen|measurement|event) (?:list|entry list)\b/u,
+          ),
+          expect.stringMatching(/^(?:commons )?knowledge search\b/u),
+        ]))
+        expect(result.savedProteinTarget).toBe(145)
+        expect(result.savedStatus).toBe('paused')
+        expect(result.card).toBeNull()
+        expect(result.message).toMatch(/145/iu)
+        expect(result.message).toMatch(/protein/iu)
+        expect(result.message).not.toMatch(
+          /pregnan|breastfeed|eating disorder|kidney|liver|bariatric/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'keeps default meal-log attachment intent out of unrelated-meal recovery',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealDefaultMealAttachmentBoundary({ config })
+        const commands = expandRecordedVaultCommands(result.commands)
+        expect(commands.filter((command) =>
+          command.startsWith('meal add ')
+          && !command.endsWith(' --help')
+        )).toHaveLength(1)
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'totals'],
+        )).toBe(true)
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'edit', result.incompleteMealId],
+        )).toBe(false)
+        expect(result.savedIncompleteCalories).toBeNull()
+        expect(result.card).toBeNull()
+        expect(result.message).not.toMatch(/\?/u)
+        expect(result.message).not.toMatch(/breakfast|toast/iu)
+        expect(result.message).toMatch(/lunch|logged|saved/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
+    'repairs an incomplete manual meal from an explicitly equivalent prior meal',
+    { timeout: 1_800_000 },
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const result = await runRealPriorMealNutritionRecovery({ config })
+        process.stdout.write(
+          `[prior-meal-nutrition-recovery-e2e] ${JSON.stringify({
+            cardAttached: result.card !== null,
+            commands: result.commands,
+            message: result.message,
+            providerActionCount: result.providerActionCount,
+            savedCalories: result.savedCalories,
+          })}\n`,
+        )
+        const semanticCommands = expandRecordedVaultCommands(result.commands)
+        const editIndexes = semanticCommands.flatMap((command, index) =>
+          command.startsWith(`meal edit ${result.currentMealId} `)
+            ? [index]
+            : [],
+        )
+        expect(editIndexes).toHaveLength(1)
+        const editIndex = editIndexes[0] ?? -1
+        const editCommand = semanticCommands[editIndex] ?? ''
+        const readbackIndex = semanticCommands.findIndex(
+          (command, index) =>
+            index > editIndex
+            && command === `meal show ${result.currentMealId}`,
+        )
+        const totalsIndex = semanticCommands.findIndex(
+          (command, index) =>
+            index > readbackIndex
+            && command.startsWith(
+              'meal totals --from 2026-08-21 --to 2026-08-21',
+            ),
+        )
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'show', result.priorMealId],
+        )).toBe(true)
+        expect(semanticCommands.filter(
+          (command) => command === 'memory show',
+        )).toHaveLength(1)
+        expect(editIndex).toBeGreaterThanOrEqual(0)
+        expect(editCommand).toContain('--nutrition-source inherited')
+        expect(editCommand).toMatch(
+          /saved package labels and measured serving\./iu,
+        )
+        expect(readbackIndex).toBeGreaterThan(editIndex)
+        expect(totalsIndex).toBeGreaterThan(readbackIndex)
+        expect(recordedVaultCommandStartsWith(
+          result.commands,
+          ['meal', 'add'],
+        )).toBe(false)
+        expect(result.savedCalories).toBe(430)
+        expect(result.savedNutritionSource).toBe('inherited')
+        expect(result.savedNutritionSourceDetail).toMatch(
+          /saved package labels and measured serving\./iu,
+        )
+        expect(result.card).toMatchObject({
+          kind: 'daily_nutrition',
+          localDate: '2026-08-21',
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 430 },
+            carbsGrams: { mealCount: 1, total: 48 },
+            fatGrams: { mealCount: 1, total: 14 },
+            fiberGrams: { mealCount: 1, total: 8 },
+            proteinGrams: { mealCount: 1, total: 31 },
+          },
+          version: 2,
+        })
+        expect(result.message).not.toMatch(/\?/u)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+  )
+
+  it(
     'recovers a tombstoned device meal before attaching the requested card',
     { timeout: 1_800_000 },
     async () => {
@@ -8999,7 +10529,7 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
 
 describeRealCodex('real Codex automatic meal clarification e2e', () => {
   it(
-    'asks only for a genuinely unidentifiable capture and enriches that same meal after the reply',
+    'keeps an unrelated incomplete meal out of scheduled capture recovery',
     { timeout: 1_800_000 },
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -9023,6 +10553,7 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
         )
         const removeIndex = eligible.firstCommands.findIndex((command) =>
           command === removePhotoCommand
+          || command.startsWith(`${removePhotoCommand} `)
         )
         expect(firstShowIndex).toBeGreaterThanOrEqual(0)
         expect(removeIndex).toBeGreaterThan(firstShowIndex)
@@ -9040,6 +10571,11 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
         )
         expect(eligible.firstCard).toBeNull()
         expect(eligible.savedAttachmentCount).toBe(0)
+        expect(recordedVaultCommandStartsWith(
+          eligible.firstCommands,
+          ['meal', 'edit', eligible.unrelatedMealId],
+        )).toBe(false)
+        expect(eligible.firstMessage).not.toMatch(/breakfast|toast/iu)
 
         const editIndex = eligible.followupCommands.findIndex((command) =>
           command.startsWith(`meal edit ${eligible.mealId} `)
@@ -9089,12 +10625,23 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
             config,
             protectedContext: true,
           })
-        expect(protectedResult.firstCommands).toContain(
-          `meal remove-photo ${protectedResult.mealId}`,
+        expect(recordedVaultCommandStartsWith(
+          protectedResult.firstCommands,
+          ['meal', 'remove-photo', protectedResult.mealId],
+        )).toBe(true)
+        const protectedCommands = expandRecordedVaultCommands(
+          protectedResult.firstCommands,
         )
-        expect(protectedResult.firstCommands).not.toEqual(
+        const protectedMealEdits = protectedCommands.filter((command) =>
+          command.startsWith(`meal edit ${protectedResult.mealId} `)
+        )
+        expect(protectedMealEdits.length).toBeGreaterThan(0)
+        for (const command of protectedMealEdits) {
+          expect(command).not.toMatch(/--nutrition-/u)
+        }
+        expect(protectedCommands).not.toEqual(
           expect.arrayContaining([
-            expect.stringMatching(/^(?:goal|meal edit|meal totals)\b/u),
+            expect.stringMatching(/^(?:goal|meal totals)\b/u),
           ]),
         )
         expect(protectedResult.firstMessage).not.toMatch(/\?/u)
@@ -9104,6 +10651,11 @@ describeRealCodex('real Codex automatic meal clarification e2e', () => {
         expect(protectedResult.firstCard).toBeNull()
         expect(protectedResult.savedAttachmentCount).toBe(0)
         expect(protectedResult.savedCalories).toBeNull()
+        expect(protectedResult.savedNote).toMatch(/reviewed|could not be identified/iu)
+        expect(recordedVaultCommandStartsWith(
+          protectedResult.firstCommands,
+          ['meal', 'edit', protectedResult.unrelatedMealId],
+        )).toBe(false)
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
@@ -9290,17 +10842,720 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
   }
 }
 
+async function runRealNumericSuitabilityMemoryRecovery(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  commands: string[]
+  message: string
+  providerActionCount: number
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-numeric-suitability-memory-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await Promise.all([
+      mkdir(vaultRoot, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+    await materializeNumericSuitabilityVaultCli({
+      binDirectory,
+      commandLog,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'I am considering a daily protein target of 135 grams.',
+        'Before changing anything, use my saved context to tell me whether numeric self-directed targets are suitable.',
+        'Do not modify a goal yet.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+
+    return {
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function materializeNumericSuitabilityVaultCli(input: {
+  binDirectory: string
+  commandLog: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const emptyGoals = {
+    count: 0,
+    items: [],
+    nextCursor: null,
+    vault: 'synthetic-vault',
+  }
+  const memory = {
+    document: {
+      records: [
+        {
+          id: 'memory_adult',
+          section: 'Identity',
+          text: 'Adult.',
+          updatedAt: '2026-08-20T15:00:00.000Z',
+        },
+        {
+          id: 'memory_numeric_suitability',
+          section: 'Context',
+          text: 'Current nutrition suitability review is complete. No pregnancy or breastfeeding, number-sensitive tracking, underweight or frailty, nutrition-target-changing medication, relevant kidney, liver, heart, or endocrine disease, bariatric care, or clinician-managed nutrition constraint applies.',
+          updatedAt: '2026-08-20T15:00:00.000Z',
+        },
+      ],
+    },
+    memory: null,
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      'case "$*" in',
+      `  "memory show --format json") ${emit(memory)} ;;`,
+      `  "goal list --status active --limit 200 --format json") ${emit(emptyGoals)} ;;`,
+      `  "goal list --limit 200 --format json") ${emit(emptyGoals)} ;;`,
+      '  goal\\ save*|goal\\ import-json*) printf \'%s\\n\' \'Goal mutation forbidden in this fixture\' >&2; exit 17 ;;',
+      '  *) printf \'unsupported suitability fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+type NumericContextJourneyScenario = 'health-rationale' | 'target-change'
+
+async function runRealNumericContextJourney(input: {
+  config: RealCodexE2eConfig
+  scenario: NumericContextJourneyScenario
+}): Promise<{
+  card: unknown
+  commands: string[]
+  goalId: string | null
+  message: string
+  providerActionCount: number
+  savedProteinTarget: number | null
+  savedStatus: string | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), `murph-numeric-context-${input.scenario}-e2e-`),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+
+    let goalId: string | null = null
+    if (input.scenario === 'target-change') {
+      const pointTarget = (
+        targetId: string,
+        metricKey: string,
+        unit: string,
+        value: number,
+      ) => goalMetricTargetSchema.parse({
+        comparator: 'between',
+        evaluation: { kind: 'selected-value' },
+        highValue: value,
+        kind: 'metric',
+        metricKey,
+        targetId,
+        unit,
+        value,
+      })
+      const goal = await upsertGoal({
+        domains: ['nutrition'],
+        horizon: 'ongoing',
+        metricTargets: [
+          pointTarget(
+            'murph-default-dietary-calories',
+            'dietary-calories',
+            'kcal',
+            2_100,
+          ),
+          pointTarget(
+            'murph-default-protein-grams',
+            'protein-grams',
+            'g',
+            135,
+          ),
+          pointTarget(
+            'murph-default-carbs-grams',
+            'carbs-grams',
+            'g',
+            250,
+          ),
+          pointTarget(
+            'murph-default-fat-grams',
+            'fat-grams',
+            'g',
+            70,
+          ),
+          pointTarget(
+            'murph-default-fiber-grams',
+            'fiber-grams',
+            'g',
+            30,
+          ),
+        ],
+        slug: 'murph-daily-nutrition-starting-targets',
+        status: 'paused',
+        title: 'Daily nutrition targets',
+        vaultRoot,
+        window: { startAt: '2026-08-21' },
+      })
+      goalId = goal.record.entity.goalId
+    }
+
+    await materializeNumericContextVaultCli({
+      binDirectory,
+      commandLog,
+      scenario: input.scenario,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: input.scenario === 'target-change'
+        ? [
+            'Change my existing provisional daily protein target from 135 grams to 145 grams.',
+            'Keep the other proposed targets and their effective date unchanged.',
+            'Use my saved suitability context, keep the revised bundle provisional, and do not attach a card.',
+          ].join(' ')
+        : [
+            'My saved context says kidney disease makes self-directed protein targets unsuitable for me.',
+            'Why does kidney disease change whether a protein target is appropriate?',
+            'Explain the medical rationale, but do not change any goal or attach a card.',
+          ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const state = await readNumericTargetState({ goalId, vaultRoot })
+
+    return {
+      card: result.responseCard,
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      goalId,
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
+      ...state,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function materializeNumericContextVaultCli(input: {
+  binDirectory: string
+  commandLog: string
+  scenario: NumericContextJourneyScenario
+  vaultRoot: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const tsxLoaderPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+    '../tsx/dist/loader.mjs',
+  )
+  const memory = {
+    document: {
+      records: input.scenario === 'target-change'
+        ? [{
+            id: 'memory_numeric_suitability',
+            section: 'Context',
+            text: 'Current nutrition suitability review is complete. Numeric self-directed nutrition targets are suitable, and no relevant safety category applies.',
+            updatedAt: '2026-08-20T15:00:00.000Z',
+          }]
+        : [{
+            id: 'memory_kidney_suitability',
+            section: 'Context',
+            text: 'Kidney disease is documented. Self-directed numeric protein targets are not suitable without clinician guidance.',
+            updatedAt: '2026-08-20T15:00:00.000Z',
+          }],
+    },
+    memory: null,
+    vault: 'synthetic-vault',
+  }
+  const commonsEvidence = {
+    items: [{
+      excerpt: 'Protein intake in chronic kidney disease may need individualization based on kidney function, nutrition status, and the treatment plan. A clinician or renal dietitian should guide the target.',
+      sources: [{
+        title: 'Nutrition and Chronic Kidney Disease',
+        url: 'https://www.niddk.nih.gov/health-information/kidney-disease/chronic-kidney-disease-ckd/eating-nutrition',
+      }],
+      title: 'Protein targets in chronic kidney disease',
+    }],
+    query: 'why kidney disease changes protein target suitability',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  const commonsBranch = input.scenario === 'health-rationale'
+    ? `    ${emit(commonsEvidence)}`
+    : [
+        '    printf \'%s\\n\' \'Health Commons is forbidden for workflow eligibility in this fixture.\' >&2',
+        '    exit 18',
+      ].join('\n')
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      'case "$*" in',
+      `  *"memory show"*) ${emit(memory)} ;;`,
+      '  *"commons knowledge search"*|*"knowledge search"*)',
+      commonsBranch,
+      '    ;;',
+      '  *)',
+      `    exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function readNumericTargetState(input: {
+  goalId: string | null
+  vaultRoot: string
+}): Promise<{
+  savedProteinTarget: number | null
+  savedStatus: string | null
+}> {
+  if (!input.goalId) {
+    return { savedProteinTarget: null, savedStatus: null }
+  }
+
+  const vault = await readVaultRawTolerant(input.vaultRoot)
+  const goal = vault.goals.find((candidate) =>
+    candidate.entityId === input.goalId
+  )
+  const metricTargets = Array.isArray(goal?.attributes.metricTargets)
+    ? goal.attributes.metricTargets
+    : []
+  const proteinTarget = metricTargets
+    .map((target) => readRecord(target))
+    .find((target) => target?.metricKey === 'protein-grams')
+
+  return {
+    savedProteinTarget: typeof proteinTarget?.value === 'number'
+      ? proteinTarget.value
+      : null,
+    savedStatus: typeof goal?.attributes.status === 'string'
+      ? goal.attributes.status
+      : null,
+  }
+}
+
+async function runRealDefaultMealAttachmentBoundary(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  card: unknown
+  commands: string[]
+  incompleteMealId: string
+  message: string
+  providerActionCount: number
+  savedIncompleteCalories: number | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-default-meal-attachment-boundary-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+    const incompleteMeal = await addMeal({
+      ingredients: ['toast'],
+      note: 'Unresolved toast plate from breakfast.',
+      occurredAt: '2026-08-21T12:10:00.000Z',
+      source: 'manual',
+      vaultRoot,
+    })
+    const pointTarget = (
+      targetId: string,
+      metricKey: string,
+      unit: string,
+      value: number,
+    ) => goalMetricTargetSchema.parse({
+      comparator: 'between',
+      evaluation: { kind: 'selected-value' },
+      highValue: value,
+      kind: 'metric',
+      metricKey,
+      targetId,
+      unit,
+      value,
+    })
+    await upsertGoal({
+      domains: ['nutrition'],
+      metricTargets: [
+        pointTarget('synthetic-calories', 'dietary-calories', 'kcal', 2_100),
+        pointTarget('synthetic-protein', 'protein-grams', 'g', 135),
+        pointTarget('synthetic-carbs', 'carbs-grams', 'g', 250),
+        pointTarget('synthetic-fat', 'fat-grams', 'g', 70),
+        pointTarget('synthetic-fiber', 'fiber-grams', 'g', 30),
+      ],
+      status: 'active',
+      title: 'Daily nutrition targets',
+      vaultRoot,
+      window: { startAt: '2026-08-01' },
+    })
+    await materializeAutomaticMealClarificationVaultCli({
+      binDirectory,
+      commandLog,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'Log lunch for August 21: grilled chicken, rice, and green beans.',
+        'The label totals are 620 calories, 45 grams protein, 70 grams carbs, 18 grams fat, and 9 grams fiber.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const incompleteState = await readAutomaticMealClarificationState({
+      mealId: incompleteMeal.mealId,
+      vaultRoot,
+    })
+
+    return {
+      card: result.responseCard,
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      incompleteMealId: incompleteMeal.mealId,
+      message: result.finalMessage,
+      providerActionCount: result.providerActionCount,
+      savedIncompleteCalories: incompleteState.savedCalories,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+async function runRealPriorMealNutritionRecovery(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  card: unknown
+  commands: string[]
+  currentMealId: string
+  message: string
+  priorMealId: string
+  providerActionCount: number
+  savedCalories: number | null
+  savedNutritionSource: string | null
+  savedNutritionSourceDetail: string | null
+}> {
+  const workingRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-prior-meal-nutrition-recovery-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingRoot, 'bin')
+    const commandLog = path.join(workingRoot, 'vault-commands.log')
+    const skillsRoot = path.join(workingRoot, 'skills')
+    const vaultRoot = path.join(workingRoot, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
+      writeFile(commandLog, '', 'utf8'),
+    ])
+    const priorMeal = await addMeal({
+      ingredients: ['rolled oats', 'plain yogurt', 'pear', 'almond butter'],
+      note: 'Breakfast bowl, one medium serving.',
+      nutrition: {
+        provenance: {
+          confidence: 'high',
+          source: 'label',
+          sourceDetail: 'Saved package labels and measured serving.',
+        },
+        totals: {
+          calories: 430,
+          carbsGrams: 48,
+          fatGrams: 14,
+          fiberGrams: 8,
+          proteinGrams: 31,
+        },
+      },
+      occurredAt: '2026-08-19T12:15:00.000Z',
+      source: 'manual',
+      vaultRoot,
+    })
+    const currentMeal = await addMeal({
+      ingredients: ['rolled oats', 'plain yogurt', 'pear', 'almond butter'],
+      note: 'Breakfast bowl, one medium serving.',
+      occurredAt: '2026-08-21T12:10:00.000Z',
+      source: 'manual',
+      vaultRoot,
+    })
+    const pointTarget = (
+      targetId: string,
+      metricKey: string,
+      unit: string,
+      value: number,
+    ) => goalMetricTargetSchema.parse({
+      comparator: 'between',
+      evaluation: { kind: 'selected-value' },
+      highValue: value,
+      kind: 'metric',
+      metricKey,
+      targetId,
+      unit,
+      value,
+    })
+    await upsertGoal({
+      domains: ['nutrition'],
+      metricTargets: [
+        pointTarget('synthetic-calories', 'dietary-calories', 'kcal', 2_100),
+        pointTarget('synthetic-protein', 'protein-grams', 'g', 135),
+        pointTarget('synthetic-carbs', 'carbs-grams', 'g', 250),
+        pointTarget('synthetic-fat', 'fat-grams', 'g', 70),
+        pointTarget('synthetic-fiber', 'fiber-grams', 'g', 30),
+      ],
+      status: 'active',
+      title: 'Daily nutrition targets',
+      vaultRoot,
+      window: { startAt: '2026-08-01' },
+    })
+    await materializeAutomaticMealClarificationVaultCli({
+      binDirectory,
+      commandLog,
+      vaultRoot,
+    })
+
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions:
+        buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21',
+          protectedContext: false,
+          scheduled: false,
+        }),
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      groupConversation: false,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: [
+        'Send my daily nutrition card for August 21.',
+        'The breakfast bowl saved that day had exactly the same ingredients and portion as the saved breakfast bowl from August 19.',
+        'Update the existing August 21 meal rather than adding another meal.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory: vaultRoot,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+    const commands = commandText === '' ? [] : commandText.split('\n')
+    const state = await readAutomaticMealClarificationState({
+      mealId: currentMeal.mealId,
+      vaultRoot,
+    })
+
+    return {
+      card: result.responseCard,
+      commands,
+      currentMealId: currentMeal.mealId,
+      message: result.finalMessage,
+      priorMealId: priorMeal.mealId,
+      providerActionCount: result.providerActionCount,
+      savedCalories: state.savedCalories,
+      savedNutritionSource: state.savedNutritionSource,
+      savedNutritionSourceDetail: state.savedNutritionSourceDetail,
+    }
+  } finally {
+    await removeRealCodexTemporaryPath(workingRoot)
+  }
+}
+
+describe('recorded vault command parsing', () => {
+  it('normalizes global format options and flattens batch commands', () => {
+    expect(expandRecordedVaultCommands([
+      '--format json meal edit meal_example --nutrition-source inherited',
+      '--format json batch --compact --command ["memory","show","--format","json"] --command ["meal","show","meal_example"] --command ["meal","edit","meal_example","--nutrition-source-detail","copied [verified]"]',
+    ])).toEqual([
+      'meal edit meal_example --nutrition-source inherited',
+      'memory show',
+      'meal show meal_example',
+      'meal edit meal_example --nutrition-source-detail copied [verified]',
+    ])
+  })
+})
+
 function recordedVaultCommandStartsWith(
   commands: readonly string[],
   prefix: readonly string[],
 ): boolean {
   const directPrefix = prefix.join(' ')
-  const batchPrefix = `[${prefix.map((part) => JSON.stringify(part)).join(',')}`
-  return commands.some((command) =>
+  return expandRecordedVaultCommands(commands).some((command) =>
     command === directPrefix
     || command.startsWith(`${directPrefix} `)
-    || command.includes(`--command ${batchPrefix}`)
   )
+}
+
+function expandRecordedVaultCommands(commands: readonly string[]): string[] {
+  return commands.flatMap((command) => {
+    const normalized = normalizeRecordedVaultCommand(command)
+    if (normalized !== 'batch' && !normalized.startsWith('batch ')) {
+      return [normalized]
+    }
+
+    return readRecordedBatchCommandArguments(normalized)
+      .map((arguments_) => normalizeRecordedVaultCommand(arguments_.join(' ')))
+  })
+}
+
+function normalizeRecordedVaultCommand(command: string): string {
+  let normalized = command.trim()
+  while (normalized.startsWith('--format ')) {
+    normalized = normalized.replace(/^--format\s+\S+\s*/u, '')
+  }
+  return normalized.replace(/\s+--format\s+\S+$/u, '')
+}
+
+function readRecordedBatchCommandArguments(command: string): string[][] {
+  return command.split(' --command ').slice(1).flatMap((encodedArguments) => {
+    try {
+      const parsed: unknown = JSON.parse(encodedArguments)
+      if (
+        Array.isArray(parsed)
+        && parsed.every((part) => typeof part === 'string')
+      ) {
+        return [parsed]
+      }
+    } catch {
+      // An invalid batch argument cannot prove a canonical nested command.
+    }
+    return []
+  })
 }
 
 async function runRealAutomaticMealClarificationScenario(input: {
@@ -9316,6 +11571,8 @@ async function runRealAutomaticMealClarificationScenario(input: {
   mealId: string
   savedAttachmentCount: number | null
   savedCalories: number | null
+  savedNote: string | null
+  unrelatedMealId: string
 }> {
   const workingRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-automatic-meal-clarification-e2e-'),
@@ -9348,6 +11605,13 @@ async function runRealAutomaticMealClarificationScenario(input: {
       occurredAt: '2026-08-24T23:37:00.000Z',
       photoPath,
       source: 'device',
+      vaultRoot,
+    })
+    const unrelatedMeal = await addMeal({
+      ingredients: ['toast'],
+      note: 'Unresolved toast plate from breakfast.',
+      occurredAt: '2026-08-24T12:15:00.000Z',
+      source: 'manual',
       vaultRoot,
     })
     await materializeAutomaticMealClarificationVaultCli({
@@ -9390,6 +11654,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
         'Controlled scenario evidence:',
         '- The canonical fixture has one device-captured meal at 7:37pm and no nearby manual duplicate.',
+        '- A separate earlier manual breakfast remains incomplete and is not the selected device capture.',
         '- Inspect the retained attachment through the canonical meal before deciding whether it supports an estimate.',
         '- Complete the normal closeout and return its terminal delivery decision.',
       ].join('\n\n'),
@@ -9418,6 +11683,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
         followupCommands: [],
         followupMessage: '',
         mealId: meal.mealId,
+        unrelatedMealId: unrelatedMeal.mealId,
         ...afterFirst,
       }
     }
@@ -9451,6 +11717,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
       followupCommands: commands.slice(firstCommands.length),
       followupMessage: followup.finalMessage,
       mealId: meal.mealId,
+      unrelatedMealId: unrelatedMeal.mealId,
       ...afterFollowup,
     }
   } finally {
@@ -9500,17 +11767,13 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const tsxLoaderPath = path.resolve(
-    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
-    '../tsx/dist/loader.mjs',
-  )
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
-      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
@@ -9527,21 +11790,36 @@ async function readAutomaticMealClarificationState(input: {
 }): Promise<{
   savedAttachmentCount: number | null
   savedCalories: number | null
+  savedNote: string | null
+  savedNutritionSource: string | null
+  savedNutritionSourceDetail: string | null
 }> {
   const vault = await readVaultRawTolerant(input.vaultRoot)
   const event = [...vault.events]
     .reverse()
-    .find((candidate) => candidate.entityId === input.mealId)
-  const meal = readRecord(event?.attributes.meal)
+    .find((candidate) =>
+      candidate.entityId === input.mealId && candidate.kind === 'meal'
+    )
+  const meal = event?.attributes
   const nutrition = readRecord(meal?.nutrition)
+  const provenance = readRecord(nutrition?.provenance)
   const totals = readRecord(nutrition?.totals)
 
   return {
-    savedAttachmentCount: Array.isArray(meal?.attachments)
-      ? meal.attachments.length
+    savedAttachmentCount: event
+      ? Array.isArray(meal?.attachments)
+        ? meal.attachments.length
+        : 0
       : null,
     savedCalories: typeof totals?.calories === 'number'
       ? totals.calories
+      : null,
+    savedNote: typeof meal?.note === 'string' ? meal.note : null,
+    savedNutritionSource: typeof provenance?.source === 'string'
+      ? provenance.source
+      : null,
+    savedNutritionSourceDetail: typeof provenance?.sourceDetail === 'string'
+      ? provenance.sourceDetail
       : null,
   }
 }
@@ -10619,6 +12897,69 @@ function createRealCodexSupportHostedToolContext(
   }
 }
 
+async function executeRealCodexProductFeedbackProbe(input: {
+  directoryPrefix: string
+  probeDeveloperInstructions?: string
+  productFeedbackRecorder: AssistantTurnProductFeedbackRecorder
+  prompt: string
+}) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), input.directoryPrefix),
+  )
+
+  try {
+    return await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: [
+        buildDirectConversationDeveloperInstructions(),
+        input.probeDeveloperInstructions,
+      ].filter((value) => value !== undefined).join('\n\n'),
+      dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+      env: config.env,
+      hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+      model: config.model,
+      modelProvider: config.modelProvider,
+      productFeedbackRecorder: input.productFeedbackRecorder,
+      prompt: input.prompt,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+function createRealCodexComputerHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_computer'],
+      conversationId: 'conversation-computer-direct',
+      conversationScope: 'direct',
+      inboundMailboxItemIds: ['mailbox-computer'],
+      originSessionId: 'session-computer-direct',
+      recipientKey: 'recipient-computer-direct',
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
+  }
+}
+
 function createRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
   return {
     async recordProductFeedback() {
@@ -10647,12 +12988,22 @@ async function materializeAssistantSkill(input: {
   skillsRoot: string
   slug: AssistantSkillSlug
 }): Promise<void> {
-  const targetDirectory = path.join(input.skillsRoot, input.slug)
-  await mkdir(targetDirectory, { recursive: true })
+  await materializeAssistantSkillAsset({
+    relativePath: path.join(input.slug, 'SKILL.md'),
+    skillsRoot: input.skillsRoot,
+  })
+}
+
+async function materializeAssistantSkillAsset(input: {
+  relativePath: string
+  skillsRoot: string
+}): Promise<void> {
+  const targetPath = path.join(input.skillsRoot, input.relativePath)
+  await mkdir(path.dirname(targetPath), { recursive: true })
   await writeFile(
-    path.join(targetDirectory, 'SKILL.md'),
+    targetPath,
     await readFile(
-      path.join(resolveAssistantSkillsRoot(), input.slug, 'SKILL.md'),
+      path.join(resolveAssistantSkillsRoot(), input.relativePath),
       'utf8',
     ),
     'utf8',
@@ -11281,6 +13632,8 @@ async function materializeHabitatVoiceVaultCli(input: {
 
 async function materializeRealWorkoutVaultCli(input: {
   binDirectory: string
+  commandLogPath: string
+  vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -11288,11 +13641,9 @@ async function materializeRealWorkoutVaultCli(input: {
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_COMMAND_LOG" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
-      '  exit 70',
-      'fi',
-      'printf \'%s\\n\' "$*" >> "$WORKOUT_E2E_COMMAND_LOG"',
-      'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
@@ -11967,7 +14318,7 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(
+function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
 ): string {
   return buildAssistantSystemPrompt({
@@ -12774,6 +15125,31 @@ function readDynamicToolAttempts(
   })
 }
 
+function expectStructuredWorkoutAuthoringAttempt(input: {
+  entityId: string
+  events: readonly unknown[]
+  state: 'active' | 'completed'
+}): void {
+  const attempts = readDynamicToolAttempts(input.events).filter(
+    (attempt) => attempt.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name,
+  )
+  expect(attempts).toHaveLength(1)
+
+  const card = readRecord(attempts[0]?.argumentsValue.card)
+  expect(card).toMatchObject({
+    kind: 'compact_table',
+    tracking: {
+      entityId: input.entityId,
+      kind: 'workout',
+    },
+    workout: { state: input.state },
+  })
+  expect(card).not.toHaveProperty('columns')
+  expect(card).not.toHaveProperty('rowHeader')
+  expect(card).not.toHaveProperty('rows')
+  expect(readRecord(card?.tracking)).not.toHaveProperty('snapshotAt')
+}
+
 function readCompletedAgentMessages(
   events: readonly unknown[],
 ): CompletedAgentMessage[] {
@@ -12837,6 +15213,16 @@ function readCommandText(value: unknown): string {
   return Array.isArray(value)
     ? value.filter((part): part is string => typeof part === 'string').join(' ')
     : ''
+}
+
+function redactRealCodexDiagnosticText(value: string): string {
+  const redactedPaths = value
+    .replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')
+    .replace(/\/home\/[^/\s]+/gu, '<HOME_DIR>')
+  const localUser = path.basename(homedir()).trim()
+  return localUser.length >= 3
+    ? redactedPaths.replaceAll(localUser, '<REDACTED_USER>')
+    : redactedPaths
 }
 
 function readArgumentsRecord(value: unknown): Record<string, unknown> {
@@ -13143,30 +15529,57 @@ function summarizeCodexEventSequence(
 }
 
 async function resolveRealCodexE2eConfig(
-  input: { multiAgentV2?: boolean } = {},
+  input: {
+    sourceEnv?: NodeJS.ProcessEnv
+  } = {},
 ): Promise<RealCodexE2eConfig> {
+  const sourceEnv = input.sourceEnv ?? process.env
   const model =
-    normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
-  const configuredCodexHome = normalizeEnvString(process.env.MURPH_REAL_CODEX_HOME)
-  if (configuredCodexHome) {
+  const authMode =
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_AUTH) ?? 'provider'
+  if (authMode !== 'provider' && authMode !== 'subscription') {
     throw new Error(
-      'MURPH_REAL_CODEX_HOME is not supported for this e2e; it always creates an isolated Codex home.',
+      'MURPH_REAL_CODEX_AUTH must be provider or subscription.',
     )
   }
-
+  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
+  if (authMode === 'provider' && configuredCodexHome) {
+    throw new Error(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
+    )
+  }
   const explicitModelProvider =
-    normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL_PROVIDER)
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL_PROVIDER)
+  if (authMode === 'subscription') {
+    if (
+      explicitModelProvider
+      && explicitModelProvider !== OPENAI_SUBSCRIPTION_MODEL_PROVIDER
+    ) {
+      throw new Error(
+        `Subscription real Codex e2e uses the built-in ${OPENAI_SUBSCRIPTION_MODEL_PROVIDER} provider.`,
+      )
+    }
+    return {
+      codexHome: configuredCodexHome,
+      env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
+      model,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    }
+  }
+
   const modelProvider =
     explicitModelProvider
     ?? (
-      normalizeEnvString(process.env[VERCEL_AI_GATEWAY_API_KEY_ENV])
+      normalizeEnvString(sourceEnv[VERCEL_AI_GATEWAY_API_KEY_ENV])
         ? VERCEL_AI_GATEWAY_MODEL_PROVIDER
         : OPENAI_ENV_MODEL_PROVIDER
     )
-  if (modelProvider === 'openai') {
+  if (modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER) {
     throw new Error(
-      `Use ${OPENAI_ENV_MODEL_PROVIDER} for this e2e; the built-in openai provider would require the normal Codex auth store.`,
+      `Use ${OPENAI_ENV_MODEL_PROVIDER} for provider-key real Codex e2e.`,
     )
   }
   if (
@@ -13179,14 +15592,14 @@ async function resolveRealCodexE2eConfig(
   }
 
   const apiKeyEnv =
-    normalizeEnvString(process.env.MURPH_REAL_CODEX_PROVIDER_ENV_KEY)
+    normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_PROVIDER_ENV_KEY)
     ?? resolveRealCodexProviderApiKeyEnv(modelProvider)
   if (!apiKeyEnv) {
     throw new Error(
       `MURPH_REAL_CODEX_PROVIDER_ENV_KEY is required for ${modelProvider} real Codex e2e.`,
     )
   }
-  if (!normalizeEnvString(process.env[apiKeyEnv])) {
+  if (!normalizeEnvString(sourceEnv[apiKeyEnv])) {
     throw new Error(
       `${apiKeyEnv} is required for ${modelProvider} real Codex e2e.`,
     )
@@ -13204,7 +15617,6 @@ async function resolveRealCodexE2eConfig(
       apiKeyEnv,
       model,
       modelProvider,
-      multiAgentV2: input.multiAgentV2,
     }),
     {
       encoding: 'utf8',
@@ -13216,11 +15628,25 @@ async function resolveRealCodexE2eConfig(
     codexHome,
     env: buildRealCodexE2eEnv({
       apiKeyEnv,
+      sourceEnv,
     }),
     model,
     modelProvider,
     temporaryPaths,
   }
+}
+
+function buildRealCodexSubscriptionE2eEnv(
+  sourceEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST) {
+    const value = normalizeEnvString(sourceEnv[key])
+    if (value) {
+      env[key] = value
+    }
+  }
+  return env
 }
 
 function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null {
@@ -13239,7 +15665,6 @@ function buildRealCodexConfigToml(input: {
   apiKeyEnv: string
   model: string
   modelProvider: string
-  multiAgentV2?: boolean
 }): string {
   const baseUrl =
     input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
@@ -13274,15 +15699,6 @@ function buildRealCodexConfigToml(input: {
     'stream_max_retries = 5',
     'supports_websockets = false',
     '',
-    ...(input.multiAgentV2
-      ? [
-          '[features.multi_agent_v2]',
-          'enabled = true',
-          'expose_spawn_agent_model_overrides = true',
-          'max_concurrent_threads_per_session = 4',
-          '',
-        ]
-      : []),
   ].join('\n')
 }
 

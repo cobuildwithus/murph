@@ -555,6 +555,7 @@ function createHostedMember(
     initialOnboardingCompletedAt: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2025-03-27T08:00:00.000Z"),
+    groupPrivateConversionTrackedAt: null,
     id: "member_123",
     pendingActivationTimeZone: null,
     signupNotificationContextEncrypted: null,

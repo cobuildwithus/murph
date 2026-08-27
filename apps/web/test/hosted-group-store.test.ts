@@ -67,6 +67,7 @@ import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  ensureHostedGroupStructureForThreadContainerTx,
   HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
@@ -2142,6 +2143,85 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
   });
 });
 
+describe("organic hosted-group materialization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.grantHostedVaultShareTx.mockResolvedValue({
+      id: "share_profile",
+      requiresProjection: true,
+    });
+  });
+
+  it("creates one unnamed ordinary group with owner membership and replays idempotently", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      ownerMemberId: "member_owner",
+    });
+    const now = new Date("2026-08-25T12:00:00.000Z");
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      now,
+      tx,
+    })).resolves.toMatchObject({
+      created: true,
+    });
+
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        displayName: null,
+        joinPolicyJson: expect.objectContaining({
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
+          requestedVaultShareProjectionScopes: [],
+        }),
+        kind: "custom",
+        ownerMemberId: "member_owner",
+        runtimeMemberId: "member_group_runtime",
+      }),
+      select: { id: true },
+    });
+    expect(tx.hostedGroupMember.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        groupId: expect.any(String),
+        joinedAt: now,
+        memberId: "member_owner",
+        role: "owner",
+      }),
+    }));
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-08-25T12:01:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({
+      created: false,
+    });
+    expect(tx.hostedGroup.create).toHaveBeenCalledTimes(1);
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("repairs owner membership without rewriting an existing group configuration", async () => {
+    const tx = buildGroupLinkTx({
+      existingDisplayName: "Existing Group",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-08-25T12:00:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({
+      created: false,
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).toHaveBeenCalledOnce();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+});
+
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2167,6 +2247,27 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
 
     expect(tx.hostedGroup.create).not.toHaveBeenCalled();
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active-access gate ahead of user-initiated group materialization", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      ownerMemberId: "member_owner",
+    });
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-08-25T12:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_RUNTIME_INACTIVE",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).not.toHaveBeenCalled();
   });
 
   it("does not request or grant health projections without an explicit checkpoint scope", async () => {

@@ -311,7 +311,13 @@ uses the existing-meal recovery above.
    unambiguous card-authorizing bundle, run the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
    range immediately before any response-card attachment; do not reuse an
-   earlier total or calculate nutrition independently. When the run covers
+   earlier total or calculate nutrition independently. On an interactive card
+   request, apply food-journal's selected-date incomplete-meal recovery to
+   every saved meal whose nutrition coverage blocks the card, including a
+   manual, conversation, provider, or device meal not selected by this
+   closeout. Do not widen the scheduled-question exception above: a scheduled
+   run follows its existing compact closeout when an unselected meal remains
+   incomplete. When the run covers
    exactly one local date, the canonical read includes a calorie total, and
    the card-time safety gate from step 6 still passes, call
    `murph.attach_response_card` with this exact mapping:

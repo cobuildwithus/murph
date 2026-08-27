@@ -169,6 +169,63 @@ describe('assistant food journal skill', () => {
       'concise truthful fallback. Never narrate individual safety, totals, estimation,\nor target-resolution mechanics.',
     )
     expect(skill).toContain(
+      '### Complete an interactive day before attaching its card',
+    )
+    expect(skill).toContain(
+      "compare every\nmetric's `mealCount` with the top-level `mealCount`",
+    )
+    expect(skill).toContain(
+      'List only that selected date, show the exact meals that lack\nnutrition',
+    )
+    expect(skill).toContain(
+      "A member's current statement that the\nmeal is equivalent to a specific prior meal is usable evidence.",
+    )
+    expect(skill).toContain(
+      'Use only the canonical meal surface for this recovery: `vault-cli meal list',
+    )
+    expect(skill).toContain(
+      '`vault-cli meal show\n<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed',
+    )
+    expect(skill).toContain(
+      '`--nutrition-calories`, `--nutrition-protein-grams`,',
+    )
+    expect(skill).toContain(
+      '`--nutrition-confidence`, and `--nutrition-source-detail` flags.',
+    )
+    expect(skill).toContain(
+      'Never inspect\nor modify raw vault files.',
+    )
+    expect(skill).toContain(
+      'show the\nselected prior meal before copying its saved totals.',
+    )
+    expect(skill).toContain(
+      'Use `--nutrition-source inherited` for\ncopied prior-meal totals',
+    )
+    expect(skill).toContain(
+      'Use this all-meal recovery only when the member explicitly requests a daily\nnutrition card or daily summary',
+    )
+    expect(skill).toContain(
+      'Default\nattachment intent after a meal mutation does not authorize reading, editing,\nor asking about another meal.',
+    )
+    expect(skill).toContain(
+      'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',
+    )
+    expect(skill).toContain(
+      'edit and read\nback the exact existing meal, then rerun fresh same-date totals before any card',
+    )
+    expect(skill).toContain(
+      'ask one compact question for only\nthat missing detail and stop without a card',
+    )
+    expect(skill).toContain(
+      'Do not ask merely to\nenable numeric output for an intuitive-eating, eating-disorder-risk, or\nnumber-sensitive member.',
+    )
+    expect(skill).toContain(
+      'This generic recovery question is interactive-only.',
+    )
+    expect(skill).toContain(
+      'partial-card schema and\nrendering remain compatibility surfaces, not the normal interactive closeout.',
+    )
+    expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',
     )
     expect(skill).toContain('does not attach a goal-less card')

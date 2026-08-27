@@ -1,8 +1,11 @@
+import { performance } from "node:perf_hooks";
+
 import { isStrictIsoDate, isWritableIsoDateTime } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { assertCanonicalWritePort } from "../core-port.ts";
 import type {
+  DeviceBatchImportExecutionOptions,
   DeviceBatchImportPayload,
   DeviceEvidencePartPayload,
 } from "../core-port.ts";
@@ -24,7 +27,16 @@ import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
   defaultTimeZone?: string;
+  importSession?: DeviceBatchImportExecutionOptions["session"];
   providerRegistry?: DeviceProviderRegistry;
+}
+
+export interface DeviceProviderSnapshotImportTiming {
+  canonicalCoreElapsedMs: number;
+  canonicalWriteElapsedMs: number;
+  eventIdentityIndexCacheHit: boolean;
+  eventIdentityIndexElapsedMs: number;
+  normalizationElapsedMs: number;
 }
 
 export interface DeviceProviderSnapshotImportInput {
@@ -342,29 +354,60 @@ function firstValidTimestamp(...candidates: Array<string | undefined>): string |
 
 export async function importDeviceProviderSnapshot<TResult = unknown>(
   input: unknown,
-  { corePort, defaultTimeZone, providerRegistry }: DeviceProviderImporterExecutionOptions = {},
+  {
+    corePort,
+    defaultTimeZone,
+    importSession,
+    providerRegistry,
+  }: DeviceProviderImporterExecutionOptions = {},
 ): Promise<TResult> {
   const writer = assertCanonicalWritePort(corePort, ["importDeviceBatch"]);
   const resolvedDefaultTimeZone =
     defaultTimeZone ?? await resolveSnapshotImportDefaultTimeZone(input, corePort);
+  const normalizationStartedAt = performance.now();
   const payload = await prepareDeviceProviderSnapshotImport(input, {
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  const result = await writer.importDeviceBatch(payload);
+  const normalizationElapsedMs = Math.max(0, performance.now() - normalizationStartedAt);
+  const coreTimingRef: {
+    value?: Parameters<NonNullable<DeviceBatchImportExecutionOptions["onTiming"]>>[0];
+  } = {};
+  const result = await writer.importDeviceBatch(payload, {
+    ...(importSession ? { session: importSession } : {}),
+    onTiming: (timing) => {
+      coreTimingRef.value = timing;
+    },
+  });
   const resultRecord = readPlainObject(result);
-  if (payload.provider !== "junction" || !resultRecord || !Array.isArray(resultRecord.events)) {
+  if (!resultRecord) {
     return result as TResult;
   }
-
+  const resultWithCoverage = payload.provider === "junction" && Array.isArray(resultRecord.events)
+    ? {
+        ...resultRecord,
+        junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
+          resultRecord.events.filter(isEventRecord),
+          {
+            providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
+          },
+        ),
+      }
+    : resultRecord;
+  const coreTiming = coreTimingRef.value;
+  if (!coreTiming) {
+    return resultWithCoverage as TResult;
+  }
+  const timing: DeviceProviderSnapshotImportTiming = {
+    canonicalCoreElapsedMs: coreTiming.totalElapsedMs,
+    canonicalWriteElapsedMs: coreTiming.canonicalWriteElapsedMs,
+    eventIdentityIndexCacheHit: coreTiming.eventIdentityIndexCacheHit,
+    eventIdentityIndexElapsedMs: coreTiming.eventIdentityIndexElapsedMs,
+    normalizationElapsedMs,
+  };
   return {
-    ...resultRecord,
-    junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
-      resultRecord.events.filter(isEventRecord),
-      {
-        providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
-      },
-    ),
+    ...resultWithCoverage,
+    deviceProviderSnapshotImportTiming: timing,
   } as TResult;
 }
 

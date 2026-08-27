@@ -553,6 +553,7 @@ interface HostedWorkspaceSnapshotStartRouteDiagnostics {
   durationsCapped: boolean;
   sessionCreateStorageDurationMs: number;
   startedAt: number;
+  workspaceAttemptId: string | null;
   writeFenceOwnerValidationDurationMs: number;
 }
 
@@ -594,6 +595,7 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
             response: unauthorized(),
           };
         }
+        diagnostics.workspaceAttemptId = writeFence.attemptId;
 
         const body = await readJsonObject(input.request, {
           limitBytes: 16 * 1024,
@@ -752,6 +754,7 @@ function createHostedWorkspaceSnapshotStartRouteDiagnostics(): HostedWorkspaceSn
     durationsCapped: false,
     sessionCreateStorageDurationMs: 0,
     startedAt: Date.now(),
+    workspaceAttemptId: null,
     writeFenceOwnerValidationDurationMs: 0,
   };
 }
@@ -825,6 +828,9 @@ function emitHostedWorkspaceSnapshotStartRouteDiagnostics(input: {
       snapshotStartWriteFenceOwnerValidationDurationMs:
         input.diagnostics.writeFenceOwnerValidationDurationMs,
       userIdPresent: input.userIdPresent,
+      ...(input.diagnostics.workspaceAttemptId
+        ? { workspaceAttemptId: input.diagnostics.workspaceAttemptId }
+        : {}),
     },
     level: input.outcome === "failed" ? "warn" : "info",
     message: "Hosted runner workspace snapshot start diagnostic.",

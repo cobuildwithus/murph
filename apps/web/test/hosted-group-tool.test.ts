@@ -329,6 +329,7 @@ import {
   filterHostedRuntimeGroupToolResponseProjectionScopes,
 } from "@/src/lib/hosted-groups/group-tool-scope-filter";
 import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
@@ -383,6 +384,12 @@ const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountPro
 });
 const COMPLETE_ACCESS_OFFER_SCOPES =
   resolveHostedGroupAccessOfferProjectionScopes(undefined);
+const EXPLICIT_COMPREHENSIVE_ACCESS_OFFER_SCOPES =
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.map((projectionKind) => ({
+    projectionKind,
+  }));
+const COMPLETE_ACCESS_OFFER_MESSAGE =
+  "Sounds good. Like or heart this message to share your Murph profile (name, email, and time zone), sleep, activity, workouts, heart and fitness, nutrition, and health source connections with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.";
 const GROUP_RUNTIME_LINQ_THREAD = {
   authority: {
     accountLookupKey: "hplk_group_runtime",
@@ -910,7 +917,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "handoff",
-        context: "Sunny logged a 405 lb deadlift personal record today.",
+        context: "The member set a personal record today.",
         groupLabel: "100 Club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
       },
@@ -921,7 +928,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "100 Club",
       memberId: "member_self",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
@@ -4108,7 +4115,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        message: expect.stringContaining("workout details"),
+        message: COMPLETE_ACCESS_OFFER_MESSAGE,
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4456,7 +4463,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }));
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining("workout details"),
+        message: COMPLETE_ACCESS_OFFER_MESSAGE,
       }),
     );
   });
@@ -4609,10 +4616,24 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
   });
 
-  it("posts the comprehensive canonical offer when the legacy template is missing", async () => {
+  it("keeps seven optional scopes exact instead of collapsing them to categories", async () => {
+    const projectionKinds = [
+      "sleep-times.v0",
+      "sleep-duration-days.v0",
+      "activity-days.v0",
+      "workout-days.v0",
+      "heart-rate-zones-days.v0",
+      "resting-heart-rate-days.v0",
+      "protein-days.v0",
+    ] as const;
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
-      request: { action: "post_join_offer", linqThread: LINQ_THREAD },
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionKinds: [...projectionKinds] },
+        linqThread: LINQ_THREAD,
+      },
     })).resolves.toMatchObject({
       action: "post_join_offer",
       result: { status: "sent" },
@@ -4620,7 +4641,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining("workout details"),
+        message:
+          "Sounds good. Like or heart this message to share your Murph profile name, sleep timing, sleep duration, activity minutes, workout summaries, heart-rate zones, resting heart rate, and daily protein (health values include their source names; nutrition totals come from your meals in Murph, including meals imported from connected apps; sleep timing and sleep duration cover the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+      }),
+    );
+  });
+
+  it("compacts eight scopes without claiming absent categories or disclosure details", async () => {
+    const projectionKinds = [
+      "sleep-times.v0",
+      "sleep-duration-days.v0",
+      "activity-days.v0",
+      "workout-days.v0",
+      "heart-rate-zones-days.v0",
+      "steps-days.v0",
+      "resting-heart-rate-days.v0",
+      "hrv-days.v0",
+    ] as const;
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionKinds: [...projectionKinds] },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Sounds good. Like or heart this message to share your Murph profile name, sleep, activity, workouts, and heart and fitness with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4628,7 +4682,37 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
-      projectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
+      projectionScopes: projectionKinds.map((projectionKind) => ({ projectionKind })),
+      tx: fakeTx,
+    });
+  });
+
+  it("compacts an explicit comprehensive offer without changing its permission snapshot", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          projectionKinds: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: COMPLETE_ACCESS_OFFER_MESSAGE,
+      }),
+    );
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_1" },
+      postedAt: expect.any(Date),
+      projectionScopes: EXPLICIT_COMPREHENSIVE_ACCESS_OFFER_SCOPES,
       tx: fakeTx,
     });
   });
@@ -4795,7 +4879,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     const reconcileQuery = readParticipantReconcileQuery();
     expect(reconcileQuery.sql).toContain(
-      "WITH input_participant(participant_member_id, handle_lookup_key)",
+      "WITH input_observation(contact_lookup_key)",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "INSERT INTO hosted_group_participant_observation",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "ORDER BY input_observation.contact_lookup_key",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "input_participant(participant_member_id, handle_lookup_key)",
     );
     expect(reconcileQuery.sql).toContain(
       "ON CONFLICT (container_member_id, participant_member_id)",
@@ -4811,6 +4904,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(reconcileQuery.values.some((value) =>
       typeof value === "string" && /^hbidx:phone:/u.test(value)
     )).toBe(true);
+    const silentEmailLookupKey = createHostedLinqParticipantContactLookupKey({
+      kind: "email",
+      value: "person@example.com",
+    });
+    expect(silentEmailLookupKey).not.toBeNull();
+    expect(reconcileQuery.values).toContain(silentEmailLookupKey);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5182,7 +5281,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
   });
 
-  it("dedupes same-member handles by first provider order in one statement", async () => {
+  it("dedupes member authority while observing every current handle in one statement", async () => {
     const firstHandle = "+15550000001";
     const laterHandle = "+15550000002";
     const firstLookupKey = createHostedLinqParticipantContactLookupKey({
@@ -5214,7 +5313,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
     const reconcileQuery = readParticipantReconcileQuery();
     expect(reconcileQuery.values).toContain(firstLookupKey);
-    expect(reconcileQuery.values).not.toContain(laterLookupKey);
+    expect(reconcileQuery.values).toContain(laterLookupKey);
     expect(reconcileQuery.values.filter((value) => value === "member_participant"))
       .toHaveLength(1);
   });

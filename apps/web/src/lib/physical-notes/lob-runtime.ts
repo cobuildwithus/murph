@@ -134,10 +134,9 @@ export function createLobPhysicalNoteRuntime(input: {
         fetchImpl,
         signal,
       });
-      const query: Record<string, string> = {};
-      query[`metadata[${PHYSICAL_NOTE_METADATA_KEY}]`] = request.noteId;
-      const requestOptions: LobSdkRequestOptions = {};
-      requestOptions.params = query;
+      const metadata = {
+        [PHYSICAL_NOTE_METADATA_KEY]: request.noteId,
+      };
 
       try {
         const response = await letters.list(
@@ -146,13 +145,12 @@ export function createLobPhysicalNoteRuntime(input: {
           undefined,
           undefined,
           undefined,
+          metadata,
           undefined,
           undefined,
           undefined,
           undefined,
           undefined,
-          undefined,
-          requestOptions,
         );
         return readLobLetterLookup(response) ?? { kind: "indeterminate" };
       } catch {
