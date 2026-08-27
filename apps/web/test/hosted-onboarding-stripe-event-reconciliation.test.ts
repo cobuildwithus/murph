@@ -4167,6 +4167,67 @@ describe("hosted Stripe event reconciliation", () => {
     });
   });
 
+  it("keeps failure telemetry safe when error metadata getters are hostile", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = Object.assign(new Error("database request timed out"), {
+      code: "ETIMEDOUT",
+    });
+    Object.defineProperty(failure, "name", {
+      configurable: true,
+      value: `UnsafeError person@example.com ${"x".repeat(160)}`,
+    });
+    Object.defineProperty(failure, "cause", {
+      configurable: true,
+      get: () => {
+        throw new Error("do_not_log_throwing_cause");
+      },
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockRejectedValue(failure);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      lastErrorCode: "ETIMEDOUT",
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+    const reconciliationFailureLogs = errorSpy.mock.calls.filter(
+      ([message]) => message === "Hosted Stripe event reconciliation failed.",
+    );
+    expect(reconciliationFailureLogs).toHaveLength(1);
+    const reconciliationFailureLog = reconciliationFailureLogs[0]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    expect(reconciliationFailureLog).toEqual(expect.objectContaining({
+      errorCode: "ETIMEDOUT",
+      errorMessage: "database request timed out",
+      stage: "event_application",
+    }));
+    const errorName = typeof reconciliationFailureLog?.errorName === "string"
+      ? reconciliationFailureLog.errorName
+      : "";
+    expect(errorName).toContain("<redacted-email>");
+    expect(errorName).not.toContain("person@example.com");
+    expect(errorName.length).toBeLessThanOrEqual(120);
+    expect(JSON.stringify(reconciliationFailureLog ?? {})).not.toContain(
+      "do_not_log_throwing_cause",
+    );
+    errorSpy.mockRestore();
+  });
+
   it("logs bounded Prisma diagnostics when Stripe reconciliation fails after retrieval", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();
