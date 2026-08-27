@@ -898,6 +898,12 @@ describe('murph.attach_response_card', () => {
       'Workout footers span native and static cards; never promise native-only taps',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'attach one verified structured workout card as the complete response',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Do not send a text-only acknowledgement or wait for a separate card request',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'let input validation decide whether its actual encoded envelope fits',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(

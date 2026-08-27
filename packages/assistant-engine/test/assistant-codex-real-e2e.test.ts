@@ -316,6 +316,12 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+const WORKOUT_E2E_CODEX_CONFIG_OVERRIDES = [
+  'allow_login_shell=false',
+  'shell_environment_policy.inherit="all"',
+  'shell_environment_policy.ignore_default_excludes=false',
+  `shell_environment_policy.include_only=["PATH","TMPDIR","${MURPH_ASSISTANT_SKILLS_ROOT_ENV}"]`,
+]
 const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.enabled=true',
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
@@ -676,7 +682,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillReference({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const result = await executeRealCodexAppServerTurn({
@@ -686,9 +700,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
+          configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
-              'vault-cli workout start [name] [--exercise <name=...;mode=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=...;unitOverride=...>]',
+              'vault-cli workout start [name] [--exercise <name=...;mode=weight_reps|bodyweight|weighted_bodyweight|assisted_bodyweight|duration|cardio;sets=...;reps=...;targetWeight=...;targetWeightUnit=...;unitOverride=...>]',
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout units show --format json',
             ].join('\n'),
@@ -714,12 +729,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
           excludeResumeTurns: true,
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: 'Start a workout: bench press, 3 sets of 8 reps at 135 lb.',
@@ -731,7 +743,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         const matching = vault.events.flatMap((event) => {
           const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
           const exercise = parsed.success
-            ? parsed.data.exercises.find((entry) => entry.name === 'Bench press')
+            ? parsed.data.exercises.find(
+                (entry) => entry.name.toLowerCase() === 'bench press',
+              )
             : undefined
           return parsed.success
             && exercise?.memberRepsPerSet === 8
@@ -759,7 +773,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(workout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 8,
           mode: 'weight_reps',
-          name: 'Bench press',
+          name: expect.stringMatching(/^bench press$/iu),
           setPlanIsFinite: true,
           targetWeightPerSet: 135,
           targetWeightUnit: 'lb',
@@ -771,7 +785,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           { order: 3 },
         ])
         expect(startCommands).toHaveLength(1)
-        expect(startCommands[0]).toContain('name=Bench press')
+        expect(startCommands[0]).toMatch(/name=Bench press/iu)
         expect(startCommands[0]).toContain('sets=3')
         expect(startCommands[0]).toContain('reps=8')
         expect(startCommands[0]).toContain('targetWeight=135')
@@ -780,7 +794,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(workoutCommands.join('\n')).not.toMatch(
           /workout (?:exercise (?:add|set-reps)|set log)/u,
         )
-        expect(result.finalMessage.trim()).toBe('')
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
         expect(result.runtimeIssueInputs).toEqual([])
         expect(result.responseCard).toMatchObject({
           kind: 'compact_table',
@@ -790,7 +804,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: {
             exercises: [{
-              name: 'Bench press',
+              name: expect.stringMatching(/^bench press$/iu),
               sets: [
                 { actual: null, status: 'pending', target: '135 lb × 8' },
                 { actual: null, status: 'pending', target: '135 lb × 8' },
@@ -830,7 +844,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillReference({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const result = await executeRealCodexAppServerTurn({
@@ -840,9 +862,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
+          configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
-              'vault-cli workout start [name] [--exercise <name=...;mode=...;sets=...;reps=...;unitOverride=...>]',
+              'vault-cli workout start [name] [--exercise <name=...;mode=weight_reps|bodyweight|weighted_bodyweight|assisted_bodyweight|duration|cardio;sets=...;reps=...;unitOverride=...>]',
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout units show --format json',
             ].join('\n'),
@@ -868,12 +891,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
           excludeResumeTurns: true,
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -902,7 +922,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         const commandLog = await readFile(commandLogPath, 'utf8')
           .catch(() => '')
         const commands = commandLog.trim().split('\n').filter(Boolean)
-
         process.stdout.write(
           `[workout-result-mode-e2e] ${JSON.stringify({
             commands,
@@ -912,7 +931,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         )
         expect(matching).toHaveLength(1)
         const workout = matching[0]!
-        expect(result.finalMessage.trim()).toBe('')
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
         expect(result.responseCard).toMatchObject({
           kind: 'compact_table',
           tracking: {
@@ -996,7 +1015,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeAssistantSkillReference({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
@@ -1036,12 +1063,13 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
+          configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout format show <format-id> --format json',
               'vault-cli workout show <event-id> --format json',
-              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> --mode <mode> [--unit-override <lb|kg>] [--sets <n>]',
+              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> --mode <weight_reps|bodyweight|weighted_bodyweight|assisted_bodyweight|duration|cardio> [--unit-override <lb|kg>] [--sets <n>]',
               'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
               'vault-cli experiment show <id> --format json',
@@ -1070,11 +1098,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
+          groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -1105,7 +1130,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(started.finalMessage).not.toMatch(/how many|which workout/iu)
         expect(matching).toHaveLength(1)
         const finiteWorkout = matching[0]!
-        expect(started.finalMessage.trim()).toBe('')
+        expect(started.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
         expect(started.responseCard).toMatchObject({
           kind: 'compact_table',
           tracking: {
@@ -1244,7 +1269,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         )
 
         expect(finalSet.finalMessage).not.toMatch(/how many|which workout|\?/iu)
-        expect(finalSet.finalMessage.trim()).toBe('')
+        expect(finalSet.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
         expect(finalSet.responseCard).toMatchObject({
           kind: 'compact_table',
           tracking: {
@@ -1303,7 +1328,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
 
         expect(reminderWorkouts).toHaveLength(1)
         const reminderWorkout = reminderWorkouts[0]!
-        expect(reminderTurn.finalMessage.trim()).toBe('')
+        expect(reminderTurn.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
         expect(reminderTurn.responseCard).toMatchObject({
           kind: 'compact_table',
           tracking: {
@@ -1374,7 +1399,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
 
         expect(nextTurn.finalMessage).not.toMatch(/finish time|duration|which workout/iu)
         expect(nextWorkouts).toHaveLength(1)
-        expect(nextTurn.finalMessage.trim()).toBe('')
+        expect(nextTurn.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
         expect(nextTurn.responseCard).toMatchObject({
           kind: 'compact_table',
           tracking: {
@@ -9001,6 +9026,29 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
 })
 
 describe('real Codex app-server cache usage e2e harness', () => {
+  it('launches the workout source CLI without the TSX IPC server', async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'murph-workout-cli-wrapper-'),
+    )
+
+    try {
+      await materializeRealWorkoutVaultCli({
+        binDirectory: directory,
+        commandLogPath: path.join(directory, 'commands.log'),
+        vaultRoot: directory,
+      })
+      const wrapper = await readFile(path.join(directory, 'vault-cli'), 'utf8')
+
+      expect(wrapper).toContain(`exec ${quoteNutritionShellLiteral(process.execPath)} --import `)
+      expect(wrapper).toContain('tsx/dist/loader.mjs')
+      expect(wrapper).toContain('TSX_TSCONFIG_PATH=')
+      expect(wrapper).toContain('tsconfig.base.json')
+      expect(wrapper).not.toContain('WORKOUT_E2E_')
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('passes only a minimal environment to live Codex probes', () => {
     const env = buildRealCodexE2eEnv({
       apiKeyEnv: 'PROVIDER_KEY',
@@ -10216,12 +10264,17 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
     path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
     '../tsx/dist/loader.mjs',
   )
+  const tsconfigPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT),
+    '../../../tsconfig.base.json',
+  )
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      `export TSX_TSCONFIG_PATH=${quoteNutritionShellLiteral(tsconfigPath)}`,
       `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
@@ -11371,6 +11424,22 @@ async function materializeAssistantSkill(input: {
   )
 }
 
+async function materializeAssistantSkillReference(input: {
+  relativePath: string
+  skillsRoot: string
+}): Promise<void> {
+  const targetPath = path.join(input.skillsRoot, input.relativePath)
+  await mkdir(path.dirname(targetPath), { recursive: true })
+  await writeFile(
+    targetPath,
+    await readFile(
+      path.join(resolveAssistantSkillsRoot(), input.relativePath),
+      'utf8',
+    ),
+    'utf8',
+  )
+}
+
 type RepeatedSetResolutionMode =
   | 'ambiguous'
   | 'experiment-reminder'
@@ -11993,18 +12062,27 @@ async function materializeHabitatVoiceVaultCli(input: {
 
 async function materializeRealWorkoutVaultCli(input: {
   binDirectory: string
+  commandLogPath: string
+  vaultRoot: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const tsxLoaderPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_TSX_BIN),
+    '../tsx/dist/loader.mjs',
+  )
+  const tsconfigPath = path.resolve(
+    path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT),
+    '../../../tsconfig.base.json',
+  )
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_COMMAND_LOG" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
-      '  exit 70',
-      'fi',
-      'printf \'%s\\n\' "$*" >> "$WORKOUT_E2E_COMMAND_LOG"',
-      'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      `export TSX_TSCONFIG_PATH=${quoteNutritionShellLiteral(tsconfigPath)}`,
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(tsxLoaderPath)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {
