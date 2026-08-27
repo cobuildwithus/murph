@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT attachment capture accepts notes when the patch is missing'
 severity: 'major'
+issue: 'cobuildwithus/murph#2388'
 ---
 
 ## Expected Behavior

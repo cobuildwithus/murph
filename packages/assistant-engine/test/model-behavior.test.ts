@@ -1831,7 +1831,10 @@ describe('assistant consumption lookup guidance', () => {
       'Read it before recommending exercises, rest, activity restriction, or load changes for pain',
     )
     expect(prompt).toContain(
-      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
+      'Private `start a live workout` is consent: read `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md`, then execute before replying.',
+    )
+    expect(prompt).toContain(
+      'Other movement selection/instruction: domain owner plus `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`.',
     )
     expect(prompt).toContain(
       'follow the owning skill\'s label or exercise-catalog workflow instead of estimating from memory or inventing details.',
