@@ -503,6 +503,13 @@ only the canonical ENAM binding. The contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/cloudflare/README.md`.
 
+Terminal hosted account deletion preserves the canonical hosted-group-before-
+member row-lock order, revalidates the exact affected group set before
+destructive erasure, and composes with Telegram group-offer affirmation's
+post-lock core-only binding revalidation without private routing projection or
+KMS work. Both deletion/affirmation interleavings and relink rollback are mapped
+in `agent-docs/references/testing-ci-map.md`.
+
 Signed hosted runtime crypto callbacks are user-bound, workspace-scoped
 resource authority without duplicate operation admission. Temporal/UserRunner,
 Settings vault export, and ordinary active-member runtime surfaces retain their

@@ -10,6 +10,7 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { toAssessmentImportVaultCliError } from '@murphai/vault-usecases/helpers'
 import { loadImportersRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { showAssessmentManifest } from './export-intake-read-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
@@ -69,6 +70,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
         title: z
           .string()
           .min(1)
+          .max(160)
           .optional()
           .describe('Optional assessment title stored on the imported record.'),
         occurredAt: occurredAtOptionSchema
@@ -83,28 +85,32 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       }),
       output: intakeImportResultSchema,
       async run({ args, options }) {
-        const importers = (await loadImportersRuntimeModule()).createImporters()
-        const result = await importers.importAssessmentResponse({
-          filePath: args.file,
-          vaultRoot: options.vault,
-          title: options.title,
-          occurredAt: await normalizeOccurredAtOption({
-            vault: options.vault,
-            occurredAt: options.occurredAt,
-          }),
-          importedAt: options.importedAt,
-          source: options.source,
-          requestId: requestIdFromOptions(options),
-        })
+        try {
+          const importers = (await loadImportersRuntimeModule()).createImporters()
+          const result = await importers.importAssessmentResponse({
+            filePath: args.file,
+            vaultRoot: options.vault,
+            title: options.title,
+            occurredAt: await normalizeOccurredAtOption({
+              vault: options.vault,
+              occurredAt: options.occurredAt,
+            }),
+            importedAt: options.importedAt,
+            source: options.source,
+            requestId: requestIdFromOptions(options),
+          })
 
-        return {
-          vault: options.vault,
-          sourceFile: args.file,
-          rawFile: result.raw.relativePath,
-          manifestFile: result.manifestPath,
-          assessmentId: result.assessment.id,
-          lookupId: result.assessment.id,
-          ledgerFile: result.ledgerPath,
+          return {
+            vault: options.vault,
+            sourceFile: args.file,
+            rawFile: result.raw.relativePath,
+            manifestFile: result.manifestPath,
+            assessmentId: result.assessment.id,
+            lookupId: result.assessment.id,
+            ledgerFile: result.ledgerPath,
+          }
+        } catch (error) {
+          throw toAssessmentImportVaultCliError(error, args.file)
         }
       },
     },

@@ -55,11 +55,10 @@ export async function acceptHostedGroupOfferAffirmation(input: {
    */
   deferPostCommit?: (run: () => Promise<void>) => void;
   /**
-   * Revalidates, inside the grant transaction, that the provider identity that
-   * tapped still maps to the member being granted. Resolving the binding before
-   * the transaction is not enough: a concurrent relink can move that identity to
-   * another member while this callback waits on the member-row lock, exactly the
-   * race the inbound Telegram message path already guards.
+   * Revalidates, inside the grant transaction and after the canonical
+   * acceptance owner locks group then member, that the provider identity that
+   * tapped still maps to the member being granted. It runs before accepted side
+   * effects or commit, so a concurrent relink rolls back the whole grant.
    */
   assertActorStillBound?: (tx: Prisma.TransactionClient) => Promise<void>;
   /**
@@ -82,7 +81,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     >;
     try {
       disclosureResult = await input.prisma.$transaction(async (tx) => {
-        await input.assertActorStillBound?.(tx);
         const accepted =
           await acceptHostedGroupDisclosurePermissionReactionTx({
             channel: input.channel,
@@ -96,6 +94,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
             tx,
           });
         if (accepted.kind === "accepted") {
+          await input.assertActorStillBound?.(tx);
           await input.onAcceptedTx?.(tx);
         }
         return accepted;
@@ -130,7 +129,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
     result = await input.prisma.$transaction(async (tx) => {
-      await input.assertActorStillBound?.(tx);
       const accepted = await acceptHostedGroupJoinOfferTx({
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
@@ -141,6 +139,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
           input.threadIdentityLookupKeyReadCandidates,
         tx,
       });
+      await input.assertActorStillBound?.(tx);
       await input.onAcceptedTx?.(tx);
       return accepted;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
