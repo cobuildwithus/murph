@@ -293,15 +293,15 @@ Place **Recent member retention** directly below the scorecard. Show at most the
 20 newest real member signups in deterministic newest-first order, excluding
 group and thread-container identities. Use only the persisted masked phone hint
 or a short opaque member-id suffix for identification. Keep Today, rolling seven
-days, all-time personal inbound messages, first-message delay, latest activity,
-onboarding, and plan state in one desktop table. At phone widths, use compact
-member rows that put lifecycle and the three message counts before timing
-detail; do not make the operator scroll sideways to reach the main value. Use
-durable mailbox receipt time throughout. `Returned` means at least one receipt
-occurred on a UTC date after signup; it is a descriptive observation, not a
-forecast or retention score. Never select or render message content, raw
-contact details, health data, device facts, or per-participant group activity
-for this section.
+days, latest activity inside that window, onboarding, and suspension state in
+one desktop table. At phone widths, use compact member rows that put the
+activity badge and both message counts before timing detail; do not make the
+operator scroll sideways to reach the main value. Use mailbox receipt time
+throughout, and label the three activity states as `Active today`, `Active in
+7d`, and `No activity in 7d`. Never infer lifetime activity or plan context from
+retention-bounded mailbox rows or raw member billing status. Never select or
+render message content, raw contact details, health data, device facts, or
+per-participant group activity for this section.
 
 Follow the recent-member table with the existing two-column chart grid. Begin with one
 full-width **People who messaged Murph** chart: a solid sage

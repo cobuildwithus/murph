@@ -33,34 +33,22 @@ describe("hosted recent-member retention", () => {
     const now = new Date("2026-08-26T15:00:00.000Z");
     mocks.hostedMemberFindMany.mockResolvedValue([
       {
-        billingRef: {
-          currentBillingPhase: "trial",
-          currentBillingPlanCode: "launch_monthly",
-        },
-        billingStatus: "active",
         createdAt: new Date("2026-08-26T13:00:00.000Z"),
-        id: "member_no_message",
+        id: "member_no_recent_activity",
         identity: { maskedPhoneNumberHint: "*** 0130" },
         initialOnboardingCompletedAt: null,
         suspendedAt: null,
       },
       {
-        billingRef: {
-          currentBillingPhase: "paid",
-          currentBillingPlanCode: "launch_edge_monthly",
-        },
-        billingStatus: "active",
         createdAt: new Date("2026-08-25T20:00:00.000Z"),
-        id: "member_returned",
+        id: "member_active_today",
         identity: null,
         initialOnboardingCompletedAt: new Date("2026-08-25T20:10:00.000Z"),
         suspendedAt: null,
       },
       {
-        billingRef: null,
-        billingStatus: "not_started",
         createdAt: new Date("2026-08-25T10:00:00.000Z"),
-        id: "member_first_day",
+        id: "member_active_in_7d",
         identity: { maskedPhoneNumberHint: "*** 0192" },
         initialOnboardingCompletedAt: new Date("2026-08-25T10:02:00.000Z"),
         suspendedAt: null,
@@ -69,24 +57,18 @@ describe("hosted recent-member retention", () => {
     mocks.hostedMailboxItemGroupBy
       .mockResolvedValueOnce([
         {
-          _count: { _all: 12 },
+          _count: { _all: 9 },
           _max: { createdAt: new Date("2026-08-26T14:30:00.000Z") },
-          _min: { createdAt: new Date("2026-08-25T20:05:00.000Z") },
-          userId: "member_returned",
+          userId: "member_active_today",
         },
         {
           _count: { _all: 3 },
           _max: { createdAt: new Date("2026-08-25T14:00:00.000Z") },
-          _min: { createdAt: new Date("2026-08-25T10:04:00.000Z") },
-          userId: "member_first_day",
+          userId: "member_active_in_7d",
         },
       ])
       .mockResolvedValueOnce([
-        { _count: { _all: 9 }, userId: "member_returned" },
-        { _count: { _all: 3 }, userId: "member_first_day" },
-      ])
-      .mockResolvedValueOnce([
-        { _count: { _all: 4 }, userId: "member_returned" },
+        { _count: { _all: 4 }, userId: "member_active_today" },
       ]);
 
     const retention = await readHostedRecentMemberRetention(now);
@@ -97,13 +79,6 @@ describe("hosted recent-member retention", () => {
         { id: "desc" },
       ],
       select: {
-        billingRef: {
-          select: {
-            currentBillingPhase: true,
-            currentBillingPlanCode: true,
-          },
-        },
-        billingStatus: true,
         createdAt: true,
         id: true,
         identity: {
@@ -121,22 +96,10 @@ describe("hosted recent-member retention", () => {
         threadContainer: null,
       },
     });
-    expect(mocks.hostedMailboxItemGroupBy).toHaveBeenCalledTimes(3);
+    expect(mocks.hostedMailboxItemGroupBy).toHaveBeenCalledTimes(2);
     expect(mocks.hostedMailboxItemGroupBy).toHaveBeenNthCalledWith(1, {
       _count: { _all: true },
       _max: { createdAt: true },
-      _min: { createdAt: true },
-      by: ["userId"],
-      where: {
-        createdAt: { lt: now },
-        kind: "conversation.message",
-        userId: {
-          in: ["member_no_message", "member_returned", "member_first_day"],
-        },
-      },
-    });
-    expect(mocks.hostedMailboxItemGroupBy).toHaveBeenNthCalledWith(2, {
-      _count: { _all: true },
       by: ["userId"],
       where: {
         createdAt: {
@@ -145,11 +108,15 @@ describe("hosted recent-member retention", () => {
         },
         kind: "conversation.message",
         userId: {
-          in: ["member_no_message", "member_returned", "member_first_day"],
+          in: [
+            "member_no_recent_activity",
+            "member_active_today",
+            "member_active_in_7d",
+          ],
         },
       },
     });
-    expect(mocks.hostedMailboxItemGroupBy).toHaveBeenNthCalledWith(3, {
+    expect(mocks.hostedMailboxItemGroupBy).toHaveBeenNthCalledWith(2, {
       _count: { _all: true },
       by: ["userId"],
       where: {
@@ -159,7 +126,11 @@ describe("hosted recent-member retention", () => {
         },
         kind: "conversation.message",
         userId: {
-          in: ["member_no_message", "member_returned", "member_first_day"],
+          in: [
+            "member_no_recent_activity",
+            "member_active_today",
+            "member_active_in_7d",
+          ],
         },
       },
     });
@@ -167,48 +138,30 @@ describe("hosted recent-member retention", () => {
       capturedAt: "2026-08-26T15:00:00.000Z",
       members: [
         {
-          billingPhase: "trial",
-          billingPlanName: "Pulse",
-          billingStatus: "active",
           createdAt: "2026-08-26T13:00:00.000Z",
-          firstMessageAt: null,
           lastMessageAt: null,
-          lifecycle: "no_message",
           maskedPhoneNumberHint: "*** 0130",
-          memberId: "member_no_message",
-          messagesAllTime: 0,
+          memberId: "member_no_recent_activity",
           messagesLast7Days: 0,
           messagesToday: 0,
           onboardingCompleted: false,
           suspended: false,
         },
         {
-          billingPhase: "paid",
-          billingPlanName: "Edge",
-          billingStatus: "active",
           createdAt: "2026-08-25T20:00:00.000Z",
-          firstMessageAt: "2026-08-25T20:05:00.000Z",
           lastMessageAt: "2026-08-26T14:30:00.000Z",
-          lifecycle: "returned",
           maskedPhoneNumberHint: null,
-          memberId: "member_returned",
-          messagesAllTime: 12,
+          memberId: "member_active_today",
           messagesLast7Days: 9,
           messagesToday: 4,
           onboardingCompleted: true,
           suspended: false,
         },
         {
-          billingPhase: null,
-          billingPlanName: null,
-          billingStatus: "not_started",
           createdAt: "2026-08-25T10:00:00.000Z",
-          firstMessageAt: "2026-08-25T10:04:00.000Z",
           lastMessageAt: "2026-08-25T14:00:00.000Z",
-          lifecycle: "activated",
           maskedPhoneNumberHint: "*** 0192",
-          memberId: "member_first_day",
-          messagesAllTime: 3,
+          memberId: "member_active_in_7d",
           messagesLast7Days: 3,
           messagesToday: 0,
           onboardingCompleted: true,
@@ -239,16 +192,18 @@ describe("RecentMemberRetention", () => {
     );
 
     expect(html).toContain("Recent member retention");
-    expect(html).toContain("Returned");
-    expect(html).toContain("No message yet");
     expect(html).toContain("Active today");
-    expect(html).toContain("Edge");
+    expect(html).toContain("Active in 7d");
+    expect(html).toContain("No activity in 7d");
     expect(html).toContain("Onboarding complete");
-    expect(html).toContain("12");
     expect(html).toContain("9");
     expect(html).toContain("4");
+    expect(html).toContain("None in window");
     expect(html).toContain("Member · 00006419");
     expect(html).not.toContain("opaque_member_identifier_00006419");
+    expect(html).not.toContain("All time");
+    expect(html).not.toContain("First message");
+    expect(html).not.toContain("No message yet");
   });
 
   it("renders the explicit empty state", () => {
@@ -270,32 +225,30 @@ function buildRetentionStudy(): HostedRecentMemberRetention {
     capturedAt: "2026-08-26T15:00:00.000Z",
     members: [
       {
-        billingPhase: "paid",
-        billingPlanName: "Edge",
-        billingStatus: "active",
         createdAt: "2026-08-25T20:00:00.000Z",
-        firstMessageAt: "2026-08-25T20:05:00.000Z",
         lastMessageAt: "2026-08-26T14:30:00.000Z",
-        lifecycle: "returned",
         maskedPhoneNumberHint: null,
         memberId: "opaque_member_identifier_00006419",
-        messagesAllTime: 12,
         messagesLast7Days: 9,
         messagesToday: 4,
         onboardingCompleted: true,
         suspended: false,
       },
       {
-        billingPhase: "trial",
-        billingPlanName: "Pulse",
-        billingStatus: "active",
-        createdAt: "2026-08-26T14:40:00.000Z",
-        firstMessageAt: null,
-        lastMessageAt: null,
-        lifecycle: "no_message",
+        createdAt: "2026-08-24T14:40:00.000Z",
+        lastMessageAt: "2026-08-25T14:40:00.000Z",
         maskedPhoneNumberHint: "*** 0130",
         memberId: "opaque_member_identifier_00000130",
-        messagesAllTime: 0,
+        messagesLast7Days: 2,
+        messagesToday: 0,
+        onboardingCompleted: true,
+        suspended: false,
+      },
+      {
+        createdAt: "2026-08-26T14:40:00.000Z",
+        lastMessageAt: null,
+        maskedPhoneNumberHint: "*** 0192",
+        memberId: "opaque_member_identifier_00000192",
         messagesLast7Days: 0,
         messagesToday: 0,
         onboardingCompleted: false,

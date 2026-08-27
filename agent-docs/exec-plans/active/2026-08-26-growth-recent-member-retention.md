@@ -7,8 +7,8 @@ Updated: 2026-08-26
 ## Goal
 
 Give authorized operators an immediately useful view of how the 20 newest real
-members are activating and returning to Murph, without exposing conversation
-content or introducing a second analytics store.
+members are using Murph today and across the rolling seven-day window, without
+exposing conversation content or introducing a second analytics store.
 
 ## Product UX
 
@@ -18,8 +18,9 @@ Growth surface.
 ### Outcome
 
 An authorized operator can scan the newest 20 real members, newest first, and
-quickly distinguish no-message, first-day activation, and later-day return
-behavior using truthful receipt-time evidence.
+quickly distinguish activity today, earlier activity in the rolling seven-day
+window, and no visible activity in that window using truthful receipt-time
+evidence.
 
 ### Entry and promise
 
@@ -32,12 +33,13 @@ time.
 ### Affected people and states
 
 - An operator reviewing rich activity sees a masked member hint, signup age,
-  onboarding and billing state, message counts today, in the last seven days,
-  and all time, plus first and latest receipt timing.
-- An operator reviewing a sparse or brand-new member sees an explicit
-  `No message yet` state instead of zeros that imply activation.
-- An operator on a narrow phone sees lifecycle and Today, seven-day, and
-  all-time counts directly in compact member rows; desktop keeps all comparison
+  onboarding and suspension state, message counts today and in the last seven
+  days, plus the latest receipt inside that window.
+- An operator reviewing a sparse or brand-new member sees explicit `No activity
+  in 7d` wording instead of a lifetime claim that the retained source cannot
+  prove.
+- An operator on a narrow phone sees the recent-activity badge and Today and
+  seven-day counts directly in compact member rows; desktop keeps all comparison
   columns visible in one table.
 - A member with no masked phone hint remains distinguishable through a short
   opaque member-id suffix; no raw phone, email, message content, health data,
@@ -53,29 +55,31 @@ time.
   not member signups. Per-participant group activity remains outside the table
   because the existing group analytics identity is explicitly not display
   data.
-- `Returned` is descriptive only: at least one durable inbound message receipt
-  occurred on a UTC calendar day after signup. It is not a cohort forecast.
+- No lifetime message count, first-ever receipt, return label, or plan label is
+  inferred from retention-bounded mailbox rows or raw billing status.
 
 ### Product challenge and approval
 
 The initial proposal risked turning one operator question into a wide generic
-analytics table. The approved scope keeps only evidence that explains early
-activation and return behavior, labels UTC and rolling-window semantics, and
-excludes speculative scoring and private content. The user approved this scope
-and explicitly authorized the worktree, branch, PR, and ReviewGPT loop.
+analytics table. The corrected scope keeps only evidence that explains recent
+engagement, labels UTC and rolling-window semantics, and excludes speculative
+scoring, private content, and claims the retained source cannot support. The
+user approved the feature and explicitly authorized the worktree, branch, PR,
+and ReviewGPT loop.
 
 ## Architecture
 
 - Add one focused server-only read model beside the existing Growth aggregate
   owner rather than expanding the already broad aggregate dashboard type.
 - Read at most 20 real members in one ordered query. For those IDs only, issue
-  three independent set-based mailbox aggregates in parallel: all-time
-  first/latest/count, rolling seven-day count, and current-UTC-day count.
-- Use `HostedMailboxItem.createdAt` for durable receipt-time semantics and
-  `conversation.message` for inbound messaging, matching the Growth contract.
+  two independent set-based mailbox aggregates in parallel: rolling seven-day
+  count/latest receipt and current-UTC-day count.
+- Use `HostedMailboxItem.createdAt` for receipt-time semantics and
+  `conversation.message` for inbound messaging, matching the Growth contract;
+  keep every displayed activity fact inside the live seven-day window.
 - Return only small serializable fields to a pure production component. Reuse
   that component with synthetic props in the existing Growth design study.
-- Maximum database work is four round trips and 20 aggregate output groups per
+- Maximum database work is three round trips and 20 aggregate output groups per
   mailbox query; there is no per-member query or transaction.
 
 ## Tasks
@@ -92,10 +96,12 @@ and explicitly authorized the worktree, branch, PR, and ReviewGPT loop.
 
 ## Verification
 
-- Product UX walkthrough: Ready. Desktop exposes the full comparison table;
-  phone renders compact member rows with lifecycle and all three counts before
-  timing details; rich, sparse, no-message, and empty states are represented by
-  synthetic data. The shipped scope matches the approved plan.
+- Product UX walkthrough: pass after remediation. ReviewGPT correctly identified
+  that retention-bounded mailbox rows cannot support lifetime or return claims,
+  and raw billing status cannot name Starter or Family plan context. The
+  deletion-first correction keeps only today and rolling-seven-day activity and
+  removes plan presentation. Refreshed desktop and phone browser proofs show all
+  three recent-activity states without clipping or horizontal scrolling.
 - `pnpm --dir apps/web test:prepared
   test/hosted-ops-recent-member-retention.test.tsx
   test/hosted-ops-growth.test.ts` — pass, 60 tests.
@@ -104,11 +110,13 @@ and explicitly authorized the worktree, branch, PR, and ReviewGPT loop.
   ignored Health Commons and Prisma prerequisites before the checker.
 - `pnpm test:frontend-design-proof` — pass, 12 tests.
 - `pnpm docs:drift` and `git diff --check` — pass.
-- Playwright proof at 1440x900 and 390x844 — pass, 2 tests; the test blocks
-  non-loopback requests and uses only the synthetic Growth study.
-- `pnpm test:diff <task paths>` — pass. The composed Web lane passed 800 test
-  files / 11,185 tests, full lint with zero errors, isolated dev smoke, and the
+- Playwright proof at desktop and phone widths — pass, 2 tests after installing
+  the repository-pinned Chromium; the test blocks non-loopback requests and uses
+  only the synthetic Growth study.
+- `pnpm test:diff <task paths>` — pass after remediation. The composed Web lane
+  passed 800 test files / 11,185 tests, full lint with zero errors, isolated dev smoke, and the
   optimized Next.js production build, plus the repository architecture,
   privacy, dependency, and workspace-boundary guards.
-- Exact pushed-head CI and both ReviewGPT stages remain pending until the
-  review candidate is committed, pushed, and described in its PR.
+- Exact pushed-head CI passed for the first candidate except the separately
+  pending native mobile E2Es. Final ReviewGPT round 1 returned two accepted
+  findings; the corrected head, refreshed evidence, CI, and final round 2 remain.

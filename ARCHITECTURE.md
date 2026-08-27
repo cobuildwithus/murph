@@ -1174,18 +1174,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   The Web-owned Growth page's recent-member retention section is another
   bounded projection, not a new analytics owner. It selects at most the 20
-  newest personal members, then admits only those ids to three set-based
-  mailbox aggregates for lifetime first/latest/count, rolling-seven-day count,
-  and current-UTC-day count. The read therefore has a fixed four-round-trip
+  newest personal members, then admits only those ids to two set-based mailbox
+  aggregates for rolling-seven-day count/latest receipt and current-UTC-day
+  count. The read therefore has a fixed three-round-trip
   bound and at most 20 aggregate rows per mailbox query, with no per-member
-  query or transaction. It uses durable `HostedMailboxItem.createdAt` receipt
-  time and `conversation.message`, selects no message content or decrypted
-  identifier, excludes group and thread-container identities, and leaves
-  per-participant group activity in the anonymous Growth projection. Composed
-  with the existing Growth dashboard and sponsorship reads, the page can queue
-  at most 28 database operations at its read peak (previously 25); the shared
-  pool still caps live connections at 15. This projection adds no concurrent
-  transaction, decrypt, external call, retry, or fallback.
+  query or transaction. It uses `HostedMailboxItem.createdAt` receipt time and
+  `conversation.message`, and every displayed activity fact stays within the
+  live rolling seven-day window instead of claiming lifetime history from
+  retention-bounded rows. It selects no billing relation, message content, or
+  decrypted identifier, excludes group and thread-container identities, and
+  leaves per-participant group activity in the anonymous Growth projection.
+  Composed with the existing Growth dashboard and sponsorship reads, the page
+  can queue at most 27 database operations at its read peak (previously 25);
+  the shared pool still caps live connections at 15. This projection adds no
+  concurrent transaction, decrypt, external call, retry, or fallback.
 
   Hosted device-sync scheduling keeps one canonical connection timestamp:
   Web's `nextReconcileAt` is the provider cadence and the only timestamp the

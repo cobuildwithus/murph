@@ -43,14 +43,14 @@ for (const viewport of VIEWPORTS) {
     })).toBeVisible();
     await expect(study).toContainText("personal conversations");
     await expect(study).toContainText("Today is the current UTC day");
-    await expect(study).toContainText("Returned");
-    await expect(study).toContainText("Activated");
-    await expect(study).toContainText("No message yet");
     await expect(study).toContainText("Active today");
-    await expect(study).toContainText("Pulse trial");
-    await expect(study).toContainText("Edge");
+    await expect(study).toContainText("Active in 7d");
+    await expect(study).toContainText("No activity in 7d");
+    await expect(study).toContainText("None in window");
+    await expect(study).not.toContainText("All time");
+    await expect(study).not.toContainText("No message yet");
     await expect(study.locator("tbody tr")).toHaveCount(3);
-    await expect(study).not.toContainText("study_recent_member_activated");
+    await expect(study).not.toContainText("study_recent_member_active_today");
     await expect(study).not.toContainText("cm_00000000000000006419");
 
     const mobileRows = study.locator('[data-layout="mobile-rows"]');

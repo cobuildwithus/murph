@@ -8,7 +8,6 @@ import {
   TableRow,
 } from "@/src/components/ui/table";
 import type {
-  HostedRecentMemberLifecycle,
   HostedRecentMemberRetention,
   HostedRecentMemberRetentionRow,
 } from "@/src/lib/hosted-ops/recent-member-retention";
@@ -41,10 +40,10 @@ export function RecentMemberRetention(input: {
           Recent member retention
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-          The newest 20 real member signups, newest first. Counts use durable
-          inbound message receipts from personal conversations: Today is the
-          current UTC day and 7 days is rolling. Returned means Murph received
-          a personal message on a later UTC day than signup.
+          The newest 20 real member signups, newest first. Counts use inbound
+          message receipt time from personal conversations: Today is the
+          current UTC day and 7 days is rolling, including today. Activity
+          status describes only these visible windows.
         </p>
       </div>
 
@@ -64,16 +63,14 @@ export function RecentMemberRetention(input: {
             ))}
           </ul>
           <div className="hidden md:block" data-layout="desktop-table">
-            <Table className="min-w-[1080px]">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="px-4">Member</TableHead>
-                  <TableHead>Retention</TableHead>
+                  <TableHead>Activity</TableHead>
                   <TableHead className="text-right">Today</TableHead>
                   <TableHead className="text-right">7 days</TableHead>
-                  <TableHead className="text-right">All time</TableHead>
-                  <TableHead>First message</TableHead>
-                  <TableHead className="pr-4">Latest message</TableHead>
+                  <TableHead className="pr-4">Latest in 7d</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -86,17 +83,13 @@ export function RecentMemberRetention(input: {
                       />
                     </TableCell>
                     <TableCell className="min-w-36 whitespace-normal py-3">
-                      <LifecycleSummary member={member} />
+                      <RecentActivityBadge member={member} />
                     </TableCell>
                     <MessageCount value={member.messagesToday} />
                     <MessageCount value={member.messagesLast7Days} />
-                    <MessageCount value={member.messagesAllTime} />
-                    <TableCell className="min-w-36 text-muted-foreground">
-                      {formatFirstMessage(member)}
-                    </TableCell>
                     <TableCell className="min-w-36 pr-4 text-muted-foreground">
                       {member.lastMessageAt === null
-                        ? "Not yet"
+                        ? "None in window"
                         : formatAgo(member.lastMessageAt, capturedAt)}
                     </TableCell>
                   </TableRow>
@@ -121,35 +114,23 @@ function MobileMemberRow(input: {
           capturedAt={input.capturedAt}
           member={input.member}
         />
-        <LifecycleSummary member={input.member} />
+        <RecentActivityBadge member={input.member} />
       </div>
-      <dl className="mt-4 grid grid-cols-3 gap-3">
+      <dl className="mt-4 grid grid-cols-2 gap-3">
         <MobileMessageCount label="Today" value={input.member.messagesToday} />
         <MobileMessageCount
           label="7 days"
           value={input.member.messagesLast7Days}
         />
-        <MobileMessageCount
-          label="All time"
-          value={input.member.messagesAllTime}
-        />
       </dl>
-      <dl className="mt-4 grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+      <dl className="mt-4 text-xs text-muted-foreground">
         <div>
           <dt className="font-mono text-[9px] uppercase tracking-[0.1em]">
-            First message
-          </dt>
-          <dd className="mt-1 text-foreground">
-            {formatFirstMessage(input.member)}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-mono text-[9px] uppercase tracking-[0.1em]">
-            Latest message
+            Latest in 7d
           </dt>
           <dd className="mt-1 text-foreground">
             {input.member.lastMessageAt === null
-              ? "Not yet"
+              ? "None in window"
               : formatAgo(input.member.lastMessageAt, input.capturedAt)}
           </dd>
         </div>
@@ -175,7 +156,8 @@ function MemberIdentity(input: {
         )}
       </div>
       <div className="text-xs leading-5 text-muted-foreground">
-        {formatAccountState(input.member)} · {input.member.onboardingCompleted
+        {input.member.suspended ? "Suspended · " : ""}
+        {input.member.onboardingCompleted
           ? "Onboarding complete"
           : "Onboarding open"}
       </div>
@@ -183,31 +165,26 @@ function MemberIdentity(input: {
   );
 }
 
-function LifecycleSummary(input: {
+function RecentActivityBadge(input: {
   member: HostedRecentMemberRetentionRow;
 }) {
+  if (input.member.messagesToday > 0) {
+    return <Badge className="shrink-0">Active today</Badge>;
+  }
+
+  if (input.member.messagesLast7Days > 0) {
+    return (
+      <Badge className="shrink-0" variant="secondary">
+        Active in 7d
+      </Badge>
+    );
+  }
+
   return (
-    <div className="shrink-0">
-      <LifecycleBadge lifecycle={input.member.lifecycle} />
-      {input.member.messagesToday > 0 ? (
-        <div className="mt-1 text-xs text-muted-foreground">
-          Active today
-        </div>
-      ) : null}
-    </div>
+    <Badge className="shrink-0" variant="outline">
+      No activity in 7d
+    </Badge>
   );
-}
-
-function LifecycleBadge(input: { lifecycle: HostedRecentMemberLifecycle }) {
-  if (input.lifecycle === "returned") {
-    return <Badge>Returned</Badge>;
-  }
-
-  if (input.lifecycle === "activated") {
-    return <Badge variant="secondary">Activated</Badge>;
-  }
-
-  return <Badge variant="outline">No message yet</Badge>;
 }
 
 function MessageCount(input: { value: number }) {
@@ -229,50 +206,6 @@ function MobileMessageCount(input: { label: string; value: number }) {
       </dd>
     </div>
   );
-}
-
-function formatAccountState(member: HostedRecentMemberRetentionRow): string {
-  if (member.suspended) {
-    return "Suspended";
-  }
-
-  if (member.billingPhase === "trial") {
-    return member.billingPlanName === null
-      ? "Trial"
-      : `${member.billingPlanName} trial`;
-  }
-
-  if (member.billingPhase === "paid") {
-    return member.billingPlanName ?? "Paid";
-  }
-
-  return sentenceCase(member.billingStatus);
-}
-
-function formatFirstMessage(
-  member: HostedRecentMemberRetentionRow,
-): string {
-  if (member.firstMessageAt === null) {
-    return "Not yet";
-  }
-
-  const createdAt = new Date(member.createdAt);
-  const firstMessageAt = new Date(member.firstMessageAt);
-  const elapsedMs = Math.max(0, firstMessageAt.getTime() - createdAt.getTime());
-
-  if (elapsedMs < 60_000) {
-    return "Within 1m";
-  }
-
-  if (elapsedMs < 60 * 60_000) {
-    return `${Math.floor(elapsedMs / 60_000)}m after signup`;
-  }
-
-  if (elapsedMs < 24 * 60 * 60_000) {
-    return `${Math.floor(elapsedMs / (60 * 60_000))}h after signup`;
-  }
-
-  return `${Math.floor(elapsedMs / (24 * 60 * 60_000))}d after signup`;
 }
 
 function formatAgo(value: string, capturedAt: Date): string {
@@ -298,9 +231,4 @@ function formatAgo(value: string, capturedAt: Date): string {
 
 function formatUtcDateTime(value: string): string {
   return UTC_DATE_TIME_FORMATTER.format(new Date(value));
-}
-
-function sentenceCase(value: string): string {
-  const normalized = value.replaceAll("_", " ");
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }

@@ -298,50 +298,32 @@ const RECENT_MEMBER_RETENTION = {
   capturedAt: "2026-07-31T18:00:00.000Z",
   members: [
     {
-      billingPhase: "trial",
-      billingPlanName: "Pulse",
-      billingStatus: "active",
       createdAt: "2026-07-31T17:12:00.000Z",
-      firstMessageAt: null,
       lastMessageAt: null,
-      lifecycle: "no_message",
       maskedPhoneNumberHint: "*** 0731",
-      memberId: "study_recent_member_no_message",
-      messagesAllTime: 0,
+      memberId: "study_recent_member_no_recent_activity",
       messagesLast7Days: 0,
       messagesToday: 0,
       onboardingCompleted: false,
       suspended: false,
     },
     {
-      billingPhase: "trial",
-      billingPlanName: "Pulse",
-      billingStatus: "active",
       createdAt: "2026-07-31T13:20:00.000Z",
-      firstMessageAt: "2026-07-31T13:24:00.000Z",
       lastMessageAt: "2026-07-31T16:48:00.000Z",
-      lifecycle: "activated",
       maskedPhoneNumberHint: "*** 4827",
-      memberId: "study_recent_member_activated",
-      messagesAllTime: 7,
+      memberId: "study_recent_member_active_today",
       messagesLast7Days: 7,
       messagesToday: 7,
       onboardingCompleted: true,
       suspended: false,
     },
     {
-      billingPhase: "paid",
-      billingPlanName: "Edge",
-      billingStatus: "active",
       createdAt: "2026-07-27T10:00:00.000Z",
-      firstMessageAt: "2026-07-27T10:18:00.000Z",
-      lastMessageAt: "2026-07-31T15:31:00.000Z",
-      lifecycle: "returned",
+      lastMessageAt: "2026-07-30T15:31:00.000Z",
       maskedPhoneNumberHint: null,
       memberId: "cm_00000000000000006419",
-      messagesAllTime: 32,
       messagesLast7Days: 21,
-      messagesToday: 4,
+      messagesToday: 0,
       onboardingCompleted: true,
       suspended: false,
     },
@@ -452,7 +434,7 @@ export function GrowthScorecardStudy() {
     >
       <div id="growth-recent-member-retention">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Recent member activation and return
+          Recent member activity
         </div>
         <RecentMemberRetention
           retention={RECENT_MEMBER_RETENTION}
@@ -461,7 +443,7 @@ export function GrowthScorecardStudy() {
       </div>
       <div id="growth-recent-member-retention-empty">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Recent member activation and return · empty
+          Recent member activity · empty
         </div>
         <RecentMemberRetention
           retention={EMPTY_RECENT_MEMBER_RETENTION}
