@@ -311,6 +311,30 @@ describe("murph.group dynamic tool", () => {
 
     for (const tool of MURPH_GROUP_FAMILY_TOOLS) {
       expect(tool.deferLoading).toBe(true);
+      if (tool.name === "group_consult") {
+        expect(tool.inputSchema.oneOf).toHaveLength(
+          MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult.length,
+        );
+        expect(tool.inputSchema.oneOf.map(
+          (branch) => branch.properties.action.enum[0],
+        )).toEqual([...MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult]);
+        expect([
+          ...new Set(tool.inputSchema.oneOf.flatMap(
+            (branch) => Object.keys(branch.properties),
+          )),
+        ].sort()).toEqual([...expectedRootKeys.group_consult].sort());
+        for (const branch of tool.inputSchema.oneOf) {
+          expect(branch.additionalProperties).toBe(false);
+          expect(branch.required).toContain("action");
+          for (const forbiddenField of [
+            "groupId", "memberId", "providerMessageId", "route", "sender",
+          ]) {
+            expect(branch.properties).not.toHaveProperty(forbiddenField);
+          }
+        }
+        continue;
+      }
+
       expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(tool.inputSchema.required).toEqual(["action"]);
       expect(tool.inputSchema.properties.action).toMatchObject({

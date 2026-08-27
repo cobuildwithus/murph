@@ -51,7 +51,7 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
     350,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 460],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 320],
   ["group_data", MURPH_GROUP_DATA_TOOL, 410],
   ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
   ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
@@ -87,16 +87,29 @@ describe("assistant tool description call contracts", () => {
     expect(total).toBeLessThanOrEqual(6_700);
   });
 
-  it("keeps group handoff discovery and pending-state semantics explicit", () => {
+  it("keeps group_consult discovery, sender ordering, and pending-state semantics explicit", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "Pass named group as groupLabel; never list first",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      'Before handoff, if name absent, run vault-cli memory show; use "a member" only if none',
+      'Before handoff if no name, vault-cli memory show; fallback "a member"',
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Accepted handoff: say queued, not sent/told/shared/posted",
+      "ask_current_sender starts fresh group-bound work",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "clarify_current_sender asks follow-up; continuations only resume it",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "Accepted handoff: queued, not sent/told/shared/posted",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
+      "message_current_sender",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("room-vault");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
+      "host-mediated bridge",
     );
   });
 
@@ -117,15 +130,4 @@ describe("assistant tool description call contracts", () => {
     );
   });
 
-  it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Complete current-sender request: message_current_sender",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Follow-up: clarify_current_sender, then continue_current_sender_privately or continue_current_sender_in_group",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "never continue a fresh request",
-    );
-  });
 });

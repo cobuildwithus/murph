@@ -169,21 +169,21 @@ describe("murph.group current-sender intent", () => {
         .toMatchObject({ kind: "invalid-group-arguments" });
     }
 
-    expect(MURPH_GROUP_CONSULT_TOOL.inputSchema).toMatchObject({
-      additionalProperties: false,
-      properties: {
-        action: {
-          enum: expect.arrayContaining([
-            "ask_current_sender",
-            "clarify_current_sender",
-            "continue_current_sender_in_group",
-            "continue_current_sender_privately",
-          ]),
-        },
-        message_ref: { pattern: "^ain_[0-9a-f]{32}$" },
-      },
-      required: ["action"],
-    });
+    expect(MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          additionalProperties: false,
+          properties: {
+            action: { enum: ["ask_current_sender"], type: "string" },
+            message_ref: expect.objectContaining({
+              pattern: "^ain_[0-9a-f]{32}$",
+            }),
+          },
+          required: ["action", "message_ref"],
+          type: "object",
+        }),
+      ]),
+    );
   });
 
   it("sends the group notice before forwarding exact-source authority", async () => {
