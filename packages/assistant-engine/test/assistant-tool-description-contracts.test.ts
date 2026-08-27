@@ -95,32 +95,33 @@ describe("assistant tool description call contracts", () => {
     );
   });
 
-  it("keeps member attribution explicit in private-to-group handoffs", () => {
+  it("keeps private-to-group handoff context identity-neutral", () => {
     const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
 
     expect(contextDescription).toContain(
-      "Attribute member actions, claims, and experiences in third person to their memory-backed preferred display name",
+      "written in identity-neutral third person",
     );
     expect(contextDescription).toContain(
-      "which joined groups already receive",
+      "the host supplies any group-safe attribution separately",
     );
+    expect(contextDescription).not.toContain("memory show");
     expect(contextDescription).toContain(
-      'run `vault-cli memory show`; use "a member" only when canonical memory has no preferred name',
-    );
-    expect(contextDescription).toContain(
-      "Never write them as if Murph did, said, or experienced them",
+      "Never write the member's actions, claims, or experiences as if Murph did, said, or experienced them",
     );
   });
 
   it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Use message_current_sender for a complete private current-sender request",
+      "Use ask_current_sender to return a complete private-current-sender answer to the group",
+    );
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
+      "message_current_sender only for an explicitly private answer",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "Call clarify_current_sender before a needed follow-up",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "continue_current_sender_privately or continue_current_sender_in_group only for a later reply",
+      "continuation actions are only for the later reply",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "never a fresh request",

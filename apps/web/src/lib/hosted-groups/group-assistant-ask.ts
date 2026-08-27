@@ -472,7 +472,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
       groupContextHandoff: {
         membershipId: preparedSelection.membershipId,
         originAssistantInputId: input.originAssistantInputId,
-        sourceDisplayName,
+        ...(sourceDisplayName ? { sourceDisplayName } : {}),
       },
       instructions: buildHostedExecutionGroupContextHandoffInstructions({
         context,

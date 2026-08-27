@@ -91,7 +91,7 @@ describe('synthetic group/private handoff flow', () => {
     })
 
     const handoffText =
-      'Member Delta averaged 6 hours 32 minutes across 247 usable nights.'
+      'Member Delta averaged 7,400 steps across 120 synthetic tracked days.'
     boundaries.executeProvider
       .mockImplementationOnce(async (input) => ({
         kind: 'succeeded',
@@ -117,7 +117,7 @@ describe('synthetic group/private handoff flow', () => {
           providerTurn: createProviderTurn({
             input,
             response:
-              'That is a meaningful long-term pattern, and it is probably short for most adults.',
+              'That is a meaningful long-term activity pattern and a useful baseline.',
             threadId: 'ordinary-group-thread',
           }),
         }
@@ -131,7 +131,7 @@ describe('synthetic group/private handoff flow', () => {
       executionContext,
       instructions: buildHostedExecutionGroupContextHandoffInstructions({
         context:
-          'The member averaged 6 hours 32 minutes of sleep across 247 usable nights.',
+          'The member averaged 7,400 steps across 120 synthetic tracked days.',
         sourceDisplayName: 'Member Delta',
       }),
       notificationPromptProfile: 'context-handoff',
@@ -172,7 +172,7 @@ describe('synthetic group/private handoff flow', () => {
       workingDirectory: vaultRoot,
     })
 
-    expect(followUp.response).toMatch(/meaningful long-term pattern/iu)
+    expect(followUp.response).toMatch(/meaningful long-term activity pattern/iu)
     expect(boundaries.executeProvider).toHaveBeenCalledTimes(2)
   })
 })

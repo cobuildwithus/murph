@@ -4887,53 +4887,20 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'uses the saved preferred name in a private-to-group handoff',
+    'keeps private-to-group handoff context identity-neutral',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-private-group-handoff-name-e2e-'),
+        path.join(tmpdir(), 'murph-private-group-handoff-context-e2e-'),
       )
-      const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
       const groupRequests: unknown[] = []
 
       try {
         const skillsRoot = path.join(workingDirectory, 'skills')
-        const vaultCliPath = path.join(workingDirectory, 'vault-cli')
-        const memoryPayload = JSON.stringify({
-          document: {
-            records: [{
-              id: 'memory_preferred_name',
-              section: 'Identity',
-              text: 'Preferred display name: Member Delta',
-              updatedAt: '2026-07-29T12:00:00.000Z',
-            }],
-          },
-          memory: null,
-          vault: 'synthetic-vault',
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
         })
-        await Promise.all([
-          materializeAssistantSkill({
-            skillsRoot,
-            slug: 'group-chat',
-          }),
-          writeFile(commandLogPath, '', 'utf8'),
-          writeFile(
-            vaultCliPath,
-            [
-              '#!/bin/sh',
-              'set -eu',
-              'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
-              'printf \'%s\\n\' "$*" >> "$script_dir/vault-commands.log"',
-              'case "$*" in',
-              `  memory\\ show*) printf '%s\\n' '${memoryPayload}' ;;`,
-              '  *) printf \'unsupported synthetic vault command: %s\\n\' "$*" >&2; exit 64 ;;',
-              'esac',
-              '',
-            ].join('\n'),
-            { encoding: 'utf8', mode: 0o700 },
-          ),
-        ])
-        await chmod(vaultCliPath, 0o700)
 
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -4947,25 +4914,24 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
           env: {
             ...config.env,
-            PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
           excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => ({
-              conversationId: 'conversation_private_group_handoff_name',
-              recipientKey: 'recipient_private_group_handoff_name',
+              conversationId: 'conversation_private_group_handoff_context',
+              recipientKey: 'recipient_private_group_handoff_context',
               returnContactKind: 'text',
             }),
             currentHostedMailboxItemIds: () => [],
             currentUserActionScope: () => ({
-              acceptedInputIds: ['input_private_group_handoff_name'],
-              conversationId: 'conversation_private_group_handoff_name',
+              acceptedInputIds: ['input_private_group_handoff_context'],
+              conversationId: 'conversation_private_group_handoff_context',
               conversationScope: 'direct',
-              inboundMailboxItemIds: ['mailbox_private_group_handoff_name'],
-              originSessionId: 'session_private_group_handoff_name',
-              recipientKey: 'recipient_private_group_handoff_name',
+              inboundMailboxItemIds: ['mailbox_private_group_handoff_context'],
+              originSessionId: 'session_private_group_handoff_context',
+              recipientKey: 'recipient_private_group_handoff_context',
             }),
             groupTool: {
               request: async (request) => {
@@ -4987,17 +4953,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'Tell Training Circle that I completed the planned session.',
+            'Tell Training Circle that I completed the synthetic mobility session as planned.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,
           workingDirectory,
         })
 
-        const memoryCommands = (await readFile(commandLogPath, 'utf8'))
-          .split('\n')
-          .map((command) => command.trim())
-          .filter(Boolean)
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
         const observedContext = groupRequests.find((request) =>
           request !== null
           && typeof request === 'object'
@@ -5005,14 +4968,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           && typeof request.context === 'string'
         )
         process.stdout.write(
-          `[group-handoff-name-e2e] ${JSON.stringify({
+          `[group-handoff-context-e2e] ${JSON.stringify({
             context:
               observedContext
                 && typeof observedContext === 'object'
                 && 'context' in observedContext
                 ? observedContext.context
                 : null,
-            memoryCommands,
             reply: result.finalMessage.trim(),
             toolCallCount: groupRequests.length,
           })}\n`,
@@ -5030,13 +4992,16 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           || !('context' in handoffRequest)
           || typeof handoffRequest.context !== 'string'
         ) {
-          throw new Error('Expected one named group handoff context.')
+          throw new Error('Expected one identity-neutral group handoff context.')
         }
-        expect(handoffRequest.context).toContain('Member Delta')
+        expect(handoffRequest.context).not.toMatch(/Member Delta/iu)
         expect(handoffRequest.context).not.toMatch(/\b(?:I|me|my)\b/iu)
         expect(
-          memoryCommands.filter((command) => command.startsWith('memory show')),
-        ).toHaveLength(1)
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('memory show')
+          ),
+        ).toBe(false)
         expect(result.finalMessage).toMatch(/queu/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -5048,15 +5013,31 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
-  it(
-    'routes a complete group request to the current sender private Murph',
-    async () => {
+  it.each([
+    {
+      audience: 'group' as const,
+      expectedAction: 'ask_current_sender' as const,
+      request:
+        'Ask my private Murph which synthetic training days I marked as travel, then summarize the answer in this group.',
+      routeLabel: 'back to the group',
+    },
+    {
+      audience: 'current_sender' as const,
+      expectedAction: 'message_current_sender' as const,
+      request:
+        'Ask my private Murph which synthetic training days I marked as travel, then send the answer only to me privately.',
+      routeLabel: 'privately when explicitly requested',
+    },
+  ])(
+    'routes a private-current-sender consultation $routeLabel',
+    async ({ audience, expectedAction, request }) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-current-sender-consult-e2e-'),
       )
       const messageRef = `ain_${'7'.repeat(32)}`
       const groupRequests: unknown[] = []
+      const routeEvents: Array<'notice' | 'request'> = []
 
       try {
         const skillsRoot = path.join(workingDirectory, 'skills')
@@ -5094,6 +5075,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             }),
             groupTool: {
               request: async (request) => {
+                routeEvents.push('request')
                 groupRequests.push(request)
                 return {
                   action: 'ask_current_sender',
@@ -5108,11 +5090,17 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           },
           model: config.model,
           modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send() {
+              routeEvents.push('notice')
+              return { kind: 'sent', source: 'system' }
+            },
+          },
           prompt: [
             `Message ref: ${messageRef}`,
             'Sender: participant-delta',
             'Current member message:',
-            '"Murph, ask my private Murph to analyze all of my recorded sleep history and bring the answer back here."',
+            JSON.stringify(request),
           ].join('\n'),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
@@ -5134,14 +5122,14 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         expect(consultCall).toMatchObject({
           argumentsValue: {
-            action: 'message_current_sender',
+            action: expectedAction,
             message_ref: messageRef,
           },
         })
         expect(groupRequests).toEqual([
           expect.objectContaining({
             action: 'ask_current_sender',
-            audience: 'current_sender',
+            audience,
             mode: 'new',
             origin: {
               assistantInputId: messageRef,
@@ -5150,6 +5138,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             },
           }),
         ])
+        expect(routeEvents).toEqual(
+          audience === 'group' ? ['notice', 'request'] : ['request'],
+        )
         expect(result.finalMessage).not.toMatch(
           /can(?:not|'t) (?:inspect|access|see).*(?:private|history)|send this request to your private/iu,
         )
@@ -5219,7 +5210,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           executionContext,
           instructions: buildHostedExecutionGroupContextHandoffInstructions({
             context:
-              'The member averaged 6 hours 32 minutes of sleep across 247 usable nights.',
+              'The member averaged 7,400 steps across 120 synthetic tracked days.',
             sourceDisplayName: 'Member Delta',
           }),
           notificationPromptProfile: 'context-handoff',
@@ -5235,9 +5226,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           workingDirectory,
         })
         expect(handoff.response).toMatch(/Member Delta/iu)
-        expect(handoff.response).toMatch(
-          /6 hours?(?: and)? 32 minutes?|6:32/iu,
-        )
+        expect(handoff.response).toMatch(/7,?400 steps?|7400 steps?/iu)
         expect(handoff.response).not.toMatch(/\ba member\b/iu)
         expect(handoff.session.target).toEqual(modelTarget)
         expect(handoff.session.codexResume).toBeNull()
@@ -5250,7 +5239,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           deliverResponse: false,
           includeEarlySessionOnboarding: false,
           persistUserPromptOnFailure: false,
-          prompt: 'What do you think about 6.5 over 250 days?',
+          prompt: 'What do you think about 8,000 over four months?',
           sessionId: handoff.session.sessionId,
           turnEnvironment,
           vault: workingDirectory,
@@ -5264,9 +5253,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })}\n`,
         )
         expect(followUp.session.sessionId).toBe(handoff.session.sessionId)
-        expect(followUp.response).toMatch(/sleep|hours?|night|long-term|pattern/iu)
+        expect(followUp.response).toMatch(/steps?|days?|months?|long-term|pattern|activity/iu)
         expect(followUp.response).not.toMatch(
-          /6\.5 of what|of what, averaged|what does 6\.5 refer to|can you clarify what 6\.5/iu,
+          /8,?000 of what|of what, averaged|what does 8,?000 refer to|can you clarify what 8,?000/iu,
         )
       } finally {
         await stopWarmCodexAppServer('group-private-handoff-flow-e2e-complete')

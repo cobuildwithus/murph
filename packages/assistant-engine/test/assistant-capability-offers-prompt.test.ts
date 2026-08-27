@@ -205,7 +205,10 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain(
-      '`murph.group_consult action="message_current_sender"`',
+      '`murph.group_consult action="ask_current_sender"`',
+    )
+    expect(section).toContain(
+      'Call `message_current_sender` only when the sender explicitly asks to receive the answer privately',
     )
     expect(section).toContain("that message's exact `Message ref`")
     expect(section).toContain('do not tell them to switch chats')

@@ -184,10 +184,11 @@ describe("hosted assistant ask completion", () => {
         session,
       );
       completionMocks.sendAssistantAskContinuation.mockResolvedValue({
+        deliveryOutcome: { intentId: "intent-exact-private" },
         status: "completed",
       });
 
-      await executeHostedAssistantAskCompletedWake({
+      const outcome = await executeHostedAssistantAskCompletedWake({
         executionContext: { hosted: null },
         vaultRoot: vault,
         wake,
@@ -214,6 +215,7 @@ describe("hosted assistant ask completion", () => {
           threadIsDirect: true,
         }),
       );
+      expect(outcome.deliveryIntentIds).toEqual(["intent-exact-private"]);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }
@@ -373,10 +375,11 @@ describe("hosted assistant ask completion", () => {
         currentSession.session,
       );
       completionMocks.sendAssistantAskContinuation.mockResolvedValue({
+        deliveryOutcome: { intentId: "intent-reviewed-group" },
         status: "completed",
       });
 
-      await executeHostedAssistantAskCompletedWake({
+      const outcome = await executeHostedAssistantAskCompletedWake({
         executionContext: { hosted: null },
         sourceMailboxItemId: eventId,
         vaultRoot: vault,
@@ -423,6 +426,7 @@ describe("hosted assistant ask completion", () => {
       expect(continuationInput).not.toHaveProperty(
         "outboxExternalThreadRouteAuthority",
       );
+      expect(outcome.deliveryIntentIds).toEqual(["intent-reviewed-group"]);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }

@@ -595,6 +595,17 @@ describe("Hosted private-to-group context handoff admission", () => {
     );
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
     mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
+    mocks.readHostedGroupSharedDataByRuntimeMemberId.mockResolvedValue({
+      members: [{
+        currentTurnHandles: [],
+        displayName: "Member Delta",
+        memberId: ORIGIN_MEMBER_ID,
+        participantId: "membership-one",
+        projections: [],
+      }],
+      requestedProjectionScopeKeys: [],
+      status: "ok",
+    });
     const destination = groupDestination();
     mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(
       destination.destination,
@@ -702,6 +713,61 @@ describe("Hosted private-to-group context handoff admission", () => {
     });
   });
 
+  it.each([
+    "unavailable",
+    "missing-name",
+    "read-error",
+  ] as const)("keeps attribution neutral when the profile read is %s", async (scenario) => {
+    if (scenario === "read-error") {
+      mocks.readHostedGroupSharedDataByRuntimeMemberId.mockRejectedValue(
+        new Error("synthetic profile read failure"),
+      );
+    } else if (scenario === "unavailable") {
+      mocks.readHostedGroupSharedDataByRuntimeMemberId.mockResolvedValue({
+        status: "unavailable",
+        unavailableReason: "synthetic_unavailable",
+      });
+    } else {
+      mocks.readHostedGroupSharedDataByRuntimeMemberId.mockResolvedValue({
+        members: [{
+          currentTurnHandles: [],
+          displayName: null,
+          memberId: ORIGIN_MEMBER_ID,
+          participantId: "membership-one",
+          projections: [],
+        }],
+        requestedProjectionScopeKeys: [],
+        status: "ok",
+      });
+    }
+    const { prisma } = createPrisma();
+    const context = "The member completed a synthetic mobility session.";
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      mailboxWake: { expectedUserId: TARGET_RUNTIME_MEMBER_ID },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    const appendInput = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx
+      .mock.calls[0]?.[0];
+    expect(appendInput?.envelope.notification.groupContextHandoff).toEqual({
+      membershipId: "membership-one",
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+    expect(appendInput?.envelope.notification.instructions).toBe(
+      buildHostedExecutionGroupContextHandoffInstructions({ context }),
+    );
+    expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledOnce();
+  });
+
   it("keeps multiple unnamed organic memberships fail-closed", async () => {
     const { prisma } = createPrisma({
       memberships: [
@@ -803,6 +869,45 @@ describe("Hosted private-to-group context handoff admission", () => {
       .not.toHaveBeenCalled();
     expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto)
       .toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
+  });
+
+  it("replays a pre-attribution neutral wake without prompt-version conflict", async () => {
+    const context = "The original identity-neutral fact.";
+    const currentWake = contextHandoffWake({
+      context,
+      sourceDisplayName: null,
+    });
+    const legacyWake = {
+      ...currentWake,
+      notification: {
+        ...currentWake.notification,
+        groupContextHandoff: {
+          membershipId: "membership-one",
+          originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        },
+      },
+    };
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockResolvedValue(
+      mailboxItemForContextHandoff(legacyWake),
+    );
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(legacyWake);
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      memberId: ORIGIN_MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: TARGET_RUNTIME_MEMBER_ID,
+        mailboxItemId: legacyWake.eventId,
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
       .not.toHaveBeenCalled();
   });

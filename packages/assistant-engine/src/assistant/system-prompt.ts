@@ -698,7 +698,7 @@ function buildAssistantHostedGroupGuidanceText(
       : []),
     ...(conversationScope === "group" && toolSurface === "families"
       ? [
-          "- When the current sender's accepted message is a complete request for their private Murph whose result should return here, call `murph.group_consult action=\"message_current_sender\"` with that message's exact `Message ref`; do not tell them to switch chats or claim the room cannot route it. If one necessary detail is missing, call `clarify_current_sender`; use a continuation action only on that sender's later answer.",
+          "- When the current sender's accepted message is a complete request for their private Murph, use that message's exact `Message ref`; do not tell them to switch chats or claim the room cannot route it. Call `murph.group_consult action=\"ask_current_sender\"` when the answer should return to this group. Call `message_current_sender` only when the sender explicitly asks to receive the answer privately. If one necessary detail is missing, call `clarify_current_sender`; use a continuation action only on that sender's later answer.",
         ]
       : []),
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
