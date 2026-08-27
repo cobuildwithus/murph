@@ -1,8 +1,8 @@
 # Accept Codex 0.149.1 token usage shape
 
-Status: active
+Status: completed
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -80,3 +80,4 @@ Updated: 2026-08-26
   typecheck, diff checks, required PR review gates, and exact-head CI.
 - Expected outcomes: current-shape events normalize deterministically, malformed
   known fields remain rejected, downstream usage is non-null, and all checks pass.
+Completed: 2026-08-27
