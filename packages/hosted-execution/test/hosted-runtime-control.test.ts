@@ -1571,10 +1571,13 @@ describe("hosted runtime control contracts", () => {
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         runtimeInvocationOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
-        userRunnerRpcStartedAtEpochMs: 1_777_000_000_021,
-        runtimeConsentLockAcquiredAtEpochMs: 1_777_000_000_022,
-        healthDataAdmissionReadStartedAtEpochMs: 1_777_000_000_023,
-        healthDataAdmissionReadFinishedAtEpochMs: 1_777_000_000_024,
+        userRunnerConstructorStartedAtEpochMs: 1_777_000_000_021,
+        userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_022,
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_023,
+        userRunnerRpcStartedAtEpochMs: 1_777_000_000_023,
+        runtimeConsentLockAcquiredAtEpochMs: 1_777_000_000_024,
+        healthDataAdmissionReadStartedAtEpochMs: 1_777_000_000_025,
+        healthDataAdmissionReadFinishedAtEpochMs: 1_777_000_000_026,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         runnerStateBindStartedAtEpochMs: 1_777_000_000_031,
         runnerStateBindFinishedAtEpochMs: 1_777_000_000_032,
@@ -1840,6 +1843,9 @@ describe("hosted runtime control contracts", () => {
       { runtimeInvocationOrchestrationAttemptId: "attempt_1" }, // arbitrary attempt ids are forbidden
       { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
+      { userRunnerConstructorStartedAtEpochMs: "1777000000021" }, // activation timestamps stay numeric
+      { userRunnerConstructorFinishedAtEpochMs: -1 }, // activation timestamps stay non-negative
+      { userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1.5 }, // activation timestamps stay integral
       { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
       { activeFenceTargetWasPriorVersion: 1 }, // boolean leaf must stay boolean
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
@@ -2149,6 +2155,9 @@ describe("hosted runtime control contracts", () => {
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      userRunnerConstructorStartedAtEpochMs: 1_777_000_000_120,
+      userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_122,
+      userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_123,
       workspaceReadElapsedMs: 70,
     })).toEqual({
       activeFenceTargetWasPriorVersion: true,
@@ -2168,6 +2177,9 @@ describe("hosted runtime control contracts", () => {
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      userRunnerConstructorStartedAtEpochMs: 1_777_000_000_120,
+      userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_122,
+      userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_123,
       workspaceReadElapsedMs: 70,
     });
 

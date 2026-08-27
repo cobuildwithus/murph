@@ -53,6 +53,28 @@ describe("hosted runtime operational report contracts", () => {
     );
     expect(coldStartReportSql).not.toContain("abs(route_received_ms");
     expect(coldStartReportSql).toContain(
+      "route_received_ms <= runner_constructor_started_ms",
+    );
+    expect(coldStartReportSql).toContain(
+      "runner_constructor_started_ms <= runner_constructor_finished_ms",
+    );
+    expect(coldStartReportSql).toContain(
+      "runner_constructor_finished_ms <= runner_first_ensure_ms",
+    );
+    expect(coldStartReportSql).toContain(
+      "runner_first_ensure_ms = runner_rpc_started_ms",
+    );
+    expect(coldStartReportSql).toContain("activation_matches_current_request");
+    expect(coldStartReportSql).toContain(
+      "Cloudflare route -> UserRunner constructor start",
+    );
+    expect(coldStartReportSql).toContain(
+      "UserRunner constructor start -> finish",
+    );
+    expect(coldStartReportSql).toContain(
+      "UserRunner constructor finish -> first ensure instruction",
+    );
+    expect(coldStartReportSql).toContain(
       "runner_job_accepted_at >= accepted_at",
     );
     expect(coldStartReportSql).toContain("stamp_candidate_count = 1");
@@ -112,6 +134,15 @@ describe.skipIf(!runPostgresProof)(
         expect(stdout).toContain("legacy_unclassified,1,5.000,5.000,5.000");
         expect(stdout).toContain("web_direct_cold,2,6.000,6.900,7.000");
         expect(stdout).not.toContain("web_direct_existing_runtime");
+        expect(stdout).toContain(
+          "Cloudflare route -> UserRunner constructor start,1,50.0,50.0,50.0",
+        );
+        expect(stdout).toContain(
+          "UserRunner constructor start -> finish,1,10.0,10.0,10.0",
+        );
+        expect(stdout).toContain(
+          "UserRunner constructor finish -> first ensure instruction,1,40.0,40.0,40.0",
+        );
         expect(stdout).toContain(
           "Cloudflare route -> UserRunner RPC,1,100.0,100.0,100.0",
         );
@@ -553,6 +584,9 @@ function createFixtureSql(schemaName: string): string {
         'directEnsureOrchestrationAttemptId', 'web-ingress-causal',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 1600,
         'runtimeInvocationOrchestrationAttemptId', 'web-ingress-causal',
+        'userRunnerConstructorStartedAtEpochMs', base_ms + 1650,
+        'userRunnerConstructorFinishedAtEpochMs', base_ms + 1660,
+        'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 1700,
         'userRunnerRpcStartedAtEpochMs', base_ms + 1700,
         'runtimeConsentLockAcquiredAtEpochMs', base_ms + 1800,
         'healthDataAdmissionReadStartedAtEpochMs', base_ms + 1810,
@@ -582,6 +616,9 @@ function createFixtureSql(schemaName: string): string {
         'directEnsureOrchestrationAttemptId', 'web-ingress-reversed',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 2600,
         'runtimeInvocationOrchestrationAttemptId', 'web-ingress-reversed',
+        'userRunnerConstructorStartedAtEpochMs', base_ms + 2300,
+        'userRunnerConstructorFinishedAtEpochMs', base_ms + 2310,
+        'userRunnerFirstEnsureRuntimeProcessingAtEpochMs', base_ms + 2350,
         'userRunnerRpcStartedAtEpochMs', base_ms + 2550,
         'freshStartRequestedAtEpochMs', base_ms + 2800
       ))
