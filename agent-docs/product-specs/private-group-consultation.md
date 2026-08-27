@@ -195,6 +195,14 @@ Web owns target resolution because it owns current `HostedGroupMember` truth.
 5. Require a valid current synthetic group-runtime identity before accepting
    the ask. The runtime may be cold; the committed request wakes it.
 
+The visible-label bound admits at most 64 labels and limits only one
+clarification response. It is not a membership or availability limit: when the
+member names a group, Web compares that normalized label against every current
+membership so the total number of joined groups can never make a unique exact
+target unavailable. The heavier `list_memberships` summary keeps its separate
+25-row page bound and exposes stable continuation instead of making later
+memberships unreachable.
+
 Never fuzzy-match, pick the newest or owned group, inspect roster identities to
 guess, or fan out. `list_memberships` is not required, and the model never
 receives a membership id for an ask.

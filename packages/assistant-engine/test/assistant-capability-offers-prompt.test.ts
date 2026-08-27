@@ -215,6 +215,18 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(directLayers.prompt).toContain('last-resort disambiguation check')
+    expect(directSection).toContain(
+      'already names a visible group',
+    )
+    expect(directSection).toContain(
+      'pass that name as `groupLabel` to `murph.group_consult` without calling `list_memberships`',
+    )
+    expect(directSection).toContain(
+      'otherwise run `vault-cli memory show`',
+    )
+    expect(directSection).toContain(
+      'use "a member" only when canonical memory has no preferred name',
+    )
     expect(directSection).toContain('possible group cue')
     expect(directSection).toContain('club, team, community, or shared challenge')
     expect(directSection).toContain(
@@ -236,8 +248,17 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain('select by role or newness')
     expect(directSection).toContain('expose identifiers, or fan out')
     expect(directSection).toContain('ordinary ambiguity without a group cue')
+    expect(directSection).toContain('Track each cursor chain separately')
+    expect(directSection).toContain(
+      'When one chain returns its null next cursor, that chain is exhausted for this turn',
+    )
+    expect(directSection).toContain(
+      'ignore any renewed cursor or truncation for the exhausted chain and never restart it',
+    )
     expect(groupPrompt).not.toContain('last-resort disambiguation check')
     expect(unverifiedPrompt).not.toContain('last-resort disambiguation check')
+    expect(groupPrompt).not.toContain('already names a visible group')
+    expect(unverifiedPrompt).not.toContain('already names a visible group')
   })
 
   it('does not fork challenge behavior into a scheduled-only prompt', () => {

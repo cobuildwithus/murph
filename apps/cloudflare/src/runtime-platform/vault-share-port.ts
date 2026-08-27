@@ -15,7 +15,9 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+  isHostedRuntimeVaultShareDeliverContinuation,
 } from "@murphai/hosted-execution/routes";
 
 import {
@@ -66,43 +68,86 @@ export function createHostedWebVaultSharePort(input: {
       const headers = new Headers({
         [HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER]: String(effectDeadlineAtEpochMs),
       });
-      let payload: unknown;
-      try {
-        payload = await fetchHostedWebControlPlaneJson({
-          body: request,
-          boundUserId: input.boundUserId,
-          description: "Hosted vault share delivery",
-          fetchImpl: input.fetchImpl,
-          headers,
-          path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
-          timeoutMs: Math.max(1, settlementDeadlineAtEpochMs - Date.now()),
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (isDefinitiveHostedVaultShareScopeFailure({
-          effectDeadlineAtEpochMs,
-          error,
-          transport: input.transport,
-        })) {
-          return { status: "scope-failed" };
+      const observedContinuations = new Set<string>();
+      let continuation: string | null = null;
+      let delivered = false;
+
+      while (true) {
+        let payload: unknown;
+        try {
+          payload = await fetchHostedWebControlPlaneJson({
+            body: continuation === null
+              ? request
+              : {
+                  ...request,
+                  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]:
+                    continuation,
+                },
+            boundUserId: input.boundUserId,
+            description: "Hosted vault share delivery",
+            fetchImpl: input.fetchImpl,
+            headers,
+            path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+            timeoutMs: Math.max(1, settlementDeadlineAtEpochMs - Date.now()),
+            transport: input.transport,
+          });
+        } catch (error) {
+          if (isDefinitiveHostedVaultShareScopeFailure({
+            effectDeadlineAtEpochMs,
+            error,
+            transport: input.transport,
+          })) {
+            return { status: "scope-failed" };
+          }
+          if (
+            !(error instanceof HostedWebControlPlaneResponseError)
+            || (
+              input.transport.mode === "proxy"
+              && !error.forwardedFromWeb
+            )
+          ) {
+            await waitForHostedVaultShareAmbiguousDeliverySettlement(
+              settlementDeadlineAtEpochMs,
+            );
+          }
+          throw error;
+        }
+
+        const response = parseHostedVaultShareDeliverResponse(payload);
+        delivered ||= response.status === "delivered";
+        const nextContinuation = readHostedVaultShareDeliverContinuation(payload);
+        if (nextContinuation === null) {
+          return delivered
+            ? { status: "delivered" }
+            : { status: "no-active-share" };
         }
         if (
-          !(error instanceof HostedWebControlPlaneResponseError)
-          || (
-            input.transport.mode === "proxy"
-            && !error.forwardedFromWeb
-          )
+          nextContinuation === continuation
+          || observedContinuations.has(nextContinuation)
         ) {
-          await waitForHostedVaultShareAmbiguousDeliverySettlement(
-            settlementDeadlineAtEpochMs,
-          );
+          throw new TypeError("Hosted vault-share delivery continuation repeated.");
         }
-        throw error;
+        observedContinuations.add(nextContinuation);
+        continuation = nextContinuation;
       }
-
-      return parseHostedVaultShareDeliverResponse(payload);
     },
   };
+}
+
+function readHostedVaultShareDeliverContinuation(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted vault share delivery response must be an object.");
+  }
+  const continuation = (value as Record<string, unknown>)[
+    HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
+  ];
+  if (continuation === undefined) {
+    return null;
+  }
+  if (!isHostedRuntimeVaultShareDeliverContinuation(continuation)) {
+    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+  }
+  return continuation;
 }
 
 function isDefinitiveHostedVaultShareScopeFailure(input: {
