@@ -1106,7 +1106,11 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
-          materializeRealWorkoutVaultCli({ binDirectory }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
         ])
 
         const result = await executeRealCodexAppServerTurn({
@@ -1144,10 +1148,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
-            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            WORKOUT_E2E_VAULT: workingDirectory,
           },
           excludeResumeTurns: true,
           model: config.model,
