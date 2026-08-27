@@ -1309,7 +1309,7 @@ describe("hosted runtime latency dashboard store", () => {
       assistantInputIds: ["input_untraced_2"],
       at: instant("2026-06-02T19:11:41.000Z"),
       authenticatedUserId: "member_latency_1",
-      milestone: "first_codex_output_observed",
+      milestone: "pending_reply_admitted",
       prisma,
       runtimeAttemptId: "attempt_untraced_2",
       runtimeLeaseGeneration: "1",
@@ -1319,6 +1319,97 @@ describe("hosted runtime latency dashboard store", () => {
       recorded: false,
       unmatchedCount: 1,
       untracedCount: 1,
+    });
+  });
+
+  it("persists the earliest pending-admission and foreground-selection timestamps", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:50.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_lifecycle_milestones_1",
+      at: instant("2026-06-02T19:11:51.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_milestones_1",
+      source: "linq",
+    });
+
+    for (const at of [
+      "2026-06-02T19:11:51.300Z",
+      "2026-06-02T19:11:51.200Z",
+      "2026-06-02T19:11:51.400Z",
+    ]) {
+      await expect(recordHostedIngressAssistantMilestone({
+        assistantInputIds: ["input_lifecycle_milestones_1"],
+        at: instant(at),
+        authenticatedUserId: "member_latency_1",
+        milestone: "pending_reply_admitted",
+        prisma,
+        runtimeAttemptId: "attempt_lifecycle_milestones_1",
+        runtimeLeaseGeneration: "1",
+        source: "linq",
+      })).resolves.toEqual({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+    }
+    for (const at of [
+      "2026-06-02T19:11:51.600Z",
+      "2026-06-02T19:11:51.500Z",
+      "2026-06-02T19:11:51.700Z",
+    ]) {
+      await expect(recordHostedIngressAssistantMilestone({
+        assistantInputIds: ["input_lifecycle_milestones_1"],
+        at: instant(at),
+        authenticatedUserId: "member_latency_1",
+        milestone: "foreground_input_selected",
+        prisma,
+        runtimeAttemptId: "attempt_lifecycle_milestones_1",
+        runtimeLeaseGeneration: "1",
+        source: "linq",
+      })).resolves.toEqual({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+    }
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      assistant: {
+        foregroundInputSelectedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.500Z"),
+        pendingReplyAdmittedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.200Z"),
+      },
+      schemaVersion: 1,
+    });
+
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_lifecycle_milestones_1"],
+      at: instant("2026-06-02T19:11:51.100Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "foreground_input_selected",
+      prisma,
+      runtimeAttemptId: "attempt_other_lifecycle_milestones_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+    });
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      assistant: {
+        foregroundInputSelectedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.500Z"),
+        pendingReplyAdmittedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.200Z"),
+      },
+      schemaVersion: 1,
     });
   });
 

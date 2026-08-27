@@ -1750,9 +1750,12 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
-Because Web strictly parses phase-breakdown leaves, roll this telemetry out
-Web-first so its reader accepts the additive fields before a runner emits them;
-during rollback, remove the runner/Cloudflare emitter before rolling Web back.
+Because Web strictly parses phase-breakdown leaves and assistant milestone
+values, deploy Web/Vercel first so its reader accepts the additive contract,
+then deploy the Cloudflare Worker/runner emitters. Warm old runners remain valid
+because the additions are optional and old milestone values are unchanged.
+Rollback Cloudflare Worker/runner first, then Web/Vercel.
+
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
@@ -1767,6 +1770,93 @@ delivery and unresolved traces by their exact provider request, then measures
 the earliest accepted visible response across progress and final delivery. A
 progress update before the fixed 30-second boundary therefore suppresses the
 latency incident, while a late update does not hide the breached wait.
+
+Two additional metadata-only assistant milestones close the bounded observation
+gap between staging and provider execution. `pending_reply_admitted` means the
+runtime's existing pending-reply enqueue completed for a reply-eligible staged
+input that was not already durably consumed. `foreground_input_selected` means
+the runner finalized that input in the foreground assistant batch, before
+assistant execution. Web stores their earliest observed epoch-millisecond
+timestamps as
+`phaseBreakdown.assistant.pendingReplyAdmittedAtEpochMs` and
+`phaseBreakdown.assistant.foregroundInputSelectedAtEpochMs`. Duplicate or
+out-of-order emissions therefore remain idempotent, while unmatched trace rows
+and stale runtime attempts remain no-ops under the existing set-based writer and
+attempt fence. Both emissions use the existing queued best-effort milestone
+path: failure cannot delay or alter admission, selection, assistant execution,
+retry, checkpointing, delivery, mailbox consumption, or device sync.
+
+These milestones carry only opaque assistant input IDs, the timestamp, the
+existing source enum, the runtime attempt ID, and the bounded milestone enum.
+They contain no message, prompt, transcript, route, phone number, email
+address, identity, health value, provider payload, credential, or scenario label. They inherit the
+existing seven-day trace retention and add no retention or state owner.
+
+For a later bounded production occurrence, verification must select only staged
+trace rows inside an explicit accepted-time window and fixed row limit where
+provider start, reply attempt, accepted delivery, terminal non-reply, and durable
+mailbox consumption are all absent. Project only the opaque trace ID, opaque
+assistant input ID, the two timestamp leaves and their presence flags, and one
+derived lifecycle state: `staged_without_pending_admission`,
+`admitted_not_selected`, or `selected_without_downstream_outcome`. Order by
+accepted time and opaque trace ID, or aggregate only by that typed lifecycle
+state. Do not project member, mailbox, route, provider, delivery-target, content,
+or arbitrary JSON fields. For the existing Linq trace owner, the bounded query
+shape is:
+
+```sql
+WITH bounded AS MATERIALIZED (
+  SELECT
+    trace.accepted_at AS sort_accepted_at,
+    trace.id AS trace_id,
+    trace.assistant_input_id,
+    trace.phase_breakdown_json #>>
+      '{assistant,pendingReplyAdmittedAtEpochMs}'
+      AS pending_reply_admitted_at_epoch_ms,
+    trace.phase_breakdown_json #>>
+      '{assistant,foregroundInputSelectedAtEpochMs}'
+      AS foreground_input_selected_at_epoch_ms
+  FROM hosted_ingress_latency_trace AS trace
+  JOIN hosted_mailbox_item AS mailbox_item
+    ON mailbox_item.user_id = trace.user_id
+   AND mailbox_item.id = trace.mailbox_item_id
+  WHERE trace.source = 'linq'
+    AND trace.accepted_at >= $1::timestamp
+    AND trace.accepted_at < $2::timestamp
+    AND trace.assistant_input_staged_at IS NOT NULL
+    AND trace.assistant_input_id IS NOT NULL
+    AND trace.provider_start_at IS NULL
+    AND trace.reply_runtime_attempt_id IS NULL
+    AND trace.linq_delivery_id IS NULL
+    AND mailbox_item.consumed_at IS NULL
+    AND trace.phase_breakdown_json #>>
+      '{assistant,terminalNonReplyCommittedAtEpochMs}' IS NULL
+  ORDER BY trace.accepted_at, trace.id
+  LIMIT $3
+)
+SELECT
+  trace_id,
+  assistant_input_id,
+  pending_reply_admitted_at_epoch_ms IS NOT NULL
+    AS pending_reply_admitted,
+  pending_reply_admitted_at_epoch_ms,
+  foreground_input_selected_at_epoch_ms IS NOT NULL
+    AS foreground_input_selected,
+  foreground_input_selected_at_epoch_ms,
+  CASE
+    WHEN foreground_input_selected_at_epoch_ms IS NOT NULL
+      THEN 'selected_without_downstream_outcome'
+    WHEN pending_reply_admitted_at_epoch_ms IS NOT NULL
+      THEN 'admitted_not_selected'
+    ELSE 'staged_without_pending_admission'
+  END AS lifecycle_state
+FROM bounded
+ORDER BY sort_accepted_at, trace_id;
+```
+
+`$1` and `$2` are the approved bounded window and `$3` is the fixed row cap; do
+not broaden either during incident verification.
+
 Scheduled automation turns, including Flex-tier turns, have no user-ingress
 reply trace and stay outside this monitor. It projects
 `terminal_non_reply_committed` only from the assistant engine's existing durable
@@ -3479,8 +3569,10 @@ refreshing it, so the trace becomes unresolved after the last published
 expectation. The marker never pretends a reply was delivered or consumes the
 mailbox item early. Missing, expired, or chronologically invalid expectation
 data cannot hide still-unconsumed work. The terminal and publication-expectation
-leaves alone use max-timestamp merge semantics. Every other latency leaf remains
-assign-once. For slow completed replies, the monitor compares
+leaves use max-timestamp merge semantics. Pending-reply admission, foreground
+selection, and accepted progress leaves use min-timestamp merge semantics.
+Every other latency leaf remains assign-once. For slow completed replies, the
+monitor compares
 accepted-to-provider-start with provider-start-to-first-visible-response and
 reports the larger measured boundary as pre-provider path or provider/assistant
 execution. Missing, ambiguous, or impossible provider chronology remains

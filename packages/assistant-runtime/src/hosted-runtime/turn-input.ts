@@ -321,6 +321,9 @@ export async function selectHostedAssistantInputIds(
     | {
         freshAssistantInputIds?: readonly string[] | null;
         mode: "foreground";
+        onSelectionFinalized?: ((
+          events: readonly AssistantInputEventRecord[],
+        ) => void) | null;
         vaultRoot: string;
       }
     | {
@@ -431,6 +434,11 @@ export async function selectHostedAssistantInputIds(
     };
   }
 
+  notifyHostedAssistantInputSelectionFinalizedBestEffort(
+    input.onSelectionFinalized ?? null,
+    selected.events,
+  );
+
   return {
     freshInputIds,
     inputIds: selected.events.map((event) => event.inputId),
@@ -440,6 +448,20 @@ export async function selectHostedAssistantInputIds(
       ? { preserveInputOrder: true as const }
       : {}),
   };
+}
+
+function notifyHostedAssistantInputSelectionFinalizedBestEffort(
+  notify: ((events: readonly AssistantInputEventRecord[]) => void) | null,
+  events: readonly AssistantInputEventRecord[],
+): void {
+  if (!notify) {
+    return;
+  }
+  try {
+    notify(events);
+  } catch {
+    // Selection observation is diagnostic-only and must not affect the batch.
+  }
 }
 
 async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {

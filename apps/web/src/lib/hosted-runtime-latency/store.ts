@@ -1020,6 +1020,10 @@ function readHostedIngressAssistantMilestoneLeaf(
   milestone: HostedRuntimeAssistantMilestone,
 ): { keepEarliest: boolean; leafKey: string } {
   switch (milestone) {
+    case "pending_reply_admitted":
+      return { keepEarliest: true, leafKey: "pendingReplyAdmittedAtEpochMs" };
+    case "foreground_input_selected":
+      return { keepEarliest: true, leafKey: "foregroundInputSelectedAtEpochMs" };
     case "linq_typing_request_started":
       return { keepEarliest: false, leafKey: "linqTypingRequestStartedAtEpochMs" };
     case "linq_typing_accepted":

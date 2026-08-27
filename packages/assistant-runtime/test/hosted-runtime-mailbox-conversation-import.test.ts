@@ -1436,7 +1436,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
-  test("adds runtime latency milestones to Linq staged trace callbacks", async () => {
+  test("adds runtime latency and pending-admission milestones to Linq trace callbacks", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -1504,8 +1504,103 @@ describe("hosted mailbox conversation import adapter", () => {
         type: "assistant_input_staged",
         workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
       }),
+      expect.objectContaining({
+        assistantInputIds: [expect.any(String)],
+        milestone: "pending_reply_admitted",
+        runtimeAttemptId: "attempt_latency_trace_1",
+        source: "linq",
+        type: "assistant_milestone",
+      }),
     ]);
     assert.equal(JSON.stringify(latencyTraceRequests).includes("latency trace message body"), false);
+  });
+
+  test("records pending admission only after enqueue completion and isolates trace failure", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-admission-trace-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem({
+      id: "mailbox_item_admission_trace_001",
+    });
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_admission_trace",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_admission_trace",
+          parts: [{ type: "text", value: "private input" }],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    let enqueueCompleted = false;
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      item,
+      async prepareWakeContext() {},
+      runtime: createRuntime({
+        platform: {
+          latencyTracePort: {
+            async record(request) {
+              latencyTraceRequests.push(request);
+              if (request.event.type === "assistant_milestone") {
+                assert.equal(enqueueCompleted, true);
+                throw new Error("synthetic latency trace failure");
+              }
+              return {
+                matchedCount: 1,
+                recorded: true,
+                unmatchedCount: 0,
+              };
+            },
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_admission_trace_1",
+      stageAssistantInputEvent: async () => ({
+        attachmentEvidenceRequired: false,
+        async enqueuePendingReply() {
+          await Promise.resolve();
+          enqueueCompleted = true;
+        },
+        inputId: "input_admission_trace_1",
+        async recordProjection() {},
+      }),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(enqueueCompleted, true);
+    await vi.waitFor(() => {
+      expect(latencyTraceRequests).toHaveLength(2);
+    });
+    expect(latencyTraceRequests.map((request) => request.event)).toEqual([
+      expect.objectContaining({
+        assistantInputId: "input_admission_trace_1",
+        type: "assistant_input_staged",
+      }),
+      expect.objectContaining({
+        assistantInputIds: ["input_admission_trace_1"],
+        milestone: "pending_reply_admitted",
+        runtimeAttemptId: "attempt_admission_trace_1",
+        source: "linq",
+        type: "assistant_milestone",
+      }),
+    ]);
+    assert.equal(JSON.stringify(latencyTraceRequests).includes("private input"), false);
   });
 
   test("adds conversation import stage timings to staged trace callbacks", async () => {
@@ -1695,6 +1790,13 @@ describe("hosted mailbox conversation import adapter", () => {
         source: "telegram",
         type: "assistant_input_staged",
       }),
+      expect.objectContaining({
+        assistantInputIds: [expect.any(String)],
+        milestone: "pending_reply_admitted",
+        runtimeAttemptId: "attempt_telegram_latency_trace_1",
+        source: "telegram",
+        type: "assistant_milestone",
+      }),
     ]);
     assert.equal(
       JSON.stringify(latencyTraceRequests).includes("telegram latency trace message body"),
@@ -1770,8 +1872,9 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    assert.equal(latencyTraceRequests.length, 1);
-    const event = latencyTraceRequests[0]?.event;
+    const event = latencyTraceRequests.find((request) =>
+      request.event.type === "assistant_input_staged"
+    )?.event;
     assert.equal(event?.type, "assistant_input_staged");
     if (!event || event.type !== "assistant_input_staged") {
       throw new Error("Expected assistant input staged latency trace event.");
@@ -1780,6 +1883,14 @@ describe("hosted mailbox conversation import adapter", () => {
       foregroundWaitResolvedAtEpochMs: staleWakeNotifiedAtEpochMs + 100,
       foregroundImportStartedAtEpochMs: staleWakeNotifiedAtEpochMs + 200,
     });
+    expect(latencyTraceRequests.map((request) => request.event)).toContainEqual(
+      expect.objectContaining({
+        milestone: "pending_reply_admitted",
+        runtimeAttemptId: "attempt_latency_trace_stale_wake",
+        source: "linq",
+        type: "assistant_milestone",
+      }),
+    );
     assert.equal(JSON.stringify(latencyTraceRequests).includes("stale wake trace message body"), false);
   });
 
