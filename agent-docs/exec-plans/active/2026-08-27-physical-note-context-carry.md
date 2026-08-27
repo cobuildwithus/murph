@@ -72,20 +72,30 @@ without depending exclusively on native provider-thread memory.
   vitest.config.ts --no-coverage
   test/assistant-automation-reply-event-path.test.ts
   test/assistant-hosted-image-completion.test.ts
-  test/assistant-hosted-image-completion-authority.test.ts` — 117 passed.
+  test/assistant-hosted-image-completion-authority.test.ts
+  test/assistant-input-store.test.ts
+  test/assistant-local-service-delivery.test.ts
+  test/assistant-codex-turn-planning.test.ts` — 298 passed across bounded
+  one-worker runs.
 - `pnpm --filter @murphai/assistant-runtime exec vitest run --config
   vitest.config.ts --isolate=true --no-coverage
   test/hosted-runtime-image-generation.test.ts
-  test/hosted-runtime-turn-input.test.ts` — 41 passed.
+  test/hosted-runtime-pending-input-index.test.ts
+  test/hosted-runtime-turn-input.test.ts` — 81 passed.
 - Assistant Engine and Assistant Runtime typechecks passed.
 - `pnpm test:assistant:live -- --test "keeps the originating destination
   through completion and a terse approval"` — passed with `gpt-5.6-terra`
-  through local subscription auth. The isolated completion attached the exact
-  synthetic image once, the later approval sent once using the carried
-  synthetic destination, and neither turn asked for destination fields. Reply
-  review: Ready.
+  through local subscription auth after the fixture moved the destination past
+  the ordinary committed-message replay cap. The production-built completion
+  prompt retained the bounded tail, attached the exact synthetic image once,
+  and the later approval sent once using that carried destination without
+  asking for destination fields. Reply review: Ready.
 - ReviewGPT round 1 found that the initial candidate stored but discarded the
-  origin excerpt at the production prompt boundary. The accepted correction
-  extends the existing trusted in-memory projection, keeps result authority
-  separate from historical context, and leaves late completions queued for
-  normal trusted turn-context admission. Final remediation review is pending.
+  origin excerpt at the production prompt boundary. Round 2 then proved that
+  keeping the excerpt only in transient trusted turn context still lost it
+  during cold transcript reconstruction. The requirement-level retrospective
+  selected the existing normalized completion prompt as the one semantic
+  carrier: it persists one bounded non-authoritative excerpt, while trusted
+  turn context keeps only result authority. The existing input event hands the
+  origin receipt time to transcript persistence without changing completion
+  ordering or adding another state owner. Final remediation review is pending.

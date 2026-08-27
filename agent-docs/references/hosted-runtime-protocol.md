@@ -1463,6 +1463,16 @@ unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
 forbidden because it can erase recent paired conversation history
 irreversibly.
 
+A delayed hosted image completion keeps its own ordering timestamps but stamps
+the exact origin content receipt time on the existing assistant input event.
+Accepted-turn transcript persistence copies that timestamp onto the normalized
+completion prompt, whose bounded origin excerpt is then the single semantic
+carrier for both immediate provider input and cold-thread history. This input
+field is only a staging handoff before transcript persistence; it is not a
+post-cleanup fallback retention owner, and it does not extend the original
+14-day deadline. The trusted turn context contains only the normalized
+completion result and exact media authority, never the historical excerpt.
+
 Accepted Linq reply and reaction delivery carry an earlier copy of the same
 exact-item consume authority: the runtime keeps `answeredMailboxItemIds` on the
 existing outbox intent, and the signed delivery callback stamps matching

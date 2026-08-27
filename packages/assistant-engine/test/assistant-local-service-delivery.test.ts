@@ -1729,6 +1729,7 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
         attachmentDescriptors: [],
         text: 'Reply to this message.',
       },
+      contentReceivedAt: '2026-04-22T09:59:00.000Z',
       conversation: {
         accountId: 'telegram-account',
         actorId: 'telegram-actor',
@@ -1815,7 +1816,7 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
         entry.kind === 'user' && entry.text === 'Reply to the selected message.'
       ),
   ).toMatchObject({
-    contentReceivedAt: '2026-04-22T10:00:00.000Z',
+    contentReceivedAt: '2026-04-22T09:59:00.000Z',
   })
 })
 

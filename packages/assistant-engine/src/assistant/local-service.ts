@@ -2968,7 +2968,9 @@ async function resolveAcceptedInputContentReceivedAt(input: {
     if (!event) {
       continue
     }
-    const receivedAtMs = Date.parse(event.receivedAt ?? event.occurredAt)
+    const receivedAtMs = Date.parse(
+      event.contentReceivedAt ?? event.receivedAt ?? event.occurredAt,
+    )
     if (
       Number.isFinite(receivedAtMs)
       && (earliestMs === null || receivedAtMs < earliestMs)

@@ -145,6 +145,7 @@ describe("hosted image generation", () => {
             type: "text",
           }],
         },
+        contentReceivedAt: "2026-07-26T11:58:00.000Z",
         conversation: {
           accountId: "account_1",
           actorId: "actor_1",
@@ -348,6 +349,12 @@ describe("hosted image generation", () => {
       sessionId: "asst_origin_1",
     });
     assert.deepEqual(completion.replyTarget, origin.replyTarget);
+    assert.equal(completion.receivedAt, completion.occurredAt);
+    assert.equal(
+      completion.contentReceivedAt,
+      "2026-07-26T11:58:00.000Z",
+    );
+    assert.notEqual(completion.contentReceivedAt, completion.receivedAt);
     assert.equal(completion.sourceRef.kind, "hosted-mailbox");
     assert.equal(
       completion.sourceRef.kind === "hosted-mailbox"
@@ -441,6 +448,11 @@ describe("hosted image generation", () => {
       actorId: null,
       sessionId: "asst_origin_1",
     });
+    assert.equal(failureCompletion.receivedAt, failureCompletion.occurredAt);
+    assert.equal(
+      failureCompletion.contentReceivedAt,
+      "2026-07-26T11:58:00.000Z",
+    );
     const failureText = failureCompletion.content.text ?? "";
     const failureDiagnosticLine = failureText.split("\n").find((line) =>
       line.startsWith(

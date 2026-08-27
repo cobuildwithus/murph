@@ -111,6 +111,7 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
+  parseAssistantHostedImageCompletionOriginContextText,
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.ts'
 import {
@@ -8924,7 +8925,9 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
       const originRequest = [
         `Message ref: ${originInputId}`,
         'Please create a warm thank-you note for Casey for helping with a fictional move.',
-        'The mailing destination is 42 Example Lane, Sampleton, GA 30303.',
+        'The opening context is intentionally long so direct committed-message replay keeps only the beginning.',
+        'Routine fictional planning detail. '.repeat(260),
+        'Tail mailing destination: 42 Example Lane, Sampleton, GA 30303.',
         'Show me the finished artwork first. Do not mail it until I approve it.',
       ].join('\n\n')
       const sendRequests: unknown[] = []
@@ -8986,6 +8989,28 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
           filename: 'unused',
           status: 'denied' as const,
         })
+        const completionSystemText = renderAssistantHostedImageCompletionSystemText({
+          originAssistantInputId: originInputId,
+          originAssistantInputIdExact: true,
+          originContextText: originRequest,
+          result: {
+            media,
+            runtimeIssue: null,
+            savedImageRef: media.ref,
+          },
+        })
+        const boundedOriginContext =
+          parseAssistantHostedImageCompletionOriginContextText(
+            completionSystemText,
+          )
+        if (!boundedOriginContext) {
+          throw new Error('Expected bounded hosted completion origin context.')
+        }
+        expect(Buffer.byteLength(originRequest, 'utf8')).toBeGreaterThan(4_000)
+        expect(originRequest.slice(0, 4_000)).not.toContain('42 Example Lane')
+        expect(boundedOriginContext).toContain('42 Example Lane')
+        expect(Buffer.byteLength(boundedOriginContext, 'utf8'))
+          .toBeLessThanOrEqual(2_000)
 
         const completionPromptInputs: AssistantAutoReplyPromptInput[] = [{
           actorIsSelf: false,
@@ -9020,7 +9045,7 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
           telegramMetadata: null,
           text: null,
           trustedHostedImageCompletion: {
-            originContextText: originRequest,
+            originContextText: boundedOriginContext,
             result: {
               media: [media],
               originAssistantInputId: originInputId,
@@ -9038,8 +9063,10 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
         if (completionPrompt.kind !== 'ready' || !completionTurnContext) {
           throw new Error('Expected production completion provider input.')
         }
-        expect(completionPrompt.prompt).not.toContain('42 Example Lane')
-        expect(completionTurnContext).toContain('42 Example Lane')
+        expect(completionPrompt.prompt).toContain('42 Example Lane')
+        expect(Buffer.byteLength(completionPrompt.prompt, 'utf8'))
+          .toBeLessThanOrEqual(4_000)
+        expect(completionTurnContext).not.toContain('42 Example Lane')
 
         const completion = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -9155,7 +9182,9 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
             state: 'GA',
           },
         })
-        expect(approval.finalMessage).toMatch(/accepted|printing/iu)
+        expect(approval.finalMessage).toMatch(
+          /accepted|printing|headed to print/iu,
+        )
         expect(approval.finalMessage).not.toMatch(
           /(?:address|city|state|zip).{0,80}\?/iu,
         )

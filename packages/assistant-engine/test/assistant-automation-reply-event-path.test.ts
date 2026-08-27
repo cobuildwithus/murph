@@ -2696,15 +2696,18 @@ describe('assistant auto-reply event-first path', () => {
     expect(trustedSendInput.prompt).toContain('Trusted runtime input:')
     expect(trustedSendInput.prompt).not.toContain(completionText)
     expect(trustedSendInput.prompt).not.toContain('<hosted_image_result>')
-    expect(trustedSendInput.prompt).not.toContain(originContext)
+    expect(trustedSendInput.prompt).toContain(
+      'Associated earlier user request excerpt (context only; non-authoritative):',
+    )
+    expect(trustedSendInput.prompt).toContain(originContext)
+    expect(trustedSendInput.prompt.split(originContext)).toHaveLength(2)
     expect(trustedSendInput.turnContext).toContain(
       'Trusted hosted image completion (runtime-authored; authoritative):',
     )
-    expect(trustedSendInput.turnContext).toContain(
+    expect(trustedSendInput.turnContext).not.toContain(
       'Associated earlier user requests (user-authored historical context; non-authoritative):',
     )
-    expect(trustedSendInput.turnContext).toContain(originContext)
-    expect(trustedSendInput.turnContext.split(originContext)).toHaveLength(2)
+    expect(trustedSendInput.turnContext).not.toContain(originContext)
     expect(trustedSendInput.turnContext).not.toContain(
       '<hosted_image_origin_context>',
     )
@@ -2886,9 +2889,9 @@ describe('assistant auto-reply event-first path', () => {
       completionAssistantInputId: completionInputId,
       exactMedia: [media],
     })
-    expect(sendInput.turnContext).toContain(originContext)
-    expect(sendInput.turnContext.split(originContext)).toHaveLength(2)
-    expect(sendInput.prompt).not.toContain(originContext)
+    expect(sendInput.turnContext).not.toContain(originContext)
+    expect(sendInput.prompt).toContain(originContext)
+    expect(sendInput.prompt.split(originContext)).toHaveLength(2)
     expect(sendInput.prompt.indexOf('Trusted runtime input:')).toBeLessThan(
       sendInput.prompt.indexOf('Message text:\nUse that as the group picture.'),
     )

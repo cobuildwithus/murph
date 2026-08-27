@@ -255,6 +255,7 @@ describe('assistant input event store', () => {
           },
         ],
       },
+      contentReceivedAt: '2026-04-01T09:59:00.000Z',
       occurredAt: '2026-04-01T10:00:00.000Z',
       receivedAt: '2026-04-01T10:00:01.000Z',
       sourceMetadata: {
@@ -302,6 +303,7 @@ describe('assistant input event store', () => {
         transcriptText: null,
         userMessageContent: null,
       },
+      contentReceivedAt: '2026-04-01T09:59:00.000Z',
       sourceMetadata: {
         replyContext: null,
       },

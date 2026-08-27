@@ -160,6 +160,14 @@ it has been explicitly elevated to a cross-cutting invariant.
   generated-ref mutation remains independently authorized and must still prove
   accepted physical delivery through the outbox; the current restriction or
   generated-capture lookup may classify origin but cannot authorize the effect.
+- A trusted generated-image completion may carry one bounded head-and-tail
+  excerpt of its exact originating user input in the normalized provider prompt.
+  That excerpt is historical context only; completion result and attachment
+  authority remain in the trusted turn context, and only a current accepted
+  input can authorize a later external effect. Persist the normalized prompt
+  with the origin content's receipt timestamp so cold-thread replay retains the
+  same context without extending its content-retention deadline. Completion
+  ordering still uses the completion event's own occurrence and receipt times.
 - This ordering is durable rather than wake-owned. A restored background pass
   or a replacement invocation with fresh input derives the same
   completion-first batch from structurally trusted completion events already
