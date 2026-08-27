@@ -6637,6 +6637,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
       const decision = parseAssistantNotificationDecision(
         result.finalMessage,
       )
+      expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
       expect(decision.kind).toBe(expectedKind)
     } finally {
       await removeRealCodexTemporaryPaths([

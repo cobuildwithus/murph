@@ -43,6 +43,11 @@ import {
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import {
+  describeAssistantAutoReplyFailure,
+  normalizeAssistantSafeFailureContext,
+  type AssistantSafeFailureContextValue,
+} from '../automation/failure-observability.js'
+import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
 } from '../automation/shared.js'
@@ -503,8 +508,10 @@ interface ExecuteClaimedAssistantCronJobInput {
 interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
   removedAfterRun: boolean
+  retryWakeAt: string | null
   run: AssistantCronRunRecord
   runErrorCode: string | null
+  runFailureContext: Record<string, AssistantSafeFailureContextValue> | null
 }
 
 type DeviceActivityParentAuthority = Awaited<
@@ -572,6 +579,7 @@ export async function executeClaimedAssistantCronJob(
   let response: string | null = null
   let errorText: string | null = null
   let errorCode: string | null = null
+  let errorContext: Record<string, AssistantSafeFailureContextValue> | null = null
   let failureConsumesOccurrence = false
   let foregroundYielded = false
   let outcome: AssistantCronRunOutcome = 'failed'
@@ -1132,6 +1140,7 @@ export async function executeClaimedAssistantCronJob(
       }
     }
   } catch (error) {
+    errorContext = resolveAssistantCronFailureContext(error)
     if (
       pendingDeliveryIntentId === null
       && groupEmailRecoveryAuthorized
@@ -1275,6 +1284,7 @@ export async function executeClaimedAssistantCronJob(
         return {
           job: claimedJob,
           removedAfterRun: true,
+          retryWakeAt: null,
         }
       }
 
@@ -1308,6 +1318,15 @@ export async function executeClaimedAssistantCronJob(
       return {
         job: finalizedJob,
         removedAfterRun,
+        retryWakeAt: resolveScheduledCodexConnectionRetryWakeAt({
+          failureConsumesOccurrence,
+          finalizedJob,
+          foregroundYielded,
+          removedAfterRun,
+          run,
+          runErrorCode: errorCode,
+          trigger: input.trigger,
+        }),
       }
     }
 
@@ -1326,6 +1345,7 @@ export async function executeClaimedAssistantCronJob(
           runtimeState: currentRuntimeState,
         }),
         removedAfterRun: false,
+        retryWakeAt: null,
       }
     }
     await appendAssistantCronRun(input.paths, run)
@@ -1407,15 +1427,24 @@ export async function executeClaimedAssistantCronJob(
 
     await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
 
+    const persistedJob = removedAfterRun
+      ? finalizedJob
+      : projectCanonicalAssistantCronJob({
+          source: input.job.source,
+          runtimeState: persistedRuntimeState,
+        })
     return {
-      job:
-        removedAfterRun
-          ? finalizedJob
-          : projectCanonicalAssistantCronJob({
-              source: input.job.source,
-              runtimeState: persistedRuntimeState,
-            }),
+      job: persistedJob,
       removedAfterRun,
+      retryWakeAt: resolveScheduledCodexConnectionRetryWakeAt({
+        failureConsumesOccurrence,
+        finalizedJob: persistedJob,
+        foregroundYielded,
+        removedAfterRun,
+        run,
+        runErrorCode: errorCode,
+        trigger: input.trigger,
+      }),
     }
   })
 
@@ -1430,11 +1459,61 @@ export async function executeClaimedAssistantCronJob(
   return {
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
+    retryWakeAt: finalized.retryWakeAt,
     run,
     // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log
     // observability; the persisted run record keeps only the error text.
     runErrorCode: errorCode,
+    runFailureContext: run.outcome === 'failed' ? errorContext : null,
   }
+}
+
+function resolveAssistantCronFailureContext(
+  error: unknown,
+): Record<string, AssistantSafeFailureContextValue> | null {
+  const context = normalizeAssistantSafeFailureContext(
+    describeAssistantAutoReplyFailure(error).context,
+  )
+  if (!context) {
+    return null
+  }
+
+  const codexContext: Record<string, AssistantSafeFailureContextValue> = {}
+  if (typeof context.codexErrorInfo === 'string') {
+    codexContext.codexErrorInfo = context.codexErrorInfo
+  }
+  if (typeof context.codexErrorInfoPresent === 'boolean') {
+    codexContext.codexErrorInfoPresent = context.codexErrorInfoPresent
+  }
+  if (typeof context.codexErrorHttpStatusCode === 'number') {
+    codexContext.codexErrorHttpStatusCode = context.codexErrorHttpStatusCode
+  }
+
+  return Object.keys(codexContext).length > 0 ? codexContext : null
+}
+
+function resolveScheduledCodexConnectionRetryWakeAt(input: {
+  failureConsumesOccurrence: boolean
+  finalizedJob: AssistantCronJob
+  foregroundYielded: boolean
+  removedAfterRun: boolean
+  run: AssistantCronRunRecord
+  runErrorCode: string | null
+  trigger: AssistantCronTrigger
+}): string | null {
+  if (
+    input.trigger !== 'scheduled' ||
+    input.run.outcome !== 'failed' ||
+    input.runErrorCode !== 'ASSISTANT_CODEX_CONNECTION_LOST' ||
+    input.failureConsumesOccurrence ||
+    input.foregroundYielded ||
+    input.removedAfterRun ||
+    !input.finalizedJob.enabled
+  ) {
+    return null
+  }
+
+  return input.finalizedJob.state.nextRunAt
 }
 
 async function resolveResearchOrientedManagedAutomationOnboardingSkipError(input: {

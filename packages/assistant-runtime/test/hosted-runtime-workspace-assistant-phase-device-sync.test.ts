@@ -1215,6 +1215,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     expect(result.invocationLocalAssistantWakeAt).toBe(retryWakeAt);
   });
 
+  it("labels an exact scheduled cron retry as invocation-local work", async () => {
+    const retryWakeAt = "2026-04-27T00:00:30.000Z";
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCronRetryWakeAt: retryWakeAt,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: retryWakeAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: null,
+    }));
+
+    expect(result.nextWakeAt).toBe(retryWakeAt);
+    expect(result.invocationLocalAssistantWakeAt).toBe(retryWakeAt);
+    expect(logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "assistant.pass_finished"))
+      .toEqual(expect.objectContaining({
+        redactedJson: expect.objectContaining({
+          cronRetryWakeProjected: true,
+        }),
+      }));
+  });
+
   it("does not checkpoint no-op alarms only because automation returned a future wake", async () => {
     const nextWakeAt = "2026-04-27T00:01:00.000Z";
     const existingWakeAt = "2026-04-27T00:05:00.000Z";

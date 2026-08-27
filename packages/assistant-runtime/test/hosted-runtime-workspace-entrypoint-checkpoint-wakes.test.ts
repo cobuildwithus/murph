@@ -147,6 +147,121 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
+  test("services an invocation-local cron retry before the checkpoint floor", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const idleCheckpointDelayMs = 180_000;
+    const retryDelayMs = 30_000;
+    const retryWakeAt = new Date(Date.parse(TEST_NOW) + retryDelayMs).toISOString();
+    let assistantPass = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_scheduled_cron_retry_hot_wake",
+              idleCheckpointDelayMs,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "c".repeat(64),
+                  key: "users/bundles/member-synthetic/scheduled-cron-retry.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPass += 1;
+              events.push(`assistant:${assistantPass}`);
+
+              if (assistantPass === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  invocationLocalAssistantWakeAt: retryWakeAt,
+                  nextWakeAt: retryWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 2) {
+                assert.equal(input.workspace?.nextWakeAt, retryWakeAt);
+                assert.equal(input.workspace?.nextWakeReason, "assistant");
+                assistantTwoObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                };
+              }
+
+              throw new Error("Scheduled cron retry wake should run exactly once.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(retryDelayMs - 1);
+      assert.equal(assistantPass, 1);
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(1);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 0, events.join(","));
+
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.equal(assistantPass, 2, events.join(","));
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoint-gated due projected wakes wait for the idle delay before service", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

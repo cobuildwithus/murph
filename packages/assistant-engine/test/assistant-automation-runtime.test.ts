@@ -13810,6 +13810,31 @@ describe('assistant automation run loop', () => {
     )
   })
 
+  it('preserves the exact scheduled cron retry wake through the automation pass', async () => {
+    const retryWakeAt = '2026-04-08T00:00:30.000Z'
+    runLoopMocks.processDueAssistantCronJobs.mockResolvedValueOnce({
+      failed: 1,
+      processed: 1,
+      retryWakeAt,
+      succeeded: 0,
+    })
+    runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
+      nextRunAt: retryWakeAt,
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await expect(runLoop.runAssistantAutomationPass({
+      requestId: 'request-scheduled-cron-retry-wake',
+      vault: '/tmp/assistant-automation-vault',
+    })).resolves.toMatchObject({
+      cronProcessed: 1,
+      cronRetryWakeAt: retryWakeAt,
+      nextWakeAt: retryWakeAt,
+    })
+  })
+
   it('marks the selected wake as outbox-only unless model-capable work ties it', async () => {
     const wakeAt = '2026-04-08T00:00:30.000Z'
     const buildScanResult = (replyWakeAt: string | null) => ({

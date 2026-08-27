@@ -2744,6 +2744,14 @@ export async function runHostedWorkspaceAssistantPhase(
         backgroundMaintenanceYielded
         || deferredPendingSystemMailboxMaintenance.backgroundMaintenanceYielded;
     }
+    const invocationLocalAssistantWakeAt =
+      resolveHostedInvocationLocalAssistantWakeAt({
+        assistantMetrics,
+        input,
+      });
+    const invocationLocalAssistantWake = invocationLocalAssistantWakeAt
+      ? { invocationLocalAssistantWakeAt }
+      : {};
     const shadowedDeviceSyncMaintenance =
       await runShadowedDeviceSyncAfterNoProgressAssistantWake({
         assistantMetrics,
@@ -2969,6 +2977,7 @@ export async function runHostedWorkspaceAssistantPhase(
         deliveryEffectCount: deliveryEffects.length,
         input,
         nextWakeAt,
+        nextWakeReason: postDelivery.nextWakeReason,
         progressed,
         systemMailboxWakeAt,
       });
@@ -2988,6 +2997,7 @@ export async function runHostedWorkspaceAssistantPhase(
         return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
           input,
           result: mergeContinuingSystemMailboxResult({
+            ...invocationLocalAssistantWake,
             ...(nextWakeAt ? { nextWakeAt } : {}),
             ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
               ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -3001,6 +3011,7 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         result: mergeContinuingSystemMailboxResult({
           checkpointReason: postDelivery.checkpointReason,
+          ...invocationLocalAssistantWake,
           nextWakeAt,
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -3055,6 +3066,7 @@ export async function runHostedWorkspaceAssistantPhase(
       deliveryEffectCount: deliveryEffects.length,
       input,
       nextWakeAt,
+      nextWakeReason: nextWake.reason,
       progressed,
       systemMailboxWakeAt,
     });
@@ -3075,6 +3087,7 @@ export async function runHostedWorkspaceAssistantPhase(
       return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
         input,
         result: mergeContinuingSystemMailboxResult({
+          ...invocationLocalAssistantWake,
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
             ? { nextWakeReason: nextWake.reason }
@@ -3086,6 +3099,7 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const result = mergeContinuingSystemMailboxResult({
+      ...invocationLocalAssistantWake,
       ...(hasPostCommitProviderCleanup
         ? {
             afterCheckpointKeepsForegroundImportLoop: true,
@@ -6778,12 +6792,13 @@ async function runForegroundAssistantReplyPhase(input: {
     assistantOutboxOnlyNextWakeAt:
       input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
-  const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-    input: input.input,
-    nextWakeAt: input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
-  });
-  const invocationLocalAssistantWake = selectedInputWakeAt
-    ? { invocationLocalAssistantWakeAt: selectedInputWakeAt }
+  const invocationLocalAssistantWakeAt =
+    resolveHostedInvocationLocalAssistantWakeAt({
+      assistantMetrics: input.assistantMetrics,
+      input: input.input,
+    });
+  const invocationLocalAssistantWake = invocationLocalAssistantWakeAt
+    ? { invocationLocalAssistantWakeAt }
     : {};
 
   if (
@@ -6837,6 +6852,7 @@ async function runForegroundAssistantReplyPhase(input: {
       deliveryEffectCount: deliveryEffects.length,
       input: input.input,
       nextWakeAt,
+      nextWakeReason: postDelivery.nextWakeReason,
       progressed,
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
@@ -6920,6 +6936,7 @@ async function runForegroundAssistantReplyPhase(input: {
     deliveryEffectCount: deliveryEffects.length,
     input: input.input,
     nextWakeAt,
+    nextWakeReason: nextWake.reason,
     progressed,
     systemMailboxWakeAt: input.systemMailboxWakeAt,
   });
@@ -8395,9 +8412,14 @@ async function writeHostedAssistantPassRuntimeLog(input: {
   deliveryEffectCount: number;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   nextWakeAt: string | null;
+  nextWakeReason: string | null | undefined;
   progressed: boolean;
   systemMailboxWakeAt: string | null;
 }): Promise<void> {
+  const cronRetryWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.assistantAutomationCronRetryWakeAt ?? null,
+  });
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields({
@@ -8430,6 +8452,10 @@ async function writeHostedAssistantPassRuntimeLog(input: {
           input.assistantMetrics.assistantInputCandidateListed ?? null,
         assistantInputCandidateQueryCount:
           input.assistantMetrics.assistantInputCandidateQueryCount ?? null,
+        cronRetryWakeProjected:
+          cronRetryWakeAt !== null
+          && input.nextWakeAt === cronRetryWakeAt
+          && hostedRuntimeWakeReasonUsesAssistantPhase(input.nextWakeReason ?? null),
         deliveryEffectCount: input.deliveryEffectCount,
         deviceSyncElapsedMs: null,
         deviceSyncProcessed: 0,
@@ -9826,6 +9852,30 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
     input.nextWakeAt,
     resolveHostedAssistantPhaseNowMs(input.input),
   );
+}
+
+function resolveHostedInvocationLocalAssistantWakeAt(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): string | null {
+  return selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      resolveHostedAssistantAutomationNextWakeAt({
+        input: input.input,
+        nextWakeAt:
+          input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
+      }),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(
+      resolveHostedAssistantAutomationNextWakeAt({
+        input: input.input,
+        nextWakeAt:
+          input.assistantMetrics.assistantAutomationCronRetryWakeAt ?? null,
+      }),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+  ]).at;
 }
 
 function buildHostedWorkspaceAssistantPhaseRedactedStatus(input: {

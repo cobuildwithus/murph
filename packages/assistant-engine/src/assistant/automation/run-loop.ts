@@ -1249,6 +1249,9 @@ export async function runAssistantAutomationPass(
 
   return {
     cronProcessed: cronResult.processed,
+    ...(cronResult.retryWakeAt
+      ? { cronRetryWakeAt: cronResult.retryWakeAt }
+      : {}),
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,
     nextWakeAt,

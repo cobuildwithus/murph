@@ -673,6 +673,73 @@ describe('assistant auto-reply failure observability', () => {
     expect(JSON.stringify(snapshot.context)).not.toContain('raw-thread-id')
   })
 
+  it('preserves typed Codex connection diagnostics for runtime logs', () => {
+    const error = Object.assign(
+      new Error('Codex app-server lost its connection while waiting for the model.'),
+      {
+        code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+        context: {
+          codexErrorHttpStatusCode: 502,
+          codexErrorInfo: 'httpConnectionFailed',
+          codexErrorInfoPresent: true,
+          connectionLost: true,
+          providerPayload: 'must-not-persist',
+          recoverableConnectionLoss: true,
+          retryable: true,
+        },
+      },
+    )
+
+    const snapshot = describeAssistantAutoReplyFailure(error)
+
+    expect(snapshot.context).toEqual({
+      codexErrorHttpStatusCode: 502,
+      codexErrorInfo: 'httpConnectionFailed',
+      codexErrorInfoPresent: true,
+      connectionLost: true,
+      recoverableConnectionLoss: true,
+      retryable: true,
+    })
+    expect(JSON.stringify(snapshot.context)).not.toContain('providerPayload')
+
+    const unknownSubtypeSnapshot = describeAssistantAutoReplyFailure(
+      Object.assign(new Error('Codex app-server turn failed.'), {
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexErrorHttpStatusCode: 418,
+          codexErrorInfo: 'providerDefinedOpaqueDetail',
+          codexErrorInfoPresent: true,
+          retryable: false,
+        },
+      }),
+    )
+    expect(unknownSubtypeSnapshot.context).not.toHaveProperty('codexErrorInfo')
+    expect(unknownSubtypeSnapshot.context).not.toHaveProperty(
+      'codexErrorHttpStatusCode',
+    )
+    expect(JSON.stringify(unknownSubtypeSnapshot.context)).not.toContain(
+      'providerDefinedOpaqueDetail',
+    )
+
+    const invalidStatusSnapshot = describeAssistantAutoReplyFailure(
+      Object.assign(new Error('Codex app-server turn failed.'), {
+        code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+        context: {
+          codexErrorHttpStatusCode: 700,
+          codexErrorInfo: 'httpConnectionFailed',
+          codexErrorInfoPresent: true,
+        },
+      }),
+    )
+    expect(invalidStatusSnapshot.context).toMatchObject({
+      codexErrorInfo: 'httpConnectionFailed',
+      codexErrorInfoPresent: true,
+    })
+    expect(invalidStatusSnapshot.context).not.toHaveProperty(
+      'codexErrorHttpStatusCode',
+    )
+  })
+
   it('classifies delivery failures and sanitizes allowed array context values', () => {
     const error = Object.assign(
       new Error('Outbound delivery failed for this reply.'),

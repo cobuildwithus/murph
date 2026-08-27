@@ -146,6 +146,7 @@ export interface AssistantCronTargetMutationResult {
 export interface AssistantCronProcessDueResult {
   failed: number
   processed: number
+  retryWakeAt?: string
   succeeded: number
 }
 
@@ -636,6 +637,7 @@ export async function processDueAssistantCronJobsLocal(
     succeeded: 0,
     failed: 0,
   }
+  const retryWakeAtByJobId = new Map<string, string>()
   if (input.shouldYield?.() === true) {
     return summary
   }
@@ -711,10 +713,24 @@ export async function processDueAssistantCronJobsLocal(
     } else if (result.run.outcome === 'failed') {
       summary.failed += 1
     }
+    if (result.retryWakeAt) {
+      retryWakeAtByJobId.set(result.job.jobId, result.retryWakeAt)
+    } else {
+      retryWakeAtByJobId.delete(result.job.jobId)
+    }
+    const retryWakeAt = earliestAssistantAutomationWakeAt(
+      ...retryWakeAtByJobId.values(),
+    )
+    if (retryWakeAt) {
+      summary.retryWakeAt = retryWakeAt
+    } else {
+      delete summary.retryWakeAt
+    }
     emitAssistantCronJobCompletedEvent({
       errorCode: result.runErrorCode,
       errorMessage: result.run.error,
       errorPresent: result.run.error !== null,
+      failureContext: result.runFailureContext,
       job: result.job,
       onEvent: input.onEvent,
       routeValidationProfile:
@@ -829,6 +845,7 @@ function emitAssistantCronJobCompletedEvent(input: {
   errorCode: string | null
   errorMessage: string | null
   errorPresent: boolean
+  failureContext: AssistantRunEvent['failureContext'] | null
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
@@ -852,6 +869,7 @@ function emitAssistantCronJobCompletedEvent(input: {
         }
       : {}),
     failureContext: {
+      ...(input.failureContext ?? {}),
       // Typed VaultCliError code (e.g. ASSISTANT_CODEX_USAGE_LIMIT) so
       // provider-level outages are queryable in the persisted hosted runtime
       // log; the June 2026 quota incident was invisible there.

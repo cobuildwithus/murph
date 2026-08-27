@@ -101,6 +101,7 @@ export interface AssistantAutomationScanResult {
 
 export interface AssistantAutomationPassResult {
   cronProcessed: number
+  cronRetryWakeAt?: string
   currentTurnDeliveryIntentIds: string[]
   nextWakeAt: string | null
   outboxOnlyNextWakeAt?: string

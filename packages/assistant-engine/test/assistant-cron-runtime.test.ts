@@ -7619,6 +7619,186 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('returns the exact retry wake created by a failed scheduled Codex turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-connection-retry-wake-',
+    )
+    await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'connection retry reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Evening reminder.',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      },
+      vault: vaultRoot,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_CODEX_CONNECTION_LOST',
+        'Codex app-server lost its connection while waiting for the model.',
+        {
+          codexErrorInfo: 'responseStreamDisconnected',
+          codexErrorInfoPresent: true,
+          connectionLost: true,
+          recoverableConnectionLoss: true,
+          retryable: true,
+        },
+      ),
+    )
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toMatchObject({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(summary).toHaveProperty(
+      'retryWakeAt',
+      '2026-04-08T09:05:30.000Z',
+    )
+  })
+
+  it('clears retry provenance when that job retries successfully in the same scan', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-connection-retry-cleared-',
+    )
+    const retryingJob = await createLocalJob(vaultRoot, 'retrying-due')
+    const interveningJob = await createLocalJob(vaultRoot, 'intervening-due')
+    await updateLocalJob(vaultRoot, retryingJob.jobId, (job) => ({
+      ...job,
+      state: {
+        ...job.state,
+        nextRunAt: '2026-04-08T07:58:00.000Z',
+      },
+      target: {
+        ...job.target,
+        channel: 'telegram',
+        deliveryTarget: 'retry-room',
+      },
+    }))
+    await updateLocalJob(vaultRoot, interveningJob.jobId, (job) => ({
+      ...job,
+      state: {
+        ...job.state,
+        nextRunAt: '2026-04-08T07:59:00.000Z',
+      },
+      target: {
+        ...job.target,
+        channel: 'telegram',
+        deliveryTarget: 'intervening-room',
+      },
+    }))
+    cronMocks.sendAssistantMessageLocal
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_CONNECTION_LOST',
+          'Codex app-server lost its connection while waiting for the model.',
+          {
+            codexErrorInfo: 'responseStreamDisconnected',
+            codexErrorInfoPresent: true,
+            connectionLost: true,
+            recoverableConnectionLoss: true,
+            retryable: true,
+          },
+        ),
+      )
+      .mockImplementationOnce(async (input: {
+        onProviderRequestStarted?: () => Promise<void> | void
+      }) => {
+        await input.onProviderRequestStarted?.()
+        vi.setSystemTime(new Date('2026-04-08T08:10:31.000Z'))
+        return {
+          decision: {
+            kind: 'send_message' as const,
+            privateSummary: 'Prepared scheduled check-in.',
+            text: 'Completed scheduled check-in.',
+          },
+          response: 'Completed scheduled check-in.',
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+      })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 3,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 3,
+      succeeded: 2,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
+  })
+
+  it('surfaces typed Codex connection diagnostics in scheduled failure events', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-connection-diagnostics-',
+    )
+    await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'connection diagnostic reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Evening reminder.',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      },
+      vault: vaultRoot,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_CODEX_CONNECTION_LOST',
+        'Codex app-server lost its connection while waiting for the model.',
+        {
+          codexErrorInfo: 'responseStreamDisconnected',
+          codexErrorInfoPresent: true,
+          connectionLost: true,
+          providerPayload: 'must-not-persist',
+          recoverableConnectionLoss: true,
+          retryable: true,
+        },
+      ),
+    )
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      type: string
+    }> = []
+
+    await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
+      vault: vaultRoot,
+    })
+
+    expect(events).toContainEqual(expect.objectContaining({
+      failureContext: expect.objectContaining({
+        codexErrorInfo: 'responseStreamDisconnected',
+        codexErrorInfoPresent: true,
+        errorCode: 'ASSISTANT_CODEX_CONNECTION_LOST',
+      }),
+      type: 'cron.job.completed',
+    }))
+    expect(JSON.stringify(events)).not.toContain('providerPayload')
+  })
+
   it('consumes non-retryable delivery failures for scheduled canonical reminders', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))

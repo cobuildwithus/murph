@@ -1,9 +1,13 @@
+import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
+
+import {
+  isKnownCodexConnectionLossErrorInfoKind,
+} from '../../assistant-codex/failures.js'
 import { redactAssistantStateString } from '../redaction.js'
 import {
   formatStructuredErrorMessage,
   normalizeNullableString,
 } from '../shared.js'
-import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
 
 export type AssistantAutoReplyFailureKind =
   | 'delivery'
@@ -315,6 +319,25 @@ function pickFailureContext(
 
   return Object.fromEntries(
     Object.entries(value).flatMap(([key, entryValue]) => {
+      if (key === 'codexErrorInfo') {
+        return isKnownCodexConnectionLossErrorInfoKind(entryValue)
+          ? [[key, entryValue]]
+          : []
+      }
+
+      if (key === 'codexErrorInfoPresent') {
+        return typeof entryValue === 'boolean'
+          ? [[key, entryValue]]
+          : []
+      }
+
+      if (key === 'codexErrorHttpStatusCode') {
+        return isSafeCodexHttpStatusCode(entryValue) &&
+          isKnownCodexConnectionLossErrorInfoKind(value.codexErrorInfo)
+          ? [[key, entryValue]]
+          : []
+      }
+
       if (!isSafeFailureContextKey(key)) {
         return []
       }
@@ -323,6 +346,13 @@ function pickFailureContext(
       return sanitizedValue === undefined ? [] : [[key, sanitizedValue]]
     }),
   )
+}
+
+function isSafeCodexHttpStatusCode(value: unknown): value is number {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 100 &&
+    value <= 599
 }
 
 function isSafeFailureContextKey(key: string): boolean {

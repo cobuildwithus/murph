@@ -30,6 +30,13 @@ const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
   'serverOverloaded',
 ])
 
+export function isKnownCodexConnectionLossErrorInfoKind(
+  value: unknown,
+): value is string {
+  return typeof value === 'string' &&
+    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(value)
+}
+
 function isCodexUsageLimitErrorInfo(
   errorInfo: CodexStructuredErrorInfo | null,
 ): boolean {
@@ -40,7 +47,7 @@ function isCodexConnectionLossErrorInfo(
   errorInfo: CodexStructuredErrorInfo | null,
 ): boolean {
   return errorInfo !== null &&
-    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(errorInfo.kind)
+    isKnownCodexConnectionLossErrorInfoKind(errorInfo.kind)
 }
 
 function buildCodexErrorInfoContext(

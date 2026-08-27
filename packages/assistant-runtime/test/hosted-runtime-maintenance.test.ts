@@ -5984,6 +5984,57 @@ describe("runHostedAssistantAutomationLane", () => {
       assistantAutomationSelectedInputWakeAt: null,
       nextWakeAt: reminderWakeAt,
     }));
+    expect(result).not.toHaveProperty("assistantAutomationCronRetryWakeAt");
+  });
+
+  it("preserves exact scheduled cron retry provenance through hosted metrics", async () => {
+    const retryWakeAt = "2026-04-08T00:00:30.000Z";
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      cronProcessed: 1,
+      cronRetryWakeAt: retryWakeAt,
+      nextWakeAt: retryWakeAt,
+      progressed: true,
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_scheduled_cron_retry",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: [],
+      requestId: "req_scheduled_cron_retry",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      assistantAutomationCronRetryWakeAt: retryWakeAt,
+      nextWakeAt: retryWakeAt,
+    }));
   });
 
   it("exposes a foreground input retry before aggregate wake ownership is lost", async () => {
