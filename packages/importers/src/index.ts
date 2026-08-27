@@ -6,6 +6,7 @@ export {
 } from "./assessment/import-assessment-response.ts";
 export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
 export {
+  CsvSampleImportError,
   importCsvSamples,
   parseDelimitedRows,
   prepareCsvSampleImport,
@@ -40,6 +41,7 @@ export {
   type CanonicalWritePort,
   type SampleImportBatchProvenance,
   type DeviceBatchImportPayload,
+  type DeviceBatchImportExecutionOptions,
   type DeviceDataOrigin,
   type DeviceEventPayload,
   type DeviceExternalRefPayload,
@@ -53,7 +55,10 @@ export {
   type SampleImportRecord,
   type SampleImportSkipReasonCount,
 } from "./core-port.ts";
-export { createImporters } from "./create-importers.ts";
+export {
+  createDeviceProviderSnapshotImportSession,
+  createImporters,
+} from "./create-importers.ts";
 export { importDocument, prepareDocumentImport } from "./document-importer.ts";
 export * from "./device-providers/index.ts";
 export { addMeal, prepareMealImport } from "./meal-importer.ts";

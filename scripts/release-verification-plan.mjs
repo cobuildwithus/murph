@@ -33,7 +33,6 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/health-commons", shard: "health-commons" },
   { dir: "packages/health-metrics", shard: "owners-b" },
   { dir: "packages/hosted-execution", shard: "owners-b" },
-  { dir: "packages/hosted-local-harness", shard: "hosted-local-harness" },
   { dir: "packages/importers", shard: "owners-b" },
   { dir: "packages/inbox-services", shard: "owners-b" },
   { dir: "packages/inboxd", shard: "owners-a" },
@@ -44,6 +43,9 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/query", shard: "owners-a" },
   { dir: "packages/runtime-state", shard: "owners-a" },
   { dir: "packages/vault-usecases", shard: "owners-b" },
+  // Keep the other child-runtime-heavy owner last so unrelated package refill
+  // completes before its pairwise Assistant Engine exclusion can hold the head.
+  { dir: "packages/hosted-local-harness", shard: "hosted-local-harness" },
 ]);
 
 export const HOSTED_WEB_TEST_SHARD_COUNT = 4;

@@ -3285,7 +3285,7 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
-  it('plans murph.analyze_video only for private accepted-input turns with the Gemini key', async () => {
+  it('plans murph.analyze_video for accepted direct and authenticated group turns with the Gemini key', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -3376,7 +3376,7 @@ describe('assistant Codex turn planning', () => {
       conversationScope: 'group',
       env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
     }))
-      .not.toContain('analyze_video')
+      .toContain('analyze_video')
   })
 
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
@@ -5194,7 +5194,7 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(
         vault,
         baseSession.sessionId,
-        Array.from({ length: 30 }, (_, index) => ([
+        Array.from({ length: 50 }, (_, index) => ([
           {
             kind: 'user' as const,
             text:
@@ -5244,12 +5244,12 @@ describe('assistant Codex turn planning', () => {
       expect(transitionPlan.conversationHistoryMessages?.length)
         .toBeGreaterThan(1)
       expect(transitionPlan.conversationHistoryMessages?.length)
-        .toBeLessThanOrEqual(24)
+        .toBeLessThanOrEqual(72)
       expect(transitionPlan.conversationHistoryMessages?.[1]?.role).toBe('user')
       expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
         .not.toContain('Member automation decision 1:')
       expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
-        .toContain('Assistant acknowledged automation decision 30:')
+        .toContain('Assistant acknowledged automation decision 50:')
       const replayedHistory = transitionPlan.conversationHistoryMessages?.slice(1)
         ?? []
       for (const [index, message] of replayedHistory.entries()) {
@@ -5579,6 +5579,71 @@ describe('assistant Codex turn planning', () => {
           role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
         })),
       ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('replays sixty short committed messages after a cold thread transition', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-deep-transcript-',
+    ))
+    const session = createSession({ turnCount: 1 })
+    const expectedHistory = Array.from({ length: 30 }, (_, index) => ([
+      {
+        content:
+          `Member context ${index + 1}: ${'member detail '.repeat(10)}`.trimEnd(),
+        role: 'user' as const,
+      },
+      {
+        content:
+          `Assistant response ${index + 1}: ${'assistant detail '.repeat(10)}`.trimEnd(),
+        role: 'assistant' as const,
+      },
+    ])).flat()
+
+    try {
+      await appendAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+        expectedHistory.map((message) => ({
+          kind: message.role,
+          text: message.content,
+        })),
+      )
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Continue the first context we discussed.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual(expectedHistory)
+      expect(expectedHistory.reduce((total, message) =>
+        total + Buffer.byteLength(message.content, 'utf8'), 0))
+        .toBeLessThanOrEqual(12_000)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -6363,7 +6428,7 @@ describe('assistant Codex turn planning', () => {
             kind: 'user' as const,
             text: 'Sole retained member message',
           },
-          ...Array.from({ length: 23 }, (_, index) => ({
+          ...Array.from({ length: 71 }, (_, index) => ({
             kind: 'assistant' as const,
             text: `Retained assistant suffix ${index + 1}`,
           })),
@@ -6455,7 +6520,7 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(
         vault,
         session.sessionId,
-        Array.from({ length: 5 }, (_, index) => ({
+        Array.from({ length: 11 }, (_, index) => ({
           kind: 'user',
           text: `message-${index}: ${'x'.repeat(6_000)}`,
         })),
@@ -6486,8 +6551,8 @@ describe('assistant Codex turn planning', () => {
       expect(history[0]?.content).toBe(
         ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
       )
-      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-3:/u))
-      expect(history[2]?.content).toEqual(expect.stringMatching(/^message-4:/u))
+      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-9:/u))
+      expect(history[2]?.content).toEqual(expect.stringMatching(/^message-10:/u))
       let totalBytes = 0
       for (const message of history) {
         const content = message.content
@@ -7157,10 +7222,13 @@ describe('assistant Codex turn planning', () => {
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
+          contentReceivedAt: '2026-07-12T12:54:00.000Z',
+          createdAt: '2026-07-12T12:55:00.000Z',
           kind: 'user',
           text: 'I want to make weekday lunches easier.',
         },
         {
+          createdAt: '2026-07-12T12:56:00.000Z',
           kind: 'assistant',
           text: 'We can keep that practical and low pressure.',
         },
@@ -7199,10 +7267,12 @@ describe('assistant Codex turn planning', () => {
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'I want to make weekday lunches easier.',
+          occurredAt: '2026-07-12T12:54:00.000Z',
           role: 'user',
         },
         {
           content: 'We can keep that practical and low pressure.',
+          occurredAt: '2026-07-12T12:56:00.000Z',
           role: 'assistant',
         },
       ])

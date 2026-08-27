@@ -496,13 +496,24 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(targetPath)
   })
 
-  it('rejects nested generated-delivery entries before deleting regular files', async () => {
+  it('retains nested generated-delivery entries while pruning independent direct files', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-nested-',
     )
     const regular = await writeGeneratedDeliveryFile({
-      contents: 'must remain',
+      contents: 'direct orphan',
       refSuffix: 'regular.pdf',
+      vaultRoot,
+    })
+    const active = await writeGeneratedDeliveryFile({
+      contents: 'active delivery',
+      refSuffix: 'active.pdf',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: active.media,
+      seed: 'nested-active',
+      status: 'pending',
       vaultRoot,
     })
     const nestedPath = path.join(
@@ -514,12 +525,18 @@ describe('assistant runtime residue pruning', () => {
     await mkdir(path.dirname(nestedPath), { recursive: true })
     await writeFile(nestedPath, 'invalid nested delivery', 'utf8')
 
-    await expect(pruneAssistantGeneratedDeliveryResidue({
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
-    })).rejects.toThrow(
-      'Assistant generated-delivery staging must remain flat.',
-    )
-    await expectPathExists(regular.filePath)
+    })
+
+    expect(result).toMatchObject({
+      generatedDeliveryActiveFilesRetained: 1,
+      generatedDeliveryFilesPruned: 1,
+      generatedDeliveryFilesScanned: 2,
+      generatedDeliveryNestedEntriesRetained: 1,
+    })
+    await expectPathMissing(regular.filePath)
+    await expectPathExists(active.filePath)
     await expectPathExists(nestedPath)
   })
 

@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from "vitest";
+
+import type { PrismaInteractiveTransactionOperation } from "@/src/lib/prisma";
 
 const mocks = vi.hoisted(() => {
   interface AdapterOptions {
@@ -331,15 +341,13 @@ describe("prisma module", () => {
   });
 
   it("logs only allowlisted metadata for adapter connection failures", async () => {
-    process.env = {
-      ...process.env,
-      NODE_ENV: "production",
-      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
-    };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { getPrisma } = await import("@/src/lib/prisma");
+    const { createPrismaClient } = await import("@/src/lib/prisma");
 
-    getPrisma();
+    createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/db?sslmode=require",
+      poolMax: 7,
+    });
     const pool = mocks.poolInstances[0];
     const options = mocks.adapterOptions[0];
     if (!pool || !options) {
@@ -357,14 +365,30 @@ describe("prisma module", () => {
     expect(() => options.onPoolError(secretBearingError)).not.toThrow();
 
     expect(warn).toHaveBeenNthCalledWith(1, "Hosted web database pool failure.", {
+      attempt: null,
+      beforeAttemptIdleConnections: null,
+      beforeAttemptTotalConnections: null,
+      beforeAttemptWaitingRequests: null,
       category: "connection_timeout",
+      disposition: "signal",
       idleConnections: 2,
+      operation: "adapter.connection",
+      poolMax: 7,
+      source: "adapter_connection",
       totalConnections: 4,
       waitingRequests: 3,
     });
     expect(warn).toHaveBeenNthCalledWith(2, "Hosted web database pool failure.", {
+      attempt: null,
+      beforeAttemptIdleConnections: null,
+      beforeAttemptTotalConnections: null,
+      beforeAttemptWaitingRequests: null,
       category: "idle_connection_error",
+      disposition: "signal",
       idleConnections: 2,
+      operation: "adapter.pool",
+      poolMax: 7,
+      source: "adapter_pool",
       totalConnections: 4,
       waitingRequests: 3,
     });
@@ -383,7 +407,7 @@ describe("prisma module", () => {
       nested: false,
     },
     {
-      category: "connection_timeout",
+      category: "connection_establishment_timeout",
       message: "Connection terminated due to connection timeout; private-password",
       nested: true,
     },
@@ -431,22 +455,21 @@ describe("prisma module", () => {
       query: async () => Promise.reject(operationFailure),
     })).rejects.toBe(operationFailure);
 
-    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", expect.objectContaining({
       category,
       idleConnections: 0,
       totalConnections: 0,
       waitingRequests: 0,
-    });
+    }));
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
     expect(JSON.stringify(warn.mock.calls)).not.toContain(message);
   });
 
   it.each([
-    { nested: false },
-    { nested: true },
-  ])("classifies SQLSTATE 53300 codes without logging them (nested: $nested)", async ({
-    nested,
-  }) => {
+    "top-level",
+    "cause",
+    "adapter",
+  ] as const)("classifies SQLSTATE 53300 codes without logging them (%s)", async (nesting) => {
     process.env = {
       ...process.env,
       NODE_ENV: "production",
@@ -461,13 +484,24 @@ describe("prisma module", () => {
       throw new Error("Expected the Prisma query extension to be captured.");
     }
     // The message avoids every fallback phrasing so only the code classifies.
+    const secret = "private-adapter-secret";
     const driverFailure = Object.assign(
-      new Error("connection rejected; private-password"),
-      { code: "53300" },
+      new Error(`connection rejected; ${secret}`),
+      nesting === "adapter"
+        ? { originalCode: "53300", privateDetail: secret }
+        : { code: "53300" },
     );
-    const operationFailure = nested
+    const operationFailure = nesting === "cause"
       ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
-      : driverFailure;
+      : nesting === "adapter"
+        ? Object.assign(new Error(`adapter failure; ${secret}`), {
+          code: "P2010",
+          meta: {
+            driverAdapterError: { cause: driverFailure, privateToken: secret },
+            privateMetadata: secret,
+          },
+        })
+        : driverFailure;
 
     await expect(extension.query.$allOperations({
       args: {},
@@ -475,14 +509,16 @@ describe("prisma module", () => {
       query: async () => Promise.reject(operationFailure),
     })).rejects.toBe(operationFailure);
 
-    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", expect.objectContaining({
       category: "connection_limit",
       idleConnections: 0,
       totalConnections: 0,
       waitingRequests: 0,
-    });
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("53300");
+    }));
+    const serializedLogs = JSON.stringify(warn.mock.calls);
+    expect(serializedLogs).not.toContain(secret);
+    expect(serializedLogs).not.toContain("53300");
+    expect(serializedLogs).not.toContain("P2010");
   });
 
   it.each([
@@ -562,17 +598,134 @@ describe("prisma module", () => {
     if (expectedCategory === null) {
       expect(warn).not.toHaveBeenCalled();
     } else {
-      expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+      expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", expect.objectContaining({
         category: expectedCategory,
         idleConnections: 0,
         totalConnections: 0,
         waitingRequests: 0,
-      });
+      }));
     }
     const serializedLogs = JSON.stringify(warn.mock.calls);
     expect(serializedLogs).not.toContain(message);
     expect(serializedLogs).not.toContain(code);
     expect(serializedLogs).not.toContain("private-password");
+  });
+
+  it.each([
+    {
+      code: "P1008",
+      expectedCategory: null,
+      message: "Operations timed out after 5000ms; private-password",
+      scenario: "P1008 operation timeout",
+    },
+    {
+      code: "P1002",
+      expectedCategory: "connection_timeout",
+      message: "Database server was reached but timed out; private-password",
+      scenario: "P1002 connection timeout",
+    },
+    {
+      code: null,
+      expectedCategory: null,
+      message: "Unrelated application timeout; private-password",
+      scenario: "unrelated timeout",
+    },
+  ])("handles $scenario without widening operation retries", async ({
+    code,
+    expectedCategory,
+    message,
+  }) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    const failure = code === null
+      ? new Error(message)
+      : Object.assign(new Error(message), { code });
+    const query = vi.fn().mockRejectedValue(failure);
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query,
+    })).rejects.toBe(failure);
+
+    expect(query).toHaveBeenCalledOnce();
+    expect(failureCategories(warn)).toEqual(
+      expectedCategory === null ? [] : [expectedCategory],
+    );
+    expect(failureDispositions(warn)).toEqual(
+      expectedCategory === null ? [] : ["terminal"],
+    );
+    const serializedLogs = JSON.stringify(warn.mock.calls);
+    expect(serializedLogs).not.toContain(message);
+    expect(serializedLogs).not.toContain("private-password");
+    if (code) {
+      expect(serializedLogs).not.toContain(code);
+    }
+  });
+
+  it("keeps pool-failure traversal cycle-safe and within its depth and node budgets", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+
+    const cycle: Record<string, unknown> = {};
+    cycle.cause = cycle;
+    cycle.meta = { driverAdapterError: { cause: cycle } };
+
+    let outsideDepthBudget: unknown = { code: "53300" };
+    for (let depth = 0; depth < 5; depth += 1) {
+      outsideDepthBudget = { cause: outsideDepthBudget };
+    }
+
+    // The valid SQLSTATE is the ninth breadth-first node while remaining only
+    // three edges deep, so the global node budget must exclude it.
+    const withEdges = (cause: unknown, driverAdapterCause: unknown) => ({
+      cause,
+      meta: { driverAdapterError: { cause: driverAdapterCause } },
+    });
+    const outsideNodeBudget = withEdges(
+      withEdges(withEdges({}, { code: "53300" }), {}),
+      withEdges({}, {}),
+    );
+
+    for (const { failure, scenario } of [
+      { failure: cycle, scenario: "cycle" },
+      { failure: outsideDepthBudget, scenario: "depth-budget" },
+      { failure: outsideNodeBudget, scenario: "node-budget" },
+    ]) {
+      const query = vi.fn().mockRejectedValue(failure);
+
+      await expect(extension.query.$allOperations({
+        args: {},
+        operation: `queryRaw.${scenario}`,
+        query,
+      })).rejects.toBe(failure);
+
+      expect(query).toHaveBeenCalledOnce();
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockClear();
+    }
   });
 
   it("classifies recognized operation failures without logging unknown errors", async () => {
@@ -594,18 +747,24 @@ describe("prisma module", () => {
       { code: "P2024" },
     );
 
+    const query = vi.fn().mockRejectedValue(poolFailure);
     await expect(extension.query.$allOperations({
       args: {},
       model: "HostedMember",
       operation: "findUnique",
-      query: async () => Promise.reject(poolFailure),
+      query,
     })).rejects.toBe(poolFailure);
-    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", expect.objectContaining({
+      attempt: 2,
       category: "pool_checkout_timeout",
+      disposition: "terminal",
       idleConnections: 0,
+      operation: "HostedMember.findUnique",
+      source: "operation",
       totalConnections: 0,
       waitingRequests: 0,
-    });
+    }));
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
 
     warn.mockClear();
@@ -654,12 +813,60 @@ describe("prisma module", () => {
       .resolves.toBe("committed");
 
     expect(mocks.transaction).toHaveBeenCalledTimes(2);
-    expect(warn).toHaveBeenCalledExactlyOnceWith("Hosted web database pool failure.", {
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Hosted web database pool failure.", expect.objectContaining({
+      attempt: 1,
       category: "transaction_start_timeout",
+      disposition: "retrying",
       idleConnections: 0,
+      operation: "transaction.interactive",
+      source: "transaction",
       totalConnections: 0,
       waitingRequests: 0,
-    });
+    }));
+  });
+
+  it.each([
+    {
+      category: "pool_checkout_timeout",
+      failure: Object.assign(new Error("checkout timed out"), { code: "P2024" }),
+    },
+    {
+      category: "connection_establishment_timeout",
+      failure: new Error("Connection terminated due to connection timeout"),
+    },
+  ])("retries a pre-callback transaction $category", async ({
+    category,
+    failure,
+  }) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    const prisma = getPrisma();
+    const callback = vi.fn(async () => "committed");
+    mocks.transaction
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce("committed");
+
+    await expect(prisma.$transaction(callback)).resolves.toBe("committed");
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(mocks.transaction).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted web database pool failure.",
+      expect.objectContaining({
+        attempt: 1,
+        category,
+        disposition: "retrying",
+        operation: "transaction.interactive",
+        source: "transaction",
+      }),
+    );
   });
 
   it("stops retrying a transaction start after the attempt budget", async () => {
@@ -706,7 +913,9 @@ describe("prisma module", () => {
     expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(pressureLogs(warn)).toEqual([{
       idleConnections: 0,
+      poolMax: 15,
       totalConnections: 15,
+      trigger: "at_capacity",
       waitingRequests: 0,
     }]);
   });
@@ -810,12 +1019,16 @@ describe("prisma module", () => {
     })).resolves.toBe("rows");
 
     expect(query).toHaveBeenCalledTimes(2);
-    expect(warn).toHaveBeenCalledExactlyOnceWith("Hosted web database pool failure.", {
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Hosted web database pool failure.", expect.objectContaining({
+      attempt: 1,
       category: "pool_checkout_timeout",
+      disposition: "retrying",
       idleConnections: 0,
+      operation: "queryRaw",
+      source: "operation",
       totalConnections: 0,
       waitingRequests: 0,
-    });
+    }));
   });
 
   it("does not retry a checkout timeout caused by local saturation", async () => {
@@ -848,9 +1061,12 @@ describe("prisma module", () => {
     })).rejects.toBe(failure);
 
     expect(query).toHaveBeenCalledOnce();
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
     expect(pressureLogs(warn)).toEqual([{
       idleConnections: 0,
+      poolMax: 15,
       totalConnections: 15,
+      trigger: "at_capacity",
       waitingRequests: 0,
     }]);
   });
@@ -890,9 +1106,12 @@ describe("prisma module", () => {
     })).rejects.toBe(failure);
 
     expect(query).toHaveBeenCalledOnce();
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
     expect(pressureLogs(warn)).toEqual([{
       idleConnections: 0,
+      poolMax: 15,
       totalConnections: 15,
+      trigger: "at_capacity",
       waitingRequests: 0,
     }]);
   });
@@ -1058,7 +1277,9 @@ describe("prisma module", () => {
     // interval so a burst cannot flood the log.
     expect(pressureLogs(warn)).toEqual([{
       idleConnections: 0,
+      poolMax: 15,
       totalConnections: 15,
+      trigger: "at_capacity",
       waitingRequests: 0,
     }]);
     // Sampling must precede the attempt, otherwise the warning only appears
@@ -1140,7 +1361,220 @@ describe("prisma module", () => {
     expect(pressureLogs(warn)).toEqual([]);
   });
 
-  it("reports connection-held time separately from acquisition wait", async () => {
+  it("does not report transient waiters while an idle connection is available", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const pool = mocks.poolInstances[0];
+    const extension = mocks.extensions[0];
+    if (!pool || !extension) {
+      throw new Error("Expected the Prisma pool and query extension to be captured.");
+    }
+    pool.idleCount = 1;
+    pool.totalCount = 1;
+    pool.waitingCount = 1;
+
+    await extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query: async () => "rows",
+    });
+
+    expect(pressureLogs(warn)).toEqual([]);
+  });
+
+  it("warns five seconds after a labeled callback enters, not during acquisition", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      const callbackEntered = deferred();
+      const releaseCallback = deferred();
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) => {
+          vi.advanceTimersByTime(5_000);
+          return callback({ transaction: true });
+        },
+      );
+
+      const pending = runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.database_delete",
+        async () => {
+          callbackEntered.resolve();
+          await releaseCallback.promise;
+          return "committed";
+        },
+        { timeout: 20_000 },
+      );
+      await callbackEntered.promise;
+
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(inFlightTransactionLogs(warn)).toEqual([{
+        durationMs: 5_000,
+        operation: "account_deletion.database_delete",
+        timeoutMs: 20_000,
+      }]);
+
+      releaseCallback.resolve();
+      await expect(pending).resolves.toBe("committed");
+      expect(slowTransactionLogs(warn, "callback")).toEqual([{
+        callbackOutcome: "completed",
+        durationMs: 5_000,
+        operation: "transaction.interactive",
+        timeoutMs: 20_000,
+      }]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the in-flight timer for a fast labeled callback", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) =>
+          callback({ transaction: true }),
+      );
+
+      await expect(runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.suspension_fence",
+        async () => "committed",
+      )).resolves.toBe("committed");
+
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("warns once while a labeled callback remains open", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      const callbackEntered = deferred();
+      const releaseCallback = deferred();
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) =>
+          callback({ transaction: true }),
+      );
+
+      const pending = runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.suspension_fence",
+        async () => {
+          callbackEntered.resolve();
+          await releaseCallback.promise;
+          return "committed";
+        },
+        { timeout: 60_000 },
+      );
+      await callbackEntered.promise;
+
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(inFlightTransactionLogs(warn)).toEqual([{
+        durationMs: 5_000,
+        operation: "account_deletion.suspension_fence",
+        timeoutMs: 60_000,
+      }]);
+
+      releaseCallback.resolve();
+      await expect(pending).resolves.toBe("committed");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    new Error("callback rejected"),
+    Object.assign(
+      new Error("Transaction API error: Transaction already closed."),
+      { code: "P2028" },
+    ),
+  ])("clears the in-flight timer after rejection", async (error) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma, runPrismaInteractiveTransaction } =
+        await import("@/src/lib/prisma");
+      mocks.transaction.mockImplementation(
+        async (callback: (tx: unknown) => unknown) =>
+          callback({ transaction: true }),
+      );
+
+      await expect(runPrismaInteractiveTransaction(
+        getPrisma(),
+        "account_deletion.database_delete",
+        async () => {
+          throw error;
+        },
+      )).rejects.toBe(error);
+
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects arbitrary runtime labels and exposes a closed label type", async () => {
+    expectTypeOf<PrismaInteractiveTransactionOperation>().toEqualTypeOf<
+      | "account_deletion.database_delete"
+      | "account_deletion.suspension_fence"
+    >();
+    const { runPrismaInteractiveTransaction } = await import("@/src/lib/prisma");
+
+    expect(() => Reflect.apply(
+      runPrismaInteractiveTransaction,
+      undefined,
+      [null, "account_deletion.member_123", async () => undefined],
+    )).toThrowError(
+      new TypeError("Unsupported Prisma interactive transaction operation."),
+    );
+  });
+
+  it("reports callback wall time separately from acquisition wait", async () => {
     process.env = {
       ...process.env,
       NODE_ENV: "production",
@@ -1160,8 +1594,50 @@ describe("prisma module", () => {
         return "committed";
       })).resolves.toBe("committed");
 
-      expect(slowTransactionLogs(warn, "hold")).toEqual([{ durationMs: 6_000 }]);
+      expect(slowTransactionLogs(warn, "callback")).toEqual([{
+        callbackOutcome: "completed",
+        durationMs: 6_000,
+        operation: "transaction.interactive",
+        timeoutMs: 15_000,
+      }]);
       expect(slowTransactionLogs(warn, "acquisition")).toEqual([]);
+      expect(inFlightTransactionLogs(warn)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports an expired callback as timed out without calling it a connection hold", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma } = await import("@/src/lib/prisma");
+      const prisma = getPrisma();
+      mocks.transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => {
+        return callback({ transaction: true });
+      });
+      const expired = Object.assign(
+        new Error("Transaction API error: Transaction already closed."),
+        { code: "P2028" },
+      );
+
+      await expect(prisma.$transaction(async () => {
+        vi.advanceTimersByTime(6_000);
+        throw expired;
+      }, { timeout: 700 })).rejects.toBe(expired);
+
+      expect(slowTransactionLogs(warn, "callback")).toEqual([{
+        callbackOutcome: "timed_out",
+        durationMs: 6_000,
+        operation: "transaction.interactive",
+        timeoutMs: 700,
+      }]);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("transaction hold");
     } finally {
       vi.useRealTimers();
     }
@@ -1188,7 +1664,7 @@ describe("prisma module", () => {
 
       expect(slowTransactionLogs(warn, "acquisition"))
         .toEqual([{ durationMs: 6_000 }]);
-      expect(slowTransactionLogs(warn, "hold")).toEqual([]);
+      expect(slowTransactionLogs(warn, "callback")).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1225,7 +1701,7 @@ describe("prisma module", () => {
       expect(mocks.transaction).toHaveBeenCalledOnce();
       expect(slowTransactionLogs(warn, "acquisition"))
         .toEqual([{ durationMs: 6_000 }]);
-      expect(slowTransactionLogs(warn, "hold")).toEqual([]);
+      expect(slowTransactionLogs(warn, "callback")).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1250,8 +1726,12 @@ describe("prisma module", () => {
       await expect(prisma.$transaction([])).resolves.toEqual(["committed"]);
 
       expect(slowTransactionLogs(warn, "batch"))
-        .toEqual([{ durationMs: 6_000 }]);
-      expect(slowTransactionLogs(warn, "hold")).toEqual([]);
+        .toEqual([{
+          durationMs: 6_000,
+          operation: "transaction.batch",
+          timeoutMs: 15_000,
+        }]);
+      expect(slowTransactionLogs(warn, "callback")).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1274,7 +1754,7 @@ describe("prisma module", () => {
     await expect(prisma.$transaction(async () => "committed"))
       .resolves.toBe("committed");
 
-    expect(slowTransactionLogs(warn, "hold")).toEqual([]);
+    expect(slowTransactionLogs(warn, "callback")).toEqual([]);
     expect(slowTransactionLogs(warn, "acquisition")).toEqual([]);
   });
 
@@ -1331,9 +1811,27 @@ function failureCategories(warn: { mock: { calls: unknown[][] } }): unknown[] {
     .map((call) => (call[1] as { category: unknown }).category);
 }
 
+function failureDispositions(warn: { mock: { calls: unknown[][] } }): unknown[] {
+  return warn.mock.calls
+    .filter((call) => call[0] === "Hosted web database pool failure.")
+    .map((call) => (call[1] as { disposition: unknown }).disposition);
+}
+
+function inFlightTransactionLogs(
+  warn: { mock: { calls: unknown[][] } },
+): unknown[] {
+  return warn.mock.calls
+    .filter(
+      (call) =>
+        call[0]
+        === "Hosted web database transaction callback still in flight.",
+    )
+    .map((call) => call[1]);
+}
+
 function slowTransactionLogs(
   warn: { mock: { calls: unknown[][] } },
-  category: "acquisition" | "batch" | "hold",
+  category: "acquisition" | "batch" | "callback",
 ): unknown[] {
   return warn.mock.calls
     .filter(
@@ -1342,6 +1840,15 @@ function slowTransactionLogs(
         : `transaction ${category}`}.`,
     )
     .map((call) => call[1]);
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise();
+  });
+
+  return { promise, resolve };
 }
 
 

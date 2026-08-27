@@ -9,7 +9,7 @@ const { Pool } = pg;
 export const PRODUCT_LABEL_RUNTIME_ENV_REQUIRED_MESSAGE =
   "MURPH_LABELS_DB_URL is required for /api/foods and /api/supplements; MURPH_SUPPLEMENT_DB_URL is not a runtime fallback.";
 export const PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE =
-  "MURPH_LABELS_DB_URL must point at a labels database with the product contaminant schema applied; run apps/web/sql/product-tests/schema.sql before deploying.";
+  "MURPH_LABELS_DB_URL must point at a labels database with the product contaminant schema and private-food search indexes applied; run apps/web/sql/product-tests/schema.sql and apps/web/sql/foods/private-search-indexes.sql before deploying.";
 export const PRODUCT_LABEL_RUNTIME_SCHEMA_VERIFY_FAILED_MESSAGE =
   "Could not verify the product contaminant schema on MURPH_LABELS_DB_URL.";
 
@@ -66,15 +66,45 @@ type ProductLabelSchemaColumn = {
   tableName: string;
   columnName: string;
 };
+type ProductLabelSchemaProblem =
+  | {
+      kind: "column";
+      name: string;
+      reason: "missing";
+    }
+  | {
+      kind: "index";
+      name: string;
+      reason: "missing" | "not_live" | "wrong_definition";
+    };
 type ProductLabelSchemaColumnRow = {
   tableName: string;
   columnName: string;
 };
-type ProductLabelRuntimeEnvDependencies = {
-  readMissingRequiredSchemaColumns?: (
-    connectionString: string,
-  ) => Promise<ProductLabelSchemaColumn[]>;
+export type ProductLabelSchemaIndexRow = {
+  definition: string | null;
+  indexName: string;
+  isLive: boolean | null;
+  isReady: boolean | null;
+  isValid: boolean | null;
 };
+type ProductLabelRuntimeEnvDependencies = {
+  readRequiredSchemaProblems?: (
+    connectionString: string,
+  ) => Promise<ProductLabelSchemaProblem[]>;
+};
+
+const REQUIRED_PRODUCT_LABEL_SEARCH_INDEXES = [
+  {
+    definitionSuffix: "USING gist (name gist_trgm_ops)",
+    indexName: "foods_name_rank_idx",
+  },
+  {
+    definitionSuffix:
+      "USING btree (lower(name), data_origin_priority, id)",
+    indexName: "foods_name_exact_rank_idx",
+  },
+] as const;
 
 export async function listProductLabelRuntimeEnvErrors(
   source: EnvSource = process.env,
@@ -91,23 +121,23 @@ export async function listProductLabelRuntimeEnvErrors(
   const labelsDatabaseConnectionString =
     normalizeProductLabelsConnectionString(labelsDatabaseUrl);
 
-  let missingColumns: ProductLabelSchemaColumn[];
+  let schemaProblems: ProductLabelSchemaProblem[];
   try {
-    missingColumns = await (
-      dependencies.readMissingRequiredSchemaColumns ??
-      readMissingRequiredProductLabelSchemaColumns
+    schemaProblems = await (
+      dependencies.readRequiredSchemaProblems ??
+      readRequiredProductLabelSchemaProblems
     )(labelsDatabaseConnectionString);
   } catch {
     return [PRODUCT_LABEL_RUNTIME_SCHEMA_VERIFY_FAILED_MESSAGE];
   }
 
-  if (missingColumns.length === 0) {
+  if (schemaProblems.length === 0) {
     return [];
   }
 
   return [
-    `${PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE} Missing columns: ${
-      missingColumns.map(formatProductLabelSchemaColumn).join(", ")
+    `${PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE} Missing or invalid objects: ${
+      schemaProblems.map(formatProductLabelSchemaProblem).join(", ")
     }.`,
   ];
 }
@@ -133,9 +163,9 @@ function normalizeOptionalString(value: string | undefined): string | null {
   return normalized ? normalized : null;
 }
 
-async function readMissingRequiredProductLabelSchemaColumns(
+async function readRequiredProductLabelSchemaProblems(
   connectionString: string,
-): Promise<ProductLabelSchemaColumn[]> {
+): Promise<ProductLabelSchemaProblem[]> {
   const pool = new Pool({
     connectionString,
     connectionTimeoutMillis: 5_000,
@@ -150,7 +180,7 @@ async function readMissingRequiredProductLabelSchemaColumns(
     const columnNames = REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS.map(
       ([, columnName]) => columnName,
     );
-    const result = await pool.query<ProductLabelSchemaColumnRow>(
+    const missingColumns = await pool.query<ProductLabelSchemaColumnRow>(
       `
         WITH required(table_name, column_name) AS (
           SELECT * FROM unnest($1::text[], $2::text[])
@@ -169,16 +199,105 @@ async function readMissingRequiredProductLabelSchemaColumns(
       [tableNames, columnNames],
     );
 
-    return result.rows;
+    const requiredIndexNames = REQUIRED_PRODUCT_LABEL_SEARCH_INDEXES.map(
+      ({ indexName }) => indexName,
+    );
+    const indexes = await pool.query<ProductLabelSchemaIndexRow>(
+      `
+        WITH required(index_name) AS (
+          SELECT unnest($1::text[])
+        )
+        SELECT
+          required.index_name AS "indexName",
+          index_state.indisvalid AS "isValid",
+          index_state.indisready AS "isReady",
+          index_state.indislive AS "isLive",
+          pg_get_indexdef(index_state.indexrelid) AS definition
+        FROM required
+        LEFT JOIN LATERAL (
+          SELECT indexes.*
+          FROM pg_class AS index_class
+          JOIN pg_namespace AS index_namespace
+            ON index_namespace.oid = index_class.relnamespace
+          JOIN pg_index AS indexes
+            ON indexes.indexrelid = index_class.oid
+          JOIN pg_class AS table_class
+            ON table_class.oid = indexes.indrelid
+          JOIN pg_namespace AS table_namespace
+            ON table_namespace.oid = table_class.relnamespace
+          WHERE
+            index_namespace.nspname = 'public'
+            AND index_class.relname = required.index_name
+            AND table_namespace.nspname = 'public'
+            AND table_class.relname = 'foods'
+          LIMIT 1
+        ) AS index_state ON true
+        ORDER BY required.index_name ASC
+      `,
+      [requiredIndexNames],
+    );
+
+    return [
+      ...missingColumns.rows.map(({ tableName, columnName }) => ({
+        kind: "column" as const,
+        name: formatProductLabelSchemaColumn({ tableName, columnName }),
+        reason: "missing" as const,
+      })),
+      ...findProductLabelSearchIndexProblems(indexes.rows),
+    ];
   } finally {
     await pool.end();
   }
+}
+
+export function findProductLabelSearchIndexProblems(
+  rows: readonly ProductLabelSchemaIndexRow[],
+): ProductLabelSchemaProblem[] {
+  const rowsByName = new Map(rows.map((row) => [row.indexName, row]));
+  const problems: ProductLabelSchemaProblem[] = [];
+
+  for (const required of REQUIRED_PRODUCT_LABEL_SEARCH_INDEXES) {
+    const row = rowsByName.get(required.indexName);
+    if (!row || !row.definition) {
+      problems.push({
+        kind: "index",
+        name: required.indexName,
+        reason: "missing",
+      });
+      continue;
+    }
+    if (!row.isValid || !row.isReady || !row.isLive) {
+      problems.push({
+        kind: "index",
+        name: required.indexName,
+        reason: "not_live",
+      });
+      continue;
+    }
+
+    const normalizedDefinition = row.definition.replace(/\s+/gu, " ").trim();
+    if (!normalizedDefinition.endsWith(required.definitionSuffix)) {
+      problems.push({
+        kind: "index",
+        name: required.indexName,
+        reason: "wrong_definition",
+      });
+    }
+  }
+
+  return problems;
 }
 
 function formatProductLabelSchemaColumn(
   column: ProductLabelSchemaColumn,
 ): string {
   return `${column.tableName}.${column.columnName}`;
+}
+
+function formatProductLabelSchemaProblem(
+  problem: ProductLabelSchemaProblem,
+): string {
+  return `${problem.name} (${problem.reason})`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

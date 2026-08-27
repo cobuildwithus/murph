@@ -67,6 +67,7 @@ interface HostedDeviceSyncDisconnectResponse {
 type ConnectStartOptions = {
   vitalDisclosureConfirmed?: boolean;
   intentClaim?: string;
+  onHandoff?: () => void;
 };
 
 type VitalConnectionRequest = {
@@ -349,6 +350,7 @@ export function ConnectSourcesGrid({
           ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
           source,
         });
+        options.onHandoff?.();
         return;
       }
 
@@ -367,6 +369,7 @@ export function ConnectSourcesGrid({
               : {}),
           },
         );
+        options.onHandoff?.();
         window.location.assign(authorizationUrl);
       } catch (error) {
         if (options.intentClaim) {
@@ -382,12 +385,14 @@ export function ConnectSourcesGrid({
             sourceName: source.name,
           });
           setPendingSourceId(null);
+          options.onHandoff?.();
           return;
         }
 
         if (isHostedWhoopDirectConnectCapReachedError(error)) {
           setShowWhoopAppleHealthSetupDialog(true);
           setPendingSourceId(null);
+          options.onHandoff?.();
           return;
         }
 
@@ -497,7 +502,10 @@ export function ConnectSourcesGrid({
     };
   }, [activeConnectIntent, authenticated, displaySources]);
 
-  const disconnectConnection = useCallback(async (source: ConnectSource) => {
+  const disconnectConnection = useCallback(async (
+    source: ConnectSource,
+    onHandoff?: () => void,
+  ) => {
     const connectionId = source.disconnectConnectionId?.trim();
     if (
       !connectionId ||
@@ -532,6 +540,7 @@ export function ConnectSourcesGrid({
             "Fitbit is still syncing while Murph retries the switch. You can leave this page.",
         });
         router.refresh();
+        onHandoff?.();
         return;
       }
       if (
@@ -569,6 +578,7 @@ export function ConnectSourcesGrid({
           ? `${resolveDisconnectSuccessMessage(source)} ${resolveDisconnectWarningDetail(result.warning)}`
           : resolveDisconnectSuccessMessage(source),
       });
+      onHandoff?.();
     } catch (error) {
       const message =
         error instanceof Error
@@ -587,6 +597,11 @@ export function ConnectSourcesGrid({
     setDeepLinkedSourceId(null);
     stripConnectSourceHash();
   }, []);
+
+  const handoffDeepLinkedSourceToAuth = useCallback(() => {
+    setDeepLinkedSourceId(null);
+    openAuthDialog();
+  }, [openAuthDialog]);
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
@@ -693,21 +708,21 @@ export function ConnectSourcesGrid({
             presentation="dialog"
             source={deepLinkedSource}
             onDisconnectTargetChange={(source) => {
-              closeDeepLinkedSourceDialog();
               setDisconnectSource(source);
+              closeDeepLinkedSourceDialog();
             }}
             onMigrationRetry={(source) => {
-              closeDeepLinkedSourceDialog();
-              void disconnectConnection(source);
+              void disconnectConnection(source, closeDeepLinkedSourceDialog);
             }}
-            onSignIn={closeDeepLinkedSourceDialog}
+            onSignIn={handoffDeepLinkedSourceToAuth}
             onSetupGuideOpen={(setupGuideId) => {
-              closeDeepLinkedSourceDialog();
               setActiveSetupGuideId(setupGuideId);
+              closeDeepLinkedSourceDialog();
             }}
             onStartConnection={async (source) => {
-              closeDeepLinkedSourceDialog();
-              await startConnection(source);
+              await startConnection(source, {
+                onHandoff: closeDeepLinkedSourceDialog,
+              });
             }}
           />
         ) : null}

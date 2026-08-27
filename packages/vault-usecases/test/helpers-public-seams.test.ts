@@ -55,6 +55,7 @@ import {
   toRegimenUpsertVaultCliError,
   toVaultCliError,
   toVaultCliFilesystemError,
+  toVaultInitializationCliError,
   toVaultMetadataCliError,
   uniqueStrings,
 } from "../src/usecases/vault-usecase-helpers.ts";
@@ -655,23 +656,55 @@ describe("helper barrel exports", () => {
       );
     }
 
-    expect(
-      toVaultMetadataCliError(
-        Object.assign(new Error("Need metadata"), {
-          name: "VaultError",
-          code: "VAULT_INVALID_METADATA",
-        }),
-      ),
-    ).toEqual(expect.objectContaining({ code: "invalid_metadata" }));
+    const invalidMetadata = toVaultMetadataCliError(
+      Object.assign(new Error("private metadata parser detail"), {
+        name: "VaultError",
+        code: "VAULT_INVALID_METADATA",
+      }),
+    );
+    expect(projectVaultCliError(invalidMetadata)).toEqual({
+      code: "invalid_metadata",
+      message: "Vault metadata is invalid. Run vault validate, then repair or restore the metadata before retrying.",
+      retryable: false,
+      stage: "validation",
+    });
+    expect(Object.hasOwn(invalidMetadata as object, "repair")).toBe(false);
+    expect(JSON.stringify(invalidMetadata)).not.toContain("private metadata parser detail");
 
-    expect(
-      toVaultMetadataCliError(
-        Object.assign(new Error("Need upgrade"), {
-          name: "VaultError",
-          code: "VAULT_UNSUPPORTED_FORMAT",
-        }),
-      ),
-    ).toEqual(expect.objectContaining({ code: "unsupported_format" }));
+    const unsupportedFormat = toVaultMetadataCliError(
+      Object.assign(new Error("private unsupported format detail"), {
+        name: "VaultError",
+        code: "VAULT_UNSUPPORTED_FORMAT",
+      }),
+    );
+    expect(projectVaultCliError(unsupportedFormat)).toEqual({
+      code: "unsupported_format",
+      message: "Vault format is not supported by this CLI version. Use a compatible CLI version or the supported vault migration path.",
+      retryable: false,
+      stage: "validation",
+    });
+    expect(JSON.stringify(unsupportedFormat)).not.toContain("private unsupported format detail");
+
+    const alreadyInitialized = toVaultInitializationCliError(
+      Object.assign(new Error("private existing-vault detail"), {
+        name: "VaultError",
+        code: "VAULT_ALREADY_EXISTS",
+      }),
+    );
+    expect(projectVaultCliError(alreadyInitialized)).toEqual({
+      code: "already_exists",
+      fieldErrors: [{
+        code: "custom",
+        expected: "",
+        message: "This field is invalid.",
+        path: "vault",
+        received: "invalid",
+      }],
+      message: "Vault is already initialized. Use vault show for the existing vault or choose a different vault root.",
+      retryable: false,
+      stage: "conflict",
+    });
+    expect(JSON.stringify(alreadyInitialized)).not.toContain("private existing-vault detail");
   });
 
   it("covers the public helper payload branches and generic entity rendering helpers", async () => {

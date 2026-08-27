@@ -72,94 +72,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
   "",
 ].join("\n");
 
-// Byte budgets over the esbuild metafile, so import-graph creep in the real
-// installed artifact fails the assembly instead of shipping silently (the
-// June 2026 latency regression was exactly this: one static import dragged
-// the whole command surface onto the hot path with nothing watching).
-// Baselines measured from the real assembled bundle on 2026-06-11:
-// total 7,052,933 B across all chunks, entry bin.js 15,569 B. The merged
-// Health Commons, recurring-timezone, workout-card, group-challenge-card, and
-// generated-image-continuity additions are intentional lazy CLI capabilities;
-// no new package enters the graph. The deterministic Messages workout action
-// reuses that existing graph and measured 9,111,172 B on macOS after merging
-// current main on 2026-08-14. The reviewed Junction temporal-fidelity and
-// source-authority graph measured 9,128,211 B on Linux CI and 9,175,594 B on
-// macOS after merging current main on 2026-08-14; no package entered the graph.
-// The reviewed cross-session context reply work measured 9,119,111 B after
-// normalizing the esbuild working directory on 2026-08-15; it grows the
-// existing Assistant Engine graph without adding a package. Preserving the
-// exact planned experiment occurrence measured 9,153,208 B on Linux CI; it
-// extends that same graph without adding a package. The August 2026 Junction
-// temporal-authority and canonical event-schema additions extend the same graph
-// without a new package. Junction summary-completeness work measured 9,170,089 B
-// on Linux CI on 2026-08-17; its 32,160 B increase is confined to the existing
-// Core event reconciliation and Junction normalization inputs, with no package
-// entering the graph or the static startup closure. The combined reviewed
-// summary-completeness and bounded workout-feature graph measured 9,188,582 B on
-// the same Linux CI lane; it extends the existing device-sync, importer, and
-// query packages without adding a package.
-// The reviewed Telegram rich-response work measured 9,159,100 B in the Linux
-// deploy lane on 2026-08-16; it grows the existing Assistant Engine graph
-// without adding a package. The reviewed Telegram phone-call result route adds
-// only bounded schemas and delivery handling within the already-bundled Hosted
-// Execution and Assistant Engine graphs; the combined graph measured
-// 9,165,765 B on 2026-08-16. Junction body-composition work extends the existing
-// device-sync, importer, query, and CLI graph without adding a package. Under
-// the established 32 KiB allowance, its reviewed 9,227,033 B ceiling represents
-// a 9,194,265 B measured baseline. The merged assistant execution graph,
-// including the session-routing SQLite projection, measured 9,209,386 B in the
-// Linux deploy lane on 2026-08-18; it extends existing graphs without adding a
-// package. Integrated Junction history measured 9,311,785 B in the canonical
-// production build. The merged bounded foreground-state work extends that graph
-// with the outbox projection and pending-input hint and measured 9,272,172 B
-// in the Linux deploy lane on 2026-08-19; no package entered the graph. The
-// resolved combined graph measured 9,364,936 B in the canonical production
-// build; the static startup closure still measured 24,950 B. The stable
-// Junction profile replay migration grew the existing lazy Core graph by
-// 7,993 B: public Linux measured 9,391,948 B, while the production-only managed
-// voice runtime overlay added 6,889 B and exposed a 1,133 B overage. Emitting
-// this Node-only artifact as UTF-8 instead of ASCII-escaping existing Unicode
-// literals removed 51,325 B without changing any input, output, entry, or
-// static-closure topology. The resulting public Linux baseline is 9,340,623 B;
-// the total cap retains 32 KiB of graph allowance plus an 8 KiB reserve for
-// the measured production overlay.
-// Batched workout creation and exact canonical event reads replace the
-// projection-backed command path without adding a package or changing the
-// static startup closure. The merged public Linux graph measured 9,360,190 B
-// on 2026-08-21 and remains within that retained allowance.
-// Direct Gemini video analysis extends the existing CLI and contract graph
-// without adding a package or changing the static startup closure. Combined
-// with the batched-workout graph, public Linux measured 9,382,747 B on
-// 2026-08-21. The cap is ratcheted from that exact baseline and retains the
-// ordinary 32 KiB graph allowance plus the 8 KiB production-overlay reserve.
-// Junction daily-alias self-healing extends the existing Core event-
-// reconciliation graph without adding a package or changing the entry or
-// static-startup topology. The combined cap composes its reviewed 41,089 B
-// lazy-graph delta with the current public Linux baseline and retains the same
-// 32 KiB graph allowance plus 8 KiB production-overlay reserve.
-// Exact workout delivery context extends the existing lazy Assistant Engine
-// graph without adding a package or changing the entry or static-startup
-// topology. The merged public Linux graph measured 9,456,843 B on 2026-08-25;
-// ratchet from that exact baseline while retaining the same allowances.
-// Keep total output inside a narrow 32 KiB allowance and static startup inside
-// an 8 KiB allowance. If a violation fires, investigate the listed largest
-// inputs first; only raise the budget deliberately for understood, intended
-// growth.
-// Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
-// shared Incur serialization removed duplicate transport branches. The entry
-// and static-startup budgets remain unchanged because error projection is lazy.
-// Nutrition and provider recovery metadata add 6,153 B to the lazy CLI graph.
-// The follow-up nutrition recovery correction at exact candidate
-// 65de007f50ed05b3f5abbd2dc142a23223364828 measured 9,477,676 B in canonical
-// local production assembly, a 3,875 B total-only increase in the existing lazy
-// error and protocol-validation graph. Entry and static-startup limits stay put.
-// Compose both measured nutrition deltas with the current foundation and exact-
-// workout graph. None of these changes alter startup topology.
-// The reviewed event, document, intake, and export recovery allowance adds
-// 17,260 B to the same lazy graph. Entry and static-startup limits stay put.
-// Experiment and Murph Age recovery metadata add another 8,772 B to the lazy
-// CLI graph. Entry and static-startup limits remain unchanged.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_536_715;
+// Keep the boot-critical CLI surfaces bounded at assembly time. Total lazy
+// output is compared to the exact first parent on canonical Linux CI instead
+// of using an absolute production cap.
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
@@ -230,7 +145,7 @@ export async function bundleInstalledVaultCliBinary(
   assertVaultCliBundleInlinesSingleCopies(Object.keys(buildResult.metafile.inputs));
   const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
   console.log(
-    `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget, static startup closure ${bundleBytes.staticClosureBytes}B of ${VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET}B budget`,
+    `vault-cli bundle size: total ${bundleBytes.totalBytes}B, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget, static startup closure ${bundleBytes.staticClosureBytes}B of ${VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET}B budget`,
   );
   const healthCommonsPackageRoot = path.join(
     bundleDir,
@@ -318,11 +233,9 @@ export function assertVaultCliBundleWithinBudgets(
   budgets: {
     entryBytes: number;
     staticClosureBytes: number;
-    totalBytes: number;
   } = {
     entryBytes: VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET,
     staticClosureBytes: VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET,
-    totalBytes: VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET,
   },
 ): { entryBytes: number; staticClosureBytes: number; totalBytes: number } {
   const outputs = Object.entries(metafile.outputs);
@@ -352,11 +265,6 @@ export function assertVaultCliBundleWithinBudgets(
   );
 
   const violations: string[] = [];
-  if (totalBytes > budgets.totalBytes) {
-    violations.push(
-      `total output ${totalBytes}B exceeds budget ${budgets.totalBytes}B`,
-    );
-  }
   if (entryBytes > budgets.entryBytes) {
     violations.push(
       `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,
@@ -381,7 +289,7 @@ export function assertVaultCliBundleWithinBudgets(
   throw new Error(
     [
       `vault-cli bundle exceeded its byte budget: ${violations.join("; ")}.`,
-      "Investigate the largest metafile inputs below before raising the budget (see baseline comment on the budget constants):",
+      "Investigate the largest metafile inputs below before changing the startup budgets:",
       ...largestInputs,
     ].join("\n"),
   );

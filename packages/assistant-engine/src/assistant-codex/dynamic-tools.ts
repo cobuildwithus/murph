@@ -168,6 +168,7 @@ import {
 import {
   resolveAssistantVaultImageResponseMedia,
 } from '../assistant/vault-file-send.js'
+
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -775,6 +776,10 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         )
         .optional(),
       standaloneLink: z.boolean().optional(),
+      message_ref: z
+        .string()
+        .regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'))
+        .optional(),
     })
     .strict(),
   z
@@ -1221,6 +1226,7 @@ type MurphGroupToolRequest =
   | {
       action: 'offer_access'
       displayName?: string
+      messageRef?: string
       projectionScopes?: readonly HostedVaultShareSelectableProjectionScope[]
       standaloneLink?: boolean
     }
@@ -3457,10 +3463,13 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'analyze-video': {
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (userActionScope?.conversationScope !== 'direct') {
+      if (
+        userActionScope?.conversationScope === 'unverified-external'
+        || !userActionScope
+      ) {
         return toolTextResult(
           false,
-          'video analysis requires a verified private direct conversation',
+          'video analysis requires a verified direct or authenticated group conversation',
         )
       }
       return await executeAnalyzeVideoDynamicTool({
@@ -4749,6 +4758,7 @@ function hasExactStringEntries(
 
 function buildGroupAccessOfferHostRequest(
   request: Extract<MurphGroupToolRequest, { action: 'offer_access' }>,
+  repostOriginAssistantInputId: string | null,
 ): Extract<
   HostedRuntimeGroupToolRequest,
   { action: 'create_join_link' | 'post_join_offer' }
@@ -4781,6 +4791,9 @@ function buildGroupAccessOfferHostRequest(
         ? {}
         : { projectionScopes: [...request.projectionScopes] }),
     },
+    ...(repostOriginAssistantInputId === null
+      ? {}
+      : { repostOriginAssistantInputId }),
   }
 }
 
@@ -4857,7 +4870,25 @@ async function executeGroupTool(input: {
     | { savedCaptureId: string | null; savedImageRef: string }
     | null = null
   if (input.request.action === 'offer_access') {
-    request = buildGroupAccessOfferHostRequest(input.request)
+    let repostOriginAssistantInputId: string | null = null
+    if (input.request.messageRef !== undefined) {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (
+        userActionScope?.conversationScope !== 'group'
+        || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+      ) {
+        return toolTextResult(
+          false,
+          'reposting group access requires the exact current accepted Message ref from this group conversation',
+        )
+      }
+      repostOriginAssistantInputId = input.request.messageRef
+    }
+    request = buildGroupAccessOfferHostRequest(
+      input.request,
+      repostOriginAssistantInputId,
+    )
   } else if (isPreparedContactCardRequest(input.request)) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
@@ -6740,7 +6771,7 @@ function invalidDynamicToolArgumentsResult(
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     false,
-    buildToolCallValidationFeedback(validationDigest, { error }),
+    buildToolCallValidationFeedback(validationDigest, error),
   )
 }
 
@@ -7180,7 +7211,24 @@ function parseGroupArguments(
     return { ok: true, request: parsed.data }
   }
   if (parsed.data.action === 'offer_access') {
-    return { ok: true, request: parsed.data }
+    return {
+      ok: true,
+      request: {
+        action: 'offer_access',
+        ...(parsed.data.displayName === undefined
+          ? {}
+          : { displayName: parsed.data.displayName }),
+        ...(parsed.data.message_ref === undefined
+          ? {}
+          : { messageRef: parsed.data.message_ref }),
+        ...(parsed.data.projectionScopes === undefined
+          ? {}
+          : { projectionScopes: parsed.data.projectionScopes }),
+        ...(parsed.data.standaloneLink === undefined
+          ? {}
+          : { standaloneLink: parsed.data.standaloneLink }),
+      },
+    }
   }
   if (parsed.data.action === 'update_display_name') {
     return {
@@ -7596,7 +7644,8 @@ function parseAttachResponseCardArguments(
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
   if (audience !== 'group') {
-    const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+    const runtimeValue = stampTrackedResponseCardSnapshot(value)
+    const parsed = attachResponseCardArgumentsSchema.safeParse(runtimeValue)
     if (parsed.success) {
       return {
         card: parsed.data.card,
@@ -7609,7 +7658,7 @@ function parseAttachResponseCardArguments(
       || Object.hasOwn(asRecord(value) ?? {}, 'card')
     ) {
       const semanticWorkout =
-        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
+        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(runtimeValue)
       if (semanticWorkout.success) {
         return {
           card: semanticWorkout.data.card,
@@ -7618,7 +7667,7 @@ function parseAttachResponseCardArguments(
         }
       }
       const diagnosticError = readAttachResponseCardDiagnosticError(
-        value,
+        runtimeValue,
         parsed.error,
       )
       return {
@@ -7657,6 +7706,30 @@ function parseAttachResponseCardArguments(
     groupChallenge: true,
     input: groupChallengeParsed.data,
     ok: true,
+  }
+}
+
+function stampTrackedResponseCardSnapshot(value: unknown): unknown {
+  const input = asRecord(value)
+  const card = asRecord(input?.card)
+  const tracking = asRecord(card?.tracking)
+  if (
+    card?.kind !== 'compact_table'
+    || tracking?.kind !== 'workout'
+    || !Object.hasOwn(card, 'workout')
+  ) {
+    return value
+  }
+
+  return {
+    ...input,
+    card: {
+      ...card,
+      tracking: {
+        ...tracking,
+        snapshotAt: new Date().toISOString(),
+      },
+    },
   }
 }
 

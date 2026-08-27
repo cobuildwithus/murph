@@ -41,10 +41,6 @@ export function SourceCard({
     || (source.connectionAvailable === false && Boolean(source.unavailableActionUrl));
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
-  const showFitbitJunctionDisclosure = source.connectTarget === "fitbit"
-    && canStart
-    && migrationState !== "verifying_successor"
-    && migrationState !== "cutover_ready";
   const canDisconnect = !setupOnly
     && authenticated
     && Boolean(source.disconnectConnectionId);
@@ -211,25 +207,11 @@ export function SourceCard({
                 {errorMessage}
               </p>
             ) : null}
-            {showFitbitJunctionDisclosure ? (
-              <p className="max-w-[22rem] text-xs leading-relaxed text-muted-foreground">
-                Google authorization is handled through{" "}
-                <a
-                  className="underline underline-offset-2 hover:text-foreground"
-                  href="https://www.junction.com"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Junction
-                </a>
-                .
-              </p>
-            ) : null}
             {!authenticated ? (
               <AuthButton
                 aria-label="Sign in to Murph"
                 className="self-end"
-                onConnect={onSignIn}
+                onAuthRequired={onSignIn}
               >
                 Sign in
               </AuthButton>

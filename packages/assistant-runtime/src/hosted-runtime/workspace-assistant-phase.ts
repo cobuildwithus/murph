@@ -33,6 +33,7 @@ import {
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+  AssistantActiveTurnInputUnavailableError,
   applyMurphManagedAutomations,
   getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
@@ -107,6 +108,7 @@ import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
 } from "./device-sync-snapshot-pagination.ts";
 import {
+  assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
@@ -317,9 +319,11 @@ const HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS = [
 ] as const;
 const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
+  "apply-member-action",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
+  "member.action.requested",
 ] as const;
 const HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
@@ -965,6 +969,42 @@ function resolveHostedInitialLinqDeliveryContexts(
   return importResult.latestLinqDeliveryContext
     ? [importResult.latestLinqDeliveryContext]
     : [];
+}
+
+async function resolveHostedAssistantInputIdsTurnCommitLinqContexts(input: {
+  inputIds: readonly string[];
+  memberId: string;
+  vaultRoot: string;
+}): Promise<HostedAssistantLinqDeliveryContext[]> {
+  const contexts: HostedAssistantLinqDeliveryContext[] = [];
+  for (const inputId of input.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (!event) {
+      throw new AssistantActiveTurnInputUnavailableError(
+        "Accepted assistant input authority is temporarily unavailable.",
+      );
+    }
+    const sourceIsLinq = event.sourceMetadata?.kind === "linq"
+      || event.conversation?.source === "linq"
+      || event.replyTarget?.channel === "linq";
+    if (!sourceIsLinq) {
+      continue;
+    }
+    const context = readHostedAssistantInputLinqDeliveryContext({
+      event,
+      memberId: input.memberId,
+    });
+    if (!context) {
+      throw new AssistantActiveTurnInputUnavailableError(
+        "Accepted Linq input authority is temporarily unavailable.",
+      );
+    }
+    contexts.push(context);
+  }
+  return contexts;
 }
 
 function resolveHostedCurrentLinqDeliveryContexts(
@@ -2090,6 +2130,23 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        async assertTurnCommitAuthority({ acceptedInputs }) {
+          const linqDeliveryContexts =
+            await resolveHostedAssistantInputIdsTurnCommitLinqContexts({
+              inputIds: acceptedInputs
+                .filter((acceptedInput) =>
+                  acceptedInput.source === "assistant-input"
+                )
+                .map((acceptedInput) => acceptedInput.id),
+              memberId: input.request.userId,
+              vaultRoot: input.restored.vaultRoot,
+            });
+          await assertHostedAssistantLinqTurnCommitAuthority({
+            effectsPort: input.runtime.platform.effectsPort,
+            linqDeliveryContexts,
+            signal: channelAbortController.signal,
+          });
+        },
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,
@@ -9233,14 +9290,10 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-type HostedAssistantDeviceTool = NonNullable<
-  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
->;
-
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): HostedAssistantDeviceTool | undefined {
+}): NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"] | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
   if (!deviceSyncPort) {
     return undefined;

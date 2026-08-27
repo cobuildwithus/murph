@@ -45,9 +45,16 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+
+  return {
+    ...actual,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 const NOW = new Date("2026-04-07T01:00:00.000Z");
 
@@ -345,6 +352,47 @@ describe("ensureHostedMemberForPhone", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
+  it.each([
+    ["missing", null, "INVITE_NOT_FOUND", 404],
+    [
+      "expired",
+      {
+        ...makeInviteRecord(),
+        expiresAt: NOW,
+      },
+      "INVITE_EXPIRED",
+      410,
+    ],
+  ] as const)(
+    "rejects %s invites before private identity reads or transaction entry",
+    async (_label, invite, code, httpStatus) => {
+      const identityFindUnique = vi.fn();
+      const prisma = asRootPrisma({
+        hostedInvite: {
+          findUnique: vi.fn().mockResolvedValue(invite),
+        },
+        hostedMemberIdentity: {
+          findUnique: identityFindUnique,
+          update: vi.fn(),
+        },
+      });
+
+      await expect(
+        prepareHostedInvitePhoneCode({
+          inviteCode: "invite-code",
+          now: NOW,
+          prisma: prisma as never,
+        }),
+      ).rejects.toMatchObject({
+        code,
+        httpStatus,
+      });
+
+      expect(identityFindUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns a stored phone for the Privy client send and records the transient send attempt", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({

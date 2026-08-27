@@ -931,7 +931,11 @@ describe('hosted domain dynamic tools', () => {
     const request = readToolRequest('automation', {
       action: 'save',
       instructions: 'Ask how the weekly check-in went.',
-      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
       supportKind: 'check_in',
       title: 'Weekly check-in',
     })
@@ -963,6 +967,82 @@ describe('hosted domain dynamic tools', () => {
       })],
     })
     expect(automationRequest).not.toHaveBeenCalled()
+  })
+
+  it('saves an ordinary hosted weekly check-in without plan-owned support fields', async () => {
+    const request = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Ask how the weekly check-in went.',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active',
+      title: 'Weekly check-in',
+    })
+    expect(request).toMatchObject({ kind: 'automation' })
+    if (!request || request.kind !== 'automation') {
+      throw new Error('Expected a valid ordinary check-in automation request.')
+    }
+
+    const automationRequest = vi.fn(async () => ({
+      action: 'save' as const,
+      automationId: 'automation-weekly-check-in',
+      created: true,
+      contextReferences: [],
+      effectiveTimeZone: 'America/New_York',
+      lookupId: 'weekly-check-in',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-08-31T23:00:00.000Z',
+        status: 'resolved' as const,
+      },
+      path: '/internal/automations/weekly-check-in.md',
+      routeBinding: 'current_conversation' as const,
+      schedule: {
+        kind: 'cron' as const,
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active' as const,
+      updatedAt: '2026-08-24T00:00:00.000Z',
+    }))
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: { request: automationRequest },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(automationRequest).toHaveBeenCalledWith({
+      action: 'save',
+      instructions: 'Ask how the weekly check-in went.',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active',
+      title: 'Weekly check-in',
+    }, { signal: null })
+    expect(readResultPayload(result)).toMatchObject({
+      action: 'save',
+      effectiveTimeZone: 'America/New_York',
+      occurrenceProjection: {
+        status: 'resolved',
+      },
+      routeBinding: 'current_conversation',
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
+      status: 'active',
+    })
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {

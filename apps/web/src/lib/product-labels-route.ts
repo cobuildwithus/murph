@@ -15,6 +15,11 @@ const MAX_SEARCH_QUERY_LENGTH = 256;
 const MAX_BATCH_BODY_BYTES = 32 * 1024;
 const GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 
+type ProductLabelsFailureContext = Readonly<Record<
+  string,
+  boolean | number | string
+>>;
+
 type ProductLabelsLookupParam =
   | { key: "id"; value: string }
   | { key: "q"; value: string }
@@ -63,7 +68,10 @@ export function createProductLabelsRouteHandlers<TItem>(
     }
   }
 
-  function apiFailed(error: unknown): Response {
+  function apiFailed(
+    error: unknown,
+    context: ProductLabelsFailureContext,
+  ): Response {
     if (config.isUnconfiguredError?.(error)) {
       console.error(config.errorCodes.unconfigured, {
         errorName: error instanceof Error ? error.name : typeof error,
@@ -72,9 +80,8 @@ export function createProductLabelsRouteHandlers<TItem>(
     }
 
     console.error(config.errorCodes.failed, {
-      ...formatHostedExecutionSafeLogErrorDetails(error, {
-        code: config.errorCodes.failed,
-      }),
+      ...formatProductLabelsSafeLogErrorDetails(error, config.errorCodes.failed),
+      ...context,
     });
     return json({ error: config.errorCodes.failed }, { status: 500 });
   }
@@ -98,6 +105,7 @@ export function createProductLabelsRouteHandlers<TItem>(
     const nutritionOnly =
       config.projectNutritionItem !== undefined &&
       params.get("nutritionOnly") === "true";
+    const startedAt = performance.now();
 
     try {
       if (id) {
@@ -150,7 +158,16 @@ export function createProductLabelsRouteHandlers<TItem>(
           projectProductLabelItem(config, item, nutritionOnly)),
       });
     } catch (error) {
-      return apiFailed(error);
+      return apiFailed(error, {
+        durationMs: roundedDurationMs(startedAt),
+        genericOnly,
+        includeOffMarket,
+        limit,
+        method: "GET",
+        nutritionOnly,
+        operation: id ? "id" : upc ? "upc" : "search",
+        ...(q ? { queryLength: q.length } : {}),
+      });
     }
   }
 
@@ -194,9 +211,10 @@ export function createProductLabelsRouteHandlers<TItem>(
     const nutritionOnly =
       config.projectNutritionItem !== undefined &&
       payload.nutritionOnly === true;
+    const uniqueQueries = dedupeBatchQueries(queries);
+    const startedAt = performance.now();
 
     try {
-      const uniqueQueries = dedupeBatchQueries(queries);
       const uniqueResults = await mapLimit(
         uniqueQueries,
         BATCH_SEARCH_CONCURRENCY,
@@ -235,11 +253,59 @@ export function createProductLabelsRouteHandlers<TItem>(
         results,
       });
     } catch (error) {
-      return apiFailed(error);
+      return apiFailed(error, {
+        batchConcurrency: BATCH_SEARCH_CONCURRENCY,
+        durationMs: roundedDurationMs(startedAt),
+        genericOnly,
+        includeOffMarket,
+        limit,
+        maxQueryLength: Math.max(...uniqueQueries.map((query) => query.length)),
+        method: "POST",
+        nutritionOnly,
+        operation: "batch_search",
+        queryCount: queries.length,
+        uniqueQueryCount: uniqueQueries.length,
+      });
     }
   }
 
   return { GET, POST };
+}
+
+function formatProductLabelsSafeLogErrorDetails(
+  error: unknown,
+  errorCode: string,
+): Record<string, string> {
+  const details = formatHostedExecutionSafeLogErrorDetails(error, {
+    code: errorCode,
+  });
+  const databaseErrorCode = readSafeDatabaseErrorCode(error);
+  const cause = error instanceof Error ? error.cause : undefined;
+  const causeDatabaseErrorCode = readSafeDatabaseErrorCode(cause);
+
+  return {
+    errorCode: details.errorCode,
+    errorType: details.errorType,
+    ...(databaseErrorCode ? { databaseErrorCode } : {}),
+    ...(details.errorCauseType
+      ? { errorCauseType: details.errorCauseType }
+      : {}),
+    ...(causeDatabaseErrorCode ? { causeDatabaseErrorCode } : {}),
+  };
+}
+
+function readSafeDatabaseErrorCode(error: unknown): string | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+  const code = error.code;
+  return typeof code === "string" && /^[A-Za-z0-9._:-]{1,64}$/u.test(code)
+    ? code
+    : null;
+}
+
+function roundedDurationMs(startedAt: number): number {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 async function lookupProductLabels<TItem>(

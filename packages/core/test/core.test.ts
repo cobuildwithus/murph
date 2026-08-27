@@ -71,6 +71,7 @@ import {
   updateVaultSummary,
   upsertEvent,
   upsertProvider,
+  validateSampleImport,
   validateVault,
   VaultError,
 } from "../src/index.ts";
@@ -1836,6 +1837,26 @@ test("importSamples supports spo2 with percent unit aliases", async () => {
   assert.equal(record.stream, "spo2");
   assert.equal(record.unit, "%");
   assert.equal(record.value, 97.2);
+});
+
+test("validateSampleImport reuses Core sample preparation without writing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const before = (await fs.readdir(vaultRoot, { recursive: true })).sort();
+
+  await validateSampleImport({
+    vaultRoot,
+    stream: "spo2",
+    unit: "percent",
+    samples: [
+      {
+        recordedAt: "2026-01-15T10:00:00.000Z",
+        value: 97.2,
+      },
+    ],
+  });
+
+  assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), before);
 });
 
 test("importSamples rejects invalid sample objects and unsupported units", async () => {

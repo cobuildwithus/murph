@@ -112,6 +112,10 @@ const hostedSignalRuntimeModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/signal-runtime.ts",
   import.meta.url,
 ).href;
+const hostedActionApprovalModuleSpecifier = new URL(
+  "../../src/lib/action-approvals.ts",
+  import.meta.url,
+).href;
 const hostedAssistantModelPreferenceModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/assistant-model-preference.ts",
   import.meta.url,
@@ -680,6 +684,11 @@ interface HostedRuntimeSignalModule {
     client?: HostedRuntimeTemporalSignalClient | null;
     environment?: NodeJS.ProcessEnv;
     expectedUserId?: string | null;
+    knownCheckpoint?: {
+      lane: "system";
+      laneSeq: string;
+      userId: string;
+    };
     mailboxItemId: string;
     prisma?: HostedTestPrismaClient;
   }): Promise<{
@@ -713,6 +722,42 @@ interface HostedRuntimeSignalModule {
     signalAccepted: true;
     workflowId: string;
   }>;
+}
+
+interface HostedActionApprovalIdentityForTest {
+  bindingHash: string;
+  expiresAt: Date;
+  tokenHash: string;
+}
+
+interface HostedActionApprovalModuleForTest {
+  decideHostedActionApprovalTx(input: {
+    approval: HostedActionApprovalIdentityForTest;
+    challenge: {
+      bindingHash: string;
+      expiresAt: Date;
+      kind: "assistant.action.approve";
+      memberId: string;
+      tokenHash: string;
+    };
+    decision: "approved";
+    memberId: string;
+    now: Date;
+    tx: unknown;
+  }): Promise<{
+    runtimeResume: {
+      lane: "system";
+      laneSeq: string;
+      mailboxItemId: string;
+      userId: string;
+    };
+  }>;
+  requirePendingHostedActionApproval(input: {
+    approvalId: string;
+    memberId: string;
+    now: Date;
+    prisma: unknown;
+  }): Promise<HostedActionApprovalIdentityForTest>;
 }
 
 interface HostedAssistantModelPreferenceModule {
@@ -1586,24 +1631,50 @@ export async function readLatestHostedSensitiveActionChallengeForTest(input: {
   );
 }
 
-export async function approveHostedSensitiveActionChallengeForTest(input: {
+export async function approveHostedActionAndSignalRuntimeForTest(input: {
+  approvalId: string;
   environment?: NodeJS.ProcessEnv;
+  memberId: string;
   tokenHash: string;
-}): Promise<HostedSensitiveActionChallengeForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const decidedAt = new Date();
-    return await deps.prisma.hostedSensitiveActionChallenge.update({
-      data: {
-        approvalStatus: "approved",
-        consumedAt: null,
-        consumedBy: null,
-        decidedAt,
-        expiresAt: new Date(decidedAt.getTime() + 15 * 60 * 1_000),
-      },
-      where: {
-        tokenHash: input.tokenHash,
-      },
+}): Promise<{ signalAccepted: true }> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const now = new Date();
+    const actionApproval = await loadHostedActionApprovalModuleForTest();
+    const approval = await actionApproval.requirePendingHostedActionApproval({
+      approvalId: input.approvalId,
+      memberId: input.memberId,
+      now,
+      prisma: deps.prisma,
     });
+    const result = await deps.prisma.$transaction(async (tx) =>
+      await actionApproval.decideHostedActionApprovalTx({
+        approval,
+        challenge: {
+          bindingHash: approval.bindingHash,
+          expiresAt: approval.expiresAt,
+          kind: "assistant.action.approve",
+          memberId: input.memberId,
+          tokenHash: input.tokenHash,
+        },
+        decision: "approved",
+        memberId: input.memberId,
+        now,
+        tx,
+      }));
+    const signalModule = await loadHostedRuntimeSignalModule();
+    const signal = await signalModule.signalHostedMailboxAppendRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      expectedUserId: input.memberId,
+      knownCheckpoint: {
+        lane: result.runtimeResume.lane,
+        laneSeq: result.runtimeResume.laneSeq,
+        userId: result.runtimeResume.userId,
+      },
+      mailboxItemId: result.runtimeResume.mailboxItemId,
+      prisma: deps.prisma,
+    });
+    return { signalAccepted: signal.signalAccepted };
   });
 }
 
@@ -2356,6 +2427,14 @@ async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientMod
 
 async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModule> {
   return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
+}
+
+async function loadHostedActionApprovalModuleForTest(): Promise<
+  HostedActionApprovalModuleForTest
+> {
+  return await import(
+    hostedActionApprovalModuleSpecifier
+  ) as HostedActionApprovalModuleForTest;
 }
 
 async function loadHostedAssistantModelPreferenceModule(): Promise<

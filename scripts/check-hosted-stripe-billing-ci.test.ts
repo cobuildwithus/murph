@@ -68,18 +68,42 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects letting the live job start from pull request events", async () => {
     const source = (await readWorkflow()).replace(
-      "if: ${{ github.event_name == 'push' }}",
-      "if: ${{ always() }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && needs.billing-hermetic.result == 'success' }}",
+    );
+    expect(issueCodes(source)).toContain("missing-live-if");
+  });
+
+  it("rejects allowing the skipped pull-request classifier to suppress the main live job", async () => {
+    const source = (await readWorkflow()).replace(
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+    );
+    expect(issueCodes(source)).toContain("missing-live-if");
+  });
+
+  it("rejects admitting the live job without successful hermetic proof", async () => {
+    const source = (await readWorkflow()).replace(
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'push' }}",
     );
     expect(issueCodes(source)).toContain("missing-live-if");
   });
 
   it("rejects dropping the pull-request live exclusion from the boundary", async () => {
     const source = (await readWorkflow()).replace(
-      'pull_request)\n              if [[ "$LIVE_RESULT" != "skipped" ]]',
-      "pull_request)\n              if false",
+      'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]',
+      "if false",
     );
     expect(issueCodes(source)).toContain("missing-pr-live-exclusion");
+  });
+
+  it("rejects running Stripe jobs under the Markdown-only receipt", async () => {
+    const source = (await readWorkflow()).replace(
+      'if [[ "$HERMETIC_RESULT" != "skipped" || "$LIVE_RESULT" != "skipped" ]]',
+      "if false",
+    );
+    expect(issueCodes(source)).toContain("missing-docs-only-skip-boundary");
   });
 
   it("rejects restoring a marker that silently skips live proof", async () => {

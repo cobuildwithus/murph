@@ -55,7 +55,7 @@ const replaySafeRequests = [
     action: "handoff",
     request: {
       action: "handoff",
-      context: "Sunny logged a 405 lb deadlift personal record today.",
+      context: "The member set a personal record today.",
       groupLabel: "100 Club",
       originAssistantInputId: `ain_${"f".repeat(32)}`,
     },

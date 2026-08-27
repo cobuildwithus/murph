@@ -368,6 +368,17 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
 });
 
+test("production static generation composes to at most four concurrent renders", () => {
+  const exportWorkers = productionNextConfig.experimental?.cpus;
+  const rendersPerWorker =
+    productionNextConfig.experimental?.staticGenerationMaxConcurrency;
+
+  assert.equal(HOSTED_WEB_PRODUCTION_BUILD_CPUS, 2);
+  assert.equal(exportWorkers, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
+  assert.equal(rendersPerWorker, 2);
+  assert.equal(exportWorkers * rendersPerWorker, 4);
+});
+
 test("production build skips only the duplicate typecheck after the runner proves it", () => {
   const preparedConfig = buildHostedWebNextConfig(
     PHASE_PRODUCTION_BUILD,
@@ -681,11 +692,14 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
   assert.match(csp, /child-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /frame-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /frame-src [^;]*https:\/\/\*\.kernel\.sh:8443/);
   assert.match(csp, /frame-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
   assert.doesNotMatch(csp, /https:\/\/kernel\.example\.test/);
   assert.match(csp, /frame-src [^;]*https:\/\/oauth\.telegram\.org/);
   assert.match(csp, /frame-src [^;]*https:\/\/verify\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/\*\.kernel\.sh:8443/);
+  assert.match(csp, /connect-src [^;]*wss:\/\/\*\.kernel\.sh:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*wss:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);

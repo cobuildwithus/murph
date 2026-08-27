@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "workout-cards-refresh-when-opened",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout cards catch up when opened",
+    "summary": "Opening an active workout card in Messages can now catch up to the latest saved sets and progress.",
+    "details": "The message bubble keeps its original snapshot, while the expanded card refreshes securely and keeps that snapshot available whenever the latest state cannot be reached.",
+    "relevanceTags": ["messaging", "workouts", "reliability"],
+    "sourcePullRequests": [2332]
+  }
+}

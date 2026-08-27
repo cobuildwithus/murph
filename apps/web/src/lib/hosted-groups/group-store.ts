@@ -227,6 +227,34 @@ export {
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 export const HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX = 64;
 
+/**
+ * System-owned structural materialization for an already-authorized routed
+ * thread container. This never edits an existing group's user-owned name,
+ * kind, join policy, or requested scopes; admission remains with the caller.
+ */
+export async function ensureHostedGroupStructureForThreadContainerTx(input: {
+  tx: Prisma.TransactionClient;
+  containerMemberId: string;
+  now: Date;
+}): Promise<{ created: boolean; groupId: string }> {
+  const container = await readLockedHostedGroupThreadContainerTx(
+    input.tx,
+    input.containerMemberId,
+  );
+  const ensured = await ensureHostedGroupStructureForLockedThreadContainerTx({
+    container,
+    createDisplayName: null,
+    createKind: null,
+    createRequestedVaultShareProjectionScopes: [],
+    now: input.now,
+    tx: input.tx,
+  });
+  return {
+    created: ensured.created,
+    groupId: ensured.groupId,
+  };
+}
+
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
   containerMemberId: string;
@@ -236,18 +264,10 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
   requestedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   requestedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<HostedGroupSummary> {
-  await lockHostedThreadContainerRow(input.tx, input.containerMemberId);
-  const container = await input.tx.hostedThreadContainer.findUnique({
-    where: { memberId: input.containerMemberId },
-    select: { memberId: true, ownerMemberId: true },
-  });
-  if (!container) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_THREAD_CONTAINER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This hosted runtime is not a connected group chat.",
-    });
-  }
+  const container = await readLockedHostedGroupThreadContainerTx(
+    input.tx,
+    input.containerMemberId,
+  );
   if (!(await hasHostedRuntimeActiveAccess(container.memberId, { prisma: input.tx }))) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_RUNTIME_INACTIVE",
@@ -260,81 +280,123 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     input.requestedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.requestedVaultShareProjectionKinds ?? []),
   );
-  const existing = await input.tx.hostedGroup.findUnique({
-    where: { runtimeMemberId: container.memberId },
-    select: { displayName: true, id: true },
+  const normalizedDisplayName = normalizeHostedGroupDisplayName(
+    input.displayName ?? null,
+  );
+  const ensured = await ensureHostedGroupStructureForLockedThreadContainerTx({
+    container,
+    createDisplayName: normalizedDisplayName,
+    createKind: input.kind,
+    createRequestedVaultShareProjectionScopes: requested,
+    now: input.now,
+    tx: input.tx,
   });
-  if (existing) {
-    await lockHostedGroupRow(input.tx, existing.id);
-    const normalizedDisplayName = normalizeHostedGroupDisplayName(input.displayName ?? null);
-    if (existing.displayName === null && normalizedDisplayName !== null) {
+  if (!ensured.created) {
+    if (ensured.displayName === null && normalizedDisplayName !== null) {
       await input.tx.hostedGroup.update({
-        where: { id: existing.id },
+        where: { id: ensured.groupId },
         data: { displayName: normalizedDisplayName },
         select: { id: true },
       });
     }
-    await ensureHostedGroupOwnerMembershipTx(input.tx, {
-      groupId: existing.id,
-      memberId: container.ownerMemberId,
-      now: input.now,
-    });
-    await grantHostedGroupMembershipProfileNameTx(input.tx, {
-      groupRuntimeMemberId: container.memberId,
-      memberId: container.ownerMemberId,
-      now: input.now,
-    });
     await replaceHostedGroupRequestedProjectionsTx(input.tx, {
-      groupId: existing.id,
+      groupId: ensured.groupId,
       now: input.now,
       requestedVaultShareProjectionScopes: requested,
     });
-    const summary = await readHostedGroupSummaryById(input.tx, existing.id);
-    if (!summary) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_NOT_ACTIVE",
-        httpStatus: 410,
-        message: "This hosted group is not active.",
-      });
-    }
-    return summary;
+  }
+
+  await grantHostedGroupMembershipProfileNameTx(input.tx, {
+    groupRuntimeMemberId: input.containerMemberId,
+    memberId: container.ownerMemberId,
+    now: input.now,
+  });
+
+  const summary = await readHostedGroupSummaryById(input.tx, ensured.groupId);
+  if (!summary) {
+    throw hostedOnboardingError({
+      code: ensured.created ? "HOSTED_GROUP_CREATE_FAILED" : "HOSTED_GROUP_NOT_ACTIVE",
+      httpStatus: ensured.created ? 500 : 410,
+      message: ensured.created
+        ? "Could not create this hosted group."
+        : "This hosted group is not active.",
+    });
+  }
+  return summary;
+}
+
+async function readLockedHostedGroupThreadContainerTx(
+  tx: Prisma.TransactionClient,
+  containerMemberId: string,
+): Promise<{ memberId: string; ownerMemberId: string }> {
+  await lockHostedThreadContainerRow(tx, containerMemberId);
+  const container = await tx.hostedThreadContainer.findUnique({
+    where: { memberId: containerMemberId },
+    select: { memberId: true, ownerMemberId: true },
+  });
+  if (!container) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_THREAD_CONTAINER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This hosted runtime is not a connected group chat.",
+    });
+  }
+  return container;
+}
+
+async function ensureHostedGroupStructureForLockedThreadContainerTx(input: {
+  container: { memberId: string; ownerMemberId: string };
+  createDisplayName: string | null;
+  createKind: HostedGroupKind | string | null | undefined;
+  createRequestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<{ created: boolean; displayName: string | null; groupId: string }> {
+  const existing = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.container.memberId },
+    select: { displayName: true, id: true },
+  });
+  if (existing) {
+    await lockHostedGroupRow(input.tx, existing.id);
+    await ensureHostedGroupOwnerMembershipTx(input.tx, {
+      groupId: existing.id,
+      memberId: input.container.ownerMemberId,
+      now: input.now,
+    });
+    return {
+      created: false,
+      displayName: existing.displayName,
+      groupId: existing.id,
+    };
   }
 
   const requestedPolicy = mergeHostedGroupJoinPolicy({
     existing: null,
     offerGeneration: generateHostedGroupJoinOfferGeneration(),
-    requestedVaultShareProjectionScopes: requested,
+    requestedVaultShareProjectionScopes:
+      input.createRequestedVaultShareProjectionScopes,
   });
   const created = await input.tx.hostedGroup.create({
     data: {
       id: generateHostedGroupId(),
-      displayName: normalizeHostedGroupDisplayName(input.displayName ?? null),
+      displayName: input.createDisplayName,
       joinPolicyJson: toHostedGroupJoinPolicyJson(requestedPolicy),
-      kind: normalizeHostedGroupKind(input.kind),
-      ownerMemberId: container.ownerMemberId,
-      runtimeMemberId: container.memberId,
+      kind: normalizeHostedGroupKind(input.createKind),
+      ownerMemberId: input.container.ownerMemberId,
+      runtimeMemberId: input.container.memberId,
     },
     select: { id: true },
   });
   await ensureHostedGroupOwnerMembershipTx(input.tx, {
     groupId: created.id,
-    memberId: container.ownerMemberId,
+    memberId: input.container.ownerMemberId,
     now: input.now,
   });
-  await grantHostedGroupMembershipProfileNameTx(input.tx, {
-    groupRuntimeMemberId: container.memberId,
-    memberId: container.ownerMemberId,
-    now: input.now,
-  });
-  const summary = await readHostedGroupSummaryById(input.tx, created.id);
-  if (!summary) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_CREATE_FAILED",
-      httpStatus: 500,
-      message: "Could not create this hosted group.",
-    });
-  }
-  return summary;
+  return {
+    created: true,
+    displayName: input.createDisplayName,
+    groupId: created.id,
+  };
 }
 
 export async function readHostedGroupByRuntimeMemberId(input: {
@@ -1499,6 +1561,61 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
   };
 }
 
+/**
+ * Reads the existing join offer policy for a resend without changing the
+ * group's policy, join code, memberships, or active offers.
+ */
+export async function readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx(input: {
+  tx: Prisma.TransactionClient;
+  actorMemberId: string;
+  containerMemberId: string;
+}): Promise<{
+  group: HostedGroupSummary;
+  joinCode: string;
+}> {
+  const container = await readLockedHostedGroupThreadContainerTx(
+    input.tx,
+    input.containerMemberId,
+  );
+  if (container.ownerMemberId !== input.actorMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "Only the group owner can resend a join offer.",
+    });
+  }
+
+  const existing = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.containerMemberId },
+    select: { id: true },
+  });
+  if (!existing) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "This hosted group is not active.",
+    });
+  }
+
+  await lockHostedGroupRow(input.tx, existing.id);
+  const current = await input.tx.hostedGroup.findUnique({
+    where: { id: existing.id },
+    select: { joinCode: true },
+  });
+  const group = await readHostedGroupSummaryById(input.tx, existing.id);
+  if (!current?.joinCode || !group) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_LINK_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "This hosted group does not have an active join offer.",
+    });
+  }
+  return {
+    group,
+    joinCode: current.joinCode,
+  };
+}
+
 export async function readHostedGroupJoinView(input: {
   joinCode: string;
   memberId?: string | null;
@@ -1617,6 +1734,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
   postedAt: Date;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
   projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
+  replaceActiveOffersAt?: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferBindingTxResult> {
   const messageLookupKey = createHostedGroupOfferMessageLookupKey(input.message);
@@ -1697,6 +1815,17 @@ export async function recordHostedGroupJoinOfferTx(input: {
     },
   });
 
+  if (input.replaceActiveOffersAt) {
+    await input.tx.hostedGroupJoinOffer.updateMany({
+      where: {
+        groupId: input.groupId,
+        messageLookupKey: { not: messageLookupKey },
+        revokedAt: null,
+      },
+      data: { revokedAt: input.replaceActiveOffersAt },
+    });
+  }
+
   return binding;
 }
 
@@ -1710,6 +1839,7 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   groupId: string;
   now: Date;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
+  replaceActiveOffer?: boolean;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferPostPreparation> {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
@@ -1739,6 +1869,14 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
     )
   ) {
     return { kind: "unavailable" };
+  }
+
+  if (input.replaceActiveOffer === true) {
+    return {
+      joinCode: group.joinCode,
+      kind: "post",
+      offerGeneration: policy.offerGeneration,
+    };
   }
 
   const offers = await input.tx.hostedGroupJoinOffer.findMany({

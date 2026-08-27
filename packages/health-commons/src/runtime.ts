@@ -150,6 +150,37 @@ export interface LoadGeneratedHealthCommonsProtocolFamilyGraphOptions {
   protocolFamilyGraphPath?: string | URL;
 }
 
+export type HealthCommonsProtocolArtifact =
+  | "protocol_family_graph"
+  | "protocol_index"
+  | "protocol_run_specs";
+
+export type HealthCommonsProtocolArtifactFailureCategory =
+  | "invalid"
+  | "unavailable";
+
+export class HealthCommonsProtocolArtifactError extends Error {
+  readonly artifact: HealthCommonsProtocolArtifact;
+  readonly category: HealthCommonsProtocolArtifactFailureCategory;
+  readonly code = "HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE";
+
+  constructor(input: {
+    artifact: HealthCommonsProtocolArtifact;
+    category: HealthCommonsProtocolArtifactFailureCategory;
+  }) {
+    super(`Health Commons protocol artifact is ${input.category}.`);
+    this.name = "HealthCommonsProtocolArtifactError";
+    this.artifact = input.artifact;
+    this.category = input.category;
+  }
+}
+
+export function isHealthCommonsProtocolArtifactError(
+  error: unknown,
+): error is HealthCommonsProtocolArtifactError {
+  return error instanceof HealthCommonsProtocolArtifactError;
+}
+
 export interface LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions {
   biomarkerDesiredDirectionsPath?: string | URL;
 }
@@ -469,13 +500,15 @@ const cachedGeneratedWebExperimentResultsPublic = new Map<
 export function loadGeneratedHealthCommonsProtocolIndex(
   options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
 ): HealthCommonsProtocolIndexArtifact {
-  const raw = readFileSync(
-    options.protocolIndexPath ?? defaultGeneratedProtocolIndexUrl(),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedHealthCommonsProtocolIndex(parsed);
-  return parsed;
+  return loadGeneratedHealthCommonsProtocolArtifact("protocol_index", () => {
+    const raw = readFileSync(
+      options.protocolIndexPath ?? defaultGeneratedProtocolIndexUrl(),
+      "utf8",
+    );
+    const parsed = parseJsonObject(raw);
+    assertGeneratedHealthCommonsProtocolIndex(parsed);
+    return parsed;
+  });
 }
 
 export function getGeneratedHealthCommonsProtocolIndexReader(
@@ -496,13 +529,15 @@ export function getGeneratedHealthCommonsProtocolIndexReader(
 export function loadGeneratedHealthCommonsProtocolRunSpecs(
   options: LoadGeneratedHealthCommonsProtocolRunSpecsOptions = {},
 ): HealthCommonsProtocolRunSpecsArtifact {
-  const raw = readFileSync(
-    options.protocolRunSpecsPath ?? defaultGeneratedProtocolRunSpecsUrl(),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedHealthCommonsProtocolRunSpecs(parsed);
-  return parsed;
+  return loadGeneratedHealthCommonsProtocolArtifact("protocol_run_specs", () => {
+    const raw = readFileSync(
+      options.protocolRunSpecsPath ?? defaultGeneratedProtocolRunSpecsUrl(),
+      "utf8",
+    );
+    const parsed = parseJsonObject(raw);
+    assertGeneratedHealthCommonsProtocolRunSpecs(parsed);
+    return parsed;
+  });
 }
 
 export function getGeneratedHealthCommonsProtocolRunSpecReader(
@@ -523,13 +558,15 @@ export function getGeneratedHealthCommonsProtocolRunSpecReader(
 export function loadGeneratedHealthCommonsProtocolFamilyGraph(
   options: LoadGeneratedHealthCommonsProtocolFamilyGraphOptions = {},
 ): HealthCommonsProtocolFamilyGraphArtifact {
-  const raw = readFileSync(
-    options.protocolFamilyGraphPath ?? defaultGeneratedProtocolFamilyGraphUrl(),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedHealthCommonsProtocolFamilyGraph(parsed);
-  return parsed;
+  return loadGeneratedHealthCommonsProtocolArtifact("protocol_family_graph", () => {
+    const raw = readFileSync(
+      options.protocolFamilyGraphPath ?? defaultGeneratedProtocolFamilyGraphUrl(),
+      "utf8",
+    );
+    const parsed = parseJsonObject(raw);
+    assertGeneratedHealthCommonsProtocolFamilyGraph(parsed);
+    return parsed;
+  });
 }
 
 export function getGeneratedHealthCommonsProtocolFamilyGraphReader(
@@ -2347,6 +2384,34 @@ function parseJsonObject(raw: string): unknown {
   }
 
   return parsed;
+}
+
+function loadGeneratedHealthCommonsProtocolArtifact<TValue>(
+  artifact: HealthCommonsProtocolArtifact,
+  load: () => TValue,
+): TValue {
+  try {
+    return load();
+  } catch (error) {
+    if (isHealthCommonsProtocolArtifactError(error)) {
+      throw error;
+    }
+    const code = readNodeErrorCode(error);
+    throw new HealthCommonsProtocolArtifactError({
+      artifact,
+      category:
+        code === "EACCES" || code === "ENOENT" || code === "EPERM"
+          ? "unavailable"
+          : "invalid",
+    });
+  }
+}
+
+function readNodeErrorCode(error: unknown): string | null {
+  return error && typeof error === "object" && "code" in error
+    && typeof error.code === "string"
+    ? error.code
+    : null;
 }
 
 function assertGeneratedHealthCommonsProtocolIndex(

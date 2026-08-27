@@ -360,16 +360,7 @@ describe("Lob physical-note runtime", () => {
   });
 
   it("finds an accepted letter through Lob's exact metadata filter", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      expect(request.url).toBe(
-        "https://api.lob.com/v1/letters?limit=2&metadata%5Bmurph_physical_note_id%5D=hpn_lookup",
-      );
-      expect(request.method).toBe("GET");
-      expect(request.headers.get("authorization")).toMatch(/^Basic /u);
-      expect(request.headers.get("Lob-Version")).toBe("2024-01-01");
-      expect(init?.body).toBeUndefined();
-      expect(init?.redirect).toBe("error");
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
       return Response.json({
         data: [{ id: "ltr_lookup" }],
       });
@@ -387,6 +378,16 @@ describe("Lob physical-note runtime", () => {
       providerLetterId: "ltr_lookup",
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
+    const [input, init] = fetchImpl.mock.calls[0] ?? [];
+    const request = new Request(input, init);
+    expect(request.url).toBe(
+      "https://api.lob.com/v1/letters?limit=2&metadata%5Bmurph_physical_note_id%5D=hpn_lookup",
+    );
+    expect(request.method).toBe("GET");
+    expect(request.headers.get("authorization")).toMatch(/^Basic /u);
+    expect(request.headers.get("Lob-Version")).toBe("2024-01-01");
+    expect(init?.body).toBeUndefined();
+    expect(init?.redirect).toBe("error");
   });
 
   it("treats a valid empty Lob metadata result as definitively absent", async () => {
@@ -402,6 +403,9 @@ describe("Lob physical-note runtime", () => {
   });
 
   it("keeps multiple Lob metadata matches indeterminate", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(
+      () => undefined,
+    );
     const runtime = createLobPhysicalNoteRuntime({
       apiKey: "test_key",
       fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
@@ -410,9 +414,17 @@ describe("Lob physical-note runtime", () => {
       fromAddressId: "adr_from",
     });
 
-    await expect(runtime.findLetterByNoteId({
-      noteId: "hpn_multiple",
-    })).resolves.toEqual({ kind: "indeterminate" });
+    try {
+      await expect(runtime.findLetterByNoteId({
+        noteId: "hpn_multiple",
+      })).resolves.toEqual({ kind: "indeterminate" });
+      expect(warning).toHaveBeenCalledWith(
+        "Lob physical-note metadata lookup was indeterminate.",
+        { category: "multiple_matches" },
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("uses the short lookup-only provider deadline", async () => {
@@ -452,21 +464,41 @@ describe("Lob physical-note runtime", () => {
       async () => Response.json({ data: [{ object: "letter" }] }),
     ];
 
-    for (const response of responses) {
+    const expectedDiagnostics = [
+      { category: "transport_error" },
+      { category: "http_error", status: 503 },
+      { category: "malformed_response" },
+    ] as const;
+
+    for (const [index, response] of responses.entries()) {
+      const warning = vi.spyOn(console, "warn").mockImplementation(
+        () => undefined,
+      );
       const fetchImpl = vi.fn<typeof fetch>(response);
       const runtime = createLobPhysicalNoteRuntime({
         apiKey: "test_key",
         fetchImpl,
         fromAddressId: "adr_from",
       });
-      await expect(runtime.findLetterByNoteId({
-        noteId: "hpn_indeterminate",
-      })).resolves.toEqual({ kind: "indeterminate" });
-      expect(fetchImpl).toHaveBeenCalledOnce();
+      try {
+        await expect(runtime.findLetterByNoteId({
+          noteId: "hpn_indeterminate",
+        })).resolves.toEqual({ kind: "indeterminate" });
+        expect(fetchImpl).toHaveBeenCalledOnce();
+        expect(warning).toHaveBeenCalledWith(
+          "Lob physical-note metadata lookup was indeterminate.",
+          expectedDiagnostics[index],
+        );
+      } finally {
+        warning.mockRestore();
+      }
     }
   });
 
   it("keeps a timed-out Lob metadata lookup indeterminate", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(
+      () => undefined,
+    );
     const fetchImpl = vi.fn<typeof fetch>(async (_input, init) =>
       await new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => {
@@ -480,10 +512,18 @@ describe("Lob physical-note runtime", () => {
       fromAddressId: "adr_from",
     });
 
-    await expect(runtime.findLetterByNoteId({
-      noteId: "hpn_timeout",
-      signal: AbortSignal.timeout(1),
-    })).resolves.toEqual({ kind: "indeterminate" });
+    try {
+      await expect(runtime.findLetterByNoteId({
+        noteId: "hpn_timeout",
+        signal: AbortSignal.timeout(1),
+      })).resolves.toEqual({ kind: "indeterminate" });
+      expect(warning).toHaveBeenCalledWith(
+        "Lob physical-note metadata lookup was indeterminate.",
+        { category: "aborted" },
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("renders only transport layout around the model-owned artwork", () => {

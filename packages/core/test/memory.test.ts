@@ -16,6 +16,7 @@ import {
   buildMemoryCorePromptBlock,
   forgetMemory,
   getMemoryRecord,
+  MemoryPersistenceError,
   readMemoryDocument,
   resolveMemoryDocumentPath,
   setMemoryDisplayName,
@@ -365,7 +366,7 @@ describe("core memory package wrapper", () => {
         recordId: "mem_missing",
         text: "Should fail",
       }),
-    ).rejects.toThrow('Memory record "mem_missing" does not exist.');
+    ).rejects.toThrow("The requested canonical memory record does not exist.");
   });
 
   test("fails closed on legacy on-disk memory docs and legacy ids", async () => {
@@ -405,40 +406,137 @@ describe("core memory package wrapper", () => {
     await expect(forgetMemory(vaultRoot, { recordId: legacyRecordId })).rejects.toThrow();
   });
 
-  test("fails closed when post-write read-back omits the upserted memory record", async () => {
-    const vaultRoot = await makeVaultRoot();
-    const now = new Date("2026-04-08T01:15:00.000Z");
-    const section = "Context";
-    const text = "Remember the resource lock runtime.";
-    const readSpy = vi
-      .spyOn(fsModule, "readUtf8File")
-      .mockResolvedValue(renderMemoryDocument({ document: createEmptyMemoryDocument(now) }));
+  test("classifies every failed post-write memory read-back after preserving the write", async () => {
+    async function expectPostWriteReadbackFailure(input: {
+      preWriteReads: number;
+      readback: Error | string;
+      run: () => Promise<void>;
+      verify: () => Promise<void>;
+    }): Promise<void> {
+      const originalReadUtf8File = fsModule.readUtf8File;
+      const readSpy = vi.spyOn(fsModule, "readUtf8File");
+      for (let index = 0; index < input.preWriteReads; index += 1) {
+        readSpy.mockImplementationOnce(originalReadUtf8File);
+      }
+      if (input.readback instanceof Error) {
+        readSpy.mockRejectedValueOnce(input.readback);
+      } else {
+        readSpy.mockResolvedValueOnce(input.readback);
+      }
 
-    let error: Error | null = null;
-    try {
-      await upsertMemory(vaultRoot, {
-        now,
-        section,
-        text,
+      let error: unknown = null;
+      let readCallCount = 0;
+      try {
+        await input.run();
+      } catch (caught) {
+        error = caught;
+      } finally {
+        readCallCount = readSpy.mock.calls.length;
+        readSpy.mockRestore();
+      }
+
+      expect(error).toBeInstanceOf(MemoryPersistenceError);
+      expect(error).toMatchObject({
+        code: "MEMORY_PERSISTENCE_INVALID",
       });
-    } catch (caught) {
-      error = caught instanceof Error ? caught : new Error(String(caught));
-    } finally {
-      readSpy.mockRestore();
+      if (!(error instanceof MemoryPersistenceError)) {
+        throw new Error("Expected post-write memory read-back to use the persistence error.");
+      }
+      const privateReadbackDetail =
+        input.readback instanceof Error ? input.readback.message : input.readback;
+      expect(error.message).not.toContain(privateReadbackDetail);
+      expect(readCallCount).toBe(input.preWriteReads + 1);
+      await input.verify();
     }
 
-    expect(error).not.toBeNull();
-    const persistedSnapshot = await readMemoryDocument(vaultRoot);
-    const persistedRecord = persistedSnapshot.records[0] ?? null;
-    expect(persistedRecord).not.toBeNull();
-    expect(isContractId(persistedRecord?.id ?? "", "mem")).toBe(true);
-    expect(error?.message).toBe(
-      `Memory record "${persistedRecord?.id ?? ""}" was not found after upsert.`,
-    );
+    const upsertVaultRoot = await makeVaultRoot();
+    await expectPostWriteReadbackFailure({
+      preWriteReads: 0,
+      readback: new Error("private post-write read-back failure"),
+      run: async () => {
+        await upsertMemory(upsertVaultRoot, {
+          now: new Date("2026-04-08T01:15:00.000Z"),
+          section: "Context",
+          text: "Remember the resource lock runtime.",
+        });
+      },
+      verify: async () => {
+        const snapshot = await readMemoryDocument(upsertVaultRoot);
+        expect(snapshot.records).toEqual([
+          expect.objectContaining({
+            section: "Context",
+            text: "Remember the resource lock runtime.",
+          }),
+        ]);
+      },
+    });
 
-    expect(persistedRecord).toMatchObject({
-      section,
-      text,
+    const setNameVaultRoot = await makeVaultRoot();
+    await expectPostWriteReadbackFailure({
+      preWriteReads: 0,
+      readback: "private malformed post-write memory document",
+      run: async () => {
+        await setMemoryDisplayName(setNameVaultRoot, {
+          displayName: "Theo",
+          now: new Date("2026-04-08T01:20:00.000Z"),
+        });
+      },
+      verify: async () => {
+        const snapshot = await readMemoryDocument(setNameVaultRoot);
+        expect(snapshot.records).toEqual([
+          expect.objectContaining({
+            section: "Identity",
+            text: "Preferred display name: Theo",
+          }),
+        ]);
+      },
+    });
+
+    const updateVaultRoot = await makeVaultRoot();
+    const updateRecord = await upsertMemory(updateVaultRoot, {
+      now: new Date("2026-04-08T01:25:00.000Z"),
+      section: "Context",
+      text: "Remember the old value.",
+    });
+    const staleUpdateMarkdown = (await readMemoryDocument(updateVaultRoot)).markdown;
+    await expectPostWriteReadbackFailure({
+      preWriteReads: 1,
+      readback: staleUpdateMarkdown,
+      run: async () => {
+        await updateMemory(updateVaultRoot, {
+          now: new Date("2026-04-08T01:30:00.000Z"),
+          recordId: updateRecord.record.id,
+          text: "Remember the new value.",
+        });
+      },
+      verify: async () => {
+        const snapshot = await readMemoryDocument(updateVaultRoot);
+        expect(snapshot.records).toEqual([
+          expect.objectContaining({
+            id: updateRecord.record.id,
+            text: "Remember the new value.",
+          }),
+        ]);
+      },
+    });
+
+    const forgetVaultRoot = await makeVaultRoot();
+    const forgetRecord = await upsertMemory(forgetVaultRoot, {
+      now: new Date("2026-04-08T01:35:00.000Z"),
+      section: "Preferences",
+      text: "Forget this value.",
+    });
+    const staleForgetMarkdown = (await readMemoryDocument(forgetVaultRoot)).markdown;
+    await expectPostWriteReadbackFailure({
+      preWriteReads: 1,
+      readback: staleForgetMarkdown,
+      run: async () => {
+        await forgetMemory(forgetVaultRoot, { recordId: forgetRecord.record.id });
+      },
+      verify: async () => {
+        const snapshot = await readMemoryDocument(forgetVaultRoot);
+        expect(snapshot.records.some((record) => record.id === forgetRecord.record.id)).toBe(false);
+      },
     });
   });
 

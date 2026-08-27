@@ -766,19 +766,50 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-If a `system_mailbox` invocation owns the active fence when foreground/default
-work arrives, the runner wakes that exact child and leaves its fence intact.
+If a `system_mailbox` invocation owns the active fence when authenticated Web
+direct foreground/default work arrives, the runner preempts that exact child,
+clears its fence by identity, and starts the foreground request. Preemption
+authority requires both the server-derived Web-direct marker and its valid
+direct-ingress attempt identity; a Temporal or scheduled default request still
+wakes the system child, leaves its fence intact, and retries cooperatively.
 System-mailbox mode may import and run one bounded model-free device-sync,
-operator-maintenance, or browser-vault refresh item;
-it checkpoints any successfully applied unit, then observes the wake. When that
-wake contains a conversation while immutable projection delivery remains
-owned, the same invocation reuses the conversation prefetch and enters the
-ordinary foreground path without waiting for publication. Other wakes return
-before assistant admission, and the foreground request retries through the
-ordinary controller path after the system child releases its fence. Other
-system items remain pending for their default owner. A system-mailbox request
-behind an active default runtime remains deferred and cannot broaden that
-child's admission authority.
+operator-maintenance, or browser-vault refresh item. Already committed web
+updates remain authoritative, while an interrupted or not-yet-checkpointed unit
+stays recoverable from the durable system mailbox and its existing continuation
+contract. Other system items remain pending for their default owner. A
+system-mailbox request behind an active default runtime remains deferred and
+cannot broaden that child's admission authority.
+An `environment_interview` request behind an active default runtime is the
+narrow exception: UserRunner wakes the exact default child but returns
+`retry_later`, because that child accepted only a wake, not Environment-mode
+ownership. The dirty default runtime preserves fresh conversation priority,
+classifies the durable mailbox prefix, and, when it sees an Environment item,
+shortens its existing idle checkpoint window to zero. It skips optional
+compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
+leaves the Environment row pending for the dedicated model-free invocation.
+This handoff never aborts a foreground turn and adds no queue, scheduler, or
+persisted mode state.
+The handoff is bidirectional. When fresh foreground/default work arrives behind
+an active `environment_interview` invocation, UserRunner wakes that exact
+child and returns `retry_later` without clearing or replacing its fence. The
+Environment child completes or checkpoints its current model-free unit, sees
+the wake, and releases; ordinary reconciliation then admits the pending
+foreground pass before re-admitting background Environment work. This preserves
+foreground authority without aborting canonical publication midway or creating
+a competing queue.
+
+Web projects `environmentInterviewPending` only when the signed Temporal facts
+request uses the exact `?includeEnvironmentInterviewPending=1` compatibility
+search. The legacy no-search response keeps omitting that key because a still-
+routable immutable reader rejects unknown reconciliation keys. The new private
+worker opts in and selects `environment_interview` only when the fact is true
+and no runnable foreground/default work is due; older workflow histories retain
+their former `system_mailbox` command shape behind the private worker's Temporal
+patch marker. The public
+`@murphai/hosted-execution` package version containing both the fact and mode
+must be released before the private worker adopts them. Source links across the
+public/private repository boundary are development proof only and are never a
+deployment contract.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -795,13 +826,13 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, the
-existing workspace-invocation abort seam is the sole preemption authority.
-UserRunner sends that exact abort directly instead of spending foreground
-command budget on a non-authoritative liveness preflight. System-mailbox work
-uses the exact-child wake-and-checkpoint handoff above instead, because aborting
-a bounded unit after canonical web updates but before its checkpoint would
-discard committed progress. A local exact-pointer abort enters the same
+For foreground/default work behind an `inbox_media_retention` fence, and for
+authenticated Web-direct foreground/default work behind a `system_mailbox`
+fence, the existing workspace-invocation abort seam is the sole preemption
+authority. UserRunner sends that exact abort directly instead of spending
+foreground command budget on a non-authoritative liveness preflight. A
+non-direct default request behind system-mailbox work retains the exact-child
+wake-and-checkpoint handoff. A local exact-pointer abort enters the same
 inactive-fence replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
@@ -809,16 +840,21 @@ and an exact abort can cancel already-queued successors before runner dispatch.
 While that abort is in flight, its exact operation remains the visible queue
 head: liveness reports the same identity, wake fails closed, and no successor
 can dispatch. The abort owner releases that token only after both the child
-abort request and exact invocation cleanup settle. Runtime wake also fails
-closed until the active invocation has reached its runner endpoint, and a child
-`absent` response cannot override a still-registered local operation while child
-admission is in flight. A pointerless wake is also rejected if a destroy request
-or observed stop begins while its child RPC is pending, even when teardown
-settles before the wake response. Conversely, a verified accepted pointerless
-wake publishes its completion before returning so an already-running expiry
-preflight yields instead of destroying that child. Failed fail-closed cleanup
-returns `failed` and preserves the fence; the next exact wake re-enters the same
-abort-and-stop owner instead of leaving that operation permanently active.
+abort request and exact invocation cleanup settle. When the child reports
+`accepted` or `queued`, it owns cancellation and settlement: the container keeps
+the outer invocation transport alive so any already-admitted canonical write
+can finish or fail before the exact operation and fence are released. A stale,
+failed, or unavailable child abort instead cancels the outer transport and keeps
+the existing fail-closed cleanup path. Runtime wake also fails closed until the
+active invocation has reached its runner endpoint, and a child `absent` response
+cannot override a still-registered local operation while child admission is in
+flight. A pointerless wake is also rejected if a destroy request or observed
+stop begins while its child RPC is pending, even when teardown settles before
+the wake response. Conversely, a verified accepted pointerless wake publishes
+its completion before returning so an already-running expiry preflight yields
+instead of destroying that child. Failed fail-closed cleanup returns `failed`
+and preserves the fence; the next exact wake re-enters the same abort-and-stop
+owner instead of leaving that operation permanently active.
 Explicit container destroy aborts every invocation registered before the
 destroy call, including lifecycle-lock successors. New invocation admission
 resumes only after the stop settles and those exact tokens are released, on a
@@ -894,15 +930,17 @@ requester membership `participantId`; first-person references map only to the
 `read_shared` member with that exact id. Display name, handle, or member order
 cannot substitute, and the opaque id cannot appear in the answer.
 
-When a joined-group request or accepted-input completion reaches a dirty warm
-runtime, the mailbox prefetch may import it before the routine idle checkpoint
-only when the entire fetched prefix contains pre-checkpoint-safe system wakes.
+When a joined-group request, accepted-input completion, or closed
+`member.action.requested` reaches a dirty warm runtime, the mailbox prefetch may
+import it before the routine idle checkpoint only when the entire fetched
+prefix contains pre-checkpoint-safe system wakes.
 One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
 and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
-the existing foreground-causal delivery path. Neither starts or advances the
+the existing foreground-causal delivery path, and a member action uses its
+existing provider-free foreground-causal service path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
@@ -1191,7 +1229,16 @@ health values include source names and that sleep-stage values also include each
 source's recorded time. The same source-aware meaning applies to existing health
 scope keys and active grants; there is no separate source-details permission.
 A fresh request returns `sent` only after the provider send succeeds and its
-message binding is durably recorded.
+message binding is durably recorded. When the room explicitly asks to repost,
+the semantic `offer_access` action carries the exact current accepted Message
+ref. Assistant Engine verifies that ref in the current group turn and maps it to
+an additive request identity; Web uses it in provider idempotency and bypasses
+covering-offer reuse for that request only. Web reads the locked current policy
+and join code without creating or replacing group configuration; omitted scopes
+therefore retain the exact current permission set, while conflicting supplied
+scopes fail closed. Exact replay remains one send. After the replacement
+binding commits, Web revokes older active offers in the same transaction; send
+or binding failure leaves them active.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
@@ -1549,10 +1596,52 @@ does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
 hint before stopping that container. A denied admission starts nothing. The
-active-member replan durably
-appends the original conversation item and Web awaits that conversation-mailbox
-Temporal signal; only then may the ordinary Linq direct ensure start and own
-readiness plus all runtime authority. The shell hint does not read the persisted
+  active-member replan durably
+appends the original conversation item. For an exact model-approved instant
+start, Web may already have a bounded tool-free Murph result generated beside
+admission and enrollment after the exact chat/event acquired its delivery-ledger
+claim. Once planning converges, only an exact model-approved active direct wake
+keeps that claim for Web delivery. Every completed non-instant plan marks the
+same row skipped before its fallback side effect. A caught planning failure
+also skips an attempted claim before rethrowing; provider-started or encrypted
+  ambiguous states remain final to that skip operation. Settlement reads only
+  the exact existing event row under the chat lock and does not depend on the
+  request-local generation promise, so exact replay can finish a rolled-back
+  settlement without creating a skipped row when no claim exists. An unavailable
+  result leaves the original conversation checkpoint unchanged. The eligibility request
+  keeps source-part cardinality, so only one actual text part can use this path,
+  and records whether the normalized source exceeded the classifier's bound so
+  a partial representation cannot become a user-facing reply. A definite
+  pre-provider route-read or projection failure confirms the attempted row was
+  skipped before fallback; an unconfirmed skip stays retryable and suppresses
+  the activation wake. A
+skipped row or failed row with no encrypted payload remains terminal on exact
+webhook replay; a failed row with retained payload may recover only that exact
+body. An accepted result instead
+passes through the existing
+Linq delivery ledger, then Web atomically appends its ordinary self-authored
+conversation row, stamps the original inbound and that outbound row consumed,
+clears the encrypted pending body, and substitutes the outbound checkpoint for
+the handoff. Web awaits that conversation-mailbox Temporal signal; only then
+may the ordinary Linq direct ensure start and own readiness plus all runtime
+authority. The runtime imports both consumed rows as context with null reply
+targets, so the first exchange is available to later normal turns without
+  answering the original inbound again. A different message or group transition
+  waits while this exact delivery obligation remains unresolved. Runtime Linq
+  provider entry carries the already validated mailbox event identity to the
+  existing chat-locked Web egress transaction and resolves that exact instant
+  row before claiming its own provider effect. Attempted, provider-started, or
+  encrypted failed rows defer; any provider-correlated row ends the stale
+  runtime send as already answered; absent and definitive uncorrelated
+  failed-without-payload rows allow the ordinary runtime path. Provider
+  acceptance remains irreversible sender ownership even when it observes a
+  buffered failed receipt, and later receipts cannot transfer the inbound to a
+  second sender. Already-answered terminally supersedes
+  the stale runtime outbox intent without a retry, failure input, or recovery
+  wake while retaining the exact reason for diagnostics. An ambiguous provider
+  outcome starts no runtime wake and retains the exact encrypted reply for
+  same-event recovery. The
+shell hint does not read the persisted
 container state; it delegates the already-running check and concurrent-start
 coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.
 Authoritative readiness aborts an in-progress hint before entering the container
@@ -1887,7 +1976,11 @@ bounded delivery-effect reconciliation without continuing the assistant
 automation lane. Reconciliation uses an observation-only approval read that
 cannot create or refresh an approval cycle; only an explicit new action request
 may refresh a denied or expired cycle. The row is never authorization or outcome
-truth.
+truth. When an already-active invocation imports the control row, it runs that
+import's owned post-checkpoint effect immediately instead of waiting for a later
+conversation message. System-only reconciliation does not become conversation
+work, flip the foreground-yield signal, steer a provider turn, or start a
+companion model reply.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 When a pending vault-file action must surface an approval capability, the
@@ -1937,9 +2030,12 @@ quiescent cleanup. The generated-delivery pass runs independently before
 pending-input compaction and broad assistant-residue maintenance, so unrelated
 maintenance failures cannot block a successful terminal-file deletion while
 checkpoint publication continues. It evaluates the complete physical
-generated-delivery inventory against the complete trusted outbox, retains exact
-active obligations, and removes terminal, changed, or orphaned files before
-archive planning. Materialization must not run between that cleanup and archive
+generated-delivery direct-file inventory against the complete trusted outbox,
+retains exact active obligations, and removes terminal, changed, or orphaned
+direct files before archive planning. A legacy nested directory remains opaque
+and retained, is counted in metadata-only diagnostics, and does not block
+cleanup of trusted direct files; it never gains generated-delivery ownership.
+Materialization must not run between that cleanup and archive
 planning because it could reintroduce residue that was absent during
 validation.
 
@@ -2222,7 +2318,14 @@ blocked incoming-line state, current assignment, healthy backup sender capacity,
 and persisted delivery shape before creating the private Linq chat. The webhook
 recipient only identifies the candidate line; the existing `HostedLinqLine`
 projection grants new-route or recovery authority. Established thread routes
-remain authoritative independently of current line-pool eligibility.
+remain authoritative independently of current line-pool eligibility. Every new
+Linq or Telegram thread-container route also materializes its ordinary unnamed
+hosted group and route-owner membership through the canonical group-store
+primitive in that same database transaction. The structural write creates no
+join code, requested health or email sharing, or memberships for observed
+roster participants. Existing routed containers that predate this invariant
+are repaired once through the bounded operator backfill, which calls the same
+primitive in serial, short transactions and emits aggregate counts only.
 Recovery deliveries use a finite five-attempt sequence within the existing
 `HostedLinqDelivery` owner. A live or successful attempt converges every source
 event for that member, failed line, and group thread. Provider-correlated failed
@@ -2748,8 +2851,10 @@ further steer, but retains the existing provider-turn correlation until the one
 steer already started under that exact key settles; a rejected steer is not
 acknowledged and its input remains pending. In the exception, request 0 pauses
 provider steering but keeps conversation admission registered until an atomic
-quiet cutoff or one reconsideration admission; request 1 closes at its first
-completed response. Missing input, a causal gap, a boundary change, capacity
+quiet cutoff or one reconsideration admission. A successfully committed live
+steer during request 0 also selects reconsideration and keeps registration open
+through request 1, which closes at its first completed response. Missing input,
+a causal gap, a boundary change, capacity
 overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and

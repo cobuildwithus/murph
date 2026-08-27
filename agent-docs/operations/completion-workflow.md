@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -58,6 +58,16 @@ requires a repository-owned, reviewer-openable representation of the production
 component, consent surface, or composed section plus risk-matched design proof;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the separate final pushed-head ReviewGPT gate.
+
+**Product boundaries before defensive controls.** Do not turn data sensitivity,
+generic least-privilege intuition, or reviewer caution into a new member-facing
+restriction. Every new authorization, consent, identity, or eligibility gate
+must trace to an explicit current requirement, a durable product or security
+invariant, a shipped external contract, or reproduced harm. Enforce the proven
+boundary and no narrower one. If ambiguity would materially change who may use
+a capability or whose content they may act on, resolve that product question
+before encoding a fail-closed rule. Apply the same standard when triaging review
+findings; review must not ratchet the product into an unrequested restriction.
 
 Every PR must also make one explicit changelog decision before the review
 candidate is pushed. A member-visible feature or improvement, including a
@@ -201,6 +211,13 @@ product-decision owners.
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
    shared-default push, run `pnpm verify:acceptance`.
+   When the diff can change how Murph interprets a turn, selects or calls a
+   tool, decides to stay quiet, or writes a user-visible reply, apply
+   `$verify-murph-assistant`: add a production-derived real-Codex journey for
+   the changed behavior, run that focused journey after deterministic boundary
+   proof, inspect every actual reply, and record its effect result plus
+   `Ready`/`Hold` UX verdict. This live proof is required even when the ordinary
+   deterministic suite is already green.
 6. For user-visible, persisted-state, operational, or trust-boundary changes,
    complete the Product UX Walkthrough with direct evidence in addition to
    scripted tests. Match the evidence to each affected person's changed claim.
