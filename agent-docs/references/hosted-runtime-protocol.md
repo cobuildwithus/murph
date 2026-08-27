@@ -779,6 +779,37 @@ stays recoverable from the durable system mailbox and its existing continuation
 contract. Other system items remain pending for their default owner. A
 system-mailbox request behind an active default runtime remains deferred and
 cannot broaden that child's admission authority.
+An `environment_interview` request behind an active default runtime is the
+narrow exception: UserRunner wakes the exact default child but returns
+`retry_later`, because that child accepted only a wake, not Environment-mode
+ownership. The dirty default runtime preserves fresh conversation priority,
+classifies the durable mailbox prefix, and, when it sees an Environment item,
+shortens its existing idle checkpoint window to zero. It skips optional
+compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
+leaves the Environment row pending for the dedicated model-free invocation.
+This handoff never aborts a foreground turn and adds no queue, scheduler, or
+persisted mode state.
+The handoff is bidirectional. When fresh foreground/default work arrives behind
+an active `environment_interview` invocation, UserRunner wakes that exact
+child and returns `retry_later` without clearing or replacing its fence. The
+Environment child completes or checkpoints its current model-free unit, sees
+the wake, and releases; ordinary reconciliation then admits the pending
+foreground pass before re-admitting background Environment work. This preserves
+foreground authority without aborting canonical publication midway or creating
+a competing queue.
+
+Web projects `environmentInterviewPending` only when the signed Temporal facts
+request uses the exact `?includeEnvironmentInterviewPending=1` compatibility
+search. The legacy no-search response keeps omitting that key because a still-
+routable immutable reader rejects unknown reconciliation keys. The new private
+worker opts in and selects `environment_interview` only when the fact is true
+and no runnable foreground/default work is due; older workflow histories retain
+their former `system_mailbox` command shape behind the private worker's Temporal
+patch marker. The public
+`@murphai/hosted-execution` package version containing both the fact and mode
+must be released before the private worker adopts them. Source links across the
+public/private repository boundary are development proof only and are never a
+deployment contract.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -1198,7 +1229,16 @@ health values include source names and that sleep-stage values also include each
 source's recorded time. The same source-aware meaning applies to existing health
 scope keys and active grants; there is no separate source-details permission.
 A fresh request returns `sent` only after the provider send succeeds and its
-message binding is durably recorded.
+message binding is durably recorded. When the room explicitly asks to repost,
+the semantic `offer_access` action carries the exact current accepted Message
+ref. Assistant Engine verifies that ref in the current group turn and maps it to
+an additive request identity; Web uses it in provider idempotency and bypasses
+covering-offer reuse for that request only. Web reads the locked current policy
+and join code without creating or replacing group configuration; omitted scopes
+therefore retain the exact current permission set, while conflicting supplied
+scopes fail closed. Exact replay remains one send. After the replacement
+binding commits, Web revokes older active offers in the same transaction; send
+or binding failure leaves them active.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
@@ -1556,10 +1596,52 @@ does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
 hint before stopping that container. A denied admission starts nothing. The
-active-member replan durably
-appends the original conversation item and Web awaits that conversation-mailbox
-Temporal signal; only then may the ordinary Linq direct ensure start and own
-readiness plus all runtime authority. The shell hint does not read the persisted
+  active-member replan durably
+appends the original conversation item. For an exact model-approved instant
+start, Web may already have a bounded tool-free Murph result generated beside
+admission and enrollment after the exact chat/event acquired its delivery-ledger
+claim. Once planning converges, only an exact model-approved active direct wake
+keeps that claim for Web delivery. Every completed non-instant plan marks the
+same row skipped before its fallback side effect. A caught planning failure
+also skips an attempted claim before rethrowing; provider-started or encrypted
+  ambiguous states remain final to that skip operation. Settlement reads only
+  the exact existing event row under the chat lock and does not depend on the
+  request-local generation promise, so exact replay can finish a rolled-back
+  settlement without creating a skipped row when no claim exists. An unavailable
+  result leaves the original conversation checkpoint unchanged. The eligibility request
+  keeps source-part cardinality, so only one actual text part can use this path,
+  and records whether the normalized source exceeded the classifier's bound so
+  a partial representation cannot become a user-facing reply. A definite
+  pre-provider route-read or projection failure confirms the attempted row was
+  skipped before fallback; an unconfirmed skip stays retryable and suppresses
+  the activation wake. A
+skipped row or failed row with no encrypted payload remains terminal on exact
+webhook replay; a failed row with retained payload may recover only that exact
+body. An accepted result instead
+passes through the existing
+Linq delivery ledger, then Web atomically appends its ordinary self-authored
+conversation row, stamps the original inbound and that outbound row consumed,
+clears the encrypted pending body, and substitutes the outbound checkpoint for
+the handoff. Web awaits that conversation-mailbox Temporal signal; only then
+may the ordinary Linq direct ensure start and own readiness plus all runtime
+authority. The runtime imports both consumed rows as context with null reply
+targets, so the first exchange is available to later normal turns without
+  answering the original inbound again. A different message or group transition
+  waits while this exact delivery obligation remains unresolved. Runtime Linq
+  provider entry carries the already validated mailbox event identity to the
+  existing chat-locked Web egress transaction and resolves that exact instant
+  row before claiming its own provider effect. Attempted, provider-started, or
+  encrypted failed rows defer; any provider-correlated row ends the stale
+  runtime send as already answered; absent and definitive uncorrelated
+  failed-without-payload rows allow the ordinary runtime path. Provider
+  acceptance remains irreversible sender ownership even when it observes a
+  buffered failed receipt, and later receipts cannot transfer the inbound to a
+  second sender. Already-answered terminally supersedes
+  the stale runtime outbox intent without a retry, failure input, or recovery
+  wake while retaining the exact reason for diagnostics. An ambiguous provider
+  outcome starts no runtime wake and retains the exact encrypted reply for
+  same-event recovery. The
+shell hint does not read the persisted
 container state; it delegates the already-running check and concurrent-start
 coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.
 Authoritative readiness aborts an in-progress hint before entering the container

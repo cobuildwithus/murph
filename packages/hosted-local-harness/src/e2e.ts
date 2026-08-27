@@ -260,6 +260,13 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     aliases: ["linq-delivery"],
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     name: "linq-first-contact",
+    ...(process.env.MURPH_RUN_REAL_LINQ_FIRST_TURN_E2E === "1"
+      ? {
+          vitestProcessTestNamePatterns: [
+            "continues a real Web-model first turn through the hosted runtime",
+          ],
+        }
+      : {}),
   },
   {
     file:

@@ -871,8 +871,8 @@ class MockStdout extends PassThrough {
             params: {
               ...params,
               tokenUsage: {
+                ...tokenUsage,
                 last,
-                modelContextWindow: tokenUsage.modelContextWindow ?? null,
                 total: tokenUsage.total ?? last,
               },
             },

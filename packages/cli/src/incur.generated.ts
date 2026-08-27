@@ -173,6 +173,7 @@ declare module 'incur' {
       'habitat show': { args: { lookup: string }; options: {} }
       'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
       'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
+      'immunization payload-schema': { args: {}; options: {} }
       'immunization save': { args: { vaccineName: string }; options: { requestId?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[]; rawRef?: string[]; manufacturer?: string; lotNumber?: string; route?: string; site?: string; series?: string; targetDisease?: string[] } }
       'immunization scaffold': { args: {}; options: { requestId?: string } }
       'immunization show': { args: { id: string }; options: { requestId?: string } }

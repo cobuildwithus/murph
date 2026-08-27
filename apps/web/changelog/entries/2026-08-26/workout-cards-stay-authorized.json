@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "workout-cards-stay-authorized",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout cards stay ready in Messages",
+    "summary": "After one Murph setup, editable workout cards can renew their secure access without the Murph app staying open.",
+    "details": "Signing out, losing access, or withdrawing consent still closes that access and returns you to Murph when setup is needed again.",
+    "relevanceTags": ["messaging", "workouts", "reliability"],
+    "sourcePullRequests": [2370]
+  }
+}

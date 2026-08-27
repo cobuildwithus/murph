@@ -117,6 +117,7 @@ import {
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
+import { assistantCronScheduleHasSingleDailyTime } from './schedule.js'
 import {
   assistantDeviceActivityAuthorityKeyMatches,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
@@ -1790,9 +1791,12 @@ function resolveAssistantCronOutboxSupportSeriesId(
   return supportSeriesIds.length === 1 ? supportSeriesIds[0]! : null
 }
 
-function buildAssistantCronExecutionInstructions(
+export function buildAssistantCronExecutionInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1843,7 +1847,10 @@ function buildAssistantCronExecutionInstructions(
 
 function buildAssistantCronAutomationContextInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string | null {
   const context =
     job.kind === 'canonical'
@@ -1893,10 +1900,13 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
 function buildAssistantCronSupportScopeInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
+  // Weekly-digest metadata still participates in plan consent checks, but the
+  // saved automation instructions own the provider-visible task.
   if (
     job.kind !== 'canonical' ||
     job.source.kind !== 'automation' ||
-    job.source.supportKind === null
+    job.source.supportKind === null ||
+    job.source.supportKind === 'weekly_digest'
   ) {
     return null
   }
@@ -1905,9 +1915,7 @@ function buildAssistantCronSupportScopeInstructions(
     ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
-      : job.source.supportKind === 'review'
-        ? "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
-        : 'Provide only the agreed weekly summary shape from current evidence. Do not append a surprise accountability, repair, or coaching question.'
+      : "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
 
   return [
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
@@ -1916,13 +1924,16 @@ function buildAssistantCronSupportScopeInstructions(
   ].join('\n')
 }
 
-export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
-  'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
-  '- This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_HEADING =
+  'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):'
+
+const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_POLICY_LINES = [
+  '- Direct-message completion takes precedence: return `skip` for only this occurrence when a timestamp or trusted adjacent date context places a user report or assistant acknowledgment that explicitly confirms this exact action was completed in its window. Missing, stale, ambiguous, other-action, or other-occurrence evidence does not qualify; future recurrences remain active.',
+  '- The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. Send those cues normally unless the direct-conversation completion rule above applies, the member explicitly changes or pauses them, or another authoritative skip condition applies.',
   '- Apply a silence-based cadence question or skip only when the immediately prior confirmed output appears in this request\'s engine-supplied automation-output history. If that output is unavailable under the existing evidence-retention horizon, send the current cue normally. Do not use an assistant transcript entry alone as proof of dispatch because transcript persistence precedes delivery.',
   '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
   '- Otherwise find the most recent output from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
-  '- If there is no such confirmed output for this revision, send the current reminder normally.',
+  '- If there is no such confirmed output for this revision, send the current reminder normally unless the direct-conversation completion rule above applies.',
   '- If a relevant human reply followed that output, use it when composing the current reminder.',
   `- When a history item with the exact text \`${ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT}\` appears inside this provider request's engine-supplied recent-conversation-history section, the current cold reconstruction is incomplete because an existing retention, count, or byte bound omitted committed details. It is not a human reply and does not prove silence. For this occurrence, do not apply a silence-based cadence question or skip: continue the current cue unless retained conversation or another authoritative owner proves an explicit pause, change, or valid skip condition.`,
   '- That marker expires after the provider request that supplied it. If it is visible only in an earlier turn of a resumed provider thread, ignore it when deciding whether a later confirmed reminder received a relevant reply.',
@@ -1930,6 +1941,11 @@ export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
   '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
   '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',
   '- In a group, address the room collectively. Never assign silence, non-completion, or failure to an individual participant.',
+] as const
+
+export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
+  ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_HEADING,
+  ...ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_POLICY_LINES,
 ].join('\n')
 
 function buildAssistantCronRecurringReminderConversationInstructions(
@@ -1946,7 +1962,16 @@ function buildAssistantCronRecurringReminderConversationInstructions(
     return null
   }
 
-  return ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS
+  const occurrenceEvidence =
+    assistantCronScheduleHasSingleDailyTime(job.source.schedule)
+      ? '- Occurrence evidence (engine-supplied): this schedule has one configured local time per eligible day, so matching completion on the occurrence local date is in-window. For medication, prescribed treatment, clinical monitoring, or safety-critical reminders, also require the current time, dose, or sequence.'
+      : '- Occurrence evidence (engine-supplied): do not assume this schedule fires only once per local day. Local-date coincidence alone is insufficient; require the evidence to identify the current time, dose, or sequence.'
+
+  return [
+    ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_HEADING,
+    occurrenceEvidence,
+    ...ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_POLICY_LINES,
+  ].join('\n')
 }
 
 function assistantCronTimestampIsLater(

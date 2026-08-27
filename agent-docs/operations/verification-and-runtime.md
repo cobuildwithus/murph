@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -259,12 +259,14 @@ count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
 If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
-any provider action and an explicitly authorized absolute alternate path is
-already available, rerun that same focused journey once with
-`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. The runner selects that home's
-existing auth and config without copying credentials. Do not auto-discover
-profiles or cycle through homes. If no authorized alternate path is available,
-or if the supplied alternate is also blocked, record `Hold`.
+any provider action, this repository grants standing authorization to discover
+alternate local Codex homes by directory and non-empty auth-file presence only,
+select one already-authenticated home that has not been used for that focused
+journey, and rerun the same journey once with
+`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Never read, print, copy, or move
+auth material. Do not cycle through additional homes. If no authenticated
+alternate is available, or if that one alternate is also blocked, record
+`Hold`.
 
 Assistant Engine's lower-level opt-in live Codex journeys still use
 `MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
@@ -851,113 +853,6 @@ only when a non-PR task would otherwise require a broader local command. The
 text-only docs/process fast path remains the default for eligible Markdown-only
 docs work unless the change will be pushed directly to a shared default branch.
 
-The local Frog autofix entrypoint uses `scripts/frog-autofix scan` for a
-non-repairing live admission proof. The command may fetch `origin/main` and
-query public issue metadata, but it must not create durable autofix state or a
-worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
-implementation proof includes the real leader-first descendant timeout,
-parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
-tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
-conflict rejection, both sides of real Git renames/copies, product-runtime
-merge pausing, complete trusted prompt-preset and delegated specialist-lens
-coverage, final-retrospective
-handoff and queue advancement, same-named fork/different-operator rejection,
-closed-unmerged and descendant-head handoff continuity, terminal versus
-transient required-check classification, conflict disposition, real native
-two-contender serialization, operator-created but foreign-edited baseline/PASS/
-open-and-closed-handoff rejection with safe body recovery, parent-local
-baseline plus exact/ancestor human-handoff preservation when a foreign body
-edit is composed with an unchanged or newer same-repository branch head,
-pre-tooling handoff return with dirty bytes unchanged and no child/model/push,
-remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
-implementation prompts whose archives contain only the exact immutable
-`origin/main` friction task blob and path/digest manifest, and do not request or
-use a mutable GitHub-content connector,
-parent-verified worker authority that rejects candidate task/Frog-skill/
-worker-template or root/nested `AGENTS.md` changes, including ignored untracked
-instructions, before and after child execution; validates protected paths from
-Git's parsed patch targets; and binds the task, skill, and instruction
-paths/digests into the child prompt,
-task edit/move/delete/replacement/binding-drift rejection after long waits and
-at both merge fences including final-scope ref movement, fresh post-wait task
-reads, trusted remote-no-PR task provenance, terminal missing or
-rejected patch/response and edit-only worker outcomes that publish a fixed-body
-empty-tree handoff without candidate bytes or a second implementation, local
-terminal recovery before remote synchronization, foreign deterministic-branch
-preservation, cross-process pre/post-neutral-body recovery using the immutable
-first-reviewed candidate, exact current-neutral/candidate and branch-
-nonexistence lease authorization, plus
-retryable post-worker authority infrastructure after the parent commit,
-unchanged-PR ancestor normalization that preserves the pre-remote PR-head
-marker while discarding unpushed candidate bytes without a push, non-ancestor
-and projection-drift rejection, and next-issue advancement,
-100-plus-record
-cursor pagination before parent cardinality, clean post-commit/pre-first-push
-resume without a second implementation request or child, exact parent-local
-body/head provenance for push-before-PR recovery plus rejection of seeded or
-stale-tracking remote-no-PR branches, issue-authority revocation before push and
-before draft creation, mandatory foul-play prompt ordering, unrelated hostile
-evidence ignore behavior, boundary-weakening task/candidate refusal,
-parent-local review-body archive binding with changed digest/editor/body/head
-rejection before and after each model wait and before metadata persistence,
-fresh trusted-review-control comparison after each canonical model wait and at
-both finalization refreshes with exact-head handoff on drift,
-loaded-runner-version comparison against each of those freshly fetched refs,
-with unrelated main movement allowed and exact-head handoff before response
-acceptance, merge, or issue closure on loaded authority drift,
-candidate-and-runner-bound persisted PASS recovery that rejects legacy or
-drifted evidence across restarts, plus frozen scriptless primary dependency
-reconciliation before the mutating parent loads, dependency-free exact-process-
-group supervision with a fixed deadline and confirmed descendant cleanup before
-native-lock release, foreign numeric process-group reuse refusal, bootstrap
-loaded-runner coverage, lockfile coverage in
-the trusted review-control inventory, and a real macOS install/`RunAtLoad`
-handoff that waits only at the generated launcher boundary, admits exactly once
-after prompt gate release, times out behind a longer repair, and retains the
-same native-gate inode,
-operator-handoff preservation during a blocked model review, non-closing exact
-issue binding across short and full-URL forms plus parent-only post-merge
-closure and never-closed retry that refuses deliberate reopen,
-strict kind-specific specialist/final response structure, one final
-implementation completion marker, and production composition of implementation
-and canonical preliminary/final ZIPs with exact task/skill bytes and manifests
-plus fail-closed omission proof and filename-independent exactly-one bounded
-regular-archive selection with stale parent-owned archive replacement on retry,
-an explicit Frog script allowlist that excludes the GitHub Actions-owned
-`scripts/frog-pr-context.ts` on direct/rename/copy paths, and fixed content-free
-foreground admission/implementation/review/check/merge progress with an
-explicit success terminal line. A macOS
-permission smoke must also apply the exact native worker profile and prove an
-in-worktree read/write succeeds while an outside-root read and a network
-request fail:
-
-```sh
-pnpm exec vitest run scripts/frog-autofix.test.ts \
-  --config scripts/vitest.config.ts --no-coverage
-pnpm exec vitest run packages/cli/test/release-script-coverage-audit.test.ts \
-  --config packages/cli/vitest.workspace.ts --no-coverage
-bash -n scripts/frog-autofix scripts/package-audit-context-full.sh
-scripts/frog-autofix verify-permissions
-scripts/frog-autofix scan
-```
-
-After the owning PR merges, installation proof must run from the exact clean
-primary checkout: install with the intended Codex home, confirm `status`
-reports `loaded=yes` and `interval_seconds=7200`, inspect the generated plist,
-launcher, relative locators, lock, and bounded event log for owner-only modes
-and identifier/credential absence. Confirm the stable native gate remains while
-the JSON owner record clears and that `RunAtLoad` records a prompt first
-admission rather than disappearing behind installation, then invoke one manual
-`run`. When no
-committed eligible binding exists, success is a no-worker event. When one does
-exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
-end proof; a locally successful child exit alone is not completion evidence.
-For a local-agent-only test issue, require automatic merge plus closure. For any
-diff outside the narrow local-agent classifier, require a ready reviewed PR and
-open issue, then confirm the runner reports `awaiting_human_merge` without a
-merge or close call.
-
-
 ## Hosted Temporal Replay Proof
 
 Private `cobuildwithus/murph-cloud` owns the Temporal Workflows, Activities,
@@ -1171,6 +1066,7 @@ the advisory budget.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
 - `pnpm test:apps`: holds one parent artifact lock, prepares Health Commons output and the hosted-web Prisma client once, then executes `apps/web verify` and `apps/cloudflare verify` concurrently by default locally (serially in CI unless overridden). Both children consume the prepared inputs instead of racing their own generation and therefore realize the intended parallel app lane. Their existing internal parallelism, app-local worker caps, and acceptance skip flags remain unchanged.
 - `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. One release-verification plan classifies every `packages/*` workspace owner: assigned packages must declare `test:coverage`, exclusions require a non-empty reason, and any new, stale, duplicate, or unassigned package fails before coverage starts. `MURPH_PACKAGE_COVERAGE_SHARD` selects one non-empty named shard only for the standalone `test:packages:coverage` command while the default remains the complete plan; aggregate coverage and acceptance commands reject subset selection, and the canonical static-SSH profile continues to force the complete plan. Standalone local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. The capable-host acceptance composition protects subprocess-heavy CLI coverage with four workers and one concurrent two-worker package process, then refills to at most five two-worker package processes after CLI releases the two app pools. On the standard 16-vCPU profile that bounds the scheduled Vitest total at 14 workers after the protected phase instead of multiplying per-process percentages. On a resource-qualified static worker, the executor-owned profile instead protects CLI coverage with three workers and one concurrent two-worker package process, then refills to three two-worker package processes. Smaller or memory-unobservable static workers retain the two-process, two-worker serial fallback. Source environment overrides cannot change either static plan. CI remains one outer process with a 50% inner cap inside each isolated job. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS`, and `MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS` remain explicit overrides for the default profile. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.
+- During composed refill, Hosted Local Harness runs after every unrelated package owner and waits while Assistant Engine remains active, so those child-runtime-heavy owners never overlap without reducing earlier package refill.
 - `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Standalone local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. The capable-host acceptance composition starts Web tests, lint, and dev smoke with package coverage under bounded worker budgets. CLI completion releases the hosted-web Next build and Cloudflare's serial app tests and independently releases package coverage from its protected phase into its full refill. Every ordinary package coverage owner, including Assistant Engine, retains the caller's Node heap; the CLI keeps only its existing prepared-runtime environment. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. On a static worker with at least 10 logical CPUs and 24 GiB of detected physical memory, the executor-owned profile overlaps package coverage, fixture verification, and both apps. It gives each ordinary package two workers, the CLI three workers, and each app Vitest pool one worker; CLI completion still gates the Next build, Cloudflare tests, and the package refill from two to three processes. Smaller or memory-unobservable static workers retain the prior serial two-process/two-worker plan. The static profile ignores caller worker and overlap controls. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available to the default and CI profiles, and source-artifact hygiene continues to reject private env files and generated residue.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution and the Blacksmith Testbox, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is resource-qualified by construction: its entrypoint selects `profile=static-ssh`, and the verifier admits composition only with at least 10 logical CPUs and 24 GiB of detected physical memory. The `resources` line reports those measurements and the effective worker/overlap plan. Smaller or memory-unobservable static workers retain the serial fallback. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe. PR-bound `scripts/package-audit-context-full.sh` additionally requires explicit `--zip`, refuses repo-visible candidates under the canonical `review-gpt-pr-context/**` namespace before producing an artifact, owns one private context directory and collision-resistant default ZIP prefix per invocation, then appends only the selected packet under that stable archive prefix; simultaneous preliminary and final packaging therefore shares neither cleanup state nor an intermediate filename and requires no lock.

@@ -1407,7 +1407,7 @@ and call the same idempotent reconciler by purchase ID.
    changes the assistant contract fingerprint: every existing direct or group
    session that would otherwise use native resume starts one new provider
    thread on its first post-deploy conversation turn. That turn replays the
-   committed transcript fallback, bounded to 24 messages, 4,000 bytes per
+   committed transcript fallback, bounded to 72 messages, 4,000 bytes per
    message, and 12,000 bytes total; later turns resume the new thread. A rollback
    rotates sessions that already adopted the new fingerprint once more.
 6. Do not run a second postdeploy constraint installer. The historical

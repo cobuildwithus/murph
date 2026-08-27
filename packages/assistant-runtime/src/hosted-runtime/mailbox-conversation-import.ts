@@ -50,6 +50,9 @@ import {
   notifyAssistantActiveTurnInputAvailableForInputIds,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
+import type {
+  AssistantModelTarget,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import {
   inferDirectEmailThreadFromParticipants,
@@ -76,9 +79,11 @@ import type {
 import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
+  suppressHostedPendingLinqInputAnsweredByExternalReply,
 } from "./pending-input-index.ts";
 import {
   prepareHostedAssistantAutoReplyForWake,
+  readHostedAssistantExecutionDefaultTarget,
   requireHostedBootstrapForWake,
   type HostedAssistantAutoReplyReadinessState,
 } from "./context.ts";
@@ -197,6 +202,7 @@ export interface HostedConversationMailboxAssistantInputStageResult {
 }
 
 export type HostedConversationMailboxAssistantInputStager = (input: {
+  assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
   pendingReplyEligible: boolean;
   vaultRoot: string;
@@ -247,6 +253,7 @@ export type HostedConversationMailboxImportOutcome =
     };
 
 export function createHostedConversationMailboxImportItem(input: {
+  assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
@@ -280,6 +287,7 @@ export function createHostedConversationMailboxImportItem(input: {
 }
 
 export async function importHostedConversationMailboxItem(input: {
+  assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
@@ -377,6 +385,26 @@ export async function importHostedConversationMailboxItem(input: {
       wake: decoded.wake,
     });
   }
+  if (
+    isHostedLinqConversationMessageWake(decoded.wake)
+    && decoded.wake.message.linqMessage.isFromMe === true
+  ) {
+    pendingReplyEligible = false;
+  }
+
+  const assistantTarget = isHostedLinqConversationMessageWake(decoded.wake)
+      && decoded.wake.message.linqMessage.isFromMe === true
+      && normalizeHostedAssistantInputSourceMetadataToken(
+        decoded.wake.message.linqMessage.replyToMessageId ?? null,
+      )
+    ? input.assistantTarget
+      ?? await readHostedAssistantExecutionDefaultTarget({
+        runtimeEnv: {
+          ...input.runtime.forwardedEnv,
+          ...input.runtime.userEnv,
+        },
+      })
+    : null;
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!pendingReplyEligible) {
@@ -388,6 +416,7 @@ export async function importHostedConversationMailboxItem(input: {
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const stagedInput = await stageAssistantInputEvent({
+    assistantTarget,
     item: input.item,
     pendingReplyEligible,
     vaultRoot: input.vaultRoot,
@@ -928,6 +957,7 @@ function loadHostedConversationEventsModule(): Promise<HostedConversationEventsM
 }
 
 async function stageHostedConversationAssistantInputEvent(input: {
+  assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
   pendingReplyEligible: boolean;
   vaultRoot: string;
@@ -961,6 +991,30 @@ async function stageHostedConversationAssistantInputEvent(input: {
     }),
     vault: input.vaultRoot,
   });
+  const replyToMessageId = linqWake?.message.linqMessage.isFromMe === true
+    ? normalizeHostedAssistantInputSourceMetadataToken(
+        linqWake.message.linqMessage.replyToMessageId ?? null,
+      )
+    : null;
+  if (
+    replyToMessageId
+    && event.conversation?.source === "linq"
+    && event.conversation.threadId
+  ) {
+    if (!input.assistantTarget) {
+      throw new Error(
+        "Hosted assistant target is required to preserve an imported Linq reply.",
+      );
+    }
+    await suppressHostedPendingLinqInputAnsweredByExternalReply({
+      accountId: event.conversation.accountId,
+      assistantReplyEvent: event,
+      replyToMessageId,
+      target: input.assistantTarget,
+      threadId: event.conversation.threadId,
+      vaultRoot: input.vaultRoot,
+    });
+  }
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
@@ -1858,7 +1912,7 @@ function isHostedConversationAnalyzeVideoRuntimeEligible(input: {
   wake: HostedExecutionConversationMessageWake;
 }): boolean {
   return hasHostedGeminiVideoAnalysisRuntimeKey(input.runtime)
-    && isHostedConversationPrivateDirectWake(input.wake);
+    && isHostedConversationAnalyzeVideoAudienceEligible(input.wake);
 }
 
 function hasHostedGeminiVideoAnalysisRuntimeKey(
@@ -1868,14 +1922,16 @@ function hasHostedGeminiVideoAnalysisRuntimeKey(
     && runtime.forwardedEnv[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV].trim().length > 0;
 }
 
-function isHostedConversationPrivateDirectWake(
+function isHostedConversationAnalyzeVideoAudienceEligible(
   wake: HostedExecutionConversationMessageWake,
 ): boolean {
   if (isHostedLinqConversationMessageWake(wake)) {
-    return wake.message.linqMessage.threadIsDirect !== false;
+    return wake.message.linqMessage.threadIsDirect !== false
+      || wake.message.routeAuthority != null;
   }
   if (isHostedTelegramConversationMessageWake(wake)) {
-    return wake.message.telegramMessage.threadIsDirect !== false;
+    return wake.message.telegramMessage.threadIsDirect !== false
+      || wake.message.routeAuthority != null;
   }
   if (isHostedEmailConversationMessageWake(wake)) {
     return resolveHostedEmailConversationDirectness({

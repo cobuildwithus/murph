@@ -130,6 +130,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
       ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
+      ['DELETE FROM "hosted_group_participant_observation"', 4],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
       ['UPDATE "hosted_member"', 3],
@@ -183,6 +184,7 @@ describe("hosted retention cleanup", () => {
       expiredDeviceOauthSessionsDeleted: 4,
       expiredDeviceWebhookTracesDeleted: 4,
       expiredEmailPublicBootstrapAttemptsDeleted: 2,
+      expiredGroupParticipantObservationsDeleted: 4,
       expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
@@ -253,7 +255,22 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(16);
+    expect(executeRaw).toHaveBeenCalledTimes(17);
+
+    const groupParticipantObservationCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "hosted_group_participant_observation"',
+    );
+    expect(sqlOf(groupParticipantObservationCall)).toContain(
+      'ORDER BY "expires_at" ASC, "contact_lookup_key" ASC',
+    );
+    expect(sqlOf(groupParticipantObservationCall)).toContain(
+      "FOR UPDATE SKIP LOCKED",
+    );
+    expect(groupParticipantObservationCall.slice(1)).toEqual([
+      now,
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
 
     const deviceOauthCall = findRetentionCall(
       executeRaw,
@@ -712,6 +729,7 @@ describe("hosted retention cleanup", () => {
         expiredDeviceOauthSessionsDeleted: 1,
         expiredDeviceWebhookTracesDeleted: 1,
         expiredEmailPublicBootstrapAttemptsDeleted: 1,
+        expiredGroupParticipantObservationsDeleted: 1,
         expiredGroupCurrentSenderClarificationsDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxContentRetired: 1,

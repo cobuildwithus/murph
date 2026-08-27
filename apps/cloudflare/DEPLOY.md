@@ -78,20 +78,27 @@ withholds a successful Gemini response until Web accepts its usage row, so an
 older Web would turn every otherwise successful analysis into a 502. Missing
 key configuration is fail-closed and
 omits `murph.analyze_video`. During an immediate rollout, old instances omit
-the tool and new instances expose it only for a private-direct turn with
-accepted user-action input. Group turns continue to omit it. A direct turn may
-receive the schema before its accepted input has video authority because the
-provider tool set freezes at turn start; this lets the first live-steered video
-be frozen and authorized before tool execution in that same turn. There is no
-schema, backfill, dual-write, or stored compatibility state.
+the tool and new instances expose it for private-direct turns and authenticated
+Linq/Telegram group turns with accepted user-action input. Any authenticated
+group participant may request analysis of another participant's video in the
+same accepted group turn. Unverified external groups continue to omit it. An
+eligible turn may receive the schema before its accepted input has video
+authority because the provider tool set freezes at turn start; this lets the
+first live-steered video be frozen and authorized before tool execution in that
+same turn. There is no schema, backfill, dual-write, or stored compatibility
+state.
 
 Rollback the Worker/runner producer first, then remove the private secret
 mapping if desired; the Web reader and pricing branch are safe to leave in
 place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
 direct conversation to verify a single Gemini request, explicit 1 FPS
 metadata, bounded output, and one usage
-record. Inspect only bounded status/error aggregates, never media, prompts,
-paths, response bodies, or credential values.
+record. Then use one consented group video and verify one Gemini request plus
+one group-visible result when its uploader requests analysis. Have a different
+authenticated participant request analysis of a second consented group video
+and verify the same single-request result. Inspect only bounded status/error
+aggregates, never media, prompts, paths, response bodies, sender handles, or
+credential values.
 
 ### Hosted inbox video transience rollout
 
@@ -2114,6 +2121,16 @@ Optional smoke env:
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
 ## Container Operator Access
+
+## Operator task rollout
+
+Deploy shared runner/Worker code that accepts the additive `operator_task` ask
+target and `operator-message` prompt profile before deploying the Web migration
+and `/ops/tasks` admission UI. Old Web remains safe with the new reader because
+it cannot enqueue the new shapes. After Web deploy, prove one private
+diagnostic and one synthetic direct-message admission. For rollback, disable or
+roll back Web admission first, allow admitted mailbox work to drain, then roll
+back the runner/Worker reader.
 
 Wrangler SSH is intentionally disabled for both runner Container classes. The
 checked-in scaffold and generated deploy config must set `ssh.enabled` to

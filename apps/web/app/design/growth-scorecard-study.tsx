@@ -14,8 +14,10 @@ import {
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
 import { GrowthSponsorships } from "../(dashboard)/ops/growth/growth-sponsorships";
 import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
+import { RecentMemberRetention } from "../(dashboard)/ops/growth/recent-member-retention";
 import { ReferralLinkUsage } from "../(dashboard)/ops/growth/referral-link-usage";
 import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
+import type { HostedRecentMemberRetention } from "@/src/lib/hosted-ops/growth-metrics";
 
 const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
   const date = new Date(Date.UTC(2026, 6, index + 1));
@@ -292,6 +294,47 @@ const UNAVAILABLE_SPONSORSHIP_METRICS = {
   available: false,
 } satisfies HostedGrowthSponsorshipMetrics;
 
+const RECENT_MEMBER_RETENTION = {
+  capturedAt: "2026-07-31T18:00:00.000Z",
+  members: [
+    {
+      createdAt: "2026-07-31T17:12:00.000Z",
+      lastMessageAt: null,
+      maskedPhoneNumberHint: "*** 0731",
+      memberId: "study_recent_member_no_recent_activity",
+      messagesLast7Days: 0,
+      messagesToday: 0,
+      onboardingCompleted: false,
+      suspended: false,
+    },
+    {
+      createdAt: "2026-07-31T13:20:00.000Z",
+      lastMessageAt: "2026-07-31T16:48:00.000Z",
+      maskedPhoneNumberHint: "*** 4827",
+      memberId: "study_recent_member_active_today",
+      messagesLast7Days: 7,
+      messagesToday: 7,
+      onboardingCompleted: true,
+      suspended: false,
+    },
+    {
+      createdAt: "2026-07-27T10:00:00.000Z",
+      lastMessageAt: "2026-07-30T15:31:00.000Z",
+      maskedPhoneNumberHint: null,
+      memberId: "cm_00000000000000006419",
+      messagesLast7Days: 21,
+      messagesToday: 0,
+      onboardingCompleted: true,
+      suspended: false,
+    },
+  ],
+} satisfies HostedRecentMemberRetention;
+
+const EMPTY_RECENT_MEMBER_RETENTION = {
+  capturedAt: "2026-07-31T18:00:00.000Z",
+  members: [],
+} satisfies HostedRecentMemberRetention;
+
 const STUDY_INPUT = {
   activeUsers: {
     today: 22,
@@ -389,6 +432,24 @@ export function GrowthScorecardStudy() {
       data-design-study="ops-weekly-growth-compass"
       id="ops-weekly-growth-compass"
     >
+      <div id="growth-recent-member-retention">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Recent member activity
+        </div>
+        <RecentMemberRetention
+          retention={RECENT_MEMBER_RETENTION}
+          titleId="design-growth-recent-members-title"
+        />
+      </div>
+      <div id="growth-recent-member-retention-empty">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Recent member activity · empty
+        </div>
+        <RecentMemberRetention
+          retention={EMPTY_RECENT_MEMBER_RETENTION}
+          titleId="design-growth-recent-members-empty-title"
+        />
+      </div>
       <div id="growth-charts">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Thirty-day movement

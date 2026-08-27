@@ -104,11 +104,6 @@ const REQUIRED_PRODUCT_LABEL_SEARCH_INDEXES = [
       "USING btree (lower(name), data_origin_priority, id)",
     indexName: "foods_name_exact_rank_idx",
   },
-  {
-    definitionSuffix:
-      "USING btree (canonical_key, data_origin_priority, id)",
-    indexName: "foods_canonical_rank_idx",
-  },
 ] as const;
 
 export async function listProductLabelRuntimeEnvErrors(
