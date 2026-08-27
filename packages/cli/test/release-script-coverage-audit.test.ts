@@ -1968,14 +1968,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain(
       'routed local Product UX review',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'Disclosure does not make\nan unsafe or needless change acceptable',
+    expect(prDeepReviewPrompt).toMatch(
+      /Disclosure does not make an\s+unsafe or needless change acceptable/u,
     )
     expect(prDeepReviewPrompt).toContain(
-      'Delete or split unnecessary scope. When\nthe surface is necessary but undisclosed',
+      'under the\n**Purpose Drift** rule in the Finding bar below',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'require the intent contract to add the reason',
+    expect(prDeepReviewPrompt).not.toMatch(
+      /surface is necessary but undisclosed, require the PR intent contract/u,
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /for necessary but materially misleading undisclosed\s+scope, require the intent contract to add the reason and regression proof/u,
     )
     expect(reviewGptConfig).toContain(
       'review_gpt_register_dir_preset "completion-specialists"',
