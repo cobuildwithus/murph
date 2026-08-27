@@ -135,13 +135,34 @@ Updated: 2026-08-26
 - The focused real-Codex journey passed. Murph made exactly one handoff call,
   used a participant display-name clue without a group title or handle, and
   truthfully replied that the handoff was queued.
+- The preliminary specialist review returned five findings, all accepted. The
+  production prompt now routes participant evidence directly to group consult,
+  the tool contract defines requester-relative counts, the changelog describes
+  safe clarification and fail-closed recovery truthfully, and composed coverage
+  crosses the real participant matcher into admission instead of mocking the
+  selector.
+- The composed Web proof passes 39/39 tests. With two current memberships and
+  complete provider rosters, it persists only the uniquely selected membership,
+  never appends to the competing runtime, and carries the completed answer back
+  to the private requesting member. Duplicate safe roster descriptions remain
+  unavailable and append nothing.
+- The participant-selected handoff composition additionally binds the durable
+  notification to only the selected membership and exact Linq thread. The
+  existing output-only context-handoff owner then passes its focused test and
+  delivers exactly one ordinary group message through the normal outbox path.
+- The revised real-Codex journey passes from the alternate authenticated Codex
+  profile with both group consult and group membership available. All three
+  prompts call handoff once without membership listing: a named participant, a
+  total three-person chat, and an explicit self plus two named people. The last
+  two emit exactly the two other participants and never emit a self cue.
 - Pinned real-App-Server measurement of the complete initial provider request
   is byte-for-byte identical at base and head: direct is 24,675
   `o200k_harmony` tokens / 114,319 UTF-8 bytes and group is 20,259 tokens /
   94,076 bytes. The changed group-consult schema remains deferred behind native
   tool discovery, so the initial-request delta is zero for both scopes.
-- Draft PR #2385 is open, and its changelog source now points to that PR. The
-  exact ReviewGPT candidate head and required review rounds remain pending.
+- PR #2385 is open and Ready, and its changelog source points to that PR. The
+  original exact-head final review remains in flight; accepted preliminary
+  remediation requires a fresh exact-head final round after it is pushed.
 
 ## Product UX walkthrough
 
@@ -152,6 +173,8 @@ Updated: 2026-08-26
 2. Current member with shared Contacts: owner and non-owner members use the same
    membership path, and selection reads only the requester's projection. A
    deterministic 26-membership journey selects the one matching contact name.
+   The composed admission journey then persists only that exact membership and
+   carries its completed answer back to the requester's private conversation.
 3. Current member without shared Contacts: safe descriptions use participant
    count, NANP area code plus last four, international last four, or generic
    email participant. Full handles do not enter the assistant contract or new

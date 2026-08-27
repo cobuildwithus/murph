@@ -1063,6 +1063,8 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
             type: 'integer',
             minimum: 1,
             maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+            description:
+              'The number of other people in the chat besides the requesting member. If the member gives a total chat size, subtract the requester. Omit this count when that conversion is unclear.',
           },
           participants: {
             type: 'array',
@@ -1093,7 +1095,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
           },
         },
         description:
-          'Optional only for action="ask" or action="handoff" when the member describes a joined iMessage/SMS group by its people or participant count. Put each described person in one participants item. Use a contact displayName only when the member supplied it; use only area code and/or last four for phone clues, or emailParticipant=true for an unnamed email participant. Never send a full phone number, email address, internal ID, or guessed identity. This evidence must identify exactly one current joined group or Murph asks for clarification.',
+          'Optional only for action="ask" or action="handoff" when the member describes a joined iMessage/SMS group by its people or participant count. Put each described person other than the requesting member in one participants item; never add the requester or a self/"me" cue. Use a contact displayName only when the member supplied it; use only area code and/or last four for phone clues, or emailParticipant=true for an unnamed email participant. Never send a full phone number, email address, internal ID, or guessed identity. This evidence must identify exactly one current joined group or Murph asks for clarification.',
       },
       displayName: {
         type: 'string',

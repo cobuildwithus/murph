@@ -193,7 +193,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
-  it('uses memberships only as bounded last-resort direct disambiguation', () => {
+  it('routes participant evidence directly and keeps memberships as a bounded last resort', () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
@@ -213,6 +213,15 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(directLayers.prompt).toContain('last-resort disambiguation check')
+    expect(directSection).toContain(
+      'call `murph.group_consult action="ask"` or `action="handoff"` directly with `participantTarget`',
+    )
+    expect(directSection).toContain('do not call `list_memberships` first')
+    expect(directSection).toContain(
+      'only the other people besides the requesting member',
+    )
+    expect(directSection).toContain('subtract the requester')
+    expect(directSection).toContain('omit `participantCount` rather than guessing')
     expect(directSection).toContain('possible group cue')
     expect(directSection).toContain('club, team, community, or shared challenge')
     expect(directSection).toContain(
@@ -229,7 +238,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain('With no memberships')
     expect(directSection).toContain('paste-or-screenshot fallback')
     expect(directSection).toContain('distinct nonblank visible labels')
-    expect(directSection).toContain('duplicate or unnamed labels')
+    expect(directSection).toContain(
+      'duplicate or unnamed labels cannot be resolved by this lookup',
+    )
     expect(directSection).toContain('Never fuzzy-match')
     expect(directSection).toContain('select by role or newness')
     expect(directSection).toContain('expose identifiers, or fan out')

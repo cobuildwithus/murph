@@ -3871,99 +3871,180 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'targets a joined group from a private participant description',
+    'targets a joined group directly from requester-relative participant descriptions',
     async () => {
       const config = await resolveRealCodexE2eConfig()
-      const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-private-group-participant-target-e2e-'),
-      )
-      const groupRequests: unknown[] = []
+      const cases = [
+        {
+          expectedNames: ['Jordan'],
+          prompt:
+            'Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
+          slug: 'named-person',
+        },
+        {
+          expectedNames: ['Jordan', 'Casey'],
+          prompt:
+            'Tell my existing three-person group chat with Jordan and Casey that Member Echo finished the mobility set.',
+          slug: 'total-chat-size',
+        },
+        {
+          expectedNames: ['Jordan', 'Casey'],
+          prompt:
+            'Tell my existing group chat with me, Jordan, and Casey that Member Echo finished the mobility set.',
+          slug: 'explicit-self',
+        },
+      ] as const
 
       try {
-        const skillsRoot = path.join(workingDirectory, 'skills')
-        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
-        const result = await executeRealCodexAppServerTurn({
-          approvalPolicy: 'never',
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-          codexCommand:
-            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-            ?? undefined,
-          codexHome: config.codexHome,
-          developerInstructions:
-            buildDirectConversationDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
-          env: {
-            ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-          },
-          excludeResumeTurns: true,
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => ({
-              conversationId: 'conversation_private_group_participant_target',
-              recipientKey: 'recipient_private_group_participant_target',
-              returnContactKind: 'text',
-            }),
-            currentHostedMailboxItemIds: () => [],
-            currentUserActionScope: () => ({
-              acceptedInputIds: ['input_private_group_participant_target'],
-              conversationId: 'conversation_private_group_participant_target',
-              conversationScope: 'direct',
-              inboundMailboxItemIds: ['mailbox_private_group_participant_target'],
-              originSessionId: 'session_private_group_participant_target',
-              recipientKey: 'recipient_private_group_participant_target',
-            }),
-            groupTool: {
-              request: async (request) => {
-                groupRequests.push(request)
-                return {
-                  action: 'handoff',
-                  result: {
-                    status: 'accepted',
-                    targetLabel: '2 people: Jordan, number ending 0456',
-                  },
-                }
+        for (const testCase of cases) {
+          const workingDirectory = await mkdtemp(path.join(
+            tmpdir(),
+            `murph-private-group-participant-target-${testCase.slug}-e2e-`,
+          ))
+          type GroupRequest = Parameters<
+            NonNullable<AssistantHostedToolContext['groupTool']>['request']
+          >[0]
+          const groupRequests: GroupRequest[] = []
+
+          try {
+            const skillsRoot = path.join(workingDirectory, 'skills')
+            await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildDirectConversationDeveloperInstructions(),
+              dynamicTools: [
+                MURPH_GROUP_CONSULT_TOOL,
+                MURPH_GROUP_MEMBERSHIP_TOOL,
+              ],
+              env: {
+                ...config.env,
+                [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
               },
-            },
-            sendVaultFile: async () => {
-              throw new Error('Vault file sends are unavailable in this test.')
-            },
-            vaultFileSendAvailable: false,
-          },
-          model: config.model,
-          modelProvider: config.modelProvider,
-          prompt:
-            'My preferred display name is Member Echo. Tell my existing group chat with Jordan that Member Echo finished the mobility set.',
-          reasoningEffort: 'low',
-          sandbox: 'workspace-write',
-          workingDirectory,
-        })
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                computerToolsAvailable: false,
+                currentHostedDeliveryContext: () => ({
+                  conversationId:
+                    `conversation_private_group_participant_${testCase.slug}`,
+                  recipientKey:
+                    `recipient_private_group_participant_${testCase.slug}`,
+                  returnContactKind: 'text',
+                }),
+                currentHostedMailboxItemIds: () => [],
+                currentUserActionScope: () => ({
+                  acceptedInputIds: [
+                    `input_private_group_participant_${testCase.slug}`,
+                  ],
+                  conversationId:
+                    `conversation_private_group_participant_${testCase.slug}`,
+                  conversationScope: 'direct',
+                  inboundMailboxItemIds: [
+                    `mailbox_private_group_participant_${testCase.slug}`,
+                  ],
+                  originSessionId:
+                    `session_private_group_participant_${testCase.slug}`,
+                  recipientKey:
+                    `recipient_private_group_participant_${testCase.slug}`,
+                }),
+                groupTool: {
+                  request: async (request) => {
+                    groupRequests.push(request)
+                    if (request.action === 'list_memberships') {
+                      return {
+                        action: 'list_memberships',
+                        result: {
+                          disclosureGrants: [],
+                          memberships: [],
+                          status: 'ok',
+                          truncated: false,
+                        },
+                      }
+                    }
+                    return {
+                      action: 'handoff',
+                      result: {
+                        status: 'accepted',
+                        targetLabel: '2 people: Jordan, Casey',
+                      },
+                    }
+                  },
+                },
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: testCase.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
 
-        process.stdout.write(
-          `[group-handoff-participants-e2e] ${JSON.stringify({
-            reply: result.finalMessage.trim(),
-            request: groupRequests[0] ?? null,
-            toolCallCount: groupRequests.length,
-          })}\n`,
-        )
+            process.stdout.write(
+              `[group-handoff-participants-e2e] ${JSON.stringify({
+                reply: result.finalMessage.trim(),
+                requests: groupRequests,
+                slug: testCase.slug,
+              })}\n`,
+            )
 
-        expect(groupRequests).toHaveLength(1)
-        expect(groupRequests[0]).toMatchObject({
-          action: 'handoff',
-          participantTarget: {
-            participants: [{ displayName: 'Jordan' }],
-          },
-        })
-        expect(groupRequests[0]).not.toHaveProperty('groupLabel')
-        expect(result.finalMessage).toMatch(/queu/iu)
+            expect(
+              groupRequests.filter(({ action }) => action === 'list_memberships'),
+              testCase.slug,
+            ).toHaveLength(0)
+            const handoffRequests = groupRequests.filter(
+              (request): request is Extract<
+                GroupRequest,
+                { action: 'handoff' }
+              > => request.action === 'handoff',
+            )
+            expect(handoffRequests, testCase.slug).toHaveLength(1)
+            expect(handoffRequests[0], testCase.slug).toMatchObject({
+              action: 'handoff',
+              participantTarget: {
+                participants: testCase.expectedNames.map((displayName) => ({
+                  displayName,
+                })),
+              },
+            })
+            expect(handoffRequests[0], testCase.slug)
+              .not.toHaveProperty('groupLabel')
+            const participantTarget = handoffRequests[0]?.participantTarget as {
+              participantCount?: number
+              participants?: Array<{ displayName?: string }>
+            }
+            expect(
+              participantTarget.participants?.some(({ displayName }) =>
+                displayName?.toLocaleLowerCase('und') === 'me'
+                || displayName?.toLocaleLowerCase('und') === 'member echo'
+              ),
+              testCase.slug,
+            ).toBe(false)
+            if (testCase.expectedNames.length === 2) {
+              expect(
+                participantTarget.participantCount === undefined
+                || participantTarget.participantCount === 2,
+                testCase.slug,
+              ).toBe(true)
+            }
+            expect(result.finalMessage, testCase.slug).toMatch(/queu/iu)
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
       } finally {
-        await removeRealCodexTemporaryPaths([
-          workingDirectory,
-          ...config.temporaryPaths,
-        ])
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
     },
-    360_000,
+    900_000,
   )
 
   it(
