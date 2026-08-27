@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "account-deletion-without-passkey",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Account deletion without passkey setup",
+    "summary": "You can now delete your Murph account from Settings without first creating a passkey or secure approval wallet.",
+    "details": "Deletion still requires a signed-in session and the exact confirmation phrase. Existing provider cleanup, retry guidance, and post-deletion sign-out remain unchanged.",
+    "relevanceTags": ["accounts", "privacy", "settings"],
+    "sourcePullRequests": [2435]
+  }
+}

@@ -104,3 +104,18 @@ Updated: 2026-08-27
   - Existing deliberate confirmation, failure recovery, export protection, and
     approval protection remain intact.
   - All focused checks and required exact-head gates pass.
+
+## Progress
+
+- Removed `account.delete` from the closed settings sensitive-action union and
+  deleted its client wallet-signature and server verification paths.
+- Preserved authenticated session resolution, browser mutation-origin
+  admission, exact typed confirmation, cleanup ordering, retry guidance, and
+  session invalidation.
+- Focused pre-fix proof ran 47 tests with the expected seven deletion-path
+  failures; after implementation, the focused suite passes 46 tests.
+- Web typecheck passes after the implementation and changelog fragment.
+- Changelog archive proof passes 9 tests after its generated registry is
+  prepared.
+- Draft PR #2435 is open; preliminary specialist review, final ReviewGPT, exact
+  PR CI, Product UX walkthrough, parent final review, and plan closure remain.
