@@ -52,6 +52,7 @@ import {
 } from "../src/hosted-runtime/mailbox-routing.ts";
 import {
   createHostedAssistantInputSource,
+  selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
   compactHostedPendingAssistantInputIds,
@@ -598,12 +599,16 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test("keeps audio attachment admission deferred when projection requests a parser retry", async () => {
+  test("admits an audio attachment exactly once after its parser retry settles", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-audio-parser-retry-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
-    const item = createResolvedConversationMailboxItem();
+    const item = createResolvedConversationMailboxItem({
+      createdAt: "2026-08-26T12:00:00.000Z",
+      occurredAt: "2026-08-26T12:00:00.000Z",
+    });
     const decodedWake = createConversationWake({
+      occurredAt: "2026-08-26T12:00:00.000Z",
       message: {
         channel: "linq",
         linqMessage: {
@@ -626,10 +631,24 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "redacted-contact-sentinel",
       },
     });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
     let notificationCount = 0;
+    let projectionAttempt = 0;
     const controller = createAssistantActiveTurnInputController({
       admissionHook: async () => {
         notificationCount += 1;
+        assert.equal(
+          (await readHostedPendingAssistantInputIds({ vaultRoot })).length,
+          1,
+        );
         return {
           kind: "no-new-input",
         };
@@ -641,14 +660,17 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     try {
-      const outcome = await importHostedConversationMailboxItem({
+      const importItem = () => importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
         async importConversationWake() {
+          projectionAttempt += 1;
           return {
             captureId: "cap_audio_parser_retry",
             metrics: {
-              nextWakeAt: "2026-08-21T09:15:00.000Z",
-              parserProcessed: 0,
+              nextWakeAt: projectionAttempt === 1
+                ? "2026-08-21T09:15:00.000Z"
+                : null,
+              parserProcessed: projectionAttempt === 1 ? 0 : 1,
             },
           };
         },
@@ -665,10 +687,14 @@ describe("hosted mailbox conversation import adapter", () => {
                 kind: "audio",
                 mime: "audio/mp4",
                 ordinal: 1,
-                parseState: "pending",
-                sha256: null,
-                storedPath: null,
-                transcriptText: null,
+                parseState: projectionAttempt === 1 ? "pending" : "succeeded",
+                sha256: projectionAttempt === 1 ? null : "d".repeat(64),
+                storedPath: projectionAttempt === 1
+                  ? null
+                  : "raw/inbox/linq/cap_audio_parser_retry/attachments/01__voice.m4a",
+                transcriptText: projectionAttempt === 1
+                  ? null
+                  : "Synthetic settled voice memo transcript.",
               },
             ],
           };
@@ -678,6 +704,7 @@ describe("hosted mailbox conversation import adapter", () => {
         runtime: createRuntime(),
         vaultRoot,
       });
+      const outcome = await importItem();
 
       assert.deepEqual(outcome, {
         reasonCode: "conversation-import.parser-retry",
@@ -686,8 +713,40 @@ describe("hosted mailbox conversation import adapter", () => {
       });
       assert.equal(notificationCount, 0);
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
-      assert.equal(listed.events[0]?.projection.status, "succeeded");
-      assert.equal(listed.events[0]?.attachmentEvidence.status, "partial");
+      assert.equal(listed.events[0]?.projection.status, "pending");
+      assert.equal(listed.events[0]?.attachmentEvidence.status, "not_attempted");
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.deepEqual(
+        (await selectHostedAssistantInputIds({
+          mode: "background",
+          vaultRoot,
+        })).inputIds,
+        [],
+      );
+
+      const replay = await importItem();
+      assert.equal(replay.status, "imported");
+      if (replay.status !== "imported") {
+        throw new Error("Expected settled audio replay to import.");
+      }
+      assert.equal(notificationCount, 1);
+      assert.deepEqual(
+        await readHostedPendingAssistantInputIds({ vaultRoot }),
+        [replay.assistantInputId],
+      );
+      assert.deepEqual(
+        (await selectHostedAssistantInputIds({
+          mode: "background",
+          vaultRoot,
+        })).inputIds,
+        [replay.assistantInputId],
+      );
+      const replayed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(replayed.events[0]?.attachmentEvidence.status, "available");
+      assert.equal(
+        replayed.events[0]?.attachmentEvidence.attachments[0]?.inlineFragments[0]?.text,
+        "Synthetic settled voice memo transcript.",
+      );
     } finally {
       controller.close();
     }
@@ -1210,6 +1269,7 @@ describe("hosted mailbox conversation import adapter", () => {
           },
         }),
         stageAssistantInputEvent: async () => ({
+          async enqueuePendingReply() {},
           inputId: "input_import_timing",
           async recordProjection() {},
         }),
@@ -1452,6 +1512,7 @@ describe("hosted mailbox conversation import adapter", () => {
             }],
           );
           return {
+            async enqueuePendingReply() {},
             inputId: "input_linq_admission",
             async recordProjection() {},
           };
@@ -1955,6 +2016,7 @@ describe("hosted mailbox conversation import adapter", () => {
             }],
           );
           return {
+            async enqueuePendingReply() {},
             inputId: "input_email_admission",
             async recordProjection() {},
           };
@@ -2723,13 +2785,7 @@ describe("hosted mailbox conversation import adapter", () => {
       retryable: true,
       status: "blocked",
     });
-    assert.deepEqual(projectionUpdates, [
-      {
-        captureId: "cap_parser_retry_projection",
-        reasonCode: null,
-        status: "succeeded",
-      },
-    ]);
+    assert.deepEqual(projectionUpdates, []);
   });
 
   test("records inbox runtime unavailable as a specific projection and evidence reason", async () => {
@@ -3701,6 +3757,7 @@ describe("hosted mailbox conversation import adapter", () => {
         stageAssistantInputEvent: async () => {
           stageCalls += 1;
           return {
+            async enqueuePendingReply() {},
             inputId: "ain_00000000000000000000000000000000",
             async recordProjection() {},
           };
@@ -3854,7 +3911,11 @@ describe("hosted mailbox conversation import adapter", () => {
       runtime: createRuntime(),
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
+        async enqueuePendingReply() {},
         inputId: "ain_00000000000000000000000000000000",
+        async recordAttachmentEvidence() {
+          return true;
+        },
         async recordProjection() {
           throw new Error("projection update unavailable");
         },
@@ -3868,7 +3929,8 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(outcome.reasonCode, "conversation-import.projection-update-failed");
   });
 
-  test("returns partial post-checkpoint result when attachment evidence update fails", async () => {
+  test("keeps mailbox retryable when attachment evidence update fails", async () => {
+    let enqueueCount = 0;
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(createConversationWake()),
       async importConversationWake() {
@@ -3891,6 +3953,9 @@ describe("hosted mailbox conversation import adapter", () => {
       runtime: createRuntime(),
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
+        async enqueuePendingReply() {
+          enqueueCount += 1;
+        },
         inputId: "ain_00000000000000000000000000000000",
         async recordAttachmentEvidence() {
           throw new Error("attachment evidence update unavailable");
@@ -3899,11 +3964,12 @@ describe("hosted mailbox conversation import adapter", () => {
       }),
       vaultRoot: "synthetic-vault-root",
     });
-    if (outcome.status !== "imported") {
-      throw new Error("Expected imported mailbox outcome.");
-    }
-
-    assert.equal(outcome.reasonCode, "conversation-import.attachment-evidence-update-failed");
+    assert.deepEqual(outcome, {
+      reasonCode: "conversation-import.attachment-evidence-update-failed",
+      retryable: true,
+      status: "blocked",
+    });
+    assert.equal(enqueueCount, 0);
   });
 
   test("does not record Linq provider cleanup during mailbox import", async () => {
@@ -4127,47 +4193,44 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(projectionUpdates.length, 0);
   });
 
-  test("keeps staged mailbox input imported when projection is aborted", async () => {
+  test("rethrows a staged mailbox projection abort without recording terminal failure", async () => {
     const abortReason = new DOMException("Stopped", "AbortError");
     const controller = new AbortController();
     const projectionUpdates: unknown[] = [];
     const order: string[] = [];
 
-    const outcome = await importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
-      async importConversationWake(input) {
-        order.push("import");
-        assert.equal(input.signal, controller.signal);
-        controller.abort(abortReason);
-        throw abortReason;
-      },
-      async prepareWakeContext(input) {
-        order.push("prepare");
-        assert.equal(input.wake.eventId, "evt_synthetic_conversation_001");
-      },
-      item: createResolvedConversationMailboxItem(),
-      runtime: createRuntime(),
-      signal: controller.signal,
-      stageAssistantInputEvent: createAssistantInputEventStager({
-        order,
-        projectionUpdates,
+    await assert.rejects(
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+        async importConversationWake(input) {
+          order.push("import");
+          assert.equal(input.signal, controller.signal);
+          controller.abort(abortReason);
+          throw abortReason;
+        },
+        async prepareWakeContext(input) {
+          order.push("prepare");
+          assert.equal(input.wake.eventId, "evt_synthetic_conversation_001");
+        },
+        item: createResolvedConversationMailboxItem(),
+        runtime: createRuntime(),
+        signal: controller.signal,
+        stageAssistantInputEvent: createAssistantInputEventStager({
+          attachmentDescriptorCount: 1,
+          order,
+          projectionUpdates,
+        }),
+        vaultRoot: "synthetic-vault-root",
       }),
-      vaultRoot: "synthetic-vault-root",
-    });
+      (error) => error === abortReason,
+    );
 
     assert.deepEqual(order, [
       "stage:evt_synthetic_conversation_001",
       "prepare",
       "import",
-      "projection:failed",
     ]);
-    assert.equal(outcome.status, "imported");
-    assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
-    assert.deepEqual(projectionUpdates, [{
-      captureId: null,
-      reasonCode: "conversation-import.projection-failed",
-      status: "failed",
-    }]);
+    assert.deepEqual(projectionUpdates, []);
   });
 
   test("keeps staged mailbox input imported when projection preparation fails", async () => {
@@ -5021,6 +5084,7 @@ function createDecodedPayloadDecoder(
 }
 
 function createAssistantInputEventStager(input: {
+  attachmentDescriptorCount?: number;
   order?: string[];
   projectionUpdates?: unknown[];
 } = {}) {
@@ -5029,6 +5093,10 @@ function createAssistantInputEventStager(input: {
   }) => {
     input.order?.push(`stage:${stageInput.wake.eventId}`);
     return {
+      ...(input.attachmentDescriptorCount === undefined
+        ? {}
+        : { attachmentDescriptorCount: input.attachmentDescriptorCount }),
+      async enqueuePendingReply() {},
       inputId: "ain_00000000000000000000000000000000",
       async recordProjection(projection: unknown) {
         const status = typeof projection === "object" && projection !== null && "status" in projection

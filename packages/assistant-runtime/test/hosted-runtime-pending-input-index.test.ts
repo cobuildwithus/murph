@@ -10,6 +10,7 @@ import {
   readHostedMailboxAssistantInputItemDetails,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
+  type AssistantInputAttachmentEvidenceItem,
 } from "@murphai/assistant-engine";
 import {
   createAssistantOutboxIntent,
@@ -41,6 +42,7 @@ import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   inspectHostedPendingAssistantInputWakeCandidate,
+  isHostedAssistantInputAttachmentEvidenceSettled,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantImageCompletionHintPath,
@@ -68,6 +70,39 @@ afterEach(async () => {
 });
 
 describe("hosted pending assistant input index", () => {
+  it("admits attachment evidence only after parser work settles", () => {
+    const attachment: AssistantInputAttachmentEvidenceItem = {
+      byteSize: 128,
+      derived: null,
+      descriptorAttachmentId: "descriptor_voice_1",
+      fileName: "voice-note.m4a",
+      inlineFragments: [],
+      kind: "audio",
+      mime: "audio/mp4",
+      ordinal: 1,
+      parseState: "pending",
+      raw: null,
+      sourceAttachmentId: "attachment_voice_1",
+    };
+
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [attachment],
+      status: "available",
+    })).toBe(false);
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [{ ...attachment, parseState: "running" }],
+      status: "partial",
+    })).toBe(false);
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [{ ...attachment, parseState: "succeeded" }],
+      status: "available",
+    })).toBe(true);
+    expect(isHostedAssistantInputAttachmentEvidenceSettled({
+      attachments: [],
+      status: "failed",
+    })).toBe(true);
+  });
+
   it("rotates bounded exact handled-item batches without starving the tail", () => {
     const candidates = Array.from({ length: 258 }, (_, index) => ({
       inputId: `input-${index + 1}`,

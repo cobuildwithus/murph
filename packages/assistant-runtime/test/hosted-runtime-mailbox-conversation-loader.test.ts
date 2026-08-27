@@ -181,6 +181,7 @@ function createAssistantInputEventStager(): NonNullable<
   MailboxConversationImportInput["stageAssistantInputEvent"]
 > {
   return async () => ({
+    async enqueuePendingReply() {},
     inputId: "ain_00000000000000000000000000000000",
     async recordProjection() {},
   });
