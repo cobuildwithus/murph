@@ -1142,11 +1142,14 @@ existing retention sweep, and terminal convergence deletes the receipt.
 Account deletion first locks and suspends the owner plus every owned thread
 container, and every relationship writer that can add a runtime, Stripe, Family,
 or Privy target shares that member lock and rejects suspended owners. The final
-deletion transaction locks the same owner first and rejects any target-set
-change before persisting the receipt or deleting local rows. A searchable,
-non-reversible Privy lookup key on an incomplete receipt blocks identity
-re-creation and lets retries prove that a newly bound identity cannot be
-deleted.
+deletion transaction locks its exact sorted hosted-group set before Family and
+deletion-member rows, then rejects any target-set change before persisting the
+receipt or deleting local rows. Group-offer acceptance uses that same
+group-before-member order; a Telegram tap revalidates its mutable actor binding
+after those canonical locks and before accepted side effects or commit, so a
+concurrent relink rolls the grant back atomically. A searchable, non-reversible
+Privy lookup key on an incomplete receipt blocks identity re-creation and lets
+retries prove that a newly bound identity cannot be deleted.
 
 Immediate provider attempts share one five-second abortable deadline. Retention
 attempts share one fifteen-second abortable deadline, use bounded four-receipt

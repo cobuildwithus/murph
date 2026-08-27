@@ -5,6 +5,7 @@ import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/cli
 import { describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
+  answerHostedTelegramCallbackQueryBestEffort: vi.fn(),
   createHostedLinqChat: vi.fn(),
   getHostedLinqChatSummary: vi.fn().mockResolvedValue({
     handles: [],
@@ -12,6 +13,17 @@ const providerMocks = vi.hoisted(() => ({
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-client", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/telegram-client")
+  >("@/src/lib/hosted-onboarding/telegram-client");
+  return {
+    ...actual,
+    answerHostedTelegramCallbackQueryBestEffort:
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort,
+  };
+});
 const accountDeletionMocks = vi.hoisted(() => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx:
     vi.fn().mockResolvedValue(undefined),
@@ -228,6 +240,9 @@ import {
   readHostedGroupJoinOfferTargetTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
+  handleHostedTelegramGroupOfferCallback,
+} from "@/src/lib/hosted-groups/telegram-offer-callback";
+import {
   HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
   HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
   acquireHostedGroupJoinOutreachDrainLockTx,
@@ -242,6 +257,8 @@ import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
+  createHostedTelegramMessageLookupKey,
+  createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
@@ -272,7 +289,12 @@ import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/lin
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
   buildHostedMemberIdentityPrivateColumns,
+  buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HOSTED_TELEGRAM_GROUP_JOIN_CALLBACK_DATA,
+} from "@/src/lib/hosted-onboarding/telegram-client";
 import {
   acquireHostedLinqParticipantPhoneLockTx,
   createHostedLinqParticipantContact,
@@ -300,6 +322,7 @@ import {
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { sha256Hex } from "@/src/lib/primitives";
+import { buildTelegramThreadId } from "@murphai/messaging-ingress/telegram-webhook";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
@@ -2791,6 +2814,278 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("serializes a Telegram group-offer tap before account deletion without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const deletionApplicationName = `delete_after_tg_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        deletionApplicationName,
+      });
+      const callbackGroupLockBarrier = createSqlLockBarrier();
+      let memberLockCount = 0;
+      const callbackPrisma = withPrismaTransactionSqlLockBarrier({
+        barrier: callbackGroupLockBarrier,
+        matches: (sql) => {
+          if (!isHostedMemberRowLockQuery(sql)) {
+            return false;
+          }
+          memberLockCount += 1;
+          return memberLockCount === 2;
+        },
+        prisma: fixture.replyPrisma,
+      });
+      let callbackPromise: ReturnType<typeof handleHostedTelegramGroupOfferCallback> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+      let telegramFixture: TelegramDeletionOfferRaceFixture | null = null;
+
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+      clearHostedOnboardingEnvCache();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort
+        .mockReset()
+        .mockResolvedValue(undefined);
+
+      try {
+        telegramFixture = await prepareTelegramDeletionOfferRaceFixture(fixture);
+        const preparedTelegramFixture = telegramFixture;
+        callbackPromise = handleHostedTelegramGroupOfferCallback({
+          callbackQuery: preparedTelegramFixture.callbackQuery,
+          prisma: callbackPrisma,
+          scheduleAfterResponse: () => undefined,
+        });
+        await withTimeout(callbackGroupLockBarrier.locked, 5_000);
+
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: deletionApplicationName,
+          observer: fixture.replyPrisma,
+        });
+
+        callbackGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([callbackPromise, deletionPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0]).toEqual({
+          status: "fulfilled",
+          value: {
+            handled: true,
+            reason: "accepted-telegram-group-join",
+          },
+        });
+        expect(settled[1].status).toBe("fulfilled");
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        callbackGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(callbackPromise ? [callbackPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        if (telegramFixture) {
+          await cleanupTelegramDeletionOfferRaceFixture({
+            fixture,
+            telegramFixture,
+          });
+        }
+        providerMocks.answerHostedTelegramCallbackQueryBestEffort.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("serializes account deletion before a Telegram group-offer tap without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const callbackApplicationName = `tg_after_delete_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        replyApplicationName: callbackApplicationName,
+      });
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      let callbackPromise: ReturnType<typeof handleHostedTelegramGroupOfferCallback> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+      let telegramFixture: TelegramDeletionOfferRaceFixture | null = null;
+
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+      clearHostedOnboardingEnvCache();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort
+        .mockReset()
+        .mockResolvedValue(undefined);
+
+      try {
+        telegramFixture = await prepareTelegramDeletionOfferRaceFixture(fixture);
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+
+        callbackPromise = handleHostedTelegramGroupOfferCallback({
+          callbackQuery: telegramFixture.callbackQuery,
+          prisma: fixture.replyPrisma,
+          scheduleAfterResponse: () => undefined,
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: callbackApplicationName,
+          observer: fixture.deletionPrisma,
+        });
+
+        deletionGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([deletionPromise, callbackPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0].status).toBe("fulfilled");
+        expect(settled[1]).toEqual({
+          status: "fulfilled",
+          value: {
+            handled: false,
+            reason: "skipped-telegram-group-offer:offer_revoked",
+          },
+        });
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(deletionPromise ? [deletionPromise] : []),
+          ...(callbackPromise ? [callbackPromise] : []),
+        ]);
+        if (telegramFixture) {
+          await cleanupTelegramDeletionOfferRaceFixture({
+            fixture,
+            telegramFixture,
+          });
+        }
+        providerMocks.answerHostedTelegramCallbackQueryBestEffort.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("rolls back a Telegram offer grant when the binding relinks before its locked recheck", async () => {
+      const fixture = await createDeletionReplyRaceFixture();
+      const callbackGroupLockBarrier = createSqlLockBarrier();
+      const callbackPrisma = withPrismaTransactionSqlLockBarrier({
+        barrier: callbackGroupLockBarrier,
+        matches: isHostedGroupRowLockQuery,
+        prisma: fixture.replyPrisma,
+      });
+      let callbackPromise: ReturnType<typeof handleHostedTelegramGroupOfferCallback> | null = null;
+      let telegramFixture: TelegramDeletionOfferRaceFixture | null = null;
+
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+      clearHostedOnboardingEnvCache();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort
+        .mockReset()
+        .mockResolvedValue(undefined);
+
+      try {
+        telegramFixture = await prepareTelegramDeletionOfferRaceFixture(fixture);
+        const preparedTelegramFixture = telegramFixture;
+        callbackPromise = handleHostedTelegramGroupOfferCallback({
+          callbackQuery: preparedTelegramFixture.callbackQuery,
+          prisma: callbackPrisma,
+          scheduleAfterResponse: () => undefined,
+        });
+        await withTimeout(callbackGroupLockBarrier.locked, 5_000);
+
+        const replacementPrivateColumns =
+          await buildHostedMemberRoutingPrivateColumns({
+            linqChatId: null,
+            linqRecipientPhone: null,
+            memberId: preparedTelegramFixture.replacementMemberId,
+            pendingLinqChatId: null,
+            pendingLinqRecipientPhone: null,
+            prisma: fixture.deletionPrisma,
+            telegramThreadId: null,
+            telegramUserId: preparedTelegramFixture.telegramUserId,
+          });
+        await fixture.deletionPrisma.$transaction(async (tx) => {
+          for (const memberId of [
+            fixture.participantMemberId,
+            preparedTelegramFixture.replacementMemberId,
+          ].sort()) {
+            await lockHostedMemberRow(tx, memberId);
+          }
+          await tx.hostedMemberRouting.update({
+            data: {
+              telegramUserIdEncrypted: null,
+              telegramUserLookupKey: null,
+            },
+            where: { memberId: fixture.participantMemberId },
+          });
+          await tx.hostedMemberRouting.create({
+            data: {
+              ...replacementPrivateColumns,
+              memberId: preparedTelegramFixture.replacementMemberId,
+              telegramUserLookupKey:
+                preparedTelegramFixture.telegramUserLookupKey,
+            },
+          });
+        });
+
+        callbackGroupLockBarrier.release();
+        await expect(withTimeout(callbackPromise, 10_000)).resolves.toEqual({
+          handled: false,
+          reason: "skipped-telegram-group-offer:no_offer_match",
+        });
+        await expect(fixture.deletionPrisma.hostedGroupMember.findUnique({
+          select: { id: true },
+          where: {
+            groupId_memberId: {
+              groupId: fixture.groupId,
+              memberId: fixture.participantMemberId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.deletionPrisma.hostedMemberRouting.findUnique({
+          select: { telegramUserLookupKey: true },
+          where: { memberId: preparedTelegramFixture.replacementMemberId },
+        })).resolves.toEqual({
+          telegramUserLookupKey: preparedTelegramFixture.telegramUserLookupKey,
+        });
+      } finally {
+        callbackGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(callbackPromise ? [callbackPromise] : []),
+        ]);
+        if (telegramFixture) {
+          await cleanupTelegramDeletionOfferRaceFixture({
+            fixture,
+            telegramFixture,
+          });
+        }
+        providerMocks.answerHostedTelegramCallbackQueryBestEffort.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
     it("revalidates the exact deletion group set before destructive database deletion", async () => {
       const fixture = await createDeletionReplyRaceFixture();
       const deletionGroupLockBarrier = createSqlLockBarrier();
@@ -4553,6 +4848,16 @@ type DeletionReplyRaceFixture = {
   runtimeMemberId: string;
 };
 
+type TelegramDeletionOfferRaceFixture = {
+  accountGroupId: string;
+  callbackQuery: Parameters<
+    typeof handleHostedTelegramGroupOfferCallback
+  >[0]["callbackQuery"];
+  replacementMemberId: string;
+  telegramUserId: string;
+  telegramUserLookupKey: string;
+};
+
 function makePreparedDeletionCleanup(input: {
   now: Date;
   runtimeMemberIds: readonly string[];
@@ -4733,6 +5038,145 @@ async function createDeletionReplyRaceFixture(input: {
     replyPrisma,
     runtimeMemberId,
   };
+}
+
+async function prepareTelegramDeletionOfferRaceFixture(
+  fixture: DeletionReplyRaceFixture,
+): Promise<TelegramDeletionOfferRaceFixture> {
+  const suffix = randomUUID().replaceAll("-", "");
+  const accountGroupId = `hag_tg_delete_${suffix}`;
+  const replacementMemberId = `hbm_tg_relinked_${suffix}`;
+  const telegramOfferId = `hgrpjo_tg_delete_${suffix}`;
+  const telegramUserId = String(randomInt(1_000_000, 9_000_000));
+  const telegramChatId = -randomInt(1_000_000_000, 2_000_000_000);
+  const telegramMessageId = randomInt(1_000_000, 9_000_000);
+  const message = {
+    chat: { id: telegramChatId, type: "supergroup" },
+    message_id: telegramMessageId,
+  } as const;
+  const telegramThreadId = buildTelegramThreadId(message);
+  const messageLookupKey = createHostedTelegramMessageLookupKey({
+    chatId: telegramChatId,
+    messageId: telegramMessageId,
+  });
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: "telegram",
+    threadId: telegramThreadId,
+  });
+  const telegramUserLookupKey =
+    createHostedTelegramUserLookupKey(telegramUserId);
+  if (
+    !messageLookupKey
+    || !threadIdentityLookupKey
+    || !telegramUserLookupKey
+  ) {
+    throw new Error("Expected Telegram deletion-race lookup keys.");
+  }
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: fixture.participantMemberId,
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    prisma: fixture.deletionPrisma,
+    telegramThreadId: null,
+    telegramUserId,
+  });
+
+  await fixture.deletionPrisma.$transaction(async (tx) => {
+    await tx.hostedMember.create({
+      data: {
+        billingStatus: HostedBillingStatus.active,
+        id: replacementMemberId,
+      },
+    });
+    await tx.hostedAccountGroup.create({
+      data: {
+        billingStatus: HostedBillingStatus.active,
+        id: accountGroupId,
+        ownerMemberId: fixture.participantMemberId,
+      },
+    });
+    await tx.hostedAccountGroupMembership.create({
+      data: {
+        groupId: accountGroupId,
+        id: `hagm_tg_delete_${suffix}`,
+        memberId: fixture.ownerMemberId,
+        role: "member",
+        status: "active",
+      },
+    });
+    await tx.hostedConsentGrant.createMany({
+      data: ["launch.legal", "launch.health-data"].map((scope) => ({
+        documentVersionsJson: {},
+        grantedAt: new Date("2026-08-26T12:00:00.000Z"),
+        memberId: fixture.participantMemberId,
+        scope,
+        source: "test",
+        status: "granted",
+      })),
+    });
+    await tx.hostedMemberRouting.create({
+      data: {
+        ...routingPrivateColumns,
+        memberId: fixture.participantMemberId,
+        telegramUserLookupKey,
+      },
+    });
+    await tx.hostedThreadRoute.create({
+      data: {
+        channel: "telegram",
+        containerMemberId: fixture.runtimeMemberId,
+        pendingParticipantAddition: false,
+        threadIdentityLookupKey,
+        threadLookupKey: `tg-delete-thread-${suffix}`,
+      },
+    });
+    await tx.hostedGroupJoinOffer.create({
+      data: {
+        groupId: fixture.groupId,
+        id: telegramOfferId,
+        messageLookupKey,
+        postedAt: new Date("2026-08-26T12:00:00.000Z"),
+        projectionKindsJson: [],
+      },
+    });
+  });
+
+  return {
+    accountGroupId,
+    callbackQuery: {
+      data: HOSTED_TELEGRAM_GROUP_JOIN_CALLBACK_DATA,
+      from: { id: Number(telegramUserId), is_bot: false },
+      id: `tg-delete-callback-${suffix}`,
+      message,
+    },
+    replacementMemberId,
+    telegramUserId,
+    telegramUserLookupKey,
+  };
+}
+
+async function cleanupTelegramDeletionOfferRaceFixture(input: {
+  fixture: DeletionReplyRaceFixture;
+  telegramFixture: TelegramDeletionOfferRaceFixture;
+}): Promise<void> {
+  await input.fixture.deletionPrisma.hostedAccountGroup.deleteMany({
+    where: { id: input.telegramFixture.accountGroupId },
+  });
+  await input.fixture.deletionPrisma.hostedMemberRouting.deleteMany({
+    where: {
+      memberId: {
+        in: [
+          input.fixture.participantMemberId,
+          input.telegramFixture.replacementMemberId,
+        ],
+      },
+    },
+  });
+  await input.fixture.deletionPrisma.hostedMember.deleteMany({
+    where: { id: input.telegramFixture.replacementMemberId },
+  });
 }
 
 async function drainDeletionReplyEffect(input: {
@@ -5144,7 +5588,20 @@ function withAccountDeletionGroupLockBarrier(
   prisma: PrismaClient,
   barrier: SqlLockBarrier,
 ): PrismaClient {
-  return new Proxy(prisma, {
+  return withPrismaTransactionSqlLockBarrier({
+    barrier,
+    matches: (sql) =>
+      sql.includes("hosted-account-deletion-target-group-lock"),
+    prisma,
+  });
+}
+
+function withPrismaTransactionSqlLockBarrier(input: {
+  barrier: SqlLockBarrier;
+  matches: (sql: string) => boolean;
+  prisma: PrismaClient;
+}): PrismaClient {
+  return new Proxy(input.prisma, {
     get(target, property) {
       const value = Reflect.get(target, property, target);
       if (property !== "$transaction" || typeof value !== "function") {
@@ -5160,9 +5617,8 @@ function withAccountDeletionGroupLockBarrier(
         ) => unknown;
         return Reflect.apply(value, target, [
           (tx: Prisma.TransactionClient) => callback(withSqlLockBarrierTx({
-            barrier,
-            matches: (sql) =>
-              sql.includes("hosted-account-deletion-target-group-lock"),
+            barrier: input.barrier,
+            matches: input.matches,
             tx,
           })),
           ...rest,
@@ -5175,6 +5631,12 @@ function withAccountDeletionGroupLockBarrier(
 function isHostedGroupRowLockQuery(sql: string): boolean {
   const normalized = sql.toLowerCase();
   return normalized.includes('from "hosted_group"')
+    && normalized.includes("for update");
+}
+
+function isHostedMemberRowLockQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_member"')
     && normalized.includes("for update");
 }
 

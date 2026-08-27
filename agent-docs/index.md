@@ -520,8 +520,9 @@ only the canonical ENAM binding. The contract is jointly specified by
 
 Terminal hosted account deletion preserves the canonical hosted-group-before-
 member row-lock order, revalidates the exact affected group set before
-destructive erasure, and has both interleavings plus rollback mapped in
-`agent-docs/references/testing-ci-map.md`.
+destructive erasure, and composes with Telegram group-offer affirmation's
+post-lock binding revalidation. Both deletion/affirmation interleavings and
+relink rollback are mapped in `agent-docs/references/testing-ci-map.md`.
 
 Signed hosted runtime crypto callbacks are user-bound, workspace-scoped
 resource authority without duplicate operation admission. Temporal/UserRunner,
