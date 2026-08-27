@@ -2,7 +2,11 @@ import { request as httpRequest } from "node:http";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
+import "../src/container-entrypoint-heavy-runtime.js";
 
 const mocks = vi.hoisted(() => ({
   reportHostedContainerFatalBestEffort: vi.fn(async () => undefined),
@@ -96,6 +100,20 @@ function createDeferred<T = void>() {
     reject,
     resolve,
   };
+}
+
+function createTestHostedWorkspaceRestorePreparer() {
+  return vi.fn(async (): Promise<HostedWorkspaceRestorePreparation> => ({
+    adoptRuntimeAbortGuard: vi.fn(),
+    phaseLogger: {
+      close: vi.fn(),
+      emit: vi.fn(),
+      failOpenPhases: vi.fn(() => []),
+    },
+    promise: new Promise<never>(() => undefined),
+    runtimePhaseStartedAt: "2026-08-27T15:00:00.000Z",
+    vaultRoot: "/tmp/murph-entrypoint-abort-prepared-restore/durable/vault",
+  }));
 }
 
 async function sendHostedContainerGetRequest(input: {
@@ -221,6 +239,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         processApi: { readFile },
       },
     });
@@ -304,6 +323,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         async stopWarmCodex(reason) {
           warmCodexStopStarted.resolve(reason);
           await allowWarmCodexStop.promise;
@@ -422,6 +442,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
       },
     });
     servers.push(server);
@@ -524,6 +545,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
       },
     });
     servers.push(server);
@@ -602,6 +624,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
       },
     });
     servers.push(server);
@@ -680,6 +703,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         stopWarmCodex: async () => {
           throw new Error("exact stop failed");
         },
