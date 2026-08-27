@@ -782,7 +782,7 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
   })
 
-  it('keeps a steered follow-up text-only after an earlier response card', async () => {
+  it('lets the latest steered context replace an earlier response card', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-card-1',
@@ -803,12 +803,11 @@ describe('steered final segments', () => {
       completedItemEvent({
         id: 'user-card-2',
         type: 'user_message',
-        message: 'One more thought',
+        message: 'Send the refreshed nutrition card',
       }),
       {
         card: DAILY_NUTRITION_RESPONSE_CARD,
-        expectedSuccess: false,
-        expectedText: 'response card unavailable for this final response',
+        expectedText: 'response card attached',
         id: 85,
         kind: 'attach-response-card',
       },
@@ -819,10 +818,13 @@ describe('steered final segments', () => {
       }),
     ], { responseCardsAvailable: true })
 
-    expect(result.responseCard).toBeNull()
+    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
     expect(result.responseMedia).toEqual([])
-    expect(result.finalMessage).toBe('Final follow-up answer.')
+    expect(result.finalMessage).toBe(
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
+    )
     expect(result.providerAuthoredFinalMessage).toBe('Final follow-up answer.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.precedingAgentMessageSegments).toEqual([{
       deliveryContextOrdinal: 0,
       media: [],
@@ -1041,8 +1043,23 @@ describe('steered final segments', () => {
     }])
   })
 
-  it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
+  it('renders oversized card recovery for the latest steered context', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-oversized-card-1',
+        type: 'user_message',
+        message: 'Show my workout',
+      }),
+      completedItemEvent({
+        id: 'assistant-oversized-card-1',
+        type: 'assistant_message',
+        message: 'I can show that workout.',
+      }),
+      completedItemEvent({
+        id: 'user-oversized-card-2',
+        type: 'user_message',
+        message: 'Use the full tracked-workout card',
+      }),
       {
         card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
         expectedText:
@@ -1055,6 +1072,7 @@ describe('steered final segments', () => {
     expect(result.responseCard).toBeNull()
     expect(result.responseMedia).toEqual([])
     expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.finalMessage).not.toMatch(/delete|merge|shorten|simplify/iu)
     for (let exerciseIndex = 0; exerciseIndex < 16; exerciseIndex += 1) {
       expect(result.finalMessage).toContain(
