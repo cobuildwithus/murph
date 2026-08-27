@@ -8347,7 +8347,7 @@ text(JSON.stringify(result));
     },
     {
       expectedFinalMessage:
-        'I could not analyze that video because the provider is rate-limited right now. Please try again later.',
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
       expectedToolOutput:
         'Video analysis was rate-limited; no analysis was retrieved',
       geminiStatus: 429,
