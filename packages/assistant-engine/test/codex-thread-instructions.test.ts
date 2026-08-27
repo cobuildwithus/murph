@@ -54,6 +54,18 @@ describe('Codex thread instructions', () => {
       'eager absence is not proof',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'every Murph tool returns a string, never an MCP `{content}` object',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'A resolved call stays complete if later JavaScript handling fails',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      '`Script running with cell ID …` is unfinished',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'before continuing or claiming success',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(

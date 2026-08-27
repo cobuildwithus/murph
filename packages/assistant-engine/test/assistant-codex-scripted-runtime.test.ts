@@ -3774,7 +3774,7 @@ const result = await tools.murph__automation({
   lookup: "evening-reminder",
   schedule: { kind: "dailyLocal", localTime: "22:00" },
 });
-text(JSON.stringify(result));
+text(JSON.stringify({ result, resultType: typeof result }));
 `,
           name: 'exec',
         },
@@ -3834,6 +3834,7 @@ text(JSON.stringify(result));
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
+    expect(toolOutputs).toContain('"resultType":"string"')
     expect(toolOutputs).toContain('America/Chicago')
     expect(toolOutputs).toContain('2026-08-11T03:00:00.000Z')
     expect(result.finalMessage).toBe(

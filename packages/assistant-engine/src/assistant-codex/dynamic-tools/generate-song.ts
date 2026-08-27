@@ -68,8 +68,10 @@ const generateSongArgumentsSchema = z
   .strict()
 
 export interface GenerateSongTurnState {
+  attachmentApplied: boolean
   attemptCount: number
-  policy: AssistantGenerateSongTurnPolicy
+  lastGenerationOutcome: 'failed' | 'succeeded' | null
+  policy: AssistantGenerateSongTurnPolicy | null
 }
 
 export function parseGenerateSongArguments(
@@ -94,23 +96,38 @@ export async function executeGenerateSongDynamicTool(input: {
 }): Promise<DynamicToolResult> {
   const turnState = input.turnState ?? null
   if (turnState) {
-    if (turnState.attemptCount >= turnState.policy.maxAttempts) {
+    if (turnState.lastGenerationOutcome === 'succeeded') {
+      return wrapVoiceMemoToolResult({
+        rpcSuccess: turnState.attachmentApplied,
+        rpcText: turnState.attachmentApplied
+          ? 'song generation already succeeded in this turn; use the existing attached song and do not call again'
+          : 'song generation already completed in this turn, but its attachment is unavailable; do not call again',
+      })
+    }
+    const maxAttempts = turnState.policy?.maxAttempts ?? 1
+    if (turnState.attemptCount >= maxAttempts) {
       return wrapVoiceMemoToolResult({
         rpcSuccess: false,
         rpcText:
-          'song generation attempt limit reached for this turn; no song ran',
+          turnState.lastGenerationOutcome === 'failed'
+            ? 'song generation already failed in this turn; do not retry'
+            : 'song generation attempt limit reached for this turn; no song ran',
       })
     }
     turnState.attemptCount += 1
   }
 
-  return wrapVoiceMemoToolResult(
+  const result = wrapVoiceMemoToolResult(
     await executeGenerateSongTool({
       abortSignal: input.abortSignal ?? null,
       args: turnState
         ? {
             ...input.args,
-            durationSeconds: turnState.policy.requiredDurationSeconds,
+            ...(turnState.policy
+              ? {
+                  durationSeconds: turnState.policy.requiredDurationSeconds,
+                }
+              : {}),
           }
         : input.args,
       currentResponseMedia: input.currentResponseMedia ?? [],
@@ -118,4 +135,10 @@ export async function executeGenerateSongDynamicTool(input: {
       runtime: input.voiceMemoRuntime ?? null,
     }),
   )
+  if (turnState) {
+    turnState.lastGenerationOutcome = result.rpcResult.success
+      ? 'succeeded'
+      : 'failed'
+  }
+  return result
 }

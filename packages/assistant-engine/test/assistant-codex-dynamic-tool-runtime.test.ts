@@ -15,6 +15,7 @@ const codexMocks = vi.hoisted(() => ({
     voiceMemoRuntime: unknown
   }>,
   executionOrder: [] as string[],
+  generatedSongMediaCount: null as number | null,
   onDynamicToolCall: null as null | ((input: {
     kind: string
     styleValue: number | null
@@ -62,6 +63,40 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
               ? input.request.args.value
               : null,
         })
+        if (
+          input.request.kind === 'generate-song' &&
+          codexMocks.generatedSongMediaCount !== null
+        ) {
+          if (input.generateSongTurnState) {
+            input.generateSongTurnState.attemptCount += 1
+            input.generateSongTurnState.lastGenerationOutcome = 'succeeded'
+          }
+          return {
+            responseMediaPatch: {
+              media: Array.from(
+                { length: codexMocks.generatedSongMediaCount },
+                (_, index) => ({
+                  filename: `generated-song-${index}.mp3`,
+                  kind: 'voice_memo' as const,
+                  transcript: null,
+                  transport: {
+                    attachmentId: `generated-song-attachment-${index}`,
+                    kind: 'linq_attachment' as const,
+                  },
+                }),
+              ),
+              op: 'append' as const,
+            },
+            rpcResult: {
+              success: true,
+              contentItems: [{
+                type: 'inputText',
+                text: 'song generated and attached as a voice memo',
+              }],
+            },
+            usageDraft: null,
+          }
+        }
         return {
           ...(input.request.kind === 'finish-without-reply'
             ? {
@@ -131,6 +166,7 @@ afterEach(async () => {
   await stopWarmCodexAppServer('dynamic-tool-runtime-test-cleanup')
   codexMocks.dynamicToolCalls.splice(0)
   codexMocks.executionOrder.splice(0)
+  codexMocks.generatedSongMediaCount = null
   codexMocks.onDynamicToolCall = null
   codexMocks.spawn.mockReset()
   vi.restoreAllMocks()
@@ -346,7 +382,9 @@ describe('Codex dynamic tool runtime routing', () => {
       {
         deliveryContextOrdinal: 0,
         generateSongTurnState: {
+          attachmentApplied: false,
           attemptCount: 0,
+          lastGenerationOutcome: null,
           policy: {
             maxAttempts: 1,
             requiredDurationSeconds: 15,
@@ -377,6 +415,88 @@ describe('Codex dynamic tool runtime routing', () => {
       'checkpoint',
       'tool:assistant-style',
     ])
+  })
+
+  it.each([
+    {
+      expectedAttachmentApplied: true,
+      expectedResponseMediaCount: 1,
+      generatedSongMediaCount: 1,
+      label: 'applies valid song media',
+    },
+    {
+      expectedAttachmentApplied: false,
+      expectedResponseMediaCount: 0,
+      generatedSongMediaCount: 9,
+      label: 'does not claim attachment success when media application fails',
+    },
+  ])('$label on an ordinary no-policy turn', async ({
+    expectedAttachmentApplied,
+    expectedResponseMediaCount,
+    generatedSongMediaCount,
+  }) => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-ordinary-song-runtime-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-ordinary-song-runtime-home-',
+    )
+    const voiceMemoRuntime: VoiceMemoToolRuntime = {
+      elevenLabs: {
+        apiKeyAvailable: true,
+        modelId: 'eleven_multilingual_v2',
+        voiceId: 'voice_murph',
+      },
+      kind: 'telegram',
+    }
+    codexMocks.generatedSongMediaCount = generatedSongMediaCount
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedDynamicToolTurn(child)
+      })
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable: true,
+        progressUpdatesAvailable: true,
+        voiceMemoGenerationAvailable: true,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        }),
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Use four tools.',
+      sandbox: 'workspace-write',
+      voiceMemoRuntime,
+      workingDirectory,
+    })
+
+    expect(result.responseMedia).toHaveLength(expectedResponseMediaCount)
+    expect(
+      codexMocks.dynamicToolCalls.find((call) => call.kind === 'generate-song'),
+    ).toMatchObject({
+      generateSongTurnState: {
+        attachmentApplied: expectedAttachmentApplied,
+        attemptCount: 1,
+        lastGenerationOutcome: 'succeeded',
+        policy: null,
+      },
+    })
   })
 
   it('starts overlapping nonserialized tool preflights at the captured ordinal', async () => {

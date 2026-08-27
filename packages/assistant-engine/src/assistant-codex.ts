@@ -90,6 +90,9 @@ import type {
   VoiceMemoPhaseTiming,
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
+import type {
+  GenerateSongTurnState,
+} from './assistant-codex/dynamic-tools/generate-song.js'
 import {
   createAskGrokTurnState,
   type AskGrokToolRuntime,
@@ -3352,10 +3355,13 @@ async function runCodexAppServerTurnOnProcess(
       ? { ...input.automationRelativeDateReferenceWindow }
       : null,
   ]
-  const generateSongTurnState = input.generateSongPolicy
+  const generateSongTurnState: GenerateSongTurnState | null =
+    offeredDynamicToolKeys.has('murph.generate_song')
     ? {
+        attachmentApplied: false,
         attemptCount: 0,
-        policy: input.generateSongPolicy,
+        lastGenerationOutcome: null,
+        policy: input.generateSongPolicy ?? null,
       }
     : null
   const subagentTokenUsageByTurn =
@@ -4981,6 +4987,12 @@ async function runCodexAppServerTurnOnProcess(
             result.responseMediaPatch,
             dynamicToolRequestDeliveryContextOrdinal,
           )
+          if (
+            dynamicToolRequest.kind === 'generate-song' &&
+            generateSongTurnState?.lastGenerationOutcome === 'succeeded'
+          ) {
+            generateSongTurnState.attachmentApplied = true
+          }
         } catch (error) {
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'

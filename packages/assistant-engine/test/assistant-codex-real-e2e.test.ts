@@ -2481,7 +2481,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               channel: 'telegram' as const,
             }),
             exerciseGuidance,
-            'Test harness tool result contract: when calling a Murph tool inside functions.exec, pass its returned value directly to text(). Do not read a content property from the result.',
           ].join('\n\n'),
           env: {
             ...config.env,
@@ -4956,6 +4955,9 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
               }])
               expect(result.finalMessage).toMatch(/10|ten/iu)
               expect(result.finalMessage).toMatch(/day|wait|check-in/iu)
+              expect(result.finalMessage).not.toMatch(
+                /could(?: not|n't) confirm|unable to confirm|failed to save|try again/iu,
+              )
             } else if (probe.kind === 'stop-checking') {
               expect(configureActions).toHaveLength(1)
               expect(configureActions[0]).toMatchObject({
@@ -4971,6 +4973,9 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                 sourceProvider: 'garmin',
               }])
               expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
+              expect(result.finalMessage).not.toMatch(
+                /could(?: not|n't) confirm|unable to confirm|failed to save|try again/iu,
+              )
             } else if (probe.kind === 'group-preference') {
               expect(deviceRequests, probe.kind).toHaveLength(0)
               expect(result.finalMessage).toMatch(/direct|private|message me/iu)
@@ -5983,7 +5988,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
 
 describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
   it(
-    'maps explicit transcript facts without persisting an exact address or following injected instructions',
+    'waits for yielded saves and maps facts without persisting an exact address or following injected instructions',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5991,7 +5996,6 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
       )
 
       try {
-        const binDirectory = path.join(workingDirectory, 'bin')
         const vaultRoot = path.join(workingDirectory, 'vault')
         const commandLogPath = path.join(
           workingDirectory,
@@ -6004,7 +6008,11 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
           recordedAt: '2026-07-30',
           vaultRoot,
         })
-        await materializeHabitatVoiceVaultCli({ binDirectory })
+        await materializeHabitatVoiceVaultCli({
+          commandLogPath,
+          executableDirectory: vaultRoot,
+          vaultRoot,
+        })
 
         const transcript = [
           'I live in Lisbon, at 123 Main Street, apartment 4B, postal code 1200-001.',
@@ -6020,22 +6028,16 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions:
+          developerInstructions: [
             buildAssistantMaintenanceSystemPromptWithCacheMetadata({
               currentLocalDate: '2026-07-30',
               currentTimeZone: 'Europe/Warsaw',
               profile: 'habitat-voice',
             }).prompt,
+            'For this isolated workspace, invoke the vault CLI as `./vault-cli`.',
+          ].join('\n\n'),
           dynamicTools: [],
-          env: {
-            ...config.env,
-            HABITAT_E2E_CLI_ENTRYPOINT:
-              HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-            HABITAT_E2E_COMMAND_LOG: commandLogPath,
-            HABITAT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
-            HABITAT_E2E_VAULT: vaultRoot,
-            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-          },
+          env: config.env,
           excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -13607,19 +13609,21 @@ async function materializePhysicalNoteAddressVaultCli(input: {
 }
 
 async function materializeHabitatVoiceVaultCli(input: {
-  binDirectory: string
+  commandLogPath: string
+  executableDirectory: string
+  vaultRoot: string
 }): Promise<void> {
-  await mkdir(input.binDirectory, { recursive: true })
-  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await mkdir(input.executableDirectory, { recursive: true })
+  const executablePath = path.join(input.executableDirectory, 'vault-cli')
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$HABITAT_E2E_COMMAND_LOG" ] || [ -z "$HABITAT_E2E_CLI_ENTRYPOINT" ] || [ -z "$HABITAT_E2E_TSX_BIN" ] || [ -z "$HABITAT_E2E_VAULT" ]; then',
-      '  exit 70',
-      'fi',
-      'printf \'%s\\n\' "$*" >> "$HABITAT_E2E_COMMAND_LOG"',
-      'exec "$HABITAT_E2E_TSX_BIN" "$HABITAT_E2E_CLI_ENTRYPOINT" "$@" --vault "$HABITAT_E2E_VAULT"',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      '  *"habitat save"*) sleep 12 ;;',
+      'esac',
+      `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
     {

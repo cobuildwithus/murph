@@ -418,6 +418,11 @@ defaults to the authenticated local Codex subscription with
 silently replace the existing isolated provider-key mode. Live scenarios print
 only synthetic reply evidence for human UX review; routine CI keeps the live
 gate unset and makes no paid request.
+Dynamic-tool completion coverage additionally proves that real Code Mode sees
+the direct string result and issues one host mutation. The focused upstream
+Codex regression forces an automatic timeout yield, suppresses the premature
+final answer, waits for terminal output, and preserves explicit background
+yields as the positive non-blocking control.
 
 ## Current CI Workflows
 

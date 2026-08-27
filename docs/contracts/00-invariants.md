@@ -57,6 +57,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   authorization, and current-turn identity; stale-output rejection and explicit
   abort; privacy; canonical writes; provider credential and delivery authority;
   and irreversible effects. Warm reuse is an optimization, never authority.
+- Code Mode receives each Murph dynamic-tool result as one direct string. A
+  resolved tool call is authoritative even if later JavaScript rendering fails:
+  recover through canonical readback, never by replaying the completed action.
+  Codex owns yielded cell execution and waiting. Automatic timeout yields block
+  final-answer delivery until the model waits for the cell's terminal result;
+  explicit background yields remain non-blocking. Murph does not parse cell
+  status text, add a shadow scheduler, or replay the action.
 - One Codex App Server belongs to the warm container or Node process and stays
   warm across ordinary turns for that owner's lifetime. Starting or completing
   an ordinary turn, closing an ordinary invocation, rotating
