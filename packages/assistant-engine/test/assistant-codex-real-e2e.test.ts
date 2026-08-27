@@ -1253,6 +1253,7 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
 describeRealCodex('real Codex video-analysis detail e2e', () => {
   it.each([
     {
+      expectedAnswerPattern: /\b(?:yes|more|farther outward)\b/iu,
       expectedFinalPattern: /left elbow|elbow/iu,
       expectedFps: 5,
       expectedSamplingMode: 'detailed_motion' as const,
@@ -1271,6 +1272,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         'selects detailed motion for visible push-up form and answers naturally',
     },
     {
+      expectedAnswerPattern: /\b(?:did not|didn't|didn’t|not)\s+(?:hear|heard)\b/iu,
       expectedFinalPattern: /rabbit|hear|heard/iu,
       expectedFps: 1,
       expectedSamplingMode: null,
@@ -1472,6 +1474,8 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
             providerCallCount: providerBodies.length,
             scenario: scenario.scenarioLabel,
             toolCallCount: videoCalls.length,
+            toolSucceeded: videoCalls[0]?.kind === 'dynamic'
+              && videoCalls[0].success,
           })}\n`,
         )
         expect(videoCalls).toHaveLength(1)
@@ -1479,6 +1483,8 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         if (videoCall?.kind !== 'dynamic') {
           throw new Error('Expected one dynamic video-analysis call.')
         }
+        expect(videoCall.success).toBe(true)
+        expect(videoCall.output).toContain(scenario.providerObservation)
         expect(videoCall).toMatchObject({
           argumentsValue: {
             message_ref: messageRef,
@@ -1511,6 +1517,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         expect(providerBodies[0]).not.toHaveProperty(
           'generationConfig.maxOutputTokens',
         )
+        expect(result.finalMessage).toMatch(scenario.expectedAnswerPattern)
         expect(result.finalMessage).toMatch(scenario.expectedFinalPattern)
         expect(result.finalMessage).not.toMatch(scenario.forbiddenFinalPattern)
       } finally {
@@ -14103,6 +14110,8 @@ type CapabilityRoutingAction =
       argumentsValue: Record<string, unknown>
       eventIndex: number
       kind: 'dynamic'
+      output: string
+      success: boolean
       tool: string
     }
 
@@ -14212,6 +14221,14 @@ function readCapabilityRoutingActions(
         argumentsValue: readArgumentsRecord(item?.arguments),
         eventIndex,
         kind: 'dynamic' as const,
+        output: Array.isArray(item?.contentItems)
+          ? item.contentItems.flatMap((contentItem) => {
+              const contentRecord = readRecord(contentItem)
+              const text = readString(contentRecord?.text)
+              return text ? [text] : []
+            }).join('\n')
+          : '',
+        success: item?.success === true,
         tool,
       }]
     }

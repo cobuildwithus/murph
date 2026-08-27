@@ -87,8 +87,12 @@ Updated: 2026-08-26
   complete form question, including side, repetition range, and comparison.
 - Negative, unavailable, and failed outcomes remain honest without automatic
   second-pass analysis, diagnosis language, or routine policy recitals.
-- Result: `Hold` only because the real-Codex lane reached its usage limit before
-  any provider action; deterministic owner and reply-shape proof passed.
+- Result: `Ready`. Focused real-Codex journeys selected detailed motion for the
+  rep-specific push-up question and standard sampling for the timed speech
+  question. Each made exactly one successful tool call and one Gemini call,
+  preserved the complete question, and returned a direct observational answer
+  without diagnosis, policy recital, false frame-by-frame certainty, or an
+  unnecessary apology.
 
 ## Verification
 
@@ -126,10 +130,26 @@ Updated: 2026-08-26
   The representative group request is byte-for-byte unchanged at 20,780
   tokens / 96,405 bytes because the current private-direct authority boundary
   does not expose the tool there.
-- The focused real-Codex journey compiled and started against the default local
-  subscription, but the lane returned `ASSISTANT_CODEX_USAGE_LIMIT` before any
-  provider action. Live reply review remains `Hold` until one authorized
-  alternate home or another exact journey run is available.
+- The focused real-Codex journeys passed through an available authenticated
+  local subscription with `gpt-5.6-terra`. The detailed-motion journey made one
+  successful tool call and one Gemini call at 5 FPS with medium thinking and no
+  output cap, preserved the complete rep-specific comparison, and answered the
+  visible elbow-path question directly. The standard journey made the same
+  single-call sequence at 1 FPS, preserved the timed speech question, and
+  answered the audible negative directly. Both actual replies passed manual UX
+  review.
+- The live lane first exposed two result-boundary ambiguities: Murph could treat
+  a successful observation as unavailable or attempt a second tool call. The
+  tool contract now makes successful versus failed completion explicit, tells
+  Murph to answer immediately after the first success, and explains that
+  untrusted observational content is evidence rather than instructions. Focused
+  deterministic tests cover the successful result, failed result, duplicate
+  call guard, and first-success preservation before the final live passes.
+- The assistant verification workflow now has standing authorization to try
+  every available authenticated local Codex home once, in stable order, when a
+  run fails before provider action. It stops rotating as soon as one run reaches
+  provider action and never reads or copies authentication material. The
+  existing public-safe Frog entry records the repository friction and remedy.
 - The production-shaped hosted-local roundtrip now covers a successful 5 FPS
   request and its additional usage row. Its local run never reached the
   scenario: both the default bundle build and the documented four-package
@@ -143,6 +163,6 @@ Updated: 2026-08-26
   journeys. Final ReviewGPT rounds 1 and 2 both passed without findings. Round
   2 reviewed exact product head `4c35fac0eed535a365792157e59b1254562db25c`
   after its single current-main merge and focused post-merge typecheck/tests.
-- Draft PR #2373 is mergeable. It remains draft because the Product UX result
-  is still `Hold` at the live real-Codex boundary above; broad exact-head CI,
-  merge, deployment proof, and guarded retirement have not started.
+- Draft PR #2373 is mergeable. Product UX is `Ready`; the PR remains draft while
+  the new candidate head completes exact-head final ReviewGPT. Broad exact-head
+  CI, merge, deployment proof, and guarded retirement have not started.

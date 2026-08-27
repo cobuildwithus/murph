@@ -258,21 +258,25 @@ reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
-If the default subscription home returns `ASSISTANT_CODEX_USAGE_LIMIT` before
-any provider action, this repository grants standing authorization to discover
-alternate local Codex homes by directory and non-empty auth-file presence only,
-select one already-authenticated home that has not been used for that focused
-journey, and rerun the same journey once with
-`--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Never read, print, copy, or move
-auth material. Do not cycle through additional homes. If no authenticated
-alternate is available, or if that one alternate is also blocked, record
-`Hold`.
+If the default subscription home cannot run the focused journey before any
+provider action because of authentication, quota, startup, or connection
+failure, this repository grants standing authorization to try every available
+authenticated local Codex home without asking for approval between attempts.
+Discover candidates by directory and non-empty auth-file presence only, order
+them by absolute path, and run the same journey at most once per unused home
+with `--codex-home <ABSOLUTE_ALTERNATE_CODEX_HOME>`. Never read, print, copy, or
+move auth material. Stop rotating homes as soon as one run reaches a provider
+action or passes. If a run reaches a provider action but misses the behavior or
+reply bar, fix the owning boundary and rerun on that same home instead of trying
+another subscription. Record `Hold` only when every available authenticated
+home is blocked before provider action.
 
 Assistant Engine's lower-level opt-in live Codex journeys still use
 `MURPH_RUN_REAL_CODEX_E2E=1`; provider-key mode requires a supported provider
 credential, while explicit subscription mode uses the normal local Codex home
-by default and may select one alternate local home for auth. It remains
-developer-local rather than hermetic CI evidence. The
+by default and may try each available authenticated local home once under the
+bounded fallback contract above. It remains developer-local rather than
+hermetic CI evidence. The
 generated-image avatar journey must exercise the production tool contracts in
 three natural turns: launch with a truthful wait acknowledgement, trusted
 completion media attachment with no group mutation, and a later explicit
