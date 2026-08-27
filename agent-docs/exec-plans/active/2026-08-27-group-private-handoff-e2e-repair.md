@@ -100,6 +100,24 @@ Updated: 2026-08-27
 - Reuse the existing hosted runtime and real-Codex test owners for the new
   harness; do not create a parallel group-chat simulator.
 
+## Round 3 retrospective
+
+- Original requirement: keep current-sender private consultation as one flow
+  with an explicit group-or-private destination, host-owned safe attribution,
+  canonical group transcript continuity, and prompt completion delivery.
+- Shape comparison: the guarded first-reviewed patch touched 37 files and 1,109
+  changed lines; the merged candidate touched 39 files and 1,398 changed lines.
+  Review-driven growth was about 22 authored-source lines, with most of the 289
+  additional changed lines in regression coverage.
+- Repeated mechanism: none. The audience-routing inversion was corrected at the
+  prompt/tool owner and passed the next full audit.
+- Decision: continue the current shape rather than split or redesign it. The
+  shared pure builder is the minimum way to keep Web/runtime handoff text in
+  sync, the optional label is the minimum way to carry existing host-owned
+  attribution, and preferring the existing completion intent is the minimum
+  causal-ordering correction. No new service, state owner, queue, digest,
+  reconciliation loop, compatibility layer, or identity store was introduced.
+
 ## Verification
 
 - Commands to run: focused Assistant Engine, Assistant Runtime, Hosted
