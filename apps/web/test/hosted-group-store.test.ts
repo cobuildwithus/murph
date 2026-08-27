@@ -74,6 +74,7 @@ import {
   leaveHostedGroupMemberTx,
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupSharedDataByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
@@ -2673,6 +2674,38 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).not.toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ displayName: expect.any(String) }),
     }));
+  });
+});
+
+describe("readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads the exact current policy without changing policy or active offers", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+
+    await expect(readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      tx,
+    })).resolves.toMatchObject({
+      group: {
+        requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+      },
+      joinCode: "join_existing",
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 });
 

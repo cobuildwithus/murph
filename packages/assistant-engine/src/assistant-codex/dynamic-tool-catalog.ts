@@ -1260,7 +1260,7 @@ export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   description:
-    'Read shared data, record sender metrics, or manage disclosure/access. Exact current message_ref is required only to repost native access.',
+    'Read shared data, record sender metrics, or manage disclosure/access.',
 })
 
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({

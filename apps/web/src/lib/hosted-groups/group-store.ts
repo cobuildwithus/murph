@@ -1561,6 +1561,61 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
   };
 }
 
+/**
+ * Reads the existing join offer policy for a resend without changing the
+ * group's policy, join code, memberships, or active offers.
+ */
+export async function readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx(input: {
+  tx: Prisma.TransactionClient;
+  actorMemberId: string;
+  containerMemberId: string;
+}): Promise<{
+  group: HostedGroupSummary;
+  joinCode: string;
+}> {
+  const container = await readLockedHostedGroupThreadContainerTx(
+    input.tx,
+    input.containerMemberId,
+  );
+  if (container.ownerMemberId !== input.actorMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "Only the group owner can resend a join offer.",
+    });
+  }
+
+  const existing = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.containerMemberId },
+    select: { id: true },
+  });
+  if (!existing) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "This hosted group is not active.",
+    });
+  }
+
+  await lockHostedGroupRow(input.tx, existing.id);
+  const current = await input.tx.hostedGroup.findUnique({
+    where: { id: existing.id },
+    select: { joinCode: true },
+  });
+  const group = await readHostedGroupSummaryById(input.tx, existing.id);
+  if (!current?.joinCode || !group) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_LINK_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "This hosted group does not have an active join offer.",
+    });
+  }
+  return {
+    group,
+    joinCode: current.joinCode,
+  };
+}
+
 export async function readHostedGroupJoinView(input: {
   joinCode: string;
   memberId?: string | null;

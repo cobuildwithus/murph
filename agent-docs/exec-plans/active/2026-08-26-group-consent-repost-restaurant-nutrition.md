@@ -27,10 +27,11 @@ Updated: 2026-08-26
 
 - Reuse the existing accepted-input authority as the explicit repost identity.
   Assistant Engine validates the exact current Message ref and maps it to the
-  lower `post_join_offer` request. Web includes that identity in provider
-  idempotency, posts one replacement, and revokes older matching offers only
-  after the new message is durably bound. Ordinary offers keep the existing
-  covering-offer reuse behavior.
+  lower `post_join_offer` request. Web reads the locked current policy snapshot,
+  includes the request identity in provider idempotency, posts one replacement,
+  and revokes older matching offers only after the new message is durably bound.
+  Reposting never creates or changes a group policy. Ordinary offers keep the
+  existing covering-offer reuse behavior.
 - Keep restaurant resolution in the existing food-journal policy and existing
   CLI/browser primitives. Move the lookup-before-write invariant to the capture
   path, state the database-miss official-source fallback explicitly, and add
@@ -70,10 +71,10 @@ Updated: 2026-08-26
    and focused real-Codex coverage.
 3. [x] Run focused tests, package typechecks, actual-reply review, Product UX
    replay, privacy inspection, and candidate diff review.
-4. [ ] Commit and push the candidate, open the draft PR, and start the required
+4. [x] Commit and push the candidate, open the draft PR, and start the required
    specialist and final ReviewGPT passes concurrently with exact-head CI.
-5. [ ] Resolve accepted findings, archive this plan with `scripts/finish-task`,
-   and confirm the final PR head is green.
+5. [ ] Resolve accepted findings, run ReviewGPT round two, archive this plan
+   with `scripts/finish-task`, and confirm the final PR head is green.
 
 ## Verification
 
@@ -90,16 +91,18 @@ Updated: 2026-08-26
 - Consent requester: the focused real-Codex group journey issued one native
   offer call with the exact current Message ref and lowered one request-bound
   repost. Deterministic Assistant Engine, transport, runtime, store, and Web
-  tests prove wrong-ref rejection, ordinary active-offer reuse, replay-stable
-  provider idempotency, and revoke-after-binding replacement order.
-- Restaurant member: the focused real-Codex journey searched an exact synthetic
-  restaurant menu item before mutation, saved the returned calories and macros
-  with valid label provenance, and replied without asking the member to repeat
-  the item. The production-shaped fixture rejects unsupported meal fields.
+  tests prove wrong-ref rejection, immutable current-policy reposting, ordinary
+  active-offer reuse, request-distinct replay-stable provider idempotency, and
+  revoke-after-binding replacement order.
+- Restaurant member: focused real-Codex journeys cover both an exact synthetic
+  menu database hit and a database miss followed by the restaurant's synthetic
+  official nutrition page. Both save after sourcing, preserve valid provenance,
+  and do not ask the member to repeat the item. The production-shaped fixture
+  rejects generic restaurant queries and unsupported meal fields.
 - Existing exclusions: deterministic food-journal coverage preserves the
   official-source fallback and existing number-sensitive safety exception.
 - Regression proof: Assistant Engine completed 4,133 tests, Assistant Runtime
-  2,516 tests, Hosted Execution 560 tests, focused Web consent coverage 243
+  2,516 tests, Hosted Execution 560 tests, focused Web consent coverage 247
   tests, and all four affected package typechecks passed.
 - Provider input: normalized complete first-request captures for representative
   direct and group turns were byte- and token-identical at base and head. The

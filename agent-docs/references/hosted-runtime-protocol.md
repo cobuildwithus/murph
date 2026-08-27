@@ -1233,9 +1233,12 @@ message binding is durably recorded. When the room explicitly asks to repost,
 the semantic `offer_access` action carries the exact current accepted Message
 ref. Assistant Engine verifies that ref in the current group turn and maps it to
 an additive request identity; Web uses it in provider idempotency and bypasses
-covering-offer reuse for that request only. Exact replay remains one send. After
-the replacement binding commits, Web revokes older active offers in the same
-transaction; send or binding failure leaves them active.
+covering-offer reuse for that request only. Web reads the locked current policy
+and join code without creating or replacing group configuration; omitted scopes
+therefore retain the exact current permission set, while conflicting supplied
+scopes fail closed. Exact replay remains one send. After the replacement
+binding commits, Web revokes older active offers in the same transaction; send
+or binding failure leaves them active.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime

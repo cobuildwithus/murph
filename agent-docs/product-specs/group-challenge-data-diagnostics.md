@@ -401,8 +401,10 @@ inside the current send attempt adds `offeredAt` evidence. This matches Linq's
 accepted whole-second timestamp precision. An idempotent replay
 retains its original provider time, is still durably bound, and returns
 unavailable recency evidence instead of claiming a new adjacent message or
-minting a fresh window. Absent an explicit current-message repost request, when
-Web finds a covering active native offer instead of posting another card,
+minting a fresh window. An explicit current-message repost resends the locked
+current permission snapshot; it never changes the challenge's requested scope.
+Absent such a repost request, when Web finds a covering active native offer
+instead of posting another card,
 assistant-engine exposes the returned first-party URL as `presentation="link"`
 so the model never claims another native message appeared. Standalone and
 scheduled links use the same presentation. Murph
