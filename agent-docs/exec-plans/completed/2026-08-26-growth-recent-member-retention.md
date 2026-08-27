@@ -1,6 +1,6 @@
 # Add recent-member retention signals to Growth
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -133,7 +133,16 @@ and ReviewGPT loop.
   smoke, and the optimized Next.js production build, plus the repository architecture,
   privacy, dependency, and workspace-boundary guards.
 - Exact pushed-head CI is green across the completed checks for the owner-collapse
-  candidate; package coverage and Vercel remain in progress. Final ReviewGPT
-  rounds 1 and 2 returned accepted findings, and round 3 returned only the
-  required retrospective gate after verifying those remediations. A substantive
-  round 4 on the documented-retrospective head remains.
+  candidate, including repository guards, full release verification, package
+  coverage, and the PR-evidence gate. Final ReviewGPT rounds 1 and 2 returned
+  accepted findings, round 3 returned only the required retrospective gate
+  after verifying those remediations, and substantive round 4 returned `PASS`
+  on `f9a68d5093af6caeed5363e37ce03ae66f47c0ac` with every prior finding
+  resolved and no new qualifying finding.
+- The exact application candidate also completed a local Vercel preview build
+  with preview environment values held in memory. Its frozen prebuilt upload and
+  the Git-connected preview remain queued behind unrelated project capacity;
+  this is recorded as external preview availability rather than successful
+  deployed proof. Exact-candidate desktop and phone browser captures and the
+  optimized production build remain the rendered and build evidence.
+Completed: 2026-08-26
