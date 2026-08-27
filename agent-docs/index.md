@@ -40,6 +40,13 @@ test modules and owner-specific harnesses, are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+Composed package coverage schedules Hosted Local Harness after every unrelated
+owner and holds it while Assistant Engine remains active, preventing their real
+child runtimes from overlapping without reducing earlier refill. The scheduling
+contract and proof are specified by
+`agent-docs/operations/verification-and-runtime.md` and
+`agent-docs/references/testing-ci-map.md`.
+
 Every pull request carries one mechanically validated, field-complete
 deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
 rollback floor, expected exposure, reversibility, convergence proof, and
