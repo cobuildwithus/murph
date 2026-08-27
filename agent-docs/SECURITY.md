@@ -313,7 +313,10 @@ Last verified: 2026-08-26
   `fetch`, Node HTTP/HTTPS, Undici, and common fetch aliases at registered
   provider boundaries. It uses Babel's parser and scope bindings; it does not
   reimplement TypeScript, validate provider payloads, or duplicate runtime
-  request/response contracts.
+  request/response contracts. The Lob physical-note owner additionally rejects
+  authored low-level SDK `params` overrides; its transport adapter may only
+  narrow the SDK-generated metadata filter to Lob's documented one-key wire
+  shape.
 
   Raw transport is allowed only in an exact path-and-function owner registered
   by the guard: an official SDK fetch hook or override, an opaque presigned byte

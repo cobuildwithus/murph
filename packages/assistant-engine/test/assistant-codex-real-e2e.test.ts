@@ -86,6 +86,7 @@ import {
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
 } from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import {
@@ -8821,6 +8822,139 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
       }
     },
     720_000,
+  )
+})
+
+describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
+  it(
+    'checks and clears one stuck physical note without generating or sending another',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-physical-note-stuck-recovery-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const messageRef = `ain_${'6'.repeat(32)}`
+      const targetMessageRef = `ain_${'7'.repeat(32)}`
+      const resolveRequests: unknown[] = []
+      let sendCount = 0
+
+      try {
+        await materializePhysicalNoteSkill({ skillsRoot })
+        const hostedToolContext = {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [messageRef],
+            conversationId: 'conversation-physical-note-stuck-recovery',
+            conversationScope: 'direct' as const,
+            inboundMailboxItemIds: ['mailbox-physical-note-stuck-recovery'],
+            originSessionId: 'session-physical-note-stuck-recovery',
+            recipientKey: 'recipient-physical-note-stuck-recovery',
+          }),
+          physicalNotes: {
+            async resolve(request: unknown) {
+              resolveRequests.push(request)
+              return {
+                remainingUnresolved: false,
+                retryAfter: null,
+                settledUsageCostUsdMicros: null,
+                status: 'clear' as const,
+              }
+            },
+            async send() {
+              sendCount += 1
+              return {
+                complimentary: false,
+                costUsdMicros: '250000',
+                failureReason: 'unknown' as const,
+                physicalNoteId: 'hpn_unexpected_send',
+                status: 'failed' as const,
+              }
+            },
+          },
+          privateImageUrlPublisher: {
+            async publishPrivateImageUrl() {
+              throw new Error('Recovery must not publish artwork.')
+            },
+          },
+          sendVaultFile: async () => ({
+            filename: 'unused',
+            status: 'denied' as const,
+          }),
+          vaultFileSendAvailable: false,
+        } satisfies AssistantHostedToolContext
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          authorizeAcceptedMessageTarget: async ({ messageRef: requested }) =>
+            requested === messageRef ? { targetInputId: messageRef } : null,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: resolveMurphDynamicTools({
+            physicalNotesAvailable: true,
+          }),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            `Earlier physical-note send Message ref: ${targetMessageRef}`,
+            'That earlier physical note is stuck. Please check it and safely clear the blocker if the provider record allows. Do not create or send a new note.',
+          ].join('\n\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const recoveryCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name
+        )
+        const imageCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )
+        const sendCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+        )
+
+        process.stdout.write(
+          `[physical-note-stuck-recovery-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            scenario: 'clears one provider-absent blocker without a new send',
+          })}\n`,
+        )
+        expect(recoveryCalls).toHaveLength(1)
+        expect(imageCalls).toHaveLength(0)
+        expect(sendCalls).toHaveLength(0)
+        expect(resolveRequests).toEqual([{
+          originAssistantInputId: messageRef,
+          targetKind: 'send',
+          targetOriginAssistantInputId: targetMessageRef,
+        }])
+        expect(sendCount).toBe(0)
+        expect(result.finalMessage).toMatch(/clear|no longer block/iu)
+        expect(result.finalMessage).toMatch(/no unresolved|nothing (?:new )?was sent/iu)
+        expect(result.finalMessage).not.toMatch(/generat|new artwork|sent a new note/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
