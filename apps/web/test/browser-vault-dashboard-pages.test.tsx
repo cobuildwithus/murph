@@ -451,19 +451,13 @@ test("JournalPage offers recovery when an old replica has no Journal view", () =
   assert.doesNotMatch(markup, /Your timeline starts with one useful detail/u);
 });
 
-test("Personal Patterns comparison controls name their factor and next-day outcome", () => {
+test("Personal Patterns comparison controls use plain result language", () => {
   const markup = renderToStaticMarkup(
     createElement(PersonalPatternsComponentStudy),
   );
 
-  assert.match(
-    markup,
-    /aria-label="Next-day HRV was 12% higher after running\./,
-  );
-  assert.match(
-    markup,
-    /aria-label="Next-day total sleep was 6\.5% higher after sauna\./,
-  );
+  assert.match(markup, /aria-label="Your HRV was higher after running\./);
+  assert.match(markup, /aria-label="You slept longer after sauna\./);
   assert.match(markup, /data-patterns-layout="mobile"/u);
   assert.match(markup, /data-patterns-layout="desktop"/u);
   assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
@@ -476,7 +470,9 @@ test("Personal Patterns comparison controls name their factor and next-day outco
     markup,
     /data-pattern-outcome-column="sleep-(?:score|efficiency)"/u,
   );
+  assert.match(markup, /data-pattern-outcome-column="total-sleep"/u);
   assert.match(markup, />Sleep</u);
+  assert.match(markup, />Sleep quality</u);
   assert.doesNotMatch(markup, />Score<\/span>/u);
   assert.doesNotMatch(markup, />Efficiency<\/span>/u);
   assert.match(markup, /sleep efficiency/u);
@@ -489,18 +485,20 @@ test("Personal Patterns comparison controls name their factor and next-day outco
   assert.match(markup, /data-observed-days="14"/u);
   assert.match(markup, /Early signal, grade D/u);
   assert.match(markup, /Pattern, grade A/u);
-  assert.match(markup, /Next-day HRV was 12% higher after running\./u);
+  assert.match(markup, /Your HRV was higher after running\./u);
   assert.match(markup, /9 days with running averaged 48 ms\./u);
   assert.match(markup, /similar comparison days averaged/u);
   assert.equal(
-    (markup.match(/associations, not proof of cause/gu) ?? []).length,
+    (markup.match(/Results show associations, not proof of cause/gu) ?? [])
+      .length,
     1,
   );
   assert.match(markup, /Custom tag/u);
   assert.match(
     markup,
-    /No clear pattern was found between custom tag and next-day HRV\./u,
+    /No clear pattern was found between custom tag and HRV\./u,
   );
+  assert.match(markup, /bg-destructive\/10 text-destructive/u);
   assert.match(markup, /data-pattern-state="no-clear-pattern"/u);
   assert.match(markup, /data-pattern-state="insufficient"/u);
   assert.match(markup, /aria-label="Not enough comparable data/u);

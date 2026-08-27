@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, Ellipsis, Minus } from "lucide-react";
 import Image from "next/image";
-import { useId } from "react";
+import { createContext, useContext, useId, useMemo, useState } from "react";
 
 import type {
   PersonalPatternCell,
@@ -46,6 +46,13 @@ const CLASSIFICATION_LABELS: Record<PersonalPatternClassification, string> = {
   early_signal: "Early signal",
   pattern: "Pattern",
 };
+
+interface PatternPopoverState {
+  activeId: string | null;
+  setActiveId: (id: string | null) => void;
+}
+
+const PatternPopoverContext = createContext<PatternPopoverState | null>(null);
 
 export function PersonalPatternsSection({
   onRetry,
@@ -139,18 +146,24 @@ function PatternsLoadingState() {
 }
 
 function PatternMatrix({ report }: { report: PersonalPatternReport }) {
-  return (
-    <TooltipProvider>
-      <div className="border-t border-border">
-        <MobilePatternMatrix report={report} />
-        <DesktopPatternMatrix report={report} />
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const popoverState = useMemo(() => ({ activeId, setActiveId }), [activeId]);
 
-        <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
-          Marker size and color show evidence strength. Results show
-          associations, not proof of cause.
+  return (
+    <PatternPopoverContext.Provider value={popoverState}>
+      <TooltipProvider>
+        <div className="border-t border-border">
+          <MobilePatternMatrix report={report} />
+          <DesktopPatternMatrix report={report} />
+
+          <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
+            Marker size shows evidence strength. Sage and sienna mark favorable
+            and unfavorable changes. Results show associations, not proof of
+            cause.
+          </div>
         </div>
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </PatternPopoverContext.Provider>
   );
 }
 
@@ -186,9 +199,7 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
                   className="flex min-w-0 items-end justify-center px-1 py-3 text-center"
                   data-pattern-outcome-column={outcome.id}
                 >
-                  <span className="text-[10px] font-medium leading-[1.15] text-foreground">
-                    {outcome.label}
-                  </span>
+                  <PatternOutcomeHeader compact outcome={outcome} />
                 </div>
               ))}
             </div>
@@ -267,9 +278,7 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
               className="px-3 py-4 text-center"
               data-pattern-outcome-column={outcome.id}
             >
-              <span className="text-xs font-medium leading-tight text-foreground">
-                {outcome.label}
-              </span>
+              <PatternOutcomeHeader outcome={outcome} />
             </div>
           ))}
         </div>
@@ -317,9 +326,61 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
 }
 
 interface PatternOutcomeColumn {
+  description: string;
   id: string;
   label: string;
   outcomes: PersonalPatternOutcome[];
+}
+
+function PatternOutcomeHeader({
+  compact = false,
+  outcome,
+}: {
+  compact?: boolean;
+  outcome: PatternOutcomeColumn;
+}) {
+  const pointerAnchor = usePointerPopoverAnchor();
+  const popover = useExclusivePatternPopover();
+
+  return (
+    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
+      <PopoverTrigger
+        closeDelay={200}
+        delay={150}
+        openOnHover
+        render={
+          <button
+            type="button"
+            className={cn(
+              "rounded-sm font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              compact ? "text-[10px] leading-[1.15]" : "text-xs leading-tight",
+            )}
+            onKeyDown={pointerAnchor.onKeyDown}
+            onPointerMove={pointerAnchor.onPointerMove}
+          >
+            {outcome.label}
+          </button>
+        }
+      />
+      <PopoverContent
+        align="center"
+        anchor={pointerAnchor.anchor}
+        className="w-[min(19rem,calc(100vw-2rem))]"
+        positionMethod="fixed"
+        side="right"
+        sideOffset={10}
+      >
+        <PopoverHeader className="gap-1">
+          <PopoverTitle className="font-serif text-base font-semibold">
+            {outcome.label}
+          </PopoverTitle>
+          <PopoverDescription className="text-xs leading-5 text-muted-foreground">
+            {outcome.description}
+          </PopoverDescription>
+        </PopoverHeader>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function PatternOutcomeColumnCell({
@@ -361,6 +422,7 @@ function PatternOutcomeColumnCell({
         compact={compact}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
+        outcomeId={outcome?.id ?? "unknown"}
         outcomeLagDays={outcome?.lagDays}
         outcomeLabel={outcome?.label ?? "this result"}
         outcomeUnit={outcome?.unit ?? "score"}
@@ -376,6 +438,7 @@ function PatternOutcomeColumnCell({
         compact={compact}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
+        outcomeId={outcome.id}
         outcomeLagDays={outcome.lagDays}
         outcomeLabel={outcome.label}
         outcomeUnit={outcome.unit}
@@ -392,6 +455,7 @@ function PatternOutcomeColumnCell({
             compact={compact}
             factorLabel={factorLabel}
             factorObservedDays={factorObservedDays}
+            outcomeId={outcome.id}
             outcomeLagDays={outcome.lagDays}
             outcomeLabel={outcome.label}
             outcomeUnit={outcome.unit}
@@ -407,6 +471,7 @@ function PatternBubble({
   compact = false,
   factorLabel,
   factorObservedDays,
+  outcomeId,
   outcomeLagDays,
   outcomeLabel,
   outcomeUnit,
@@ -415,15 +480,17 @@ function PatternBubble({
   compact?: boolean;
   factorLabel: string;
   factorObservedDays: number;
+  outcomeId: string;
   outcomeLagDays?: 0 | 1;
   outcomeLabel: string;
   outcomeUnit: string;
 }) {
   const pointerAnchor = usePointerPopoverAnchor();
+  const popover = useExclusivePatternPopover();
 
   if (!cell || cell.stage === "insufficient") {
     return (
-      <Popover>
+      <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
         <PopoverTrigger
           closeDelay={200}
           delay={150}
@@ -474,6 +541,7 @@ function PatternBubble({
   }
 
   const isFlat = cell.stage === "no_clear_pattern" || cell.direction === "flat";
+  const tone = getPatternEffectTone(outcomeId, cell.deltaPercent);
   const indicatorSize = compact
     ? cell.stage === "worth_testing"
       ? 18
@@ -491,9 +559,10 @@ function PatternBubble({
       : formatPercent(Math.abs(cell.deltaPercent));
   const DirectionIcon =
     cell.deltaPercent !== null && cell.deltaPercent > 0 ? ArrowUp : ArrowDown;
-  const accessibleLabel = `${describeResult({
+  const accessibleLabel = `${describePlainResult({
     cell,
     factorLabel,
+    outcomeId,
     outcomeLabel,
     outcomeLagDays,
   })} ${describeComparison(
@@ -503,7 +572,7 @@ function PatternBubble({
   )} ${formatEvidenceLabel(cell)}, ${formatEvidencePeriod(cell)}.`;
 
   return (
-    <Popover>
+    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
       <PopoverTrigger
         closeDelay={200}
         delay={150}
@@ -526,11 +595,24 @@ function PatternBubble({
                 "inline-flex shrink-0 items-center justify-center rounded-full",
                 isFlat && "border border-border bg-card text-muted-foreground",
                 !isFlat &&
+                  tone === "positive" &&
                   cell.classification === "pattern" &&
                   "bg-primary text-primary-foreground",
                 !isFlat &&
+                  tone === "positive" &&
                   cell.classification !== "pattern" &&
                   "bg-primary/15 text-primary",
+                !isFlat &&
+                  tone === "negative" &&
+                  cell.classification === "pattern" &&
+                  "bg-destructive/80 text-card",
+                !isFlat &&
+                  tone === "negative" &&
+                  cell.classification !== "pattern" &&
+                  "bg-destructive/10 text-destructive",
+                !isFlat &&
+                  tone === "neutral" &&
+                  "bg-muted text-muted-foreground",
               )}
               style={{ height: indicatorSize, width: indicatorSize }}
             >
@@ -549,6 +631,7 @@ function PatternBubble({
         cell={cell}
         factorLabel={factorLabel}
         isFlat={isFlat}
+        outcomeId={outcomeId}
         outcomeLagDays={outcomeLagDays}
         outcomeLabel={outcomeLabel}
         outcomeUnit={outcomeUnit}
@@ -557,11 +640,35 @@ function PatternBubble({
   );
 }
 
+function useExclusivePatternPopover(): {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+} {
+  const id = useId();
+  const state = useContext(PatternPopoverContext);
+
+  if (!state) {
+    return { onOpenChange: () => undefined, open: false };
+  }
+
+  return {
+    onOpenChange: (open) => {
+      if (open) {
+        state.setActiveId(id);
+      } else if (state.activeId === id) {
+        state.setActiveId(null);
+      }
+    },
+    open: state.activeId === id,
+  };
+}
+
 function PatternPopoverContent({
   anchor,
   cell,
   factorLabel,
   isFlat,
+  outcomeId,
   outcomeLagDays,
   outcomeLabel,
   outcomeUnit,
@@ -570,17 +677,19 @@ function PatternPopoverContent({
   cell: PersonalPatternCell;
   factorLabel: string;
   isFlat: boolean;
+  outcomeId: string;
   outcomeLagDays?: 0 | 1;
   outcomeLabel: string;
   outcomeUnit: string;
 }) {
   const factor = factorLabel.toLocaleLowerCase();
+  const tone = getPatternEffectTone(outcomeId, cell.deltaPercent);
   const exposedLabel =
     outcomeLagDays === 0 ? `With ${factor}` : `After ${factor}`;
   const comparisonLabel =
     cell.comparisonBasis === "confirmed_absence"
       ? `Without ${factor}`
-      : "On similar days";
+      : "Other days";
 
   return (
     <PopoverContent
@@ -593,14 +702,15 @@ function PatternPopoverContent({
     >
       <PopoverHeader className="gap-1.5">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-          {isFlat ? "Checked" : formatClassificationLabel(cell)}
+          {outcomeLabel}
         </p>
         <PopoverTitle className="font-serif text-lg font-semibold leading-6">
           {isFlat
             ? "No clear pattern"
-            : describeResult({
+            : describePlainResult({
                 cell,
                 factorLabel,
+                outcomeId,
                 outcomeLabel,
                 outcomeLagDays,
               })}
@@ -612,7 +722,9 @@ function PatternPopoverContent({
           )}
         >
           {isFlat
-            ? `${factorLabel} and ${outcomeLabel.toLocaleLowerCase()} did not move together consistently in the checked days.`
+            ? `We did not find a consistent change in ${formatSentenceTerm(
+                outcomeLabel,
+              )} after ${factor}.`
             : "Comparison details for this personal pattern"}
         </PopoverDescription>
       </PopoverHeader>
@@ -620,24 +732,14 @@ function PatternPopoverContent({
       {cell.exposedMean !== null && cell.comparisonMean !== null ? (
         <>
           <Separator />
-          <dl className="grid grid-cols-2 gap-4">
-            <div className="min-w-0">
-              <dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
-                {exposedLabel}
-              </dt>
-              <dd className="mt-1 font-serif text-xl font-semibold tabular-nums text-foreground">
-                {formatMean(cell.exposedMean, outcomeUnit)}
-              </dd>
-            </div>
-            <div className="min-w-0 border-l border-border pl-4">
-              <dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
-                {comparisonLabel}
-              </dt>
-              <dd className="mt-1 font-serif text-xl font-semibold tabular-nums text-foreground">
-                {formatMean(cell.comparisonMean, outcomeUnit)}
-              </dd>
-            </div>
-          </dl>
+          <PatternComparisonBars
+            comparisonLabel={comparisonLabel}
+            comparisonMean={cell.comparisonMean}
+            exposedLabel={exposedLabel}
+            exposedMean={cell.exposedMean}
+            tone={tone}
+            unit={outcomeUnit}
+          />
         </>
       ) : null}
 
@@ -646,6 +748,86 @@ function PatternPopoverContent({
         Data from {formatEvidencePeriod(cell)}.
       </p>
     </PopoverContent>
+  );
+}
+
+function PatternComparisonBars({
+  comparisonLabel,
+  comparisonMean,
+  exposedLabel,
+  exposedMean,
+  tone,
+  unit,
+}: {
+  comparisonLabel: string;
+  comparisonMean: number;
+  exposedLabel: string;
+  exposedMean: number;
+  tone: PatternEffectTone;
+  unit: string;
+}) {
+  const largestMean = Math.max(
+    Math.abs(exposedMean),
+    Math.abs(comparisonMean),
+    1,
+  );
+  const exposedWidth = Math.max(8, (Math.abs(exposedMean) / largestMean) * 100);
+  const comparisonWidth = Math.max(
+    8,
+    (Math.abs(comparisonMean) / largestMean) * 100,
+  );
+
+  return (
+    <dl className="space-y-3">
+      <ComparisonBar
+        className={cn(
+          tone === "positive" && "bg-primary",
+          tone === "negative" && "bg-destructive/75",
+          tone === "neutral" && "bg-muted-foreground/60",
+        )}
+        label={exposedLabel}
+        value={formatMean(exposedMean, unit)}
+        width={exposedWidth}
+      />
+      <ComparisonBar
+        className="bg-muted-foreground/25"
+        label={comparisonLabel}
+        value={formatMean(comparisonMean, unit)}
+        width={comparisonWidth}
+      />
+    </dl>
+  );
+}
+
+function ComparisonBar({
+  className,
+  label,
+  value,
+  width,
+}: {
+  className: string;
+  label: string;
+  value: string;
+  width: number;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-4">
+        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dd className="font-serif text-sm font-semibold text-foreground">
+          {value}
+        </dd>
+      </div>
+      <div
+        aria-hidden="true"
+        className="h-1.5 overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          className={cn("h-full rounded-full", className)}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -663,19 +845,49 @@ function buildOutcomeColumns(
 
   return outcomes.flatMap((outcome, index) => {
     if (outcome.id !== "sleep-score" && outcome.id !== "sleep-efficiency") {
-      return [{ id: outcome.id, label: outcome.label, outcomes: [outcome] }];
+      return [
+        {
+          description: getOutcomeDescription(outcome.id),
+          id: outcome.id,
+          label: outcome.id === "total-sleep" ? "Sleep" : outcome.label,
+          outcomes: [outcome],
+        },
+      ];
     }
     if (index !== firstSleepQualityIndex) {
       return [];
     }
     return [
       {
+        description:
+          "Your device's sleep score or sleep efficiency. Each result names the measure that changed.",
         id: "sleep-quality",
-        label: "Sleep",
+        label: "Sleep quality",
         outcomes: sleepQualityOutcomes,
       },
     ];
   });
+}
+
+function getOutcomeDescription(outcomeId: string): string {
+  switch (outcomeId) {
+    case "total-sleep":
+      return "The total time you slept.";
+    case "deep-sleep":
+      return "Estimated time in deep non-REM sleep.";
+    case "rem-sleep":
+      return "Estimated time in rapid-eye-movement sleep.";
+    case "readiness-score":
+      return "Your device's daily recovery and strain score.";
+    case "hrv":
+      return "Beat-to-beat variation, compared with your own baseline.";
+    case "resting-heart-rate":
+      return "Your heart rate while resting.";
+    case "respiratory-rate":
+      return "Your average breathing rate.";
+    default:
+      return "A personal health result compared across recorded days.";
+  }
 }
 
 function chunkOutcomeColumns(
@@ -727,7 +939,7 @@ function ObservedDaysMeter({
           {Array.from({ length: 5 }, (_, index) => (
             <span
               className={cn(
-                "h-3 w-0.5 rounded-full",
+                "h-[11px] w-[3px] rounded-full",
                 index < level ? "bg-primary" : "bg-border",
               )}
               key={index}
@@ -735,11 +947,9 @@ function ObservedDaysMeter({
           ))}
         </span>
       </TooltipTrigger>
-      <TooltipContent className="max-w-52">
+      <TooltipContent className="max-w-52 flex-col items-start gap-0.5">
         <p className="font-medium">Data coverage</p>
-        <p className="mt-0.5 text-xs opacity-80">
-          Based on {formatCaseCount(days)}.
-        </p>
+        <p className="text-xs opacity-80">Based on {formatCaseCount(days)}.</p>
       </TooltipContent>
     </Tooltip>
   );
@@ -776,36 +986,80 @@ function selectVisiblePatternReport(
   return { ...report, factors, outcomes };
 }
 
-function describeResult({
+function describePlainResult({
   cell,
   factorLabel,
+  outcomeId,
   outcomeLabel,
   outcomeLagDays,
 }: {
   cell: PersonalPatternCell;
   factorLabel: string;
+  outcomeId: string;
   outcomeLabel: string;
   outcomeLagDays?: 0 | 1;
 }): string {
   if (cell.deltaPercent === null || cell.direction === "flat") {
-    const outcome =
-      outcomeLagDays === 0
-        ? `same-day ${formatSentenceTerm(outcomeLabel)}`
-        : `next-day ${formatSentenceTerm(outcomeLabel)}`;
-    return `No clear pattern was found between ${factorLabel.toLocaleLowerCase()} and ${outcome}.`;
+    return `No clear pattern was found between ${factorLabel.toLocaleLowerCase()} and ${formatSentenceTerm(
+      outcomeLabel,
+    )}.`;
   }
 
-  const timing =
-    outcomeLagDays === 0
-      ? `${formatSentenceTerm(outcomeLabel)} was`
-      : `Next-day ${formatSentenceTerm(outcomeLabel)} was`;
   const context =
     outcomeLagDays === 0
       ? `on days with ${factorLabel.toLocaleLowerCase()}`
       : `after ${factorLabel.toLocaleLowerCase()}`;
-  return `${timing} ${formatPercent(Math.abs(cell.deltaPercent))} ${
-    cell.deltaPercent > 0 ? "higher" : "lower"
-  } ${context}.`;
+  const increased = cell.deltaPercent > 0;
+
+  switch (outcomeId) {
+    case "total-sleep":
+      return `You slept ${increased ? "longer" : "less"} ${context}.`;
+    case "sleep-score":
+    case "sleep-efficiency":
+      return `You slept ${increased ? "better" : "worse"} ${context}.`;
+    case "deep-sleep":
+      return `You got ${increased ? "more" : "less"} deep sleep ${context}.`;
+    case "rem-sleep":
+      return `You got ${increased ? "more" : "less"} REM sleep ${context}.`;
+    case "readiness-score":
+      return `Your readiness was ${increased ? "higher" : "lower"} ${context}.`;
+    case "hrv":
+      return `Your HRV was ${increased ? "higher" : "lower"} ${context}.`;
+    case "resting-heart-rate":
+      return `Your resting heart rate was ${
+        increased ? "higher" : "lower"
+      } ${context}.`;
+    default:
+      return `Your ${formatSentenceTerm(outcomeLabel)} was ${
+        increased ? "higher" : "lower"
+      } ${context}.`;
+  }
+}
+
+type PatternEffectTone = "negative" | "neutral" | "positive";
+
+function getPatternEffectTone(
+  outcomeId: string,
+  deltaPercent: number | null,
+): PatternEffectTone {
+  if (deltaPercent === null || deltaPercent === 0) return "neutral";
+
+  if (outcomeId === "resting-heart-rate") {
+    return deltaPercent < 0 ? "positive" : "negative";
+  }
+
+  if (
+    outcomeId === "total-sleep" ||
+    outcomeId === "sleep-score" ||
+    outcomeId === "sleep-efficiency" ||
+    outcomeId === "deep-sleep" ||
+    outcomeId === "readiness-score" ||
+    outcomeId === "hrv"
+  ) {
+    return deltaPercent > 0 ? "positive" : "negative";
+  }
+
+  return "neutral";
 }
 
 function describeComparison(
