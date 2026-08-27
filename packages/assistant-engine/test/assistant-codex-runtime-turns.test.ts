@@ -2755,7 +2755,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       summary: 'Codex command execution failed during provider turn.',
       details: {
         actionKind: 'command.execution',
-        commandFamily: 'unknown',
+        commandFamily: 'cat',
         commandOrdinal: 1,
         durationMsBucket: '5_30s',
         exitCode: 2,
@@ -2965,22 +2965,32 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       {
         command: 'cat /tmp/private-record',
         exitCode: 126,
+        expectedFamily: 'cat',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 127,
+        expectedFamily: 'cat',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 124,
+        expectedFamily: 'cat',
       },
       {
         command: 'bash -lc "rg private-query /tmp/private-record"',
         exitCode: 1,
+        expectedFamily: 'command',
       },
       {
         command: 'rg private-query /tmp/private-record | head',
         exitCode: 1,
+        expectedFamily: 'command',
+      },
+      {
+        command: 'vault-cli knowledge show page_test --format json',
+        exitCode: 2,
+        expectedFamily: 'vault-cli knowledge',
       },
     ] as const
     const operationalIssues: AssistantRuntimeIssueInput[] = []
@@ -2996,7 +3006,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const issue = record(event)
       expect(issue).toMatchObject({
         details: {
-          commandFamily: 'unknown',
+          commandFamily: example.expectedFamily,
           commandOrdinal: index + 5,
           exitCode: example.exitCode,
         },
@@ -3095,7 +3105,22 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       },
     })
 
+    const wrappedVaultIssue = recordCommand({
+      command:
+        'bash -lc "vault-cli knowledge show private-page --format json"',
+      exitCode: 2,
+      output: 'private vault output',
+    })
+    expect(wrappedVaultIssue).toMatchObject({
+      details: {
+        commandFamily: 'vault-cli knowledge',
+        commandOrdinal: 7,
+        exitCode: 2,
+      },
+    })
+
     const commandsWithExecutableShellSyntax = [
+      'bash -lc "rg private-query /tmp/private-record"',
       'rg private-query /tmp/private-record | head',
       'rg private-query /tmp/private-record; head /tmp/private-record',
       'rg private-query /tmp/private-record && head /tmp/private-record',
@@ -3114,8 +3139,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         const issue = recordCommand({ command, exitCode: 1 })
         expect(issue).toMatchObject({
           details: {
-            commandFamily: 'unknown',
-            commandOrdinal: index + 7,
+            commandFamily: 'command',
+            commandOrdinal: index + 8,
             exitCode: 1,
           },
         })
@@ -3125,6 +3150,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     const encodedIssues = JSON.stringify([
       searchIssue,
+      wrappedVaultIssue,
       ...executableShellIssues,
     ])
     expect(encodedIssues).not.toContain('private(foo|bar)')
@@ -3133,6 +3159,8 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(encodedIssues).not.toContain('/tmp/private-record')
     expect(encodedIssues).not.toContain('private search output')
     expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('private vault output')
+    expect(encodedIssues).not.toContain('private-page')
     expect(encodedIssues).not.toContain('item-sensitive')
     expect(encodedIssues).not.toContain('turn-current')
   })
@@ -3180,7 +3208,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     })
     expect(boundaryIssue).toMatchObject({
       details: {
-        commandFamily: 'unknown',
+        commandFamily: 'cat',
         commandOrdinal: 10_000,
         exitCode: 127,
       },

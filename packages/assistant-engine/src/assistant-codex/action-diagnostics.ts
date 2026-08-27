@@ -4,6 +4,9 @@ import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 import type {
   AssistantRuntimeIssueInput,
 } from '../assistant/issue-reporting.js'
+import type {
+  CodexCommandFamily,
+} from './command-family.js'
 import {
   resolveCodexCommandFamily,
 } from './command-family.js'
@@ -50,11 +53,9 @@ type BytesBucket =
   | '10_100kb'
   | 'gt_100kb'
 
-type CommandDiagnosticFamily = 'search' | 'unknown'
-
 type TrackedCommandDiagnostic = {
   commandOrdinal: number
-  commandFamily: CommandDiagnosticFamily
+  commandFamily: CodexCommandFamily
 }
 
 type TokenUsageSample = {
@@ -138,7 +139,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
     normalizedEvent: CodexNormalizedEvent,
   ): TrackedCommandDiagnostic => ({
     commandOrdinal: nextCommandOrdinal(),
-    commandFamily: resolveDirectSearchCommandFamily(normalizedEvent),
+    commandFamily: resolveDiagnosticCommandFamily(normalizedEvent),
   })
 
   return {
@@ -195,7 +196,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
         ? {
             commandOrdinal:
               startedDiagnostic?.commandOrdinal ?? nextCommandOrdinal(),
-            commandFamily: resolveDirectSearchCommandFamily(
+            commandFamily: resolveDiagnosticCommandFamily(
               input.normalizedEvent,
             ),
           }
@@ -599,23 +600,32 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   }
 }
 
-function resolveDirectSearchCommandFamily(
+function resolveDiagnosticCommandFamily(
   normalizedEvent: CodexNormalizedEvent,
-): CommandDiagnosticFamily {
+): CodexCommandFamily {
   if (
     normalizedEvent.kind !== 'status_item'
     || normalizedEvent.commandLabel === null
   ) {
-    return 'unknown'
+    return 'command'
   }
 
-  const command = normalizedEvent.commandLabel.trim()
-  return resolveCodexCommandFamily({
-    commandLabel: command,
+  const directFamily = resolveCodexCommandFamily({
+    commandLabel: normalizedEvent.commandLabel,
     source: 'display',
-  }) === 'search'
-    ? 'search'
-    : 'unknown'
+  })
+  if (directFamily !== 'command') {
+    return directFamily
+  }
+
+  const wrappedFamily = resolveCodexCommandFamily({
+    allowKnownShellWrapper: true,
+    commandLabel: normalizedEvent.commandLabel,
+    source: 'display',
+  })
+  // Only a bare direct search owns no-match suppression and recovery. The
+  // bounded wrapper pass exists to attribute non-search command failures.
+  return wrappedFamily === 'search' ? 'command' : wrappedFamily
 }
 
 function readCommandExitCode(input: {

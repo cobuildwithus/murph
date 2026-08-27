@@ -12814,15 +12814,32 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1
+                            "pattern": "^(?:\\s*evt_[0-9A-HJKMNP-TV-Z]{26}\\s*|\\s+)$"
                           }
                         },
                         "stream": {
                           "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "heart_rate",
+                                  "spo2",
+                                  "hrv",
+                                  "steps",
+                                  "sleep_stage",
+                                  "respiratory_rate",
+                                  "temperature",
+                                  "glucose"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:\\s*(?:heart_rate|spo2|hrv|steps|sleep_stage|respiratory_rate|temperature|glucose)\\s*|\\s+)$"
+                              }
+                            ]
                           }
                         }
                       }
@@ -12848,15 +12865,32 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1
+                            "pattern": "^(?:\\s*evt_[0-9A-HJKMNP-TV-Z]{26}\\s*|\\s+)$"
                           }
                         },
                         "stream": {
                           "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "heart_rate",
+                                  "spo2",
+                                  "hrv",
+                                  "steps",
+                                  "sleep_stage",
+                                  "respiratory_rate",
+                                  "temperature",
+                                  "glucose"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:\\s*(?:heart_rate|spo2|hrv|steps|sleep_stage|respiratory_rate|temperature|glucose)\\s*|\\s+)$"
+                              }
+                            ]
                           }
                         }
                       }
@@ -13676,7 +13710,8 @@
                         "title": {
                           "description": "Optional assessment title stored on the imported record.",
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 160
                         },
                         "occurredAt": {
                           "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
