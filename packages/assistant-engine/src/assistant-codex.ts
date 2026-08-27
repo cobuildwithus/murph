@@ -262,9 +262,13 @@ const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
   'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 const ANALYZE_VIDEO_FALSE_UNAVAILABLE_REPLY_PATTERNS = [
-  /\b(?:could(?: not|n't)|can(?: not|'t)|failed to|unable to)\s+(?:access|complete|retrieve|use)\b[\s\S]{0,100}\b(?:analysis|observation|result|video)\b/iu,
-  /\b(?:analysis|observation|result)\b[\s\S]{0,100}\b(?:did(?: not|n't)|never|was(?: not|n't))\s+(?:arrive|return|come through)\b/iu,
-  /\b(?:no usable|without a usable)\s+(?:analysis|observation|result)\b/iu,
+  /^(?:sorry[,.]?\s*)?(?:i\s+)?(?:could(?: not|n't)|can(?: not|'t)|failed to|unable to)\s+(?:access|retrieve)\b[\s\S]{0,100}\b(?:analysis|observation|result)\b[\s\S]{0,100}[.!]?$/iu,
+  /^(?:the\s+)?(?:analysis|observation|result)\b[\s\S]{0,100}\b(?:did(?: not|n't)|never|was(?: not|n't))\s+(?:arrive|return|come through)\b[\s\S]{0,80}[.!]?$/iu,
+  /^(?:i\s+)?(?:received|got)?\s*(?:no usable|without a usable)\s+(?:analysis|observation|result)\b[\s\S]{0,80}[.!]?$/iu,
+] as const
+const ANALYZE_VIDEO_FAILURE_ONLY_REPLY_PATTERNS = [
+  /^(?:sorry[,.]?\s*)?(?:i\s+)?(?:could(?: not|n't)|can(?: not|'t)|failed to|unable to)\s+(?:analyze|access|retrieve)\s+(?:that|the|this)\s+video(?:\s+analysis)?(?:\s+because\b[\s\S]{0,160})?[.!]?$/iu,
+  /^video analysis\s+(?:failed|did(?: not|n't)\s+(?:run|complete|return|come through)|was\s+(?:unavailable|rate-limited))(?:[.;:]?\s*(?:no analysis was retrieved|please try again(?: later)?))*[.!]?$/iu,
 ] as const
 type CodexAppServerProcessState =
   | 'idle'
@@ -6109,22 +6113,12 @@ async function runCodexAppServerTurnOnProcess(
       : modelFinalMessage
   const normalizedSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage)
-  const useAnalyzeVideoFallback =
-    requiredFinalResponseFallback !== null && (
-      requiredFinalResponseFallbackOutcome === 'analyze-video-failure' || (
-        requiredFinalResponseFallbackOutcome === 'analyze-video-success' &&
-        normalizedSemanticFinalMessage !== null &&
-        ANALYZE_VIDEO_FALSE_UNAVAILABLE_REPLY_PATTERNS.some((pattern) =>
-          pattern.test(normalizedSemanticFinalMessage)
-        )
-      )
-    )
   const requiredSemanticFinalMessage =
-    useAnalyzeVideoFallback
-      ? requiredFinalResponseFallback
-      : normalizedSemanticFinalMessage ??
-        requiredFinalResponseFallback ??
-        semanticFinalMessage
+    resolveAnalyzeVideoRequiredMessage({
+      fallback: requiredFinalResponseFallback,
+      message: normalizedSemanticFinalMessage,
+      outcome: requiredFinalResponseFallbackOutcome,
+    }) ?? semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -6149,11 +6143,11 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    useAnalyzeVideoFallback
-      ? requiredFinalResponseFallback
-      : normalizeNullableString(semanticTranscriptMessage) ??
-        requiredFinalResponseFallback ??
-        semanticTranscriptMessage,
+    resolveAnalyzeVideoRequiredMessage({
+      fallback: requiredFinalResponseFallback,
+      message: normalizeNullableString(semanticTranscriptMessage),
+      outcome: requiredFinalResponseFallbackOutcome,
+    }) ?? semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (
@@ -6373,6 +6367,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
+    request.kind === 'analyze-video' ||
     (request.kind === 'group' &&
       request.request.action === 'ask_current_sender' &&
       request.request.mode !== 'new') ||
@@ -6384,6 +6379,40 @@ function isSerializedDynamicToolRequest(
     request.kind === 'computer-pause-for-user' ||
     request.kind === 'computer-finish-run' ||
     request.kind === 'invalid-computer-arguments'
+}
+
+function resolveAnalyzeVideoRequiredMessage(input: {
+  fallback: string | null
+  message: string | null
+  outcome: 'analyze-video-failure' | 'analyze-video-success' | null
+}): string | null {
+  const { fallback, message, outcome } = input
+  if (fallback === null || outcome === null) {
+    return message
+  }
+  if (message === null) {
+    return fallback
+  }
+  if (outcome === 'analyze-video-success') {
+    const isResultUnavailableClaim =
+      !/\b(?:but|however)\b/iu.test(message) &&
+      ANALYZE_VIDEO_FALSE_UNAVAILABLE_REPLY_PATTERNS.some((pattern) =>
+        pattern.test(message)
+      )
+    return isResultUnavailableClaim ? fallback : message
+  }
+  if (
+    message.includes(fallback) ||
+    (
+      !/\b(?:but|however)\b/iu.test(message) &&
+      ANALYZE_VIDEO_FAILURE_ONLY_REPLY_PATTERNS.some((pattern) =>
+        pattern.test(message)
+      )
+    )
+  ) {
+    return fallback
+  }
+  return `${message}\n\n${fallback}`
 }
 
 function isResponseAttachmentDynamicToolRequest(

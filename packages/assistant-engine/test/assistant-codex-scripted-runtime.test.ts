@@ -8465,11 +8465,11 @@ text(JSON.stringify(result));
       expectedFallback:
         'Video analysis returned no usable answer. Please try again later.',
       expectedProviderMessage:
-        'I could not complete the video analysis because no result returned.',
+        'I could not analyze that video because no result returned.',
       geminiStatus: 200,
       name: 'Gemini returns no usable observation and the model claims no result returned',
       providerResponses: [{
-        text: 'I could not complete the video analysis because no result returned.',
+        text: 'I could not analyze that video because no result returned.',
       }],
     },
   ] satisfies readonly {
@@ -8550,6 +8550,113 @@ text(JSON.stringify(result));
     },
   )
 
+  it('preserves a completed reminder alongside the exact video failure status', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Send the push-up reminder.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-08-28',
+          time: '09:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Push-up reminder',
+    }
+    const expectedReminderAt = '2026-08-28T13:00:00.000Z'
+    const reminderRequest: AssistantHostedAutomationToolRequest = {
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: {
+        at: expectedReminderAt,
+        kind: 'at',
+      },
+      title: providerReminderRequest.title,
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    const providerMessage =
+      'The push-up reminder is set for tomorrow. I could not analyze that video because the provider is rate-limited right now.'
+    const videoFailure =
+      'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            message_ref: fixture.inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          name: 'analyze_video',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: providerMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: vi.fn<typeof fetch>(async () =>
+          new Response(JSON.stringify({ error: 'rate limited' }), {
+            headers: { 'content-type': 'application/json' },
+            status: 429,
+          })),
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        automationAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        ...fixture.hostedToolContext,
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-push-up-reminder',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'push-up-reminder',
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedReminderAt,
+                status: 'resolved',
+              },
+              routeBinding: 'current_conversation',
+              schedule: reminderRequest.schedule,
+              status: 'active',
+              updatedAt: '2026-08-27T20:00:00.000Z',
+            }
+          },
+        },
+      },
+      prompt: 'Analyze my push-ups and remind me tomorrow.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(automationRequests).toEqual([reminderRequest])
+    expect(result.providerAuthoredFinalMessage).toBe(providerMessage)
+    expect(result.finalMessage).toBe(`${providerMessage}\n\n${videoFailure}`)
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
+
   it.each([
     {
       allowFinishWithoutReply: false,
@@ -8579,8 +8686,21 @@ text(JSON.stringify(result));
         text: 'I could not retrieve a usable analysis of the video.',
       }],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalMessage:
+        'I can’t use this video to diagnose an injury, but I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      expectedProviderMessage:
+        'I can’t use this video to diagnose an injury, but I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      name: 'the model preserves health and camera limits around the observation',
+      providerResponses: [{
+        text:
+          'I can’t use this video to diagnose an injury, but I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFinalMessage?: string
     expectedProviderMessage?: string
     name: string
     providerResponses: readonly ScriptedResponse[]
@@ -8589,6 +8709,7 @@ text(JSON.stringify(result));
     { timeout: TURN_TIMEOUT_MS },
     async ({
       allowFinishWithoutReply,
+      expectedFinalMessage,
       expectedProviderMessage,
       providerResponses,
     }) => {
@@ -8645,12 +8766,15 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ??
+          'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      )
       expect(result.finalMessage).not.toContain('Gemini video observation below')
       expect(result.providerAuthoredFinalMessage).toBe(
         expectedProviderMessage ?? '',
       )
-      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
