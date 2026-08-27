@@ -110,6 +110,7 @@ import type { HostedRunnerUserDataDeletionBestEffortResult } from "../hosted-exe
 import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
+import { runPrismaInteractiveTransaction } from "../prisma";
 import { decryptHostedWebNullableFields } from "../hosted-web/encryption";
 import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
@@ -1153,7 +1154,9 @@ async function deleteHostedAccountDataInternal(input: {
           session: phoneTransferSession,
         })
       : null;
-  const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
+  const deleteHostedAccountDataCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<HostedAccountDeletionDatabaseResult> => {
     if (input.phoneTransfer && phoneTransferSession) {
       await acquireHostedPrivyPhoneTransferPhoneLocksTx({
         prisma: tx,
@@ -1331,7 +1334,13 @@ async function deleteHostedAccountDataInternal(input: {
       deletedCounts,
       deletedRuntimeMemberIds: transactionDeletionMemberIds,
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  };
+  const databaseDeletion = await runPrismaInteractiveTransaction(
+    input.prisma,
+    "account_deletion.database_delete",
+    deleteHostedAccountDataCallback,
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
   const deletedCounts = databaseDeletion.deletedCounts;
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
@@ -1884,7 +1893,9 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   prisma: PrismaClient;
   providerAccessRemovalConfirmationToken: string | null;
 }): Promise<string[]> {
-  return input.prisma.$transaction(async (tx) => {
+  const suspendHostedMembersCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<string[]> => {
     const preparedMemberIds = uniqueStrings([
       input.ownerMemberId,
       ...await listOwnedHostedThreadContainerMemberIds({
@@ -2014,7 +2025,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
     // the suspended group runtime.
     await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
-  }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
+  };
+  return runPrismaInteractiveTransaction(
+    input.prisma,
+    "account_deletion.suspension_fence",
+    suspendHostedMembersCallback,
+    HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS,
+  );
 }
 
 export async function assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx(

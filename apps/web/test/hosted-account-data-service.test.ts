@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type HostedWebEncryptionModule =
   typeof import("@/src/lib/hosted-web/encryption");
+type PrismaModule = typeof import("@/src/lib/prisma");
 
 const serviceMocks = vi.hoisted(() => ({
   acquireHostedPrivyPhoneTransferPhoneLocksTx: vi.fn(),
@@ -50,6 +51,11 @@ const serviceMocks = vi.hoisted(() => ({
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   runHostedAccountDeletionCleanup: vi.fn(),
+  runPrismaInteractiveTransaction:
+    vi.fn<PrismaModule["runPrismaInteractiveTransaction"]>(),
+  runPrismaInteractiveTransactionOriginal: null as
+    | PrismaModule["runPrismaInteractiveTransaction"]
+    | null,
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx: vi.fn(),
   closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
@@ -60,6 +66,20 @@ const serviceMocks = vi.hoisted(() => ({
   resolveDeviceProviderApplicationForConnection: vi.fn(),
   revokeStravaDeviceSyncAccess: vi.fn(),
 }));
+
+vi.mock("@/src/lib/prisma", async (importOriginal) => {
+  const original = await importOriginal<PrismaModule>();
+  serviceMocks.runPrismaInteractiveTransactionOriginal =
+    original.runPrismaInteractiveTransaction;
+  serviceMocks.runPrismaInteractiveTransaction.mockImplementation(
+    original.runPrismaInteractiveTransaction,
+  );
+  return {
+    ...original,
+    runPrismaInteractiveTransaction:
+      serviceMocks.runPrismaInteractiveTransaction,
+  };
+});
 
 vi.mock("@/src/lib/hosted-web/encryption", async (importOriginal) => {
   const original = await importOriginal<HostedWebEncryptionModule>();
@@ -427,6 +447,10 @@ const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
+  serviceMocks.runPrismaInteractiveTransaction.mockReset();
+  serviceMocks.runPrismaInteractiveTransaction.mockImplementation(
+    serviceMocks.runPrismaInteractiveTransactionOriginal!,
+  );
   serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockReset();
   serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockResolvedValue(
     undefined,
@@ -845,6 +869,40 @@ describe("deleteHostedAccountData", () => {
     expect(
       serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
     ).not.toHaveBeenCalled();
+  });
+
+  it("labels the long callbacks without changing account-deletion transaction budgets", async () => {
+    const transactionOptions: unknown[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: vi.fn(),
+      transactionOptions,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({ memberId: "member_123" });
+
+    expect(
+      serviceMocks.runPrismaInteractiveTransaction.mock.calls.map(
+        ([, operation, , options]) => ({ operation, options }),
+      ),
+    ).toEqual([
+      {
+        operation: "account_deletion.suspension_fence",
+        options: { maxWait: 5_000, timeout: 20_000 },
+      },
+      {
+        operation: "account_deletion.database_delete",
+        options: { maxWait: 5_000 },
+      },
+    ]);
+    expect(transactionOptions).toEqual([
+      { maxWait: 5_000, timeout: 20_000 },
+      { maxWait: 5_000 },
+      { maxWait: 5_000 },
+    ]);
   });
 
   it("starts all four ordinary target reads before waiting and holds the terminal transaction", async () => {
@@ -5832,6 +5890,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   transactionFamilyClaimOwnerMemberIds?: string[];
   transactionFamilyGroups?: Array<{ id: string }>;
   transactionIdentityRecord?: Record<string, unknown> | null;
+  transactionOptions?: unknown[];
   transactionOwnedThreadContainerMemberIds?: string[];
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   let transactionCallCount = 0;
@@ -6304,9 +6363,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return input.hostedComputerRunRows ?? [];
       },
     },
-    $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
+    $transaction: async (
+      callback: (prisma: typeof transactionPrisma) => Promise<unknown>,
+      options?: unknown,
+    ) => {
       transactionCallCount += 1;
       input.onTransaction();
+      input.transactionOptions?.push(options);
       return callback(transactionPrisma);
     },
   };
