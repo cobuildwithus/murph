@@ -121,7 +121,10 @@ import {
 } from "./experiment-journal-vault.js"
 import { addCaptureRecord } from "./capture.js"
 import {
+  toAssessmentProjectVaultCliError,
+  toImporterInputFileVaultCliError,
   toVaultCliError,
+  toVaultCliFilesystemError,
   toVaultInitializationCliError,
   toVaultMetadataCliError,
 } from "./vault-usecase-helpers.js"
@@ -907,18 +910,22 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async projectAssessment(input: ProjectAssessmentInput) {
       const { vault, assessmentId } = input
       const core = await loadCoreRuntime()
-      const assessment = await core.readAssessmentResponse({
-        vaultRoot: vault,
-        assessmentId,
-      })
-      const proposal = await core.projectAssessmentResponse({
-        assessmentResponse: assessment,
-      })
+      try {
+        const assessment = await core.readAssessmentResponse({
+          vaultRoot: vault,
+          assessmentId,
+        })
+        const proposal = await core.projectAssessmentResponse({
+          assessmentResponse: assessment,
+        })
 
-      return {
-        vault,
-        assessmentId,
-        proposal,
+        return {
+          vault,
+          assessmentId,
+          proposal,
+        }
+      } catch (error) {
+        throw toAssessmentProjectVaultCliError(error)
       }
     },
     ...createExplicitHealthCoreServices(async () => {
@@ -945,6 +952,10 @@ function createIntegratedImporterServices(): ImporterServices {
           reuseExact,
         })
       } catch (error) {
+        const inputFileError = toImporterInputFileVaultCliError(error, file)
+        if (inputFileError !== error) {
+          throw inputFileError
+        }
         throw toVaultCliError(error, {
           DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
           RAW_MANIFEST_INVALID: { code: 'conflict' },
@@ -1550,10 +1561,24 @@ function createIntegratedQueryServices(): QueryServices {
         experimentSlug: experiment,
       })
 
-      await materializeExportPack(vault, pack.files)
+      try {
+        await materializeExportPack(vault, pack.files)
+      } catch (error) {
+        throw toVaultCliFilesystemError(error, {
+          message: 'The export pack could not be stored in the vault.',
+          fieldPath: 'vault',
+        })
+      }
 
       if (out) {
-        await materializeExportPack(out, pack.files)
+        try {
+          await materializeExportPack(out, pack.files)
+        } catch (error) {
+          throw toVaultCliFilesystemError(error, {
+            message: 'The export pack could not be written to the output directory.',
+            fieldPath: 'out',
+          })
+        }
       }
 
       return {
