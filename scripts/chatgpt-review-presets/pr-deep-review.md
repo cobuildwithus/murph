@@ -41,8 +41,9 @@ promise.
   fewest necessary words, actions, choices, and screens while preserving
   accessibility, consent, trust, and control.
 - Every material behavior or ownership change is necessary for the stated PR
-  outcome. Every non-obvious affected surface is disclosed in the applicable
-  risk notes with a concrete reason and regression proof.
+  outcome. Every material non-obvious affected surface whose omission would
+  make the merge contract meaningfully misleading is disclosed in the
+  applicable risk notes with a concrete reason and regression proof.
 - The review stops after every issue in the current round's scope has an
   evidence-backed disposition. Zero findings is valid.
 
@@ -288,6 +289,21 @@ chosen direction, require a new retrospective.
 
 # Finding bar
 
+`FINDINGS` means the PR is not ready to merge as written. Across every category
+below, report a finding only when the evidence shows that a correction is
+necessary before merge because the current patch creates material production
+harm, fails its central outcome, or adds material avoidable complexity, scope,
+or user friction. A category label never lowers this threshold.
+
+If the PR can responsibly merge without correcting an observation, it is not a
+finding. This includes bounded, reversible, or safely deferrable concerns that
+do not materially affect correctness, safety, privacy, durable data, a core
+flow, an irreversible effect, or the stated user outcome. Preserve a useful,
+evidence-backed subthreshold observation as a non-blocking review note under
+the output contract below. Do not promote it to a finding merely because a
+repository preference, ideal proof standard, or broader disclosure could be
+improved.
+
 Report only:
 
 - **Critical** or **High**: a PR-caused, production-faithful, realistically
@@ -309,12 +325,15 @@ Report only:
   deleted and the smaller ownership/data-flow shape. Do not justify a new
   abstraction with composability, reuse, or a hypothetical next caller.
 - **Purpose Drift**: the diff materially changes behavior or ownership outside
-  the stated outcome without a demonstrated need, or omits that change from the
-  required non-obvious-surface disclosure. Name the unrelated surface, trace how
-  the PR reaches it, explain the user or operational impact, and recommend the
-  smallest disposition: delete or split unnecessary scope; for necessary but
-  undisclosed scope, require the intent contract to add the reason and
-  regression proof.
+  stated outcome without a demonstrated need, or leaves a necessary material
+  change undisclosed such that reviewers cannot judge a real merge risk. Name
+  the unrelated surface, trace how the PR reaches it, explain the material user
+  or operational impact, and recommend the smallest disposition: delete or
+  split unnecessary scope; for necessary but materially misleading undisclosed
+  scope, require the intent contract to add the reason and regression proof.
+  A necessary, safely bounded change whose only gap is supplementary disclosure
+  or additional proof belongs in review notes unless that omission itself makes
+  the PR materially unsafe or its central outcome untruthful.
 - **Material UX Failure**: a PR-caused ordinary journey has materially wrong
   latency, ordering, feedback, permission behavior, destination, completion,
   or recovery, even when it does not meet the High bar. Trace the affected
@@ -396,6 +415,17 @@ owners removed, and invariants the smaller shape preserves.
 For an Experience Collapse, also state the removed words, actions, screens,
 choices, concepts, or waits and the clarity, accessibility, consent, trust, and
 control that the smaller experience preserves.
+
+After all qualifying findings, optionally add a `Review notes:` section with at
+most three concise, evidence-backed observations that are useful to preserve but
+do not meet the finding bar. For each note, state the observation and why it is
+non-blocking. Omit speculation, taste, naming preferences, generic cleanup,
+optional enhancements, and exhaustive nit lists.
+
+Review notes do not require remediation before merge, do not become prior
+findings in later rounds, and never change the round outcome. A response with no
+qualifying findings and one or more review notes must return `ROUND_OUTCOME:
+PASS`. Omit the section when there are no useful notes.
 
 When a user-facing frontend change has no readable rendered artifacts inside
 `codebase.zip`, add `Rendered evidence gap: <exact gap>` after the findings and

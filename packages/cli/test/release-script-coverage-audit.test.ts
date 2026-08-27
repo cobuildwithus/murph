@@ -1908,12 +1908,37 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toMatch(
       /A contract\s+mismatch or theoretical concern is evidence, not a finding, unless it\s+establishes that harm/u,
     )
+    expect(prDeepReviewPrompt).toContain(
+      '`FINDINGS` means the PR is not ready to merge as written',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'A category label never lowers this threshold',
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /If the PR can responsibly merge without correcting an observation, it is not a\s+finding/u,
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'as a non-blocking review note under',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'whose only gap is supplementary disclosure',
+    )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
     expect(prDeepReviewPrompt).toMatch(
       /rare one-window miss affecting one or\s+a\s+few members/u,
     )
     expect(prDeepReviewPrompt).toContain('Do not demand replay, backfill, migration, dual-write,')
+    expect(prDeepReviewPrompt).toContain('`Review notes:` section')
+    expect(prDeepReviewPrompt).toContain(
+      'Review notes do not require remediation before merge',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'do not become prior\nfindings in later rounds',
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /no\s+qualifying findings and one or more review notes must return `ROUND_OUTCOME:\s+PASS`/u,
+    )
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: PASS`')
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: FINDINGS`')
     expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: RETROSPECTIVE_REQUIRED`')
@@ -1935,7 +1960,7 @@ describe('monorepo release flow coverage audit', () => {
       'Every material behavior or ownership change is necessary',
     )
     expect(prDeepReviewPrompt).toMatch(
-      /Every non-obvious affected surface is(?: also)?\s+disclosed/u,
+      /Every material non-obvious affected surface whose omission would\s+make the merge contract meaningfully misleading is disclosed/u,
     )
     expect(prDeepReviewPrompt).toContain(
       'applicable frontend and Product UX lenses own rendered proof',
