@@ -141,6 +141,7 @@ import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import {
+  createAnalyzeVideoTurnState,
   snapshotAnalyzeVideoAttachmentAuthorities,
   type AnalyzeVideoAttachmentAuthority,
 } from '../assistant-codex/analyze-video-tool.js'
@@ -745,6 +746,7 @@ export async function sendAssistantMessageLocal(
           string,
           AnalyzeVideoAttachmentAuthority
         >()
+        const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
         const snapshotAnalyzeVideoAuthorities = async (
           acceptedInputIds: readonly string[],
@@ -1601,6 +1603,7 @@ export async function sendAssistantMessageLocal(
           const providerOutcome = await executeCodexTurnWithRecovery({
             acceptedInputItems: providerRequestAcceptedInputItems,
             activeTurnSteering,
+            analyzeVideoTurnState,
             authorizeAcceptedMessageTarget,
             input: currentInput,
             onFinishWithoutReplyAccepted: async (event) => {

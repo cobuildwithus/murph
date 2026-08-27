@@ -129,3 +129,19 @@ Updated: 2026-08-26
   is the newly available tool and schema. No requester-ref field remains.
 - Corrected docs drift, docs gardening, changelog rendering, and diff hygiene
   checks passed. Exact-head review, CI, and merge/deploy proof remain pending.
+- Final ReviewGPT round 2 found that the existing one-call counter was created
+  inside each App Server provider request, so a held group draft followed by
+  reconsideration could reset the ceiling within one assistant turn. The
+  correction creates the same plain counter once beside the turn-owned frozen
+  attachment authorities and passes that reference through both provider
+  requests; it adds no persistence, registry, manager, or policy layer.
+- Focused proof shows request 0 and request 1 share the exact counter reference,
+  a completed request-0 call is visible to request 1, an unused request-0 state
+  still permits request 1's first call, and the tool itself rejects a second
+  provider call. Assistant Engine and Web typechecks, changelog generation and
+  claim coverage, and doc gardening passed.
+- The exact focused real-Codex journey remains `Hold`: the default local
+  subscription reported a usage limit before any provider action, and the one
+  repository-authorized alternate profile also failed before any provider
+  action. No additional profile retry is permitted or needed for deterministic
+  acceptance.
