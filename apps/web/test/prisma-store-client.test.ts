@@ -456,11 +456,10 @@ describe("prisma module", () => {
   });
 
   it.each([
-    { nested: false },
-    { nested: true },
-  ])("classifies SQLSTATE 53300 codes without logging them (nested: $nested)", async ({
-    nested,
-  }) => {
+    "top-level",
+    "cause",
+    "adapter",
+  ] as const)("classifies SQLSTATE 53300 codes without logging them (%s)", async (nesting) => {
     process.env = {
       ...process.env,
       NODE_ENV: "production",
@@ -475,13 +474,24 @@ describe("prisma module", () => {
       throw new Error("Expected the Prisma query extension to be captured.");
     }
     // The message avoids every fallback phrasing so only the code classifies.
+    const secret = "private-adapter-secret";
     const driverFailure = Object.assign(
-      new Error("connection rejected; private-password"),
-      { code: "53300" },
+      new Error(`connection rejected; ${secret}`),
+      nesting === "adapter"
+        ? { originalCode: "53300", privateDetail: secret }
+        : { code: "53300" },
     );
-    const operationFailure = nested
+    const operationFailure = nesting === "cause"
       ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
-      : driverFailure;
+      : nesting === "adapter"
+        ? Object.assign(new Error(`adapter failure; ${secret}`), {
+          code: "P2010",
+          meta: {
+            driverAdapterError: { cause: driverFailure, privateToken: secret },
+            privateMetadata: secret,
+          },
+        })
+        : driverFailure;
 
     await expect(extension.query.$allOperations({
       args: {},
@@ -495,8 +505,10 @@ describe("prisma module", () => {
       totalConnections: 0,
       waitingRequests: 0,
     }));
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("53300");
+    const serializedLogs = JSON.stringify(warn.mock.calls);
+    expect(serializedLogs).not.toContain(secret);
+    expect(serializedLogs).not.toContain("53300");
+    expect(serializedLogs).not.toContain("P2010");
   });
 
   it.each([
@@ -589,6 +601,123 @@ describe("prisma module", () => {
     expect(serializedLogs).not.toContain("private-password");
   });
 
+  it.each([
+    {
+      code: "P1008",
+      expectedCategory: null,
+      message: "Operations timed out after 5000ms; private-password",
+      scenario: "P1008 operation timeout",
+    },
+    {
+      code: "P1002",
+      expectedCategory: "connection_timeout",
+      message: "Database server was reached but timed out; private-password",
+      scenario: "P1002 connection timeout",
+    },
+    {
+      code: null,
+      expectedCategory: null,
+      message: "Unrelated application timeout; private-password",
+      scenario: "unrelated timeout",
+    },
+  ])("handles $scenario without widening operation retries", async ({
+    code,
+    expectedCategory,
+    message,
+  }) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    const failure = code === null
+      ? new Error(message)
+      : Object.assign(new Error(message), { code });
+    const query = vi.fn().mockRejectedValue(failure);
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query,
+    })).rejects.toBe(failure);
+
+    expect(query).toHaveBeenCalledOnce();
+    expect(failureCategories(warn)).toEqual(
+      expectedCategory === null ? [] : [expectedCategory],
+    );
+    expect(failureDispositions(warn)).toEqual(
+      expectedCategory === null ? [] : ["terminal"],
+    );
+    const serializedLogs = JSON.stringify(warn.mock.calls);
+    expect(serializedLogs).not.toContain(message);
+    expect(serializedLogs).not.toContain("private-password");
+    if (code) {
+      expect(serializedLogs).not.toContain(code);
+    }
+  });
+
+  it("keeps pool-failure traversal cycle-safe and within its depth and node budgets", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+
+    const cycle: Record<string, unknown> = {};
+    cycle.cause = cycle;
+    cycle.meta = { driverAdapterError: { cause: cycle } };
+
+    let outsideDepthBudget: unknown = { code: "53300" };
+    for (let depth = 0; depth < 5; depth += 1) {
+      outsideDepthBudget = { cause: outsideDepthBudget };
+    }
+
+    // The valid SQLSTATE is the ninth breadth-first node while remaining only
+    // three edges deep, so the global node budget must exclude it.
+    const withEdges = (cause: unknown, driverAdapterCause: unknown) => ({
+      cause,
+      meta: { driverAdapterError: { cause: driverAdapterCause } },
+    });
+    const outsideNodeBudget = withEdges(
+      withEdges(withEdges({}, { code: "53300" }), {}),
+      withEdges({}, {}),
+    );
+
+    for (const { failure, scenario } of [
+      { failure: cycle, scenario: "cycle" },
+      { failure: outsideDepthBudget, scenario: "depth-budget" },
+      { failure: outsideNodeBudget, scenario: "node-budget" },
+    ]) {
+      const query = vi.fn().mockRejectedValue(failure);
+
+      await expect(extension.query.$allOperations({
+        args: {},
+        operation: `queryRaw.${scenario}`,
+        query,
+      })).rejects.toBe(failure);
+
+      expect(query).toHaveBeenCalledOnce();
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockClear();
+    }
+  });
+
   it("classifies recognized operation failures without logging unknown errors", async () => {
     process.env = {
       ...process.env,
@@ -608,12 +737,14 @@ describe("prisma module", () => {
       { code: "P2024" },
     );
 
+    const query = vi.fn().mockRejectedValue(poolFailure);
     await expect(extension.query.$allOperations({
       args: {},
       model: "HostedMember",
       operation: "findUnique",
-      query: async () => Promise.reject(poolFailure),
+      query,
     })).rejects.toBe(poolFailure);
+    expect(query).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", expect.objectContaining({
       attempt: 2,
       category: "pool_checkout_timeout",
