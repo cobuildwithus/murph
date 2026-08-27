@@ -352,6 +352,47 @@ describe("ensureHostedMemberForPhone", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
+  it.each([
+    ["missing", null, "INVITE_NOT_FOUND", 404],
+    [
+      "expired",
+      {
+        ...makeInviteRecord(),
+        expiresAt: NOW,
+      },
+      "INVITE_EXPIRED",
+      410,
+    ],
+  ] as const)(
+    "rejects %s invites before private identity reads or transaction entry",
+    async (_label, invite, code, httpStatus) => {
+      const identityFindUnique = vi.fn();
+      const prisma = asRootPrisma({
+        hostedInvite: {
+          findUnique: vi.fn().mockResolvedValue(invite),
+        },
+        hostedMemberIdentity: {
+          findUnique: identityFindUnique,
+          update: vi.fn(),
+        },
+      });
+
+      await expect(
+        prepareHostedInvitePhoneCode({
+          inviteCode: "invite-code",
+          now: NOW,
+          prisma: prisma as never,
+        }),
+      ).rejects.toMatchObject({
+        code,
+        httpStatus,
+      });
+
+      expect(identityFindUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns a stored phone for the Privy client send and records the transient send attempt", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
