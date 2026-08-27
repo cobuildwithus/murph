@@ -119,6 +119,10 @@ import {
   sendHostedSubscriptionCancellationEmailForMember,
 } from "./subscription-cancellation-email";
 import {
+  resolveHostedMemberActivationRuntimeWakeTargets,
+  signalHostedMemberActivationRuntimeWakeBestEffortResult,
+} from "./member-activation-runtime-wake";
+import {
   HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
@@ -1088,6 +1092,10 @@ async function processClaimedHostedStripeEvent(
             candidate: paymentNotificationCandidate,
           });
       } catch (error) {
+        await signalHostedStripeActivationRuntimeWakeAfterPaymentNotificationFailure({
+          prisma,
+          result,
+        });
         throw new HostedStripePaymentNotificationPendingError(error);
       }
       if (paymentNotificationOutcome === "sent") {
@@ -1922,6 +1930,32 @@ function buildHostedStripeActivationResultJson(result: {
     activationMailboxItemIds,
     schema: "hosted.stripe.activation-result.v1",
   };
+}
+
+async function signalHostedStripeActivationRuntimeWakeAfterPaymentNotificationFailure(
+  input: {
+    prisma: PrismaClient;
+    result: {
+      activatedMemberId: string | null;
+      activatedMembers: HostedStripeActivatedMemberOutcome[];
+      hostedExecutionEventId: string | null;
+      hostedExecutionMailboxItemId: string | null;
+    };
+  },
+): Promise<void> {
+  const activationTargets = resolveHostedMemberActivationRuntimeWakeTargets(
+    input.result,
+  );
+
+  for (const activationTarget of activationTargets) {
+    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+      hostedExecutionEventId: activationTarget.hostedExecutionEventId,
+      mailboxItemId: activationTarget.hostedExecutionMailboxItemId,
+      memberId: activationTarget.memberId,
+      prisma: input.prisma,
+      source: "stripe.webhook.activation",
+    });
+  }
 }
 
 function mapHostedStripeSubscriptionUpdateOutcome(

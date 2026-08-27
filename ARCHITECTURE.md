@@ -2316,6 +2316,10 @@ plan changes that collect no money remain silent. A receipt-local sent marker
 and event-derived Resend idempotency key prevent replay after provider success;
 configuration or provider failure leaves that receipt retryable while the
 already-committed billing, entitlement, and usage-credit result remains intact.
+If reconciliation also committed one or more activation mailbox items, that
+email-failure seam hands their exact pointers to the existing activation-wake
+owner before the receipt returns failed; operator email availability therefore
+cannot delay member activation.
 The projection includes only amount, currency, a bounded payment category,
 event type and time, live/test mode, and the opaque Stripe event id. It never
 reads or includes member/customer identity, contact details, checkout contents,

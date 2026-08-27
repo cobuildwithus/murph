@@ -23,6 +23,7 @@ import {
 } from "./runtime";
 import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
+  resolveHostedMemberActivationRuntimeWakeTargets,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 
@@ -192,7 +193,7 @@ export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
   prisma?: PrismaClient;
   timeoutMs?: number;
 }): Promise<HostedStripeWebhookRuntimeWakeResult> {
-  const activationTargets = resolveHostedStripeWebhookActivationTargets(input);
+  const activationTargets = resolveHostedMemberActivationRuntimeWakeTargets(input);
 
   if (activationTargets.length === 0) {
     return {
@@ -207,8 +208,6 @@ export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
       ...activationTarget,
       eventId: input.eventId,
       eventType: input.eventType,
-      hostedExecutionMailboxItemId:
-        activationTarget.hostedExecutionMailboxItemId ?? input.hostedExecutionMailboxItemId ?? null,
       prisma: input.prisma,
       timeoutMs: input.timeoutMs,
     });
@@ -261,44 +260,6 @@ async function signalHostedStripeWebhookActivationRuntimeWakeTarget(input: {
   return {
     accepted: result.accepted,
   };
-}
-
-function resolveHostedStripeWebhookActivationTargets(input: {
-  activatedMemberId: string | null;
-  activatedMembers?: Array<{
-    activatedMemberId: string | null;
-    hostedExecutionEventId: string | null;
-    hostedExecutionMailboxItemId?: string | null;
-  }>;
-  hostedExecutionEventId: string | null;
-}): Array<{ hostedExecutionEventId: string; hostedExecutionMailboxItemId?: string | null; memberId: string }> {
-  const explicitTargets = (input.activatedMembers ?? [])
-    .filter((activation): activation is {
-      activatedMemberId: string;
-      hostedExecutionEventId: string;
-      hostedExecutionMailboxItemId?: string | null;
-    } =>
-      typeof activation.activatedMemberId === "string" &&
-      activation.activatedMemberId.length > 0 &&
-      typeof activation.hostedExecutionEventId === "string" &&
-      activation.hostedExecutionEventId.length > 0
-    )
-    .map((activation) => ({
-      hostedExecutionEventId: activation.hostedExecutionEventId,
-      hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
-      memberId: activation.activatedMemberId,
-    }));
-
-  if (explicitTargets.length > 0) {
-    return explicitTargets;
-  }
-
-  return input.activatedMemberId && input.hostedExecutionEventId
-    ? [{
-        hostedExecutionEventId: input.hostedExecutionEventId,
-        memberId: input.activatedMemberId,
-      }]
-    : [];
 }
 
 async function readHostedStripeWebhookEventReceipt(

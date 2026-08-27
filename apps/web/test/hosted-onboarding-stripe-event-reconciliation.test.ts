@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedStripePaymentNotificationEmail: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
+  signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
   stripe: {
     events: {
@@ -299,6 +300,20 @@ vi.mock("@/src/lib/hosted-onboarding/subscription-cancellation-email", () => ({
 }));
 
 vi.mock(
+  "@/src/lib/hosted-onboarding/member-activation-runtime-wake",
+  async () => {
+    const actual = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/member-activation-runtime-wake")
+    >("@/src/lib/hosted-onboarding/member-activation-runtime-wake");
+    return {
+      ...actual,
+      signalHostedMemberActivationRuntimeWakeBestEffortResult:
+        mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    };
+  },
+);
+
+vi.mock(
   "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation",
   async () => {
     const actual = await vi.importActual<
@@ -477,6 +492,14 @@ describe("hosted Stripe event reconciliation", () => {
     );
     mocks.sendHostedSubscriptionCancellationEmailForMember.mockResolvedValue({
       status: "sent",
+    });
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
+      accepted: true,
+      configured: true,
+      errorCode: null,
+      mailboxItemIdPresent: true,
+      signalAccepted: true,
+      workflowIdPresent: true,
     });
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
@@ -677,10 +700,27 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 6,
+      claimExpiresAt: null,
+      nextAttemptAt: expect.any(Date),
       paymentNotificationEmailSentAt: null,
       processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));
+    expect(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    ).toHaveBeenCalledWith({
+      hostedExecutionEventId: "dispatch_123",
+      mailboxItemId: "mailbox_dispatch_123",
+      memberId: "member_123",
+      prisma: prisma.client,
+      source: "stripe.webhook.activation",
+    });
+    expect(
+      mocks.sendHostedStripePaymentNotificationEmail.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+        .mock.invocationCallOrder[0] ?? 0,
+    );
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -689,6 +729,9 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "completed" });
 
     expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    ).toHaveBeenCalledOnce();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 7,
       paymentNotificationEmailSentAt: expect.any(Date),

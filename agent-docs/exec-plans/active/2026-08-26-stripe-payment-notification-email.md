@@ -6,9 +6,9 @@ Updated: 2026-08-26
 ## Goal
 
 Deliver one privacy-safe internal email for every verified positive Stripe
-payment Murph accepts, including subscription starts and renewals, paid plan
-change prorations, recurring or metered invoices, and one-time or automatic
-usage-credit purchases.
+payment event Murph observes, including subscription starts and renewals, paid
+plan change prorations, recurring or metered invoices, and one-time or
+automatic usage-credit purchases.
 
 Success means:
 
@@ -16,7 +16,7 @@ Success means:
 - one logical positive payment produces one operator email across webhook
   duplication, reconciliation retry, and response loss;
 - email failure cannot revoke or duplicate billing, entitlement, usage credit,
-  or provider effects;
+  activation wake, or provider effects;
 - zero-dollar invoices and non-payment lifecycle events remain silent; and
 - email content contains only amount, currency, payment category, event type,
   event time, live/test mode, and an opaque Stripe event reference.
@@ -52,7 +52,8 @@ Effort: Feature.
   after provider success or receipt-finalization failure. An unconfigured
   operational channel leaves the already-committed billing result intact while
   keeping notification delivery pending on that receipt until configuration is
-  restored.
+  restored. Any activation mailbox item already committed by that attempt is
+  still signaled through the existing activation-wake owner.
 - Proof: provider-shaped positive invoice, usage Checkout, asynchronous Checkout,
   and saved-card events reach one email; zero-dollar and unrelated events do not;
   send failure retries; marked success does not resend after finalization loss.
@@ -93,7 +94,10 @@ receipts are not replayed or backfilled.
   grant and required runtime recheck succeed.
 - Replay and recovery: provider failure keeps delivery pending on the existing
   receipt; provider success followed by receipt-finalization loss does not
-  resend because the local marker and provider idempotency converge.
+  resend because the local marker and provider idempotency converge. A first
+  paid activation still receives its exact mailbox wake during an operator
+  email outage; later reconciliation remains idempotent and cannot append a
+  second activation.
 - Privacy and absence: email includes only payment metadata and an opaque event
   reference. Zero-dollar invoices, unpaid Checkout, unrelated PaymentIntents,
   and no-charge scheduled downgrades remain silent.
@@ -113,5 +117,12 @@ and no visual surface or screenshot proof applies.
   validation passed, Web typecheck passed, and the full Web verifier passed
   11,199 tests across 801 files, lint with zero errors, dev smoke, and the
   production build.
+- [x] Resolve the final ReviewGPT activation finding at the existing wake
+  boundary: operator-email failure now signals every exact activation mailbox
+  target before leaving the receipt failed and claimable. Focused proof covers
+  the failure, retry, and no-duplicate-activation path. The separate preliminary
+  suggestion to suppress later-refunded positive invoice events is intentionally
+  out of scope after the operator clarified that every observed positive payment
+  event should notify.
 - [ ] Push the exact candidate, run CI and ReviewGPT, resolve findings, and
   close the plan.

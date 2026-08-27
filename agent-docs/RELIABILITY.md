@@ -854,7 +854,10 @@ Last verified: 2026-08-23
   rolling back billing, entitlement, or usage credit. A receipt-local sent
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
-  the marker must skip send and finish remaining work. Zero-dollar invoices and
+  the marker must skip send and finish remaining work. When the same attempt
+  committed activation mailbox items, notification failure best-effort signals
+  those exact durable pointers through the existing activation-wake owner
+  before returning the receipt to its retry lane. Zero-dollar invoices and
   no-charge plan changes complete without notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
