@@ -10,7 +10,8 @@ Updated: 2026-08-27
   when a foreground Murph reply is already running, without adding an
   Environment-specific scheduler or changing Temporal workflow behavior.
 - Express the behavior through the existing ordered mailbox, one generic
-  execution classifier, and the default runtime's existing safe checkpoint.
+  execution classifier, and the existing safe checkpoint between its two
+  generic runtime owners.
 
 ## Success criteria
 
@@ -20,9 +21,9 @@ Updated: 2026-08-27
 - `environment-interview.completed` is handled by the existing model-free
   system-mailbox lane and reaches Browser Vault publication without a model
   request.
-- A resident default runtime absorbs first-frontier model-free work after its
-  existing safe checkpoint; only the bounded system-mailbox owner yields when
-  fresh foreground/default work arrives.
+- A resident default or system-mailbox owner finishes its current bounded unit,
+  checkpoints, and yields when the exact first frontier belongs to the other
+  owner.
 - Environment status remains a UI projection only and is not a scheduling
   fact supplied to Temporal.
 - Temporal and the private worker repository require no functional change.
@@ -79,9 +80,8 @@ Updated: 2026-08-27
    persisted fence.
 3. Risk: Cross-mode wakes could interrupt a reply or canonical Browser
    Vault publication.
-   Mitigation: the default owner absorbs model-free work only after its existing
-   safe checkpoint; the bounded system owner alone yields through the existing
-   wake-and-retry path.
+   Mitigation: either generic owner preserves its current bounded unit, then
+   yields through the same existing wake-and-retry checkpoint path.
 4. Risk: Removing the Environment reconciliation fact could regress the UI.
    Mitigation: keep the existing Environment status query at its UI owner and
    remove only its orchestration projection.
@@ -92,8 +92,8 @@ Updated: 2026-08-27
    fact, runtime handoff, and Cloudflare ownership tests.
 2. Add one shared generic classifier and route Environment completion through
    the existing model-free system-mailbox action set.
-3. Reuse the default owner's checkpoint path and narrow the controller to one
-   system-to-default yield direction.
+3. Reuse the existing checkpoint path and keep one symmetric cooperative yield
+   rule between default and system-mailbox owners.
 4. Delete Environment-specific orchestration facts, flags, and documentation
    made obsolete by the classifier.
 5. Add focused deterministic and composed hosted-local proof for all three
@@ -121,16 +121,20 @@ Updated: 2026-08-27
 
 ## Verification
 
-- Completed local proof:
+- Completed local proof before the composed correction:
   - Hosted-execution classifier: 8 tests passed.
   - Assistant-runtime checkpoint, system-mailbox, and Environment integration:
-    91 focused tests passed after deleting the default-to-system handoff.
-  - Cloudflare runner coordination: 157 tests passed.
+    91 focused tests passed on the disproven in-place-drain candidate.
   - Web reconciliation and classifier: 51 tests passed.
   - Changelog rendering: 9 tests passed.
   - Temporal compatibility fixtures: 2 tests passed.
   - Hosted-execution, assistant-runtime, Cloudflare, and Web typechecks passed.
   - `git diff --check` passed.
+- Current correction proof:
+  - Cloudflare runner coordination: 157 tests passed.
+  - Focused system-to-default cooperative release and in-flight projection
+    interruption tests passed; assistant-runtime and Cloudflare typechecks
+    passed.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
     runner's fixed macOS total-byte ceiling stopped bundle assembly before the
@@ -140,8 +144,12 @@ Updated: 2026-08-27
   - Corrected exact-head final ReviewGPT, public CI, private Linux composed E2E,
     and post-deploy smoke. The preliminary specialists requested the composed
     journey and a same-member ordered-predecessor case; both are accepted.
+  - The first exact private Linux run disproved default-owner in-place draining:
+    Environment stayed imported but pending, and system-owned foreground
+    processing retained the wrong fence. The current correction restores one
+    cooperative checkpoint-and-retry rule in both directions and still needs a
+    fresh exact-head Linux run.
 - Required outcomes:
   - Exact first-frontier classification, no leapfrogging, no model call for
-    Environment completion, default-owner in-place draining, safe
-    system-to-default yield, durable retry after failure, and unchanged
-    foreground reply authority.
+    Environment completion, safe cooperative owner yield in both directions,
+    durable retry after failure, and unchanged foreground reply authority.

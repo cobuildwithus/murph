@@ -566,7 +566,8 @@ gate unset and makes no paid request.
   It also queues one same-member default-owned system row immediately before an
   Environment completion, holds the default owner's canonical checkpoint, and
   proves the report does not publish early before the ordered Environment row
-  advances without another provider request.
+  advances through the subsequent model-free owner without another provider
+  request.
   That process proves a later durable conversation reaches mailbox import and
   provider start before an interrupted idle snapshot can retry, and proves the
   same foreground continuation after a committed canonical publication. The

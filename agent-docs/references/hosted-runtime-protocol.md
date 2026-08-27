@@ -774,19 +774,14 @@ row remains a hard ordering barrier. Already committed Web updates remain
 authoritative, while an interrupted or not-yet-checkpointed unit stays
 recoverable from the durable mailbox and its existing continuation contract.
 
-The default owner already has the safe checkpoint and ordered system-mailbox
-pass needed to absorb model-free work. When `system_mailbox` is requested behind
-an active default runtime, UserRunner wakes that exact child and accepts the
-request without changing its fence. The default runtime finishes its current
-foreground work, checkpoints normally, and processes the exact first model-free
-row in place. There is no second owner transition or retry timer.
-
-The reverse direction remains cooperative: when fresh default work arrives
-behind a `system_mailbox` owner, UserRunner wakes that exact child, preserves its
-fence, and returns `retry_later`. The bounded system owner finishes or
-checkpoints its current model-free unit and releases so ordinary reconciliation
-can admit the foreground owner. Neither direction aborts canonical publication
-or adds a queue, scheduler, feature-specific mode, or persisted handoff state.
+Default and `system_mailbox` remain separate bounded owners over one ordered
+mailbox. When either mode is requested behind the other, UserRunner wakes the
+exact active child, preserves its fence, and returns `retry_later`. The active
+owner finishes or checkpoints its current unit, projects any remaining work,
+and releases so ordinary reconciliation can admit the requested owner. Neither
+direction aborts canonical publication or adds a queue, scheduler,
+feature-specific mode, persisted handoff state, or same-invocation owner
+upgrade.
 
 Web derives the generic `systemMailboxFrontier` from the exact first live row
 after `hostedMailboxSystemHandledThroughSeq` by using the same shared

@@ -438,12 +438,15 @@ export class RuntimeProcessingController {
     }
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
-    const defaultAbsorbsSystemMailbox =
-      activeFence.processingMode === "default"
-      && requestedProcessingMode === "system_mailbox";
-    const systemMailboxYieldsToDefault =
-      activeFence.processingMode === "system_mailbox"
-      && requestedProcessingMode === "default";
+    const cooperativeMailboxOwnerHandoff =
+      (
+        activeFence.processingMode === "default"
+        && requestedProcessingMode === "system_mailbox"
+      )
+      || (
+        activeFence.processingMode === "system_mailbox"
+        && requestedProcessingMode === "default"
+      );
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"
@@ -456,7 +459,7 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (!defaultAbsorbsSystemMailbox && !systemMailboxYieldsToDefault) {
+      if (!cooperativeMailboxOwnerHandoff) {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
             activeFence,
@@ -558,7 +561,7 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      if (systemMailboxYieldsToDefault) {
+      if (cooperativeMailboxOwnerHandoff) {
         // The active child accepted the wake so it can checkpoint and release.
         // It did not accept processing under the requested mode.
         return this.createRetryLater({

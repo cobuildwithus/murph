@@ -19,11 +19,9 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
-  stageAssistantInputEventForMailboxItem,
   waitUntil,
   withRealTimeout,
   writeMailboxImportStateFile,
-  writeSyntheticAssistantAutoReplyTerminalEvidence,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
@@ -208,7 +206,6 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           vaultRoot,
         },
       );
-
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(baseDeviceSyncPort.fetchDirtyStatesCalls, 0);
@@ -344,18 +341,18 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("foreground input during a blocked system pass upgrades after checkpointing the bounded unit once", async () => {
+  test("foreground input during a blocked system pass yields after checkpointing the bounded unit once", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const foregroundWakeSent = createDeferred<void>();
     const mailboxItems: HostedMailboxItem[] = [];
     const foregroundItem = createMailboxItem({
       id: "mailbox_item_system_mailbox_blocked_foreground_upgrade",
       laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
-    let assistantPhaseCalls = 0;
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:preempt-during",
       id: "mailbox_item_system_mailbox_device_preempt_during",
@@ -368,7 +365,9 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
       onApplyUpdates: () => {
         mailboxItems.push(foregroundItem);
+        events.push("foreground.wake");
         runtimeWakeSignal.notify();
+        foregroundWakeSent.resolve();
       },
     });
 
@@ -390,7 +389,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         vaultRoot,
       });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             assistantExecutionBlocked: true,
@@ -410,16 +409,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
               }),
             };
           },
-          async importItem(item) {
-            assert.equal(item.item.id, foregroundItem.id);
-            const assistantInputId = await stageAssistantInputEventForMailboxItem({
-              item: item.item,
-              vaultRoot,
-            });
-            return {
-              assistantInputId,
-              status: "imported",
-            };
+          async importItem() {
+            throw new Error(
+              "The system-mailbox owner must yield before importing foreground work.",
+            );
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
@@ -435,27 +428,26 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase(input) {
-            assistantPhaseCalls += 1;
-            const inputIds =
-              input.initialAssistantInputBatch?.assistantInputIds
-              ?? input.initialMailboxImport.importResult.assistantInputIds
-              ?? [];
-            assert.equal(inputIds.length, 1);
-            await writeSyntheticAssistantAutoReplyTerminalEvidence({
-              inputId: inputIds[0] ?? "",
-              vaultRoot,
-            });
-            return {
-              checkpointReason: "assistant_runtime_commit" as const,
-              progressed: true,
-            };
+          async runAssistantPhase() {
+            throw new Error(
+              "The system-mailbox owner must yield before entering the assistant phase.",
+            );
           },
           vaultRoot,
         },
       );
+      await withRealTimeout(
+        foregroundWakeSent.promise,
+        45_000,
+        () => `System-mailbox work did not reach foreground wake: ${events.join(",")}`,
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        5_000,
+        () => `System-mailbox owner did not yield promptly: ${events.join(",")}`,
+      );
 
-      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(result.immediateRecheckRequested, true);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
       assert.ok(checkpointRequests.length >= 1);
@@ -1426,18 +1418,16 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         },
       );
       runtimeWakeSignal.notify();
-      await withRealTimeout(
-        waitUntil(() => {
-          assert.ok(fetchRequests.some((request) =>
-            request.requestId.includes(":system-mailbox-foreground-upgrade")
-          ));
-        }),
-        5_000,
-        () => events.join(","),
-      );
+      await Promise.resolve();
       assert.equal(interruptedRunSettled, false);
       assert.equal(projectionCalls, 1);
       assert.equal(activeProjectionCalls, 1);
+      assert.equal(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":system-mailbox-foreground-upgrade")
+        ),
+        false,
+      );
       projectionRelease.resolve();
       const interruptedResult = await withRealTimeout(
         interruptedRun,

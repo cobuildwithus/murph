@@ -3878,7 +3878,7 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
-  it("wakes the active foreground owner to absorb system-mailbox work", async () => {
+  it("wakes the active foreground owner before retrying system-mailbox work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -3903,11 +3903,9 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-system-mailbox-behind-foreground",
       processingMode: "system_mailbox",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: expect.any(String),
-      runtimeAttemptId: token.attemptId,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledWith({

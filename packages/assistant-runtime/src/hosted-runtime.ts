@@ -3315,8 +3315,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
-    let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
     const selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
       && !assistantExecutionBlocked
       ? findNextHostedSystemMailboxQueueItem({
@@ -3336,41 +3334,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     ) {
       const systemMailboxResult =
         await returnSystemMailboxProcessingModeAfterInitialImport();
-      const returnSystemMailboxResult = (): HostedWorkspaceInvocationResult => {
-        emitPhaseLog({
-          details: {
-            immediateRecheckRequested:
-              systemMailboxResult.immediateRecheckRequested === true,
-            invocationStatus: systemMailboxResult.status,
-            nextWakeAtPresent: systemMailboxResult.nextWakeAt !== null,
-          },
-          input,
-          requestId,
-          stage: "runtime.return",
-          status: "done",
-        });
-        return systemMailboxResult;
-      };
-      if (
-        systemMailboxResult.immediateRecheckRequested !== true
-        || runtimeAbortController.signal.aborted
-        || options.shutdownSignal?.aborted === true
-      ) {
-        return returnSystemMailboxResult();
-      }
-      const foregroundPrefetch = await createHostedForegroundMailboxPrefetch({
-        lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-        limitPerLane: mailboxBudget.fetchLimitPerLane,
-        requestId: `${requestId}:system-mailbox-foreground-upgrade`,
-        runnerInput: baseRunnerInput,
+      emitPhaseLog({
+        details: {
+          immediateRecheckRequested:
+            systemMailboxResult.immediateRecheckRequested === true,
+          invocationStatus: systemMailboxResult.status,
+          nextWakeAtPresent: systemMailboxResult.nextWakeAt !== null,
+        },
+        input,
+        requestId,
+        stage: "runtime.return",
+        status: "done",
       });
-      const foregroundResponse = await foregroundPrefetch.response;
-      if (!foregroundResponse.items.some((item) => item.lane === "conversation")) {
-        return returnSystemMailboxResult();
-      }
-      systemMailboxForegroundWakePrefetch = foregroundPrefetch;
-      systemMailboxForegroundWakeResult = systemMailboxResult;
-      hostedCodexRuntime = await prepareInvocationCodexRuntime();
+      return systemMailboxResult;
     }
     if (systemMailboxForegroundOwnerSelected) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
@@ -3801,8 +3777,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let invocationLocalProjectedAssistantWakeKey: string | null = null;
     let hotProjectedAssistantWakeAttemptedKey: string | null = null;
     let durableCheckpointFollowUpPending = false;
-    let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> =
-      systemMailboxForegroundWakeResult?.redactedStatus ?? {};
+    let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> = {};
     let invocationStatus: HostedWorkspaceInvocationResult["status"] =
       resolveHostedWorkspaceInvocationStatus({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
@@ -5422,6 +5397,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             requestIdKind: input.requestIdKind,
             signal: input.signal,
           });
+          await stageMailboxImportWake(systemImport);
         } catch (error) {
           if (!runtimeAbortController.signal.aborted && !shouldContinue()) {
             await stageMailboxImportWake(systemImport);
@@ -5562,19 +5538,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
 
       result = await runForegroundPass({
-        ...(systemMailboxForegroundWakePrefetch
-          ? {
-              initialMailboxImportContext:
-                createHostedRuntimeWakeInitialImportContext(null),
-              initialMailboxImportLanes:
-                HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-              initialMailboxPrefetch: systemMailboxForegroundWakePrefetch,
-            }
-          : {
-              initialMailboxImport,
-              initialMailboxImportContext,
-              initialMailboxPrefetch: initialMailboxImportResult.prefetch,
-            }),
+        initialMailboxImport,
+        initialMailboxImportContext,
+        initialMailboxPrefetch: initialMailboxImportResult.prefetch,
         latencySeed: null,
         ...(initialProviderStartCriticalPath
           ? { providerStartCriticalPath: initialProviderStartCriticalPath }
