@@ -143,22 +143,26 @@ describeRealModel("hosted Linq instant first-turn real-model semantics", () => {
       const request = buildHostedLinqInstantFirstTurnOpenAiBody({ text });
       request.reasoning = { ...request.reasoning, effort };
       const startedAt = performance.now();
-      const response = await openAi.responses.create(
+      const completion = await openAi.responses.create(
         request,
         { maxRetries: 0, timeout: 18_000 },
       );
       const latencyMs = Math.round(performance.now() - startedAt);
-      expect(response.status).toBe("completed");
-      expect(response.usage?.total_tokens).toBeGreaterThan(0);
-      assertSemanticReply({ evalCase, outputText: response.output_text });
+      expect(completion.status).toBe("completed");
+      expect(completion.usage?.total_tokens).toBeGreaterThan(0);
+      assertSemanticReply({ evalCase, outputText: completion.output_text });
+      const inputTokens = completion.usage?.input_tokens ?? null;
+      const outputTokens = completion.usage?.output_tokens ?? null;
+      const reasoningTokens =
+        completion.usage?.output_tokens_details.reasoning_tokens ?? null;
+      const serviceTier = completion.service_tier ?? null;
       console.info("hosted Linq first-turn real-model control", {
         effort,
-        inputTokens: response.usage?.input_tokens ?? null,
+        inputTokens,
         latencyMs,
-        outputTokens: response.usage?.output_tokens ?? null,
-        reasoningTokens:
-          response.usage?.output_tokens_details.reasoning_tokens ?? null,
-        serviceTier: response.service_tier ?? null,
+        outputTokens,
+        reasoningTokens,
+        serviceTier,
         text,
       });
     }
