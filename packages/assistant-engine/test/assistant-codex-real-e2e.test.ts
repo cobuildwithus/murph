@@ -482,6 +482,134 @@ describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
   )
 })
 
+describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
+  it(
+    'answers from the admitted voice memo transcript without claiming the memo is unavailable',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-voice-memo-attachment-evidence-e2e-'),
+      )
+      const transcript = [
+        'The synthetic verification phrase is amber lighthouse.',
+        'Reply with that two-word phrase.',
+      ].join(' ')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const promptInput: AssistantAutoReplyPromptInput = {
+          actorIsSelf: false,
+          attachmentDescriptors: [{
+            attachmentId: 'attachment-voice-evidence',
+            contentType: 'audio/mp4',
+            fileName: 'voice-note.m4a',
+            kind: 'voice_memo',
+            sizeBytes: 1_024,
+          }],
+          attachmentEvidence: {
+            attachments: [{
+              byteSize: 1_024,
+              derived: null,
+              descriptorAttachmentId: 'attachment-voice-evidence',
+              fileName: 'voice-note.m4a',
+              inlineFragments: [{
+                kind: 'attachment_transcript',
+                label: 'attachment-1-transcript',
+                text: transcript,
+                truncated: false,
+              }],
+              kind: 'audio',
+              mime: 'audio/mp4',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: null,
+              sourceAttachmentId: 'attachment-voice-evidence',
+            }],
+            optionalInboxCaptureId: 'capture-voice-evidence',
+            reasonCode: null,
+            source: 'hosted-inbox-projection',
+            status: 'available',
+            updatedAt: '2026-08-26T20:00:01.000Z',
+          },
+          conversation: {
+            accountId: 'account-voice-evidence',
+            actorId: 'actor-voice-evidence',
+            actorIsSelf: false,
+            source: 'linq',
+            threadId: 'thread-voice-evidence',
+            threadIsDirect: true,
+          },
+          inputId: 'input-voice-evidence',
+          occurredAt: '2026-08-26T20:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'capture-voice-evidence',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T20:00:00.000Z',
+          replyContext: null,
+          replyTarget: {
+            channel: 'linq',
+            messageId: 'message-voice-evidence',
+            threadId: 'thread-voice-evidence',
+          },
+          source: 'linq',
+          sourceMetadata: null,
+          telegramMetadata: null,
+          text: 'Received a voice memo.',
+        }
+        const prepared = await prepareAssistantAutoReplyInput(
+          [promptInput],
+          workingDirectory,
+        )
+        if (prepared.kind !== 'ready') {
+          throw new Error(`Expected a ready voice memo prompt, received ${prepared.kind}.`)
+        }
+        expect(prepared.prompt).toContain(transcript)
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: prepared.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[voice-memo-attachment-evidence-e2e] ${JSON.stringify({
+            promptBytes: Buffer.byteLength(prepared.prompt, 'utf8'),
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
+        expect(result.finalMessage).toMatch(/amber lighthouse/iu)
+        expect(result.finalMessage).not.toMatch(
+          /(?:could(?:n't| not)|can(?:'t|not)) access|did(?:n't| not) come through|resend|type it out/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
     'runs a Luna child through native collaboration',

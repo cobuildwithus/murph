@@ -27,9 +27,6 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
-} from "@murphai/hosted-execution/assistant-capabilities";
-import {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   createAssistantActiveTurnInputController,
   listAssistantInputEvents,
@@ -218,26 +215,51 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     });
     const order: string[] = [];
-
-    const outcome = await importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake(input) {
-        order.push(`projection:${input.wake.eventId}`);
-        throw new HostedConversationInboxProjectionError(
-          "canonical inbox capture unavailable",
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        const listed = await listAssistantInputEvents({ vault: vaultRoot });
+        assert.equal(listed.events[0]?.attachmentEvidence.status, "failed");
+        assert.equal(
+          listed.events[0]?.attachmentEvidence.reasonCode,
+          "conversation-import.attachment-evidence-failed",
         );
+        order.push("notify");
+        return {
+          kind: "no-new-input",
+        };
       },
-      async prepareWakeContext(input) {
-        order.push(`prepare:${input.wake.eventId}`);
-      },
-      item,
-      runtime: createRuntime(),
-      vaultRoot,
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_projection_failure",
+      turnId: "turn_projection_failure",
+      vault: vaultRoot,
     });
+
+    const outcome = await (async () => {
+      try {
+        return await importHostedConversationMailboxItem({
+          decodePayload: createDecodedPayloadDecoder(decodedWake),
+          async importConversationWake(input) {
+            order.push(`projection:${input.wake.eventId}`);
+            throw new HostedConversationInboxProjectionError(
+              "canonical inbox capture unavailable",
+            );
+          },
+          async prepareWakeContext(input) {
+            order.push(`prepare:${input.wake.eventId}`);
+          },
+          item,
+          runtime: createRuntime(),
+          vaultRoot,
+        });
+      } finally {
+        controller.close();
+      }
+    })();
 
     assert.deepEqual(order, [
       "prepare:evt_synthetic_conversation_001",
       "projection:evt_synthetic_conversation_001",
+      "notify",
     ]);
     assert.equal(outcome.status, "imported");
     assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
@@ -342,8 +364,8 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
   });
 
-  test("notifies active turn input after staging and before non-video inbox projection completes", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-early-notify-"));
+  test("waits for audio attachment evidence before notifying active turn input while staging stays early", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-audio-evidence-notify-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const item = createResolvedConversationMailboxItem();
@@ -351,17 +373,17 @@ describe("hosted mailbox conversation import adapter", () => {
       message: {
         channel: "linq",
         linqMessage: {
-          chatId: "chat_early_notify",
+          chatId: "chat_audio_evidence_notify",
           from: "redacted-contact-sentinel",
           isFromMe: false,
-          messageId: "msg_early_notify",
+          messageId: "msg_audio_evidence_notify",
           parts: [
             {
               type: "text",
-              value: "please fold this into the turn",
+              value: "please fold this voice memo into the turn",
             },
             {
-              attachmentId: "att_early_notify",
+              attachmentId: "att_audio_evidence_notify",
               fileName: "voice.m4a",
               mimeType: "audio/mp4",
               size: 12_345,
@@ -374,13 +396,32 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "redacted-contact-sentinel",
       },
     });
+    const rawPath =
+      "raw/inbox/linq/cap_audio_evidence_notify/attachments/01__voice.m4a";
+    await writeVaultFile(vaultRoot, rawPath, Buffer.from("audio bytes"));
     const notificationObserved = createDeferred<void>();
+    const projectionStarted = createDeferred<void>();
     const projectionRelease = createDeferred<void>();
     const signalController = new AbortController();
     const order: string[] = [];
+    let notificationCount = 0;
     const controller = createAssistantActiveTurnInputController({
       admissionHook: async (input) => {
         assert.equal(input.signal, signalController.signal);
+        notificationCount += 1;
+        const listed = await listAssistantInputEvents({ vault: vaultRoot });
+        const evidence = listed.events[0]?.attachmentEvidence;
+        assert.equal(evidence?.status, "available");
+        assert.equal(evidence?.attachments[0]?.kind, "audio");
+        assert.equal(evidence?.attachments[0]?.raw?.path, rawPath);
+        assert.deepEqual(evidence?.attachments[0]?.inlineFragments, [
+          {
+            kind: "attachment_transcript",
+            label: "attachment-1-transcript",
+            text: "Synthetic voice memo transcript.",
+            truncated: false,
+          },
+        ]);
         order.push("notify");
         notificationObserved.resolve(undefined);
         return {
@@ -388,8 +429,8 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
-      sessionId: "session_early_notify",
-      turnId: "turn_early_notify",
+      sessionId: "session_audio_evidence_notify",
+      turnId: "turn_audio_evidence_notify",
       vault: vaultRoot,
     });
 
@@ -397,14 +438,37 @@ describe("hosted mailbox conversation import adapter", () => {
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       async importConversationWake() {
         order.push("projection-started");
+        projectionStarted.resolve(undefined);
         await projectionRelease.promise;
         order.push("projection-finished");
         return {
-          captureId: null,
+          captureId: "cap_audio_evidence_notify",
           metrics: {
             nextWakeAt: null,
-            parserProcessed: 0,
+            parserProcessed: 1,
           },
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        order.push("attachment-evidence");
+        return {
+          captureId: input.captureId,
+          attachments: [
+            {
+              attachmentId: "att_audio_evidence_notify",
+              byteSize: 12_345,
+              derivedPath: null,
+              extractedText: null,
+              fileName: "voice.m4a",
+              kind: "audio",
+              mime: "audio/mp4",
+              ordinal: 1,
+              parseState: "succeeded",
+              sha256: "c".repeat(64),
+              storedPath: rawPath,
+              transcriptText: "Synthetic voice memo transcript.",
+            },
+          ],
         };
       },
       async prepareWakeContext() {
@@ -419,165 +483,6 @@ describe("hosted mailbox conversation import adapter", () => {
         order.push("staged-callback");
       },
       runtime: createRuntime(),
-      signal: signalController.signal,
-      vaultRoot,
-    });
-
-    try {
-      await notificationObserved.promise;
-      assert.deepEqual(order, ["activity-callback", "staged-callback", "notify"]);
-
-      projectionRelease.resolve(undefined);
-      const outcome = await importPromise;
-      if (outcome.status !== "imported") {
-        throw new Error("Expected imported mailbox outcome.");
-      }
-
-      const listed = await listAssistantInputEvents({ vault: vaultRoot });
-      assert.equal(listed.events.length, 1);
-      assert.deepEqual(order, [
-        "activity-callback",
-        "staged-callback",
-        "notify",
-        "projection-prepared",
-        "projection-started",
-        "projection-finished",
-      ]);
-      assert.equal(outcome.assistantInputId, listed.events[0]?.inputId);
-      assert.equal(outcome.captureId, null);
-      assert.deepEqual(outcome.metrics, {
-        nextWakeAt: null,
-        parserProcessed: 0,
-      });
-      assert.equal(typeof outcome.conversationImportTiming?.projectionPrepareMs, "number");
-      assert.equal(typeof outcome.conversationImportTiming?.projectionImportMs, "number");
-      assert.equal(typeof outcome.conversationImportTiming?.projectionTotalMs, "number");
-      assert.equal("attachmentEvidenceMs" in (outcome.conversationImportTiming ?? {}), false);
-      assert.equal(outcome.linqDeliveryContext?.replyToMessageId, "msg_early_notify");
-      assert.equal("reasonCode" in outcome, false);
-      assert.equal("afterCheckpoint" in outcome, false);
-    } finally {
-      projectionRelease.resolve(undefined);
-      controller.close();
-      await importPromise.catch(() => undefined);
-    }
-  });
-
-  test("waits for attachment evidence before notifying active turn input", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-notify-"));
-    tempRoots.push(parentRoot);
-    const vaultRoot = path.join(parentRoot, "vault");
-    const item = createResolvedConversationMailboxItem();
-    const decodedWake = createConversationWake({
-      message: {
-        channel: "linq",
-        linqMessage: {
-          chatId: "chat_evidence_notify",
-          from: "redacted-contact-sentinel",
-          isFromMe: false,
-          messageId: "msg_evidence_notify",
-          parts: [
-            {
-              type: "text",
-              value: "please analyze this video",
-            },
-            {
-              attachmentId: "att_evidence_notify",
-              fileName: "clip.mp4",
-              mimeType: "video/mp4",
-              size: 11,
-              type: "media",
-              url: "redacted-attachment-url-sentinel",
-            },
-          ],
-          threadIsDirect: true,
-        },
-        phoneLookupKey: "redacted-contact-sentinel",
-      },
-    });
-    const rawPath =
-      "raw/inbox/linq/cap_evidence_notify/attachments/01__clip.mp4";
-    await writeVaultFile(vaultRoot, rawPath, Buffer.from("video bytes"));
-    const notificationObserved = createDeferred<void>();
-    const projectionStarted = createDeferred<void>();
-    const projectionRelease = createDeferred<void>();
-    const signalController = new AbortController();
-    const order: string[] = [];
-    let notificationCount = 0;
-    const controller = createAssistantActiveTurnInputController({
-      admissionHook: async (input) => {
-        assert.equal(input.signal, signalController.signal);
-        notificationCount += 1;
-        const listed = await listAssistantInputEvents({ vault: vaultRoot });
-        const event = listed.events[0];
-        assert.equal(event?.attachmentEvidence.status, "available");
-        assert.equal(event?.attachmentEvidence.attachments[0]?.kind, "video");
-        assert.equal(event?.attachmentEvidence.attachments[0]?.raw?.path, rawPath);
-        order.push("notify");
-        notificationObserved.resolve(undefined);
-        return {
-          kind: "no-new-input",
-        };
-      },
-      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
-      sessionId: "session_evidence_notify",
-      turnId: "turn_evidence_notify",
-      vault: vaultRoot,
-    });
-
-    const importPromise = importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake() {
-        order.push("projection-started");
-        projectionStarted.resolve(undefined);
-        await projectionRelease.promise;
-        order.push("projection-finished");
-        return {
-          captureId: "cap_evidence_notify",
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 1,
-          },
-        };
-      },
-      async loadAttachmentEvidenceCapture(input) {
-        order.push("attachment-evidence");
-        return {
-          captureId: input.captureId,
-          attachments: [
-            {
-              attachmentId: "att_evidence_notify",
-              byteSize: 11,
-              derivedPath: null,
-              extractedText: null,
-              fileName: "clip.mp4",
-              kind: "video",
-              mime: "video/mp4",
-              ordinal: 1,
-              parseState: "succeeded",
-              sha256: "c".repeat(64),
-              storedPath: rawPath,
-              transcriptText: null,
-            },
-          ],
-        };
-      },
-      async prepareWakeContext() {
-        order.push("projection-prepared");
-      },
-      item,
-      onConversationActivityObserved() {
-        order.push("activity-callback");
-      },
-      onConversationInputStaged(channel) {
-        assert.equal(channel, "linq");
-        order.push("staged-callback");
-      },
-      runtime: createRuntime({
-        forwardedEnv: {
-          [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",
-        },
-      }),
       signal: signalController.signal,
       vaultRoot,
     });
@@ -610,6 +515,7 @@ describe("hosted mailbox conversation import adapter", () => {
         "attachment-evidence",
         "notify",
       ]);
+      assert.equal(typeof outcome.conversationImportTiming?.attachmentEvidenceMs, "number");
     } finally {
       projectionRelease.resolve(undefined);
       controller.close();
@@ -617,247 +523,8 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test.each([
-    {
-      attachment: {
-        attachmentId: "att_group_video",
-        fileName: "clip.mp4",
-        mimeType: "video/mp4",
-        size: 11,
-        type: "media",
-        url: "redacted-attachment-url-sentinel",
-      } as const,
-      name: "group MP4",
-      runtime: createRuntime({
-        forwardedEnv: {
-          [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",
-        },
-      }),
-      threadIsDirect: false,
-    },
-    {
-      attachment: {
-        attachmentId: "att_unsupported_video",
-        fileName: "clip.avi",
-        mimeType: "video/avi",
-        size: 11,
-        type: "media",
-        url: "redacted-attachment-url-sentinel",
-      } as const,
-      name: "unsupported video MIME",
-      runtime: createRuntime({
-        forwardedEnv: {
-          [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",
-        },
-      }),
-      threadIsDirect: true,
-    },
-    {
-      attachment: {
-        attachmentId: "att_default_off_video",
-        fileName: "clip.mp4",
-        mimeType: "video/mp4",
-        size: 11,
-        type: "media",
-        url: "redacted-attachment-url-sentinel",
-      } as const,
-      name: "supported video while Gemini is unavailable",
-      runtime: createRuntime(),
-      threadIsDirect: true,
-    },
-  ])("notifies active turn before projection for $name", async ({
-    attachment,
-    name,
-    runtime,
-    threadIsDirect,
-  }) => {
-    const parentRoot = await mkdtemp(path.join(
-      tmpdir(),
-      `murph-hosted-input-video-ineligible-${name.replaceAll(" ", "-")}-`,
-    ));
-    tempRoots.push(parentRoot);
-    const vaultRoot = path.join(parentRoot, "vault");
-    const item = createResolvedConversationMailboxItem({
-      dedupeKey: `evt_${attachment.attachmentId}`,
-      id: `mailbox_item_${attachment.attachmentId}`,
-    });
-    const decodedWake = createConversationWake({
-      eventId: `evt_${attachment.attachmentId}`,
-      message: {
-        channel: "linq",
-        linqMessage: {
-          chatId: `chat_${attachment.attachmentId}`,
-          from: "redacted-contact-sentinel",
-          isFromMe: false,
-          messageId: `msg_${attachment.attachmentId}`,
-          parts: [
-            {
-              type: "text",
-              value: "please fold this into the turn",
-            },
-            attachment,
-          ],
-          threadIsDirect,
-        },
-        phoneLookupKey: "redacted-contact-sentinel",
-      },
-    });
-    const notificationObserved = createDeferred<void>();
-    const projectionRelease = createDeferred<void>();
-    const order: string[] = [];
-    const controller = createAssistantActiveTurnInputController({
-      admissionHook: async () => {
-        order.push("notify");
-        notificationObserved.resolve(undefined);
-        return {
-          kind: "no-new-input",
-        };
-      },
-      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
-      sessionId: `session_${attachment.attachmentId}`,
-      turnId: `turn_${attachment.attachmentId}`,
-      vault: vaultRoot,
-    });
-
-    const importPromise = importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake() {
-        order.push("projection-started");
-        await projectionRelease.promise;
-        order.push("projection-finished");
-        return {
-          captureId: null,
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 0,
-          },
-        };
-      },
-      async prepareWakeContext() {
-        order.push("projection-prepared");
-      },
-      item,
-      onConversationActivityObserved() {
-        order.push("activity-callback");
-      },
-      onConversationInputStaged(channel) {
-        assert.equal(channel, "linq");
-        order.push("staged-callback");
-      },
-      runtime,
-      vaultRoot,
-    });
-
-    try {
-      await notificationObserved.promise;
-      assert.deepEqual(order, ["activity-callback", "staged-callback", "notify"]);
-
-      projectionRelease.resolve(undefined);
-      const outcome = await importPromise;
-      assert.equal(outcome.status, "imported");
-    } finally {
-      projectionRelease.resolve(undefined);
-      controller.close();
-      await importPromise.catch(() => undefined);
-    }
-  });
-
-  test("notifies active turn before projection for unsupported Telegram video-note descriptors", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-video-note-"));
-    tempRoots.push(parentRoot);
-    const vaultRoot = path.join(parentRoot, "vault");
-    const item = createResolvedConversationMailboxItem({
-      dedupeKey: "evt_telegram_video_note",
-      id: "mailbox_item_telegram_video_note",
-    });
-    const decodedWake = createConversationWake({
-      eventId: "evt_telegram_video_note",
-      message: {
-        channel: "telegram",
-        telegramMessage: {
-          attachments: [
-            {
-              fileId: "file_telegram_video_note",
-              fileName: "video-note.bin",
-              fileSize: 11,
-              kind: "video_note",
-              mimeType: "application/octet-stream",
-            },
-          ],
-          messageId: "msg_telegram_video_note",
-          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
-          text: "please fold this into the turn",
-          threadId: "thread_telegram_video_note",
-          threadIsDirect: true,
-        },
-      },
-    });
-    const notificationObserved = createDeferred<void>();
-    const projectionRelease = createDeferred<void>();
-    const order: string[] = [];
-    const controller = createAssistantActiveTurnInputController({
-      admissionHook: async () => {
-        order.push("notify");
-        notificationObserved.resolve(undefined);
-        return {
-          kind: "no-new-input",
-        };
-      },
-      conversationKeys: [createTelegramConversationLookupKey({ item, wake: decodedWake })],
-      sessionId: "session_telegram_video_note",
-      turnId: "turn_telegram_video_note",
-      vault: vaultRoot,
-    });
-
-    const importPromise = importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake() {
-        order.push("projection-started");
-        await projectionRelease.promise;
-        order.push("projection-finished");
-        return {
-          captureId: null,
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 0,
-          },
-        };
-      },
-      async prepareWakeContext() {
-        order.push("projection-prepared");
-      },
-      item,
-      onConversationActivityObserved() {
-        order.push("activity-callback");
-      },
-      onConversationInputStaged(channel) {
-        assert.equal(channel, "telegram");
-        order.push("staged-callback");
-      },
-      runtime: createRuntime({
-        forwardedEnv: {
-          [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",
-        },
-      }),
-      vaultRoot,
-    });
-
-    try {
-      await notificationObserved.promise;
-      assert.deepEqual(order, ["activity-callback", "staged-callback", "notify"]);
-
-      projectionRelease.resolve(undefined);
-      const outcome = await importPromise;
-      assert.equal(outcome.status, "imported");
-    } finally {
-      projectionRelease.resolve(undefined);
-      controller.close();
-      await importPromise.catch(() => undefined);
-    }
-  });
-
-  test("keeps active turn notification deferred when eligible video projection retries", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-video-parser-retry-"));
+  test("notifies active turn directly for attachment-free text without opening inbox projection", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-text-fast-path-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const item = createResolvedConversationMailboxItem();
@@ -865,21 +532,92 @@ describe("hosted mailbox conversation import adapter", () => {
       message: {
         channel: "linq",
         linqMessage: {
-          chatId: "chat_video_parser_retry",
+          chatId: "chat_text_fast_path",
           from: "redacted-contact-sentinel",
           isFromMe: false,
-          messageId: "msg_video_parser_retry",
+          messageId: "msg_text_fast_path",
           parts: [
             {
               type: "text",
-              value: "please analyze this video",
+              value: "please fold this text into the turn",
             },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const order: string[] = [];
+    const importConversationWake = vi.fn(async () => {
+      throw new Error("attachment-free text must not open inbox projection");
+    });
+    const prepareWakeContext = vi.fn(async () => {
+      throw new Error("attachment-free text must not prepare inbox projection");
+    });
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        order.push("notify");
+        return {
+          kind: "no-new-input",
+        };
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_text_fast_path",
+      turnId: "turn_text_fast_path",
+      vault: vaultRoot,
+    });
+
+    try {
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        importConversationWake,
+        prepareWakeContext,
+        item,
+        onConversationActivityObserved() {
+          order.push("activity-callback");
+        },
+        onConversationInputStaged(channel) {
+          assert.equal(channel, "linq");
+          order.push("staged-callback");
+        },
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.deepEqual(order, [
+        "activity-callback",
+        "staged-callback",
+        "notify",
+      ]);
+      expect(prepareWakeContext).not.toHaveBeenCalled();
+      expect(importConversationWake).not.toHaveBeenCalled();
+      assert.equal("conversationImportTiming" in outcome, false);
+    } finally {
+      controller.close();
+    }
+  });
+
+  test("keeps audio attachment admission deferred when projection requests a parser retry", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-audio-parser-retry-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_audio_parser_retry",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_audio_parser_retry",
+          parts: [
             {
-              attachmentId: "att_video_parser_retry",
-              fileName: "clip.mp4",
-              mimeType: "video/mp4",
+              attachmentId: "att_audio_parser_retry",
+              fileName: "voice.m4a",
+              mimeType: "audio/mp4",
               size: 11,
-              type: "media",
+              type: "voice_memo",
               url: "redacted-attachment-url-sentinel",
             },
           ],
@@ -897,8 +635,8 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
-      sessionId: "session_video_parser_retry",
-      turnId: "turn_video_parser_retry",
+      sessionId: "session_audio_parser_retry",
+      turnId: "turn_audio_parser_retry",
       vault: vaultRoot,
     });
 
@@ -907,20 +645,37 @@ describe("hosted mailbox conversation import adapter", () => {
         decodePayload: createDecodedPayloadDecoder(decodedWake),
         async importConversationWake() {
           return {
-            captureId: null,
+            captureId: "cap_audio_parser_retry",
             metrics: {
               nextWakeAt: "2026-08-21T09:15:00.000Z",
               parserProcessed: 0,
             },
           };
         },
+        async loadAttachmentEvidenceCapture(input) {
+          return {
+            captureId: input.captureId,
+            attachments: [
+              {
+                attachmentId: "att_audio_parser_retry",
+                byteSize: 11,
+                derivedPath: null,
+                extractedText: null,
+                fileName: "voice.m4a",
+                kind: "audio",
+                mime: "audio/mp4",
+                ordinal: 1,
+                parseState: "pending",
+                sha256: null,
+                storedPath: null,
+                transcriptText: null,
+              },
+            ],
+          };
+        },
         async prepareWakeContext() {},
         item,
-        runtime: createRuntime({
-          forwardedEnv: {
-            [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: "configured",
-          },
-        }),
+        runtime: createRuntime(),
         vaultRoot,
       });
 
@@ -930,6 +685,9 @@ describe("hosted mailbox conversation import adapter", () => {
         status: "blocked",
       });
       assert.equal(notificationCount, 0);
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(listed.events[0]?.projection.status, "succeeded");
+      assert.equal(listed.events[0]?.attachmentEvidence.status, "partial");
     } finally {
       controller.close();
     }
@@ -5218,12 +4976,17 @@ function createLinqConversationLookupKey(input: {
     secret: accountLookupKey,
     userId: input.item.item.userId,
   });
+  const threadIsDirect = input.wake.message.linqMessage.threadIsDirect === undefined
+    ? true
+    : input.wake.message.linqMessage.threadIsDirect;
   const conversationKey = resolveAssistantConversationLookupKey({
     conversation: {
       channel: "linq",
-      directness: input.wake.message.linqMessage.threadIsDirect === false
-        ? "group"
-        : "direct",
+      directness: threadIsDirect === true
+        ? "direct"
+        : threadIsDirect === false
+          ? "group"
+          : "unknown",
       identityId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         accountLookupKey,
@@ -5240,38 +5003,6 @@ function createLinqConversationLookupKey(input: {
   });
   if (!conversationKey) {
     throw new Error("Expected Linq conversation lookup key.");
-  }
-  return conversationKey;
-}
-
-function createTelegramConversationLookupKey(input: {
-  item: HostedMailboxResolvedImportItem;
-  wake: HostedExecutionConversationMessageWake;
-}): string {
-  if (input.wake.message.channel !== "telegram") {
-    throw new Error("Expected Telegram conversation wake.");
-  }
-
-  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-    secret: input.wake.message.telegramMessage.threadId,
-    userId: input.item.item.userId,
-  });
-  const conversationKey = resolveAssistantConversationLookupKey({
-    conversation: {
-      channel: "telegram",
-      directness: input.wake.message.telegramMessage.threadIsDirect === false
-        ? "group"
-        : "direct",
-      identityId: null,
-      participantId: null,
-      threadId: hashNullableHostedAssistantConversationIdentifier(
-        identifierBlind,
-        input.wake.message.telegramMessage.threadId,
-      ),
-    },
-  });
-  if (!conversationKey) {
-    throw new Error("Expected Telegram conversation lookup key.");
   }
   return conversationKey;
 }
