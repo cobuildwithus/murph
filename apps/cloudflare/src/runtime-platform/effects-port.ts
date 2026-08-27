@@ -6,12 +6,16 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  parseHostedOperatorTaskControlResponse,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
   HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -305,6 +309,24 @@ export function createCloudflareEffectsPort(input: {
             return typeof assistantAskFallbackRequired === "boolean"
               ? { assistantAskFallbackRequired }
               : undefined;
+          },
+          async controlOperatorTask(request, context) {
+            return parseHostedOperatorTaskControlResponse(
+              await fetchHostedWebControlPlaneJson({
+                body: request,
+                boundUserId: input.boundUserId,
+                description: "Hosted operator task control",
+                fetchImpl: input.fetchImpl,
+                headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                  description: "Hosted operator task control",
+                  workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+                }),
+                path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
+                signal: context?.signal ?? null,
+                timeoutMs: input.timeoutMs,
+                transport: webControlTransport,
+              }),
+            );
           },
           async resolveCurrentVerifiedEmailRecipient(context) {
             const payload = await fetchHostedWebControlPlaneJson({

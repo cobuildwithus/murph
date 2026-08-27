@@ -18,10 +18,13 @@ import type {
   HostedExecutionLogLevel,
   HostedExecutionLogPhase,
   HostedExecutionMemberActivatedWake,
+  HostedExecutionOperatorTaskNotification,
   HostedExecutionRedactedLogEntry,
   HostedExecutionStructuredLogDetails,
   HostedExecutionSystemWake,
   HostedRuntimeEvent,
+  HostedOperatorTaskControlAction,
+  HostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
 import type { AssistantCronJob } from "@murphai/operator-config/assistant-cli-contracts";
 import {
@@ -51,6 +54,9 @@ const HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX =
   "assistant.notification.requested:";
 const HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED_ERROR_CODE =
   "HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED";
+const HOSTED_OPERATOR_TASK_ALREADY_COMPLETED_ERROR_CODE =
+  "HOSTED_OPERATOR_TASK_ALREADY_COMPLETED";
+const HOSTED_OPERATOR_TASK_EXPIRED_ERROR_CODE = "HOSTED_OPERATOR_TASK_EXPIRED";
 const HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX =
   "usage-referral-reward:";
 
@@ -323,6 +329,7 @@ export async function executeHostedMemberActivatedWake(input: {
 }
 
 export async function executeHostedAssistantNotificationWake(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "controlOperatorTask">;
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnly?: boolean;
@@ -357,12 +364,15 @@ export async function executeHostedAssistantNotificationWake(input: {
   }
   let notificationDecisionKind: string | null = null;
   let deliveryIntentIds: string[] = [];
+  const effectsPort = input.effectsPort ?? {};
+  const operatorTask = requireHostedOperatorMessageNotification(input.wake);
 
   try {
     const notificationResult = await sendAssistantNotification(
       buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
+        effectsPort,
         input.forceQueueOnly === true,
         input.vaultRoot,
         input.sourceMailboxItemId ?? null,
@@ -379,7 +389,60 @@ export async function executeHostedAssistantNotificationWake(input: {
         ? deliveryOutcome.intentId
         : null;
     deliveryIntentIds = deliveryIntentId ? [deliveryIntentId] : [];
+    if (operatorTask) {
+      if (deliveryIntentIds.length !== 1) {
+        throw new VaultCliError(
+          "HOSTED_OPERATOR_TASK_DELIVERY_INTENT_MISSING",
+          "Hosted operator message completed without one delivery intent.",
+          { retryable: true },
+        );
+      }
+      const completion = await controlHostedOperatorTask({
+        action: "complete",
+        effectsPort,
+        operatorTask,
+        requestId: input.wake.eventId,
+      });
+      if (
+        completion.status !== "completed"
+        && completion.status !== "already_completed"
+      ) {
+        throw new VaultCliError(
+          "HOSTED_OPERATOR_TASK_COMPLETION_REJECTED",
+          "Hosted operator task completion was rejected.",
+          { retryable: false },
+        );
+      }
+    }
   } catch (error) {
+    if (isHostedOperatorTaskTerminalNoSendError(error)) {
+      redactedLogEntries.push(
+        emitHostedAssistantNotificationLifecycleLog({
+          extraDetails: {
+            eventCode: "assistant.notification.operator_task_terminal_no_send",
+            terminalDisposition: deriveHostedExecutionErrorCode(error),
+          },
+          level: "info",
+          message: "Hosted operator message ended without a new delivery intent.",
+          phase: "wake.running",
+          wake: input.wake,
+        }),
+      );
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        deliveryIntentIds: [],
+        mailboxLane: "assistant-notification",
+        redactedLogEntries,
+      });
+    }
+    if (operatorTask && readHostedNotificationErrorRetryable(error) === false) {
+      await controlHostedOperatorTask({
+        action: "fail",
+        effectsPort,
+        operatorTask,
+        requestId: input.wake.eventId,
+      });
+    }
     if (isHostedGroupContextHandoffExpiredError(error)) {
       redactedLogEntries.push(
         emitHostedAssistantNotificationLifecycleLog({
@@ -822,6 +885,7 @@ function buildHostedMemberSignupWelcomeInstructions(text: string): string {
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
+  effectsPort: Pick<HostedRuntimeEffectsPort, "controlOperatorTask">,
   forceQueueOnly: boolean,
   vault: string,
   sourceMailboxItemId: string | null,
@@ -837,9 +901,36 @@ function buildAssistantNotificationInput(
     isHostedGroupContextHandoffNotificationCandidate(wake)
       ? requireHostedGroupContextHandoffNotification(wake)
       : null;
+  const operatorTask = requireHostedOperatorMessageNotification(wake);
+  const authorizeOperatorTask = operatorTask
+    ? async () => {
+        const response = await controlHostedOperatorTask({
+          action: "authorize",
+          effectsPort,
+          operatorTask,
+          requestId: wake.eventId,
+        });
+        if (response.status === "already_completed") {
+          throw new VaultCliError(
+            HOSTED_OPERATOR_TASK_ALREADY_COMPLETED_ERROR_CODE,
+            "Hosted operator task already completed.",
+            { retryable: false },
+          );
+        }
+        if (response.status !== "authorized") {
+          throw new VaultCliError(
+            HOSTED_OPERATOR_TASK_EXPIRED_ERROR_CODE,
+            "Hosted operator task expired before delivery admission.",
+            { retryable: false },
+          );
+        }
+      }
+    : null;
   return buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
-    ...(contextHandoffExpiresAtMs === null
+    ...(authorizeOperatorTask
+      ? { beforeProviderAcceptedInputs: authorizeOperatorTask }
+      : contextHandoffExpiresAtMs === null
       ? {}
       : {
           beforeProviderAcceptedInputs: () => {
@@ -851,6 +942,7 @@ function buildAssistantNotificationInput(
             }
           },
         }),
+    ...(authorizeOperatorTask ? { beforeDelivery: authorizeOperatorTask } : {}),
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
     deliveryDispatchMode: forceQueueOnly
       ? "queue-only"
@@ -900,6 +992,7 @@ function buildAssistantNotificationInputFromRoute(input: {
   assistantTurnOrdinal: string;
   beforeProviderAcceptedInputs?:
     AssistantNotificationInput["beforeProviderAcceptedInputs"];
+  beforeDelivery?: AssistantNotificationInput["beforeDelivery"];
   deliveryDedupeToken: AssistantNotificationInput["deliveryDedupeToken"];
   deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
   deliveryIdempotencyKey: AssistantNotificationInput["deliveryIdempotencyKey"];
@@ -938,6 +1031,7 @@ function buildAssistantNotificationInputFromRoute(input: {
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
       : {}),
+    ...(input.beforeDelivery ? { beforeDelivery: input.beforeDelivery } : {}),
     channel: route.channel,
     deliveryDedupeToken: input.deliveryDedupeToken,
     deliveryDispatchMode: input.deliveryDispatchMode,
@@ -1057,6 +1151,98 @@ function requireHostedGroupContextHandoffNotification(
     );
   }
   return occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
+}
+
+function requireHostedOperatorMessageNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): HostedExecutionOperatorTaskNotification | null {
+  const operatorTask = wake.notification.operatorTask;
+  const candidate = operatorTask != null
+    || wake.notification.notificationPromptProfile === "operator-message"
+    || wake.eventId.startsWith(
+      "assistant.notification.requested:operator-task:",
+    );
+  if (!candidate) {
+    return null;
+  }
+  const authority = wake.notification.externalThreadRouteAuthority;
+  const route = wake.notification.route;
+  if (
+    !operatorTask
+    || wake.eventId
+      !== `assistant.notification.requested:operator-task:${operatorTask.taskId}`
+    || wake.notification.deliveryDedupeToken !== wake.eventId
+    || wake.notification.deliveryIdempotencyKey !== wake.eventId
+    || wake.notification.deliveryDispatchMode !== "queue-only"
+    || wake.notification.notificationPromptProfile !== "operator-message"
+    || wake.notification.responsePolicy?.kind !== "require_send"
+    || wake.notification.firstContact != null
+    || wake.notification.groupContextHandoff != null
+    || wake.notification.privateAssistantAskCompletion != null
+    || authority == null
+    || authority.containerMemberId !== wake.userId
+    || authority.channel !== route.channel
+    || route.threadIsDirect !== true
+    || (
+      route.delivery.kind !== "explicit"
+      && route.delivery.kind !== "thread"
+    )
+    || authority.threadId !== route.delivery.target
+    || !operatorTask.taskId.startsWith("opt_")
+    || Date.parse(operatorTask.expiresAt) <= Date.parse(wake.occurredAt)
+  ) {
+    throw new TypeError("Hosted operator message notification proof is invalid.");
+  }
+  return operatorTask;
+}
+
+async function controlHostedOperatorTask(input: {
+  action: HostedOperatorTaskControlAction;
+  effectsPort: Pick<HostedRuntimeEffectsPort, "controlOperatorTask">;
+  operatorTask: HostedExecutionOperatorTaskNotification;
+  requestId: string;
+}): Promise<HostedOperatorTaskControlResponse> {
+  const control = input.effectsPort.controlOperatorTask;
+  if (!control) {
+    throw new VaultCliError(
+      "HOSTED_OPERATOR_TASK_CONTROL_UNAVAILABLE",
+      "Hosted operator task control is unavailable.",
+      { retryable: true },
+    );
+  }
+  return control({
+    action: input.action,
+    expiresAt: input.operatorTask.expiresAt,
+    requestId: input.requestId,
+    taskId: input.operatorTask.taskId,
+  });
+}
+
+function isHostedOperatorTaskTerminalNoSendError(error: unknown): boolean {
+  return error instanceof VaultCliError
+    && (
+      error.code === HOSTED_OPERATOR_TASK_ALREADY_COMPLETED_ERROR_CODE
+      || error.code === HOSTED_OPERATOR_TASK_EXPIRED_ERROR_CODE
+    );
+}
+
+function readHostedNotificationErrorRetryable(error: unknown): boolean | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  if ("retryable" in error && typeof error.retryable === "boolean") {
+    return error.retryable;
+  }
+  if (
+    "context" in error
+    && error.context
+    && typeof error.context === "object"
+    && "retryable" in error.context
+    && typeof error.context.retryable === "boolean"
+  ) {
+    return error.context.retryable;
+  }
+  return null;
 }
 
 function isHostedGroupContextHandoffExpiredError(

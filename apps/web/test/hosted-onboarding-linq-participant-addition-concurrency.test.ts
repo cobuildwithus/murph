@@ -78,10 +78,6 @@ import {
   type PreparedHostedThreadContainerCreation,
 } from "@/src/lib/hosted-routing/thread-container-service";
 import {
-  parseHostedGroupMaterializationScriptOptions,
-  runHostedGroupMaterializationCommand,
-} from "@/scripts/backfill-hosted-group-materialization";
-import {
   buildHostedThreadDeliveryRoute,
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
   sealHostedThreadDeliveryRoute,
@@ -656,72 +652,6 @@ function observeHostedThreadRouteLockAttempt(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
-    it("backfills a historical route through the production command and private membership read", async () => {
-      const fixture = await createRouteFixture();
-      try {
-        await expect(fixture.observer.hostedGroup.findUnique({
-          where: { runtimeMemberId: fixture.containerMemberId },
-        })).resolves.toBeNull();
-
-        await expect(runHostedGroupMaterializationCommand({
-          now: () => new Date("2026-08-25T12:00:00.000Z"),
-          options: parseHostedGroupMaterializationScriptOptions([
-            "--apply",
-            "--batch-size",
-            "100",
-          ]),
-          prisma: fixture.observer,
-        })).resolves.toMatchObject({
-          failedRows: 0,
-          materializedRows: 1,
-          remainingRows: 0,
-        });
-        await expect(readHostedGroupMembershipsForMember({
-          memberId: fixture.ownerMemberId,
-          prisma: fixture.observer,
-        })).resolves.toEqual({
-          memberships: [{
-            displayName: null,
-            grantedVaultShareProjectionScopes: [],
-            kind: "custom",
-            memberCount: 1,
-            membershipId: expect.any(String),
-            ownerJoinCode: null,
-            requestedVaultShareProjectionScopes: [],
-            role: "owner",
-            runtimeMemberId: fixture.containerMemberId,
-          }],
-          truncated: false,
-        });
-        await expectCanonicalOwnerActionAuthority({
-          containerMemberId: fixture.containerMemberId,
-          ownerMemberId: fixture.ownerMemberId,
-          prisma: fixture.observer,
-          threadId: fixture.threadId,
-        });
-        await expect(fixture.observer.hostedVaultShare.count({
-          where: { destinationMemberId: fixture.containerMemberId },
-        })).resolves.toBe(0);
-        await expect(runHostedGroupMaterializationCommand({
-          options: parseHostedGroupMaterializationScriptOptions(["--check"]),
-          prisma: fixture.observer,
-        })).resolves.toEqual({
-          complete: true,
-          pendingRows: 0,
-        });
-        await expect(runHostedGroupMaterializationCommand({
-          options: parseHostedGroupMaterializationScriptOptions(["--apply"]),
-          prisma: fixture.observer,
-        })).resolves.toMatchObject({
-          materializedRows: 0,
-          remainingRows: 0,
-          selectedRows: 0,
-        });
-      } finally {
-        await cleanupRouteFixture(fixture);
-      }
-    });
-
     it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");

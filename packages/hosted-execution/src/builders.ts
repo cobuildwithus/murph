@@ -574,6 +574,9 @@ function cloneAssistantNotificationPayload(
             ...value.privateAssistantAskCompletion,
           },
         }),
+    ...(value.operatorTask === undefined
+      ? {}
+      : { operatorTask: { ...value.operatorTask } }),
     ...(value.responsePolicy === undefined
       ? {}
       : { responsePolicy: value.responsePolicy ? { ...value.responsePolicy } : null }),

@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "clearer-homepage-referral-rewards",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Referral rewards are easier to scan",
+    "summary": "The public homepage now presents referral options in a clearer split layout, with each way to earn paired directly with its typical-use estimate.",
+    "details": "Reward estimates, referral availability, and the path to the full referral page are unchanged.",
+    "relevanceTags": ["homepage", "referrals", "design"],
+    "sourcePullRequests": [2363],
+    "tryIt": {
+      "href": "/",
+      "label": "Visit the homepage"
+    }
+  }
+}
