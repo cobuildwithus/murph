@@ -50,13 +50,26 @@ export async function importCsvSamples(
   input: unknown,
   { corePort, presetRegistry }: CsvSampleImporterOptions = {},
 ): Promise<CsvSampleImportResult> {
-  const writer = assertCanonicalWritePort(corePort, ["importSamples"]);
+  const writer = assertCanonicalWritePort(corePort, [
+    "validateSampleImport",
+    "importSamples",
+  ]);
   const plan = await prepareCsvSampleImport(input, { presetRegistry });
   const imports: CsvSampleImportBatchResult[] = [];
   const lookupIds: string[] = [];
   const ledgerFileSet = new Set<string>();
   let importedCount = 0;
   let skippedCount = 0;
+
+  for (const [importIndex, importPlan] of plan.imports.entries()) {
+    if (importPlan.payload.samples.length === 0) continue;
+
+    try {
+      await writer.validateSampleImport(importPlan.payload);
+    } catch (error) {
+      throw toCsvSampleWriteError(error, importIndex, importPlan.stream);
+    }
+  }
 
   for (const [importIndex, importPlan] of plan.imports.entries()) {
     const result = importPlan.payload.samples.length === 0

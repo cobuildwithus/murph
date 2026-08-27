@@ -17,7 +17,7 @@ import {
   profileCsvSampleFile,
   summarizeSampleSeries,
 } from "../src/index.ts";
-import type { DocumentImportPayload } from "../src/index.ts";
+import type { DocumentImportPayload, SampleImportPayload } from "../src/index.ts";
 import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
 
 test("importDocument delegates a core-shaped document payload", async () => {
@@ -225,6 +225,50 @@ test("importCsvSamples auto-imports multiple recognizable sample columns and nor
       { stream: "steps", skippedCount: 1, transformId: "xfm_spy" },
     ],
   );
+});
+
+test("importCsvSamples validates every planned stream before its first write", async () => {
+  const filePath = await createTempFile(
+    "multi-stream-invalid.csv",
+    "timestamp,spo2,heart_rate\n2026-03-11T08:00:00Z,97,-17\n",
+  );
+  const validated: string[] = [];
+  const written: string[] = [];
+  const corePort = {
+    async validateSampleImport(payload: SampleImportPayload) {
+      validated.push(payload.stream);
+      if (payload.stream === "heart_rate") {
+        throw new coreRuntime.VaultError(
+          "SAMPLE_INVALID",
+          "Sample 1 contains an invalid value field.",
+          {
+            sampleField: "value",
+            sampleIndex: 0,
+          },
+        );
+      }
+    },
+    async importSamples(payload: SampleImportPayload) {
+      written.push(payload.stream);
+    },
+  };
+
+  await assert.rejects(
+    () => importCsvSamples({ filePath }, { corePort }),
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.deepEqual(error.failure, {
+        code: "invalid_sample",
+        importIndex: 1,
+        sampleField: "value",
+        stream: "heart_rate",
+      });
+      return true;
+    },
+  );
+
+  assert.deepEqual(validated, ["spo2", "heart_rate"]);
+  assert.deepEqual(written, []);
 });
 
 test("profileCsvSampleFile exposes a non-mutating CSV plan with source hints and optional summaries", async () => {

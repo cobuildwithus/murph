@@ -293,6 +293,13 @@ interface ImportSamplesResult {
   manifestPath: string;
 }
 
+interface PreparedSampleImport {
+  normalizedStream: SampleStream;
+  preparedRecords: Array<{ record: SampleRecord; relativePath: string }>;
+  source: string;
+  transformId: string;
+}
+
 interface DeviceEvidencePartInput extends LooseRecord {
   role?: string;
   fileName?: string;
@@ -6786,7 +6793,7 @@ export async function addMeal({
   });
 }
 
-export async function importSamples({
+async function prepareSampleImport({
   vaultRoot,
   stream,
   unit,
@@ -6794,8 +6801,7 @@ export async function importSamples({
   sourcePath,
   source = "import",
   quality = "raw",
-  batchProvenance,
-}: ImportSamplesInput): Promise<ImportSamplesResult> {
+}: ImportSamplesInput): Promise<PreparedSampleImport> {
   const vault = await loadVault({ vaultRoot });
 
   if (!SAMPLE_STREAM_SET.has(stream as SampleStream)) {
@@ -6872,6 +6878,32 @@ export async function importSamples({
 
     preparedRecords.push({ record, relativePath });
   }
+
+  return {
+    normalizedStream,
+    preparedRecords,
+    source,
+    transformId,
+  };
+}
+
+export async function validateSampleImport(input: ImportSamplesInput): Promise<void> {
+  await prepareSampleImport(input);
+}
+
+export async function importSamples(input: ImportSamplesInput): Promise<ImportSamplesResult> {
+  const {
+    normalizedStream,
+    preparedRecords,
+    source,
+    transformId,
+  } = await prepareSampleImport(input);
+  const {
+    batchProvenance,
+    sourcePath,
+    unit,
+    vaultRoot,
+  } = input;
 
   const raw = sourcePath
     ? prepareRawArtifact({

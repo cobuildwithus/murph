@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { VAULT_LAYOUT } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -58,11 +59,10 @@ async function runRawSliceCli(args: string[]): Promise<string> {
   return output.join('').trim()
 }
 
-async function countAuditRecords(vaultRoot: string): Promise<number> {
-  const auditRoot = path.join(vaultRoot, 'audit')
+async function countJsonlRecordsUnder(root: string): Promise<number> {
   let entries: string[]
   try {
-    entries = await readdir(auditRoot, { recursive: true })
+    entries = await readdir(root, { recursive: true })
   } catch (error) {
     if (
       typeof error === 'object'
@@ -77,10 +77,31 @@ async function countAuditRecords(vaultRoot: string): Promise<number> {
   const counts = await Promise.all(entries
     .filter((entry) => entry.endsWith('.jsonl'))
     .map(async (entry) => {
-      const content = await readFile(path.join(auditRoot, entry), 'utf8')
+      const content = await readFile(path.join(root, entry), 'utf8')
       return content.split('\n').filter(Boolean).length
     }))
   return counts.reduce((total, count) => total + count, 0)
+}
+
+async function countAuditRecords(vaultRoot: string): Promise<number> {
+  return countJsonlRecordsUnder(path.join(vaultRoot, VAULT_LAYOUT.auditDirectory))
+}
+
+async function countFilesUnder(root: string): Promise<number> {
+  try {
+    const entries = await readdir(root, { recursive: true, withFileTypes: true })
+    return entries.filter((entry) => entry.isFile()).length
+  } catch (error) {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return 0
+    }
+    throw error
+  }
 }
 
 test('samples import-csv schema exposes the expansion-only import options', async () => {
@@ -354,36 +375,34 @@ test.sequential('sample CSV failures expose value-free guidance without multiply
   }
 })
 
-test.sequential('sample CSV semantic failures retain fixed repair hints without writes or value echo', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-semantics-'))
-  const cases = [
+test.sequential.each([
     {
       command: ['samples', 'import-csv'] as const,
       fileName: 'negative-heart-rate.csv',
-      content: 'timestamp,spo2,heart_rate\n2026-03-12T08:00:00Z,private-spo2-cell,-17\n',
+      content: 'timestamp,spo2,heart_rate\n2026-03-12T08:00:00Z,97,-17\n',
+      correctedContent: 'timestamp,spo2,heart_rate\n2026-03-12T08:00:00Z,97,62\n',
       options: [] as const,
       path: 'imports.1.samples',
       hint: 'Use a non-negative integer.',
-      sentinels: ['private-spo2-cell', '-17'],
+      sentinels: ['-17'],
+      streams: ['spo2', 'heart_rate'] as const,
     },
     {
       command: ['samples', 'csv', 'import'] as const,
-      fileName: 'fractional-heart-rate.csv',
-      content: 'timestamp,heart_rate\n2026-03-12T08:00:00Z,61.5\n',
-      options: [
-        '--stream', 'heart_rate',
-        '--ts-column', 'timestamp',
-        '--value-column', 'heart_rate',
-        '--unit', 'bpm',
-      ] as const,
-      path: 'imports.0.samples',
-      hint: 'Use a non-negative integer.',
-      sentinels: ['61.5'],
+      fileName: 'negative-spo2.csv',
+      content: 'timestamp,heart_rate,spo2\n2026-03-12T08:00:00Z,62,-1\n',
+      correctedContent: 'timestamp,heart_rate,spo2\n2026-03-12T08:00:00Z,62,98\n',
+      options: [] as const,
+      path: 'imports.1.samples',
+      hint: 'Use a non-negative finite number.',
+      sentinels: ['-1'],
+      streams: ['heart_rate', 'spo2'] as const,
     },
     {
       command: ['samples', 'import-csv'] as const,
       fileName: 'incompatible-unit.csv',
       content: 'timestamp,heart_rate\n2026-03-12T08:00:00Z,62\n',
+      correctedContent: null,
       options: [
         '--stream', 'heart_rate',
         '--ts-column', 'timestamp',
@@ -393,14 +412,13 @@ test.sequential('sample CSV semantic failures retain fixed repair hints without 
       path: 'imports.0.samples',
       hint: 'Use "bpm" for heart_rate.',
       sentinels: ['private-heart-rate-unit'],
+      streams: ['heart_rate'] as const,
     },
-  ]
-
-  try {
-    await initializeVault({ vaultRoot })
-    const initialAuditCount = await countAuditRecords(vaultRoot)
-
-    for (const semanticCase of cases) {
+])('sample CSV semantic failure $fileName retains fixed repair hints without writes or value echo', async (semanticCase) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-semantics-'))
+    try {
+      await initializeVault({ vaultRoot })
+      const initialAuditCount = await countAuditRecords(vaultRoot)
       const csvPath = path.join(vaultRoot, semanticCase.fileName)
       await writeFile(
         csvPath,
@@ -427,76 +445,65 @@ test.sequential('sample CSV semantic failures retain fixed repair hints without 
         assert.equal(serialized.includes(sentinel), false, semanticCase.fileName)
       }
 
-      const samples = await runSliceCli<{ count: number }>([
-        'samples',
-        'list',
-        '--stream',
-        'heart_rate',
-        '--vault',
-        vaultRoot,
-      ])
-      const batches = await runSliceCli<{ items: unknown[] }>([
-        'samples',
-        'batch',
-        'list',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(requireData(samples).count, 0, semanticCase.fileName)
-      assert.equal(requireData(batches).items.length, 0, semanticCase.fileName)
+      for (const stream of semanticCase.streams) {
+        assert.equal(
+          await countJsonlRecordsUnder(
+            path.join(vaultRoot, VAULT_LAYOUT.sampleLedgerDirectory, stream),
+          ),
+          0,
+          `${semanticCase.fileName}:${stream}`,
+        )
+      }
+      assert.equal(
+        await countFilesUnder(path.join(vaultRoot, VAULT_LAYOUT.rawDirectory)),
+        0,
+        semanticCase.fileName,
+      )
       assert.equal(await countAuditRecords(vaultRoot), initialAuditCount, semanticCase.fileName)
-    }
 
-    for (const [index, command] of [
-      ['samples', 'import-csv'],
-      ['samples', 'csv', 'import'],
-    ].entries()) {
-      const csvPath = path.join(vaultRoot, `valid-heart-rate-${index}.csv`)
+      if (semanticCase.correctedContent === null) return
+
       await writeFile(
         csvPath,
-        `timestamp,heart_rate\n2026-03-12T08:0${index}:00Z,${62 + index}\n`,
+        semanticCase.correctedContent,
         'utf8',
       )
-      const result = await runSliceCli<{ importedCount: number }>([
-        ...command,
+      const corrected = await runSliceCli<{
+        importedCount: number
+        imports: Array<{ manifestFile: string }>
+      }>([
+        ...semanticCase.command,
         csvPath,
         '--vault',
         vaultRoot,
-        '--stream',
-        'heart_rate',
-        '--ts-column',
-        'timestamp',
-        '--value-column',
-        'heart_rate',
-        '--unit',
-        'bpm',
+        ...semanticCase.options,
       ])
 
-      assert.equal(result.ok, true, command.join(' '))
-      assert.equal(result.meta.command, command.join(' '), command.join(' '))
-      assert.equal(requireData(result).importedCount, 1, command.join(' '))
-    }
+      assert.equal(corrected.ok, true, semanticCase.fileName)
+      assert.equal(corrected.meta.command, semanticCase.command.join(' '), semanticCase.fileName)
+      const correctedData = requireData(corrected)
+      assert.equal(correctedData.importedCount, semanticCase.streams.length, semanticCase.fileName)
+      assert.equal(correctedData.imports.length, semanticCase.streams.length, semanticCase.fileName)
 
-    const samples = await runSliceCli<{ count: number }>([
-      'samples',
-      'list',
-      '--stream',
-      'heart_rate',
-      '--vault',
-      vaultRoot,
-    ])
-    const batches = await runSliceCli<{ items: unknown[] }>([
-      'samples',
-      'batch',
-      'list',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(requireData(samples).count, 2)
-    assert.equal(requireData(batches).items.length, 2)
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
+      for (const stream of semanticCase.streams) {
+        assert.equal(
+          await countJsonlRecordsUnder(
+            path.join(vaultRoot, VAULT_LAYOUT.sampleLedgerDirectory, stream),
+          ),
+          1,
+          `${semanticCase.fileName}:${stream}`,
+        )
+      }
+      await Promise.all(correctedData.imports.map((entry) =>
+        access(path.join(vaultRoot, entry.manifestFile))))
+      assert.equal(
+        await countAuditRecords(vaultRoot),
+        initialAuditCount + semanticCase.streams.length,
+        semanticCase.fileName,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
 })
 
 test.sequential('samples batch show accepts every exact id emitted by batch list', async () => {

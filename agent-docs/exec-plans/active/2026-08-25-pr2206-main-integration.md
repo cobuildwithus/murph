@@ -203,6 +203,28 @@ shared error projector and no partial writes or submitted-value echo.
   CLI total allowance and its boundary delta are absent. Current `main` remains
   the sole lazy-growth owner through exact-base comparison; this PR retains no
   second cap, timeout, or compatibility mechanism.
+- Round eight found that CSV semantic validation still happened inside each
+  canonical stream write. A valid first stream could therefore commit before a
+  later stream failed, even though the CLI returned only the later validation
+  error. The pre-fix CLI regression reproduced one committed batch from a file
+  containing valid SpO2 followed by invalid heart rate.
+- The accepted correction extracts Core's existing sample preparation into one
+  private function and exposes a non-writing validation call that reuses it.
+  The CSV importer validates every nonempty planned stream before entering its
+  unchanged write loop. No semantic rule, constraint mapper, rollback path,
+  transaction coordinator, state owner, queue, or reconciliation mechanism is
+  duplicated or added.
+- Focused proof passes Core's non-writing validation test, three importer port
+  and ordering tests, and three real CLI journeys. Both mutating CSV command
+  spellings and both stream orders reject the later invalid stream with zero
+  sample records, batch/raw files, or audit writes; after editing the same file
+  in place, both streams import exactly once. Core, Importers, and CLI
+  typechecks pass. The CLI cases retain the existing per-test 60-second limit;
+  no timeout or worker policy changed for shared-host contention.
+- Product UX remains a Patch. The affected person is a member or assistant
+  importing one CSV with multiple recognized sample streams. The walkthrough
+  proves the rejected file can be corrected in place without hidden partial
+  state, value echo, or a duplicate first-stream retry.
 
 ## Tasks
 
