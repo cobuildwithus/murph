@@ -206,6 +206,9 @@ content rules are:
   labeled participant-specific observations and comparisons use those labels
   unless the group requested anonymization; never map unlabeled or ambiguous
   rows from order, values, or conversation;
+- keep that association snapshot-specific: a later shared read may answer a
+  current-value question, but it must not remap different unlabeled figures
+  from an earlier update;
 - avoid lowest-performer, missing-data, body, diagnosis, and illness jokes;
 - use only the current tool result, never private one-to-one data or raw share
   files.

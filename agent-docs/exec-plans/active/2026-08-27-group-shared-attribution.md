@@ -17,8 +17,11 @@ Updated: 2026-08-27
   existing rule that names cannot establish sender identity or authority.
 - A scheduled group summary does not turn labeled participant-specific values
   into a mapping that Murph later claims is unavailable.
-- A direct follow-up asking who had which shared values performs one fresh,
-  exact-scope `read_shared` and answers only from the returned rows.
+- A direct question about current values performs one fresh, exact-scope
+  `read_shared` and answers only from the returned rows.
+- A later read never remaps different unlabeled historical figures; without a
+  prior explicit association, Murph states that narrow limitation and may
+  separately label the fresh result as current.
 - Missing or ambiguous labels produce a truthful limitation instead of guessed
   cross-row matching or a request for members to reconfirm tool-known data.
 - Deterministic prompt tests, focused real-Codex journeys, package typecheck,

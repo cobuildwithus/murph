@@ -25,7 +25,7 @@ describe('group shared metric presentation prompt', () => {
       'Never rebuild a name-to-value mapping from row order, value matching, or conversation',
     )
     expect(prompt).toContain(
-      'For explicit current visibility or attribution of a consented shared metric',
+      'For explicit current visibility or explicitly present-time attribution of a consented shared metric',
     )
     expect(prompt).toContain(
       'If a needed label is absent or ambiguous, do not guess; state only that narrow row-label limitation',
@@ -34,7 +34,16 @@ describe('group shared metric presentation prompt', () => {
       'When the relevant rows have usable, unambiguous labels, never ask people to confirm the mapping already supplied by the tool',
     )
     expect(prompt).toContain(
-      'answer only from that fresh exact-scope result',
+      'For explicitly present-time attribution such as "who has which values now?", answer only from the fresh exact-scope result',
+    )
+    expect(prompt).toContain(
+      'use only an explicit prior name-to-value association visible in the conversation',
+    )
+    expect(prompt).toContain(
+      'never use a different fresh snapshot to retroactively map those earlier figures',
+    )
+    expect(prompt).toContain(
+      'label it clearly as current',
     )
     expect(prompt).toContain('This row association is presentation only')
     expect(prompt).toContain(
@@ -76,6 +85,7 @@ describe('group shared metric presentation prompt', () => {
     )
     expect(prompt).not.toMatch(/\b(?:Apple Health|Garmin|Oura|WHOOP)\b/u)
   })
+
 })
 
 function buildHostedGroupSharedPrompt(): string {

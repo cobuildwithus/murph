@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Group health updates keep participant labels",
-    "summary": "Scheduled group health updates now keep each participant's name with their shared values, and later attribution questions refresh those labels before answering.",
-    "details": "Labels come only from consented shared rows. They do not identify a sender or expand what the group can access.",
+    "summary": "Scheduled group health updates now keep each participant's name with their shared values, and current-value questions refresh those labels before answering.",
+    "details": "Labels come only from consented shared rows. A new snapshot is not used to remap different earlier figures, identify a sender, or expand what the group can access.",
     "relevanceTags": [
       "assistant",
       "groups",
