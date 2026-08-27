@@ -419,7 +419,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       sending: input.sending,
     })
   const abandonedDelivery = abandonedAmbiguousDelivery ||
-    isEmailGroupRecipientAuthoritySuperseded({
+    isAssistantOutboxAuthoritySuperseded({
       error: input.error,
       sending: input.sending,
     })
@@ -689,14 +689,10 @@ function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
   return code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
 }
 
-function isEmailGroupRecipientAuthoritySuperseded(input: {
+function isAssistantOutboxAuthoritySuperseded(input: {
   error: unknown
   sending: AssistantOutboxIntent
 }): boolean {
-  if (input.sending.channel !== 'email') {
-    return false
-  }
-
   const errorRecord = readRecord(input.error)
   const context = readRecord(errorRecord?.context)
   const code =
@@ -704,7 +700,13 @@ function isEmailGroupRecipientAuthoritySuperseded(input: {
     readNonEmptyString(context?.code) ??
     null
 
-  return code === 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED'
+  return (
+    input.sending.channel === 'email' &&
+    code === 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED'
+  ) || (
+    input.sending.channel === 'linq' &&
+    code === 'HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED'
+  )
 }
 
 function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {

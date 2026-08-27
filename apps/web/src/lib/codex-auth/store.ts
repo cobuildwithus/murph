@@ -14,8 +14,9 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
-  appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxItemByDedupeKey,
+  runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -85,101 +86,141 @@ export async function beginHostedCodexAuthAttempt(input: {
 }): Promise<HostedCodexAuthAttemptResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  const nextAttemptId = createHostedCodexAuthAttemptId();
 
-  return await prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    const current = await tx.hostedCodexAuthConnection.findUnique({
-      where: { memberId: input.memberId },
-    });
-
-    if (input.action === "connect") {
-      if (current?.state === "connected") {
-        return {
-          attemptId: null,
-          mailboxItemId: null,
-          view: { state: "connected" },
-        };
-      }
-      if (
-        current?.state === "connecting"
-        && !hostedCodexAuthAttemptIsStale(current.updatedAt, now)
-      ) {
-        return {
-          attemptId: current.attemptId,
-          mailboxItemId: await readHostedCodexAuthAttemptMailboxItemId({
-            action: input.action,
-            attemptId: current.attemptId,
-            memberId: input.memberId,
-            prisma: tx,
-          }),
-          view: projectHostedCodexAuthConnection(current, now),
-        };
-      }
-    } else {
-      if (!current || current.state === "disconnected") {
-        return {
-          attemptId: null,
-          mailboxItemId: null,
-          view: { state: "disconnected" },
-        };
-      }
-      if (
-        current.state === "disconnecting"
-        && !hostedCodexAuthAttemptIsStale(current.updatedAt, now)
-      ) {
-        return {
-          attemptId: current.attemptId,
-          mailboxItemId: await readHostedCodexAuthAttemptMailboxItemId({
-            action: input.action,
-            attemptId: current.attemptId,
-            memberId: input.memberId,
-            prisma: tx,
-          }),
-          view: { state: "disconnecting" },
-        };
-      }
-    }
-
-    const attemptId = createHostedCodexAuthAttemptId();
-    const state = input.action === "connect" ? "connecting" : "disconnecting";
-    await tx.hostedCodexAuthConnection.upsert({
-      create: {
-        attemptId,
-        memberId: input.memberId,
-        state,
-        updatedAt: now,
-        userCode: null,
-        verificationUrl: null,
-      },
-      update: {
-        attemptId,
-        state,
-        updatedAt: now,
-        userCode: null,
-        verificationUrl: null,
-      },
-      where: { memberId: input.memberId },
-    });
-
-    const mailbox = await appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionCodexAuthRequestedWake({
-        action: input.action,
-        attemptId,
-        eventId: buildHostedCodexAuthAttemptEventId(input.action, attemptId),
-        occurredAt: now.toISOString(),
-        userId: input.memberId,
-      }),
+  const existing = await prisma.$transaction((tx) =>
+    readLockedHostedCodexAuthAttemptExistingResultTx({
+      action: input.action,
+      memberId: input.memberId,
+      now,
       tx,
-    });
+    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (existing) {
+    return existing;
+  }
 
+  return await runWithPreparedHostedMailboxItemAppendCrypto({
+    append: (prepared) => prisma.$transaction(async (tx) => {
+      const revalidatedExisting =
+        await readLockedHostedCodexAuthAttemptExistingResultTx({
+          action: input.action,
+          memberId: input.memberId,
+          now,
+          tx,
+        });
+      if (revalidatedExisting) {
+        return revalidatedExisting;
+      }
+
+      const state = input.action === "connect" ? "connecting" : "disconnecting";
+      await tx.hostedCodexAuthConnection.upsert({
+        create: {
+          attemptId: nextAttemptId,
+          memberId: input.memberId,
+          state,
+          updatedAt: now,
+          userCode: null,
+          verificationUrl: null,
+        },
+        update: {
+          attemptId: nextAttemptId,
+          state,
+          updatedAt: now,
+          userCode: null,
+          verificationUrl: null,
+        },
+        where: { memberId: input.memberId },
+      });
+
+      const mailbox = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+        envelope: buildHostedExecutionCodexAuthRequestedWake({
+          action: input.action,
+          attemptId: nextAttemptId,
+          eventId: buildHostedCodexAuthAttemptEventId(
+            input.action,
+            nextAttemptId,
+          ),
+          occurredAt: now.toISOString(),
+          userId: input.memberId,
+        }),
+        prepared,
+        tx,
+      });
+
+      return {
+        attemptId: nextAttemptId,
+        mailboxItemId: mailbox.item.id,
+        view: state === "connecting"
+          ? { state, userCode: null, verificationUrl: null }
+          : { state },
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS),
+    prisma,
+    userId: input.memberId,
+  });
+}
+
+async function readLockedHostedCodexAuthAttemptExistingResultTx(input: {
+  action: HostedCodexAuthAction;
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedCodexAuthAttemptResult | null> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const current = await input.tx.hostedCodexAuthConnection.findUnique({
+    where: { memberId: input.memberId },
+  });
+
+  if (input.action === "connect") {
+    if (current?.state === "connected") {
+      return {
+        attemptId: null,
+        mailboxItemId: null,
+        view: { state: "connected" },
+      };
+    }
+    if (
+      current?.state === "connecting"
+      && !hostedCodexAuthAttemptIsStale(current.updatedAt, input.now)
+    ) {
+      return {
+        attemptId: current.attemptId,
+        mailboxItemId: await readHostedCodexAuthAttemptMailboxItemId({
+          action: input.action,
+          attemptId: current.attemptId,
+          memberId: input.memberId,
+          prisma: input.tx,
+        }),
+        view: projectHostedCodexAuthConnection(current, input.now),
+      };
+    }
+    return null;
+  }
+
+  if (!current || current.state === "disconnected") {
     return {
-      attemptId,
-      mailboxItemId: mailbox.item.id,
-      view: state === "connecting"
-        ? { state, userCode: null, verificationUrl: null }
-        : { state },
+      attemptId: null,
+      mailboxItemId: null,
+      view: { state: "disconnected" },
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }
+  if (
+    current.state === "disconnecting"
+    && !hostedCodexAuthAttemptIsStale(current.updatedAt, input.now)
+  ) {
+    return {
+      attemptId: current.attemptId,
+      mailboxItemId: await readHostedCodexAuthAttemptMailboxItemId({
+        action: input.action,
+        attemptId: current.attemptId,
+        memberId: input.memberId,
+        prisma: input.tx,
+      }),
+      view: { state: "disconnecting" },
+    };
+  }
+
+  return null;
 }
 
 export async function markHostedCodexAuthAttemptError(input: {

@@ -19,6 +19,14 @@ const usage = {
   totalTokens: 18,
 }
 
+const minimumUsage = {
+  cachedInputTokens: 5,
+  inputTokens: 11,
+  outputTokens: 7,
+  reasoningOutputTokens: 2,
+  totalTokens: 18,
+}
+
 describe('Codex app-server protocol boundary', () => {
   it.each([
     {
@@ -117,7 +125,7 @@ describe('Codex app-server protocol boundary', () => {
     expect(readCodexRpcResponseId({ id: -7, result: {} })).toBe(-7)
   })
 
-  it('requires the complete pinned token-usage shape', () => {
+  it('accepts explicitly present token-usage optional fields', () => {
     expect(readCodexThreadTokenUsage({
       last: usage,
       modelContextWindow: 200_000,
@@ -127,11 +135,102 @@ describe('Codex app-server protocol boundary', () => {
       modelContextWindow: 200_000,
       total: usage,
     })
+  })
+
+  it('normalizes the current upstream minimum token-usage shape', () => {
     expect(readCodexThreadTokenUsage({
-      last: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      modelContextWindow: 200_000,
-      total: usage,
+      last: minimumUsage,
+      total: minimumUsage,
+    })).toEqual({
+      last: {
+        cacheWriteInputTokens: 0,
+        ...minimumUsage,
+      },
+      modelContextWindow: null,
+      total: {
+        cacheWriteInputTokens: 0,
+        ...minimumUsage,
+      },
+    })
+  })
+
+  it('ignores additive token-usage fields without dropping known counters', () => {
+    expect(readCodexThreadTokenUsage({
+      futureUsageMetadata: { source: 'future-codex' },
+      last: {
+        ...minimumUsage,
+        futureInputTokens: 13,
+      },
+      modelContextWindow: null,
+      total: {
+        ...minimumUsage,
+        futureInputTokens: 21,
+      },
+    })).toEqual({
+      last: {
+        cacheWriteInputTokens: 0,
+        ...minimumUsage,
+      },
+      modelContextWindow: null,
+      total: {
+        cacheWriteInputTokens: 0,
+        ...minimumUsage,
+      },
+    })
+  })
+
+  it.each([
+    'cachedInputTokens',
+    'inputTokens',
+    'outputTokens',
+    'reasoningOutputTokens',
+    'totalTokens',
+  ])('rejects a missing required %s counter in either breakdown', (field) => {
+    const incompleteLast: Record<string, unknown> = { ...minimumUsage }
+    delete incompleteLast[field]
+    expect(readCodexThreadTokenUsage({
+      last: incompleteLast,
+      total: minimumUsage,
     })).toBeNull()
+
+    const incompleteTotal: Record<string, unknown> = { ...minimumUsage }
+    delete incompleteTotal[field]
+    expect(readCodexThreadTokenUsage({
+      last: minimumUsage,
+      total: incompleteTotal,
+    })).toBeNull()
+  })
+
+  it.each([null, -1, 1.5, '3'])(
+    'rejects invalid explicit cache-write token value %j',
+    (cacheWriteInputTokens) => {
+      expect(readCodexThreadTokenUsage({
+        last: { ...minimumUsage, cacheWriteInputTokens },
+        total: minimumUsage,
+      })).toBeNull()
+      expect(readCodexThreadTokenUsage({
+        last: minimumUsage,
+        total: { ...minimumUsage, cacheWriteInputTokens },
+      })).toBeNull()
+    },
+  )
+
+  it.each([undefined, -1, 1.5, '200000'])(
+    'rejects invalid explicit context-window value %j',
+    (modelContextWindow) => {
+      expect(readCodexThreadTokenUsage({
+        last: minimumUsage,
+        modelContextWindow,
+        total: minimumUsage,
+      })).toBeNull()
+    },
+  )
+
+  it.each([
+    { total: minimumUsage },
+    { last: minimumUsage },
+  ])('rejects a missing required token-usage breakdown %#', (tokenUsage) => {
+    expect(readCodexThreadTokenUsage(tokenUsage)).toBeNull()
   })
 
   it.each(['', ' ', 'not-json', '[]', 'null'])('rejects invalid line %j', (line) => {

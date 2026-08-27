@@ -74,6 +74,7 @@ import {
   leaveHostedGroupMemberTx,
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
+  readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupSharedDataByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
@@ -1189,6 +1190,36 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("retires older active offers only after a replacement binding is created", async () => {
+    const tx = buildTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+
+    await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: "group_1",
+      message: { channel: "linq", messageId: "msg_offer_replacement" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffersAt: postedAt,
+      tx,
+    });
+
+    expect(
+      tx.hostedGroupJoinOffer.create.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      tx.hostedGroupJoinOffer.updateMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: postedAt },
+      where: {
+        groupId: "group_1",
+        messageLookupKey: { not: expect.stringMatching(/^hbidx:linq-message:/u) },
+        revokedAt: null,
+      },
+    });
+  });
+
   it("rejects a provider completion from a replaced offer generation", async () => {
     const tx = buildTx();
     tx.hostedGroup.findUnique.mockResolvedValueOnce({
@@ -1241,6 +1272,35 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       select: { projectionKindsJson: true },
       take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
     });
+  });
+
+  it("prepares an explicit replacement without inspecting or revoking the active offer", async () => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
+        })),
+      },
+      hostedGroupJoinOffer: { findMany, updateMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffer: true,
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_generation_1",
+      kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
+    });
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("revokes a broader active offer before posting a narrower replacement", async () => {
@@ -2614,6 +2674,38 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).not.toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ displayName: expect.any(String) }),
     }));
+  });
+});
+
+describe("readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads the exact current policy without changing policy or active offers", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+
+    await expect(readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      tx,
+    })).resolves.toMatchObject({
+      group: {
+        requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+      },
+      joinCode: "join_existing",
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.upsert).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 });
 

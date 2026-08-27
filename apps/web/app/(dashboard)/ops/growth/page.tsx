@@ -5,11 +5,11 @@ import { GroupPrivateConversions } from "./group-private-conversions";
 import { GrowthScorecard } from "./growth-scorecard";
 import { GrowthSponsorships } from "./growth-sponsorships";
 import { GrowthWeeklyTable } from "./growth-weekly-table";
+import { RecentMemberRetention } from "./recent-member-retention";
 import { ReferralLinkUsage } from "./referral-link-usage";
 import { TrialStartAttribution } from "./trial-start-attribution";
 import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import {
-  captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
   HOSTED_GROWTH_CONVERSION_MATURITY_DAYS,
   type HostedGrowthStatusCounts,
@@ -44,11 +44,8 @@ export default async function HostedOpsGrowthPage() {
   await requireHostedOpsPageAccess();
 
   const now = new Date();
-  await captureHostedGrowthDailySnapshot(now);
-  const [dashboard, sponsorships] = await Promise.all([
-    readHostedGrowthDashboard(now),
-    readHostedGrowthSponsorshipMetrics(now),
-  ]);
+  const dashboard = await readHostedGrowthDashboard(now);
+  const sponsorships = await readHostedGrowthSponsorshipMetrics(now);
 
   return (
     <div className="flex flex-col gap-8">
@@ -83,6 +80,8 @@ export default async function HostedOpsGrowthPage() {
         trialStarts={dashboard.trialStarts}
         usageTopUps={dashboard.usageTopUps}
       />
+
+      <RecentMemberRetention retention={dashboard.recentMemberRetention} />
 
       <GrowthCharts
         dailySeries={dashboard.dailySeries}

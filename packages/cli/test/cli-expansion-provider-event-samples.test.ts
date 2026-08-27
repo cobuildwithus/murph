@@ -197,6 +197,268 @@ test('recipe and samples examples surface branchy command fields in help and LLM
   assert.match(samplesImportJsonLlms, /sourcePath\/importConfig provenance/u)
 })
 
+test.sequential('samples import-json returns indexed repair fields without partial writes or value echo', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-repair-'))
+  const samplesPayloadPath = path.join(vaultRoot, 'samples-repair.json')
+  const countAuditRecords = async () => {
+    const auditRoot = path.join(vaultRoot, 'audit')
+    let entries: string[]
+    try {
+      entries = await readdir(auditRoot, { recursive: true })
+    } catch (error) {
+      if (
+        typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && error.code === 'ENOENT'
+      ) {
+        return 0
+      }
+      throw error
+    }
+    const counts = await Promise.all(entries
+      .filter((entry) => entry.endsWith('.jsonl'))
+      .map(async (entry) => {
+        const content = await readFile(path.join(auditRoot, entry), 'utf8')
+        return content.split('\n').filter(Boolean).length
+      }))
+    return counts.reduce((total, count) => total + count, 0)
+  }
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+
+    const mixedMemberSentinel = 'private-mixed-member'
+    await writeFile(
+      samplesPayloadPath,
+      JSON.stringify({
+        stream: 'heart_rate',
+        unit: 'bpm',
+        samples: [
+          { recordedAt: '2026-03-12T08:00:00.000Z', value: 61 },
+          mixedMemberSentinel,
+        ],
+      }),
+      'utf8',
+    )
+
+    const mixedMembers = await runSliceCli([
+      'samples',
+      'import-json',
+      '--input',
+      `@${samplesPayloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(mixedMembers.ok, false)
+    assert.equal(mixedMembers.error.code, 'invalid_payload')
+    assert.equal(mixedMembers.error.stage, 'validation')
+    assert.equal(mixedMembers.error.fieldErrors?.[0]?.path, 'samples.1')
+    assert.equal(mixedMembers.error.fieldErrors?.[0]?.expected, 'object')
+    assert.equal(JSON.stringify(mixedMembers).includes(mixedMemberSentinel), false)
+
+    const afterMixedMembers = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(afterMixedMembers.ok, true)
+    assert.equal(requireData(afterMixedMembers).count, 0)
+
+    const invalidValueSentinel = 'private-invalid-value'
+    await writeFile(
+      samplesPayloadPath,
+      JSON.stringify({
+        stream: 'heart_rate',
+        unit: 'bpm',
+        samples: [
+          { recordedAt: '2026-03-12T08:00:00.000Z', value: 61 },
+          {
+            recordedAt: '2026-03-12T08:01:00.000Z',
+            value: invalidValueSentinel,
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    const invalidField = await runSliceCli([
+      'samples',
+      'import-json',
+      '--input',
+      `@${samplesPayloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(invalidField.ok, false)
+    assert.equal(invalidField.error.code, 'invalid_payload')
+    assert.equal(invalidField.error.stage, 'validation')
+    assert.deepEqual(invalidField.error.fieldErrors, [
+      {
+        code: 'invalid_type',
+        path: 'samples.1.value',
+        expected: 'number',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ])
+    assert.equal(JSON.stringify(invalidField).includes(invalidValueSentinel), false)
+
+    const afterInvalidField = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(afterInvalidField.ok, true)
+    assert.equal(requireData(afterInvalidField).count, 0)
+
+    const initialAuditCount = await countAuditRecords()
+    const semanticCases = [
+      {
+        name: 'negative heart rate',
+        stream: 'heart_rate',
+        unit: 'bpm',
+        sample: { recordedAt: '2026-03-12T08:02:00.000Z', value: -17 },
+        path: 'samples.0.value',
+        hint: 'Use a non-negative integer.',
+        privateValue: '-17',
+      },
+      {
+        name: 'fractional heart rate',
+        stream: 'heart_rate',
+        unit: 'bpm',
+        sample: { recordedAt: '2026-03-12T08:03:00.000Z', value: 61.5 },
+        path: 'samples.0.value',
+        hint: 'Use a non-negative integer.',
+        privateValue: '61.5',
+      },
+      {
+        name: 'invalid timestamp',
+        stream: 'heart_rate',
+        unit: 'bpm',
+        sample: { recordedAt: 'private-invalid-timestamp', value: 61 },
+        path: 'samples.0.recordedAt',
+        hint: 'Use an ISO 8601 timestamp.',
+        privateValue: 'private-invalid-timestamp',
+      },
+      {
+        name: 'zero sleep duration',
+        stream: 'sleep_stage',
+        unit: 'stage',
+        sample: {
+          recordedAt: '2026-03-12T08:04:00.000Z',
+          startAt: '2026-03-12T08:04:00.000Z',
+          endAt: '2026-03-12T08:24:00.000Z',
+          durationMinutes: 0,
+          stage: 'deep',
+        },
+        path: 'samples.0.durationMinutes',
+        hint: 'Use a positive integer number of minutes.',
+        privateValue: '"durationMinutes":0',
+      },
+      {
+        name: 'fractional sleep duration',
+        stream: 'sleep_stage',
+        unit: 'stage',
+        sample: {
+          recordedAt: '2026-03-12T08:05:00.000Z',
+          startAt: '2026-03-12T08:05:00.000Z',
+          endAt: '2026-03-12T08:25:00.000Z',
+          durationMinutes: 20.5,
+          stage: 'deep',
+        },
+        path: 'samples.0.durationMinutes',
+        hint: 'Use a positive integer number of minutes.',
+        privateValue: '20.5',
+      },
+      {
+        name: 'unsupported sleep stage',
+        stream: 'sleep_stage',
+        unit: 'stage',
+        sample: {
+          recordedAt: '2026-03-12T08:06:00.000Z',
+          startAt: '2026-03-12T08:06:00.000Z',
+          endAt: '2026-03-12T08:26:00.000Z',
+          durationMinutes: 20,
+          stage: 'private-sleep-stage',
+        },
+        path: 'samples.0.stage',
+        hint: 'Use one of: awake, light, deep, rem.',
+        privateValue: 'private-sleep-stage',
+      },
+      {
+        name: 'incompatible unit',
+        stream: 'heart_rate',
+        unit: 'private-heart-rate-unit',
+        sample: { recordedAt: '2026-03-12T08:07:00.000Z', value: 61 },
+        path: 'unit',
+        hint: 'Use "bpm" for heart_rate.',
+        privateValue: 'private-heart-rate-unit',
+      },
+    ] as const
+
+    for (const semanticCase of semanticCases) {
+      await writeFile(
+        samplesPayloadPath,
+        JSON.stringify({
+          stream: semanticCase.stream,
+          unit: semanticCase.unit,
+          sourcePath: './imports/private-sample-source.csv',
+          samples: [semanticCase.sample],
+        }),
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        'samples',
+        'import-json',
+        '--input',
+        `@${samplesPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const serialized = JSON.stringify(result)
+
+      assert.equal(result.ok, false, semanticCase.name)
+      assert.equal(result.error.code, 'invalid_payload', semanticCase.name)
+      assert.equal(result.error.stage, 'validation', semanticCase.name)
+      assert.equal(result.error.fieldErrors?.[0]?.path, semanticCase.path, semanticCase.name)
+      assert.equal(result.error.hint, semanticCase.hint, semanticCase.name)
+      assert.equal(serialized.includes(semanticCase.privateValue), false, semanticCase.name)
+      assert.equal(serialized.includes('private-sample-source'), false, semanticCase.name)
+
+      const samples = await runSliceCli<{ count: number }>([
+        'samples',
+        'list',
+        '--stream',
+        semanticCase.stream,
+        '--vault',
+        vaultRoot,
+      ])
+      const batches = await runSliceCli<{ items: unknown[] }>([
+        'samples',
+        'batch',
+        'list',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(requireData(samples).count, 0, semanticCase.name)
+      assert.equal(requireData(batches).items.length, 0, semanticCase.name)
+      assert.equal(await countAuditRecords(), initialAuditCount, semanticCase.name)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('provider, food, recipe, and event edit/delete schemas expose shared record mutation options', async () => {
   const providerEditSchema = JSON.parse(
     await runSliceCliRaw(['provider', 'edit', '--schema']),

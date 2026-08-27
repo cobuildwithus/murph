@@ -8,6 +8,7 @@ import * as coreRuntime from "@murphai/core";
 import {
   addMeal,
   createSamplePresetRegistry,
+  CsvSampleImportError,
   importCsvSamples,
   importDocument,
   parseDelimitedRows,
@@ -16,7 +17,7 @@ import {
   profileCsvSampleFile,
   summarizeSampleSeries,
 } from "../src/index.ts";
-import type { DocumentImportPayload } from "../src/index.ts";
+import type { DocumentImportPayload, SampleImportPayload } from "../src/index.ts";
 import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
 
 test("importDocument delegates a core-shaped document payload", async () => {
@@ -226,6 +227,50 @@ test("importCsvSamples auto-imports multiple recognizable sample columns and nor
   );
 });
 
+test("importCsvSamples validates every planned stream before its first write", async () => {
+  const filePath = await createTempFile(
+    "multi-stream-invalid.csv",
+    "timestamp,spo2,heart_rate\n2026-03-11T08:00:00Z,97,-17\n",
+  );
+  const validated: string[] = [];
+  const written: string[] = [];
+  const corePort = {
+    async validateSampleImport(payload: SampleImportPayload) {
+      validated.push(payload.stream);
+      if (payload.stream === "heart_rate") {
+        throw new coreRuntime.VaultError(
+          "SAMPLE_INVALID",
+          "Sample 1 contains an invalid value field.",
+          {
+            sampleField: "value",
+            sampleIndex: 0,
+          },
+        );
+      }
+    },
+    async importSamples(payload: SampleImportPayload) {
+      written.push(payload.stream);
+    },
+  };
+
+  await assert.rejects(
+    () => importCsvSamples({ filePath }, { corePort }),
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.deepEqual(error.failure, {
+        code: "invalid_sample",
+        importIndex: 1,
+        sampleField: "value",
+        stream: "heart_rate",
+      });
+      return true;
+    },
+  );
+
+  assert.deepEqual(validated, ["spo2", "heart_rate"]);
+  assert.deepEqual(written, []);
+});
+
 test("profileCsvSampleFile exposes a non-mutating CSV plan with source hints and optional summaries", async () => {
   const filePath = await createTempFile(
     "O2Ring-export.csv",
@@ -425,7 +470,14 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
         },
         { corePort },
       ),
-    /did not contain any importable sample rows/,
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.deepEqual(error.failure, {
+        code: "no_importable_rows",
+        importIndexes: [0],
+      });
+      return true;
+    },
   );
 
   await assert.throws(
@@ -447,6 +499,136 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
       ),
     /unterminated quoted field/,
   );
+});
+
+test("sample CSV repair errors expose fixed value-free guidance without cell values", async () => {
+  const invalidRowsPath = await createTempFile(
+    "invalid-sample-rows.csv",
+    "timestamp,bpm\nprivate-timestamp-cell,private-value-cell\n",
+  );
+  const privateTimestampHeader = "private_time_header";
+  const privateMetricHeader = "private_metric_header";
+  const privateHeaderPath = await createTempFile(
+    "private-sample-inference.csv",
+    `${privateTimestampHeader},${privateMetricHeader}\nprivate-cell,62\n`,
+  );
+  const customValueHeader = "custom_private_metric";
+  const customValuePath = await createTempFile(
+    "custom-value-inference.csv",
+    `timestamp,${customValueHeader}\n2043-02-01T00:00:00Z,72\n`,
+  );
+  const headerlessTimestamp = "2042-11-19T12:34:56Z";
+  const headerlessValue = "791337";
+  const headerlessPath = await createTempFile(
+    "headerless-samples.csv",
+    `${headerlessTimestamp},${headerlessValue}\n2042-11-19T12:35:56Z,791338\n`,
+  );
+  const preamble = "private-preamble-sentinel";
+  const preambleHeaderA = "preamble_time_column";
+  const preambleHeaderB = "preamble_metric_column";
+  const preamblePath = await createTempFile(
+    "preamble-samples.csv",
+    `${preamble}\n${preambleHeaderA},${preambleHeaderB}\nprivate-preamble-cell,72\n`,
+  );
+  const wrongDelimiterTimestamp = "2043-01-17T03:02:01Z";
+  const wrongDelimiterValue = "881199";
+  const wrongDelimiterHeader = "time_flag;bpm_flag";
+  const wrongDelimiterPath = await createTempFile(
+    "wrong-delimiter-samples.csv",
+    `${wrongDelimiterHeader}\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
+  );
+  const longHeader = `metric_${"x".repeat(200)}`;
+  const longHeaderPath = await createTempFile(
+    "long-header-samples.csv",
+    `timestamp,${longHeader}\n2043-02-01T00:00:00Z,72\n`,
+  );
+  const wideHeaders = Array.from({ length: 24 }, (_, index) =>
+    `metric_${String(index + 1).padStart(2, "0")}`
+  );
+  const wideHeaderPath = await createTempFile(
+    "wide-header-samples.csv",
+    `timestamp,${wideHeaders.join(",")}\n2043-02-01T00:00:00Z,${wideHeaders.map(() => "72").join(",")}\n`,
+  );
+  const { corePort } = createCorePortSpy();
+  async function readRepairError(filePath: string): Promise<CsvSampleImportError> {
+    try {
+      await prepareCsvSampleImport({ filePath });
+      assert.fail("Expected sample CSV inference to fail.");
+    } catch (error) {
+      assert.ok(error instanceof CsvSampleImportError);
+      return error;
+    }
+  }
+
+  function assertValueFreeFailure(
+    error: CsvSampleImportError,
+    input: {
+      code: "timestamp_column_inference_failed" | "value_column_inference_failed";
+      sentinels: readonly string[];
+    },
+  ): void {
+    assert.equal(error.code, input.code);
+    assert.deepEqual(error.failure, { code: input.code });
+    const serialized = JSON.stringify(error);
+    for (const sentinel of input.sentinels) {
+      assert.equal(serialized.includes(sentinel), false);
+    }
+  }
+
+  await assert.rejects(
+    () => importCsvSamples({ filePath: invalidRowsPath }, { corePort }),
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.equal(error.code, "no_importable_rows");
+      assert.deepEqual(error.failure, {
+        code: "no_importable_rows",
+        importIndexes: [0],
+      });
+      assert.equal(JSON.stringify(error).includes("private-timestamp-cell"), false);
+      assert.equal(JSON.stringify(error).includes("private-value-cell"), false);
+      return true;
+    },
+  );
+
+  assertValueFreeFailure(await readRepairError(privateHeaderPath), {
+    code: "timestamp_column_inference_failed",
+    sentinels: [privateTimestampHeader, privateMetricHeader, "private-cell"],
+  });
+
+  assertValueFreeFailure(await readRepairError(customValuePath), {
+    code: "value_column_inference_failed",
+    sentinels: [customValueHeader],
+  });
+
+  const headerless = await readRepairError(headerlessPath);
+  assertValueFreeFailure(headerless, {
+    code: "timestamp_column_inference_failed",
+    sentinels: [headerlessTimestamp, headerlessValue],
+  });
+
+  assertValueFreeFailure(await readRepairError(preamblePath), {
+    code: "timestamp_column_inference_failed",
+    sentinels: [preamble, preambleHeaderA, preambleHeaderB, "private-preamble-cell"],
+  });
+
+  const wrongDelimiter = await readRepairError(wrongDelimiterPath);
+  assertValueFreeFailure(wrongDelimiter, {
+    code: "timestamp_column_inference_failed",
+    sentinels: [wrongDelimiterHeader, wrongDelimiterTimestamp, wrongDelimiterValue],
+  });
+
+  const longHeaderError = await readRepairError(longHeaderPath);
+  assertValueFreeFailure(longHeaderError, {
+    code: "value_column_inference_failed",
+    sentinels: [longHeader, longHeader.slice(0, 24)],
+  });
+
+  const wideHeaderError = await readRepairError(wideHeaderPath);
+  assertValueFreeFailure(wideHeaderError, {
+    code: "value_column_inference_failed",
+    sentinels: wideHeaders,
+  });
+  assert.ok(JSON.stringify(wideHeaderError).length < 1_000);
 });
 
 test("importDocument accepts a narrow core port with only the called export", async () => {

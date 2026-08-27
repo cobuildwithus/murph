@@ -12,6 +12,7 @@ import {
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
+  validateSampleImport as validateSampleImportInternal,
   resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
 } from "./mutations.ts";
 import {
@@ -568,6 +569,12 @@ export async function importSamples(
   input: Parameters<typeof importSamplesInternal>[0],
 ): ReturnType<typeof importSamplesInternal> {
   return withCanonicalInputWriteLock(input, importSamplesInternal);
+}
+
+export async function validateSampleImport(
+  input: Parameters<typeof validateSampleImportInternal>[0],
+): ReturnType<typeof validateSampleImportInternal> {
+  return validateSampleImportInternal(input);
 }
 
 export async function upsertProvider(

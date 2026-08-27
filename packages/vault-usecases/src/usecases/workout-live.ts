@@ -265,6 +265,10 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   const appendMutations = input.action.mutations.filter(
     (mutation) => mutation.kind === 'exercise.append',
   )
+  const renameMutations = input.action.mutations.filter(
+    (mutation): mutation is ExerciseRenameMutation =>
+      mutation.kind === 'exercise.rename',
+  )
   const removeMutations = input.action.mutations.filter(
     (mutation): mutation is SetRemoveMutation => mutation.kind === 'set.remove',
   ).sort((left, right) =>
@@ -346,6 +350,19 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   }
 
   if (!applyMemberActionSetAppends(exercises, newSetMutations)) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (!applyMemberActionExerciseRenames(
+    exercises,
+    renameMutations,
+    input.action.expectedWorkout.exercises,
+  )) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (
+    renameMutations.length > 0
+    && hasAmbiguousWorkoutActionExerciseCoordinates({ exercises })
+  ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
 
@@ -467,6 +484,27 @@ function applyMemberActionSetPuts(
   return true
 }
 
+function applyMemberActionExerciseRenames(
+  exercises: WorkoutExercise[],
+  mutations: ExerciseRenameMutation[],
+  expectedExercises: WorkoutLiveApplyMemberActionV1['expectedWorkout']['exercises'],
+): boolean {
+  for (const mutation of mutations) {
+    const exercise = exercises[mutation.exercisePosition - 1]
+    const expectedExercise = expectedExercises[mutation.exercisePosition - 1]
+    if (
+      !exercise
+      || !expectedExercise
+      || exercise.name !== expectedExercise.name
+      || mutation.name === expectedExercise.name
+    ) {
+      return false
+    }
+    exercise.name = mutation.name
+  }
+  return true
+}
+
 function applyMemberActionSetAppends(
   exercises: WorkoutExercise[],
   mutations: SetAppendMutation[],
@@ -555,6 +593,10 @@ function buildMemberActionWorkoutSet(input: {
 
 type MemberActionSetResult = WorkoutMemberActionSetResultV1 | null
 type MemberActionSetResultKind = NonNullable<MemberActionSetResult>['kind']
+type ExerciseRenameMutation = Extract<
+  WorkoutLiveApplyMemberActionV1['mutations'][number],
+  { kind: 'exercise.rename' }
+>
 type SetPutMutation = Extract<
   WorkoutLiveApplyMemberActionV1['mutations'][number],
   { kind: 'set.put' }

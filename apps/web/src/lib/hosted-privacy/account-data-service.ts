@@ -70,6 +70,7 @@ import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
+  prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   type HostedPrivyPhoneTransferProof,
   type HostedPrivyPhoneTransferSourceRetirementProof,
@@ -109,6 +110,7 @@ import type { HostedRunnerUserDataDeletionBestEffortResult } from "../hosted-exe
 import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
+import { runPrismaInteractiveTransaction } from "../prisma";
 import { decryptHostedWebNullableFields } from "../hosted-web/encryption";
 import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
@@ -1086,6 +1088,12 @@ async function deleteHostedAccountDataInternal(input: {
     ? await readHostedPrivyPhoneTransferTargetSession(phoneTransfer)
     : null;
   if (phoneTransfer && phoneTransferSessionBeforeBillingCleanup) {
+    const preparedRetirement =
+      await prepareHostedPrivyPhoneTransferSourceRetirement({
+        prisma: input.prisma,
+        sourceMemberId: phoneTransfer.transfer.sourceMemberId,
+        targetMemberId: phoneTransfer.targetMember.id,
+      });
     // Reclassify immediately before billing cleanup. Stripe can promptly write
     // the cancellation webhook back to this already-fenced source, so the
     // final deletion transaction verifies only the immutable transfer fence.
@@ -1095,6 +1103,7 @@ async function deleteHostedAccountDataInternal(input: {
           identity: phoneTransferSessionBeforeBillingCleanup.identity,
           member: phoneTransfer.targetMember,
           now: deletionStartedAt,
+          prepared: preparedRetirement,
           prisma: tx,
           targetPhoneNumberBeforeTransfer:
             phoneTransfer.targetPhoneNumberBeforeTransfer,
@@ -1149,7 +1158,9 @@ async function deleteHostedAccountDataInternal(input: {
     memberIds: deletionMemberIds,
     prisma: input.prisma,
   });
-  const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
+  const deleteHostedAccountDataCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<HostedAccountDeletionDatabaseResult> => {
     if (input.phoneTransfer && phoneTransferSession) {
       await acquireHostedPrivyPhoneTransferPhoneLocksTx({
         prisma: tx,
@@ -1339,7 +1350,13 @@ async function deleteHostedAccountDataInternal(input: {
       deletedCounts,
       deletedRuntimeMemberIds: transactionDeletionMemberIds,
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  };
+  const databaseDeletion = await runPrismaInteractiveTransaction(
+    input.prisma,
+    "account_deletion.database_delete",
+    deleteHostedAccountDataCallback,
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
   const deletedCounts = databaseDeletion.deletedCounts;
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
@@ -1892,7 +1909,9 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   prisma: PrismaClient;
   providerAccessRemovalConfirmationToken: string | null;
 }): Promise<string[]> {
-  return input.prisma.$transaction(async (tx) => {
+  const suspendHostedMembersCallback = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<string[]> => {
     const preparedMemberIds = uniqueStrings([
       input.ownerMemberId,
       ...await listOwnedHostedThreadContainerMemberIds({
@@ -2022,7 +2041,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
     // the suspended group runtime.
     await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
-  }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
+  };
+  return runPrismaInteractiveTransaction(
+    input.prisma,
+    "account_deletion.suspension_fence",
+    suspendHostedMembersCallback,
+    HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS,
+  );
 }
 
 export async function assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx(

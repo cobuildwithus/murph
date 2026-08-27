@@ -527,6 +527,18 @@
     {
       "issue": "cobuildwithus/murph#2328",
       "path": ".agents/friction-log/20260825213023-hosted-local-minio/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2337",
+      "path": ".agents/friction-log/20260826002019-vercel-env-run/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2354",
+      "path": ".agents/friction-log/20260826131502-graft-rebuilds-a/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2364",
+      "path": ".agents/friction-log/20260826141134-preliminary-reviewgpt-omits/friction.md"
     }
   ],
   "version": 1

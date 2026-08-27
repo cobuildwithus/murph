@@ -1872,7 +1872,10 @@ describe("hosted runtime latency dashboard store", () => {
       expect(sql).toContain("statement_timestamp() AT TIME ZONE 'UTC'");
       expect(sql).not.toContain("CURRENT_TIMESTAMP");
       expect(sql).toContain("ORDER BY trace.id");
-      expect(sql).toContain("FOR UPDATE OF trace");
+      expect(sql).toContain("FOR UPDATE OF trace SKIP LOCKED");
+      expect(sql).toMatch(
+        /FROM locked\s+WHERE locked\.assistant_input_id = requested\.assistant_input_id/u,
+      );
     }
     expect(prisma.readTransactionCallCount()).toBe(0);
   });
