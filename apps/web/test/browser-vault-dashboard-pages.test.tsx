@@ -468,7 +468,10 @@ test("Personal Patterns comparison controls name their factor and next-day outco
   assert.match(markup, /data-patterns-layout="desktop"/u);
   assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
   assert.match(markup, /Sleep efficiency/u);
-  assert.match(markup, />14 days</u);
+  assert.doesNotMatch(markup, /Unsupported outcome/u);
+  assert.doesNotMatch(markup, /Sparse factor/u);
+  assert.match(markup, /aria-label="Seen on 14 days"/u);
+  assert.match(markup, /data-observed-days="14"/u);
   assert.match(markup, /Early signal, grade D/u);
   assert.match(markup, /Pattern, grade A/u);
   assert.match(markup, /Next-day HRV was 12% higher after running\./u);
@@ -478,11 +481,12 @@ test("Personal Patterns comparison controls name their factor and next-day outco
     markup,
     /No clear pattern was found between custom tag and next-day HRV\./u,
   );
-  assert.match(markup, />No clear pattern</u);
+  assert.match(markup, /data-pattern-state="no-clear-pattern"/u);
+  assert.match(markup, /data-pattern-state="insufficient"/u);
+  assert.match(markup, /aria-label="Not enough comparable data/u);
   assert.match(markup, /data-slot="popover-trigger"/u);
   assert.doesNotMatch(markup, />~</u);
-  assert.match(markup, /Sparse factor/u);
-  assert.match(markup, /Not enough data/u);
+  assert.doesNotMatch(markup, /font-mono font-semibold tabular-nums/u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
 });
 

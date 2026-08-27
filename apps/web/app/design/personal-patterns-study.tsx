@@ -38,6 +38,7 @@ const POPULATED_REPORT: PersonalPatternReport = {
     { id: "deep-sleep", label: "Deep sleep", unit: "min" },
     { id: "respiratory-rate", label: "Respiratory rate", unit: "rpm" },
     { id: "sleep-efficiency", label: "Sleep efficiency", unit: "%" },
+    { id: "unsupported", label: "Unsupported outcome", unit: "score" },
   ],
   cells: [
     cell("running", "hrv", "seen_again", "higher", 12.4, 48, 42.7, 9),
@@ -217,16 +218,7 @@ const POPULATED_REPORT: PersonalPatternReport = {
       91,
       5,
     ),
-    cell(
-      "custom-tag",
-      "respiratory-rate",
-      "no_clear_pattern",
-      "flat",
-      0.1,
-      14.9,
-      14.9,
-      5,
-    ),
+    cell("custom-tag", "respiratory-rate", "insufficient", "flat", 0, 0, 0, 5),
     cell(
       "custom-tag",
       "sleep-efficiency",

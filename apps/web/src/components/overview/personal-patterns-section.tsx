@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDown, ArrowUp, Ellipsis, Minus } from "lucide-react";
 import Image from "next/image";
 import { useId } from "react";
 
@@ -21,6 +22,12 @@ import {
 } from "@/src/components/ui/popover";
 import { Separator } from "@/src/components/ui/separator";
 import { Skeleton } from "@/src/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/src/components/ui/tooltip";
 import { usePointerPopoverAnchor } from "@/src/components/ui/use-pointer-popover-anchor";
 import { cn } from "@/src/lib/utils";
 import { resolvePatternFactorIcon } from "./pattern-factor-icon";
@@ -49,7 +56,7 @@ export function PersonalPatternsSection({
   state?: "error" | "loading" | "ready" | "unavailable";
 }) {
   const headingId = useId();
-  const visibleReport = report;
+  const visibleReport = report ? selectVisiblePatternReport(report) : null;
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-8">
@@ -91,7 +98,7 @@ export function PersonalPatternsSection({
             <div className="px-6 py-8 sm:px-8">
               <p className="max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
                 {report && report.factors.length > 0
-                  ? "No personal pattern stands out yet. Murph will keep checking as new data arrives."
+                  ? "Murph needs more comparable days before showing this table."
                   : "No comparison is ready yet. Murph needs an action or context, health data, and a nearby comparison day."}
               </p>
             </div>
@@ -132,17 +139,17 @@ function PatternsLoadingState() {
 
 function PatternMatrix({ report }: { report: PersonalPatternReport }) {
   return (
-    <>
+    <TooltipProvider>
       <div className="border-t border-border">
         <MobilePatternMatrix report={report} />
         <DesktopPatternMatrix report={report} />
 
         <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
-          Circle color and size show evidence strength. Select a result for
+          Marker color and size show evidence strength. Select a result for
           details.
         </div>
       </div>
-    </>
+    </TooltipProvider>
   );
 }
 
@@ -198,33 +205,27 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
                   <p className="mt-1 max-w-full break-words text-[11px] font-medium leading-tight text-foreground">
                     {factor.label}
                   </p>
-                  <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">
-                    {formatObservedDays(factor.observedDays)}
-                  </p>
+                  <ObservedDaysMeter
+                    className="mt-1"
+                    days={factor.observedDays}
+                  />
                 </div>
 
                 {outcomes.map((outcome) => {
-                  const cell = findPatternCell(report, factor.id, outcome.id);
                   return (
                     <div
                       key={outcome.id}
                       className="flex min-w-0 items-center justify-center px-0.5 py-2"
                     >
-                      {cell ? (
-                        <PatternBubble
-                          cell={cell}
-                          compact
-                          factorLabel={factor.label}
-                          factorObservedDays={factor.observedDays}
-                          outcomeLagDays={outcome.lagDays}
-                          outcomeLabel={outcome.label}
-                          outcomeUnit={outcome.unit}
-                        />
-                      ) : (
-                        <span className="text-[9px] text-muted-foreground">
-                          —
-                        </span>
-                      )}
+                      <PatternBubble
+                        cell={findPatternCell(report, factor.id, outcome.id)}
+                        compact
+                        factorLabel={factor.label}
+                        factorObservedDays={factor.observedDays}
+                        outcomeLagDays={outcome.lagDays}
+                        outcomeLabel={outcome.label}
+                        outcomeUnit={outcome.unit}
+                      />
                     </div>
                   );
                 })}
@@ -267,7 +268,7 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
         {report.factors.map((factor) => (
           <div
             key={factor.id}
-            className="grid min-h-[5.5rem] items-center border-t border-border"
+            className="grid min-h-[4.75rem] items-center border-t border-border"
             style={{ gridTemplateColumns: columns }}
           >
             <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-border bg-[#fffcf6] px-6 py-3 dark:bg-card">
@@ -278,34 +279,25 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
                 height={40}
                 className="size-10 shrink-0 object-contain"
               />
-              <div>
+              <div className="flex min-w-0 flex-col gap-1">
                 <p className="text-sm font-medium text-foreground">
                   {factor.label}
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Seen on {factor.observedDays} days
-                </p>
+                <ObservedDaysMeter days={factor.observedDays} />
               </div>
             </div>
 
             {report.outcomes.map((outcome) => {
-              const cell = findPatternCell(report, factor.id, outcome.id);
               return (
                 <div key={outcome.id} className="flex justify-center px-3 py-3">
-                  {cell ? (
-                    <PatternBubble
-                      cell={cell}
-                      factorLabel={factor.label}
-                      factorObservedDays={factor.observedDays}
-                      outcomeLagDays={outcome.lagDays}
-                      outcomeLabel={outcome.label}
-                      outcomeUnit={outcome.unit}
-                    />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      Not enough
-                    </span>
-                  )}
+                  <PatternBubble
+                    cell={findPatternCell(report, factor.id, outcome.id)}
+                    factorLabel={factor.label}
+                    factorObservedDays={factor.observedDays}
+                    outcomeLagDays={outcome.lagDays}
+                    outcomeLabel={outcome.label}
+                    outcomeUnit={outcome.unit}
+                  />
                 </div>
               );
             })}
@@ -325,7 +317,7 @@ function PatternBubble({
   outcomeLabel,
   outcomeUnit,
 }: {
-  cell: PersonalPatternCell;
+  cell?: PersonalPatternCell;
   compact?: boolean;
   factorLabel: string;
   factorObservedDays: number;
@@ -335,7 +327,7 @@ function PatternBubble({
 }) {
   const pointerAnchor = usePointerPopoverAnchor();
 
-  if (cell.stage === "insufficient") {
+  if (!cell || cell.stage === "insufficient") {
     return (
       <Popover>
         <PopoverTrigger
@@ -349,17 +341,14 @@ function PatternBubble({
                 outcomeLabel,
               )}.`}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                compact ? "text-[9px]" : "text-xs",
+                "inline-flex shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                compact ? "size-5" : "size-6",
               )}
+              data-pattern-state="insufficient"
               onKeyDown={pointerAnchor.onKeyDown}
               onPointerMove={pointerAnchor.onPointerMove}
             >
-              <span
-                aria-hidden="true"
-                className="size-4 rounded-full border border-border bg-card"
-              />
-              <span>{compact ? "More data" : "Not enough data"}</span>
+              <Ellipsis aria-hidden="true" className="size-3" />
             </button>
           }
         />
@@ -376,7 +365,7 @@ function PatternBubble({
               Still learning
             </p>
             <PopoverTitle className="font-serif text-lg font-semibold leading-6">
-              Not enough comparable days yet
+              Not enough data
             </PopoverTitle>
             <PopoverDescription className="text-xs leading-5 text-muted-foreground">
               Murph saw {formatDayCount(factorObservedDays)} with{" "}
@@ -393,21 +382,21 @@ function PatternBubble({
   const isFlat = cell.stage === "no_clear_pattern" || cell.direction === "flat";
   const indicatorSize = compact
     ? cell.stage === "worth_testing"
-      ? 22
+      ? 18
       : cell.stage === "seen_again"
-      ? 20
-      : 18
+      ? 17
+      : 16
     : cell.stage === "worth_testing"
-    ? 28
+    ? 20
     : cell.stage === "seen_again"
-    ? 25
-    : 22;
+    ? 18
+    : 16;
   const label =
     cell.deltaPercent === null || isFlat
       ? "No clear pattern"
       : formatPercent(Math.abs(cell.deltaPercent));
-  const directionArrow =
-    cell.deltaPercent !== null && cell.deltaPercent > 0 ? "↑" : "↓";
+  const DirectionIcon =
+    cell.deltaPercent !== null && cell.deltaPercent > 0 ? ArrowUp : ArrowDown;
   const accessibleLabel = `${describeResult({
     cell,
     factorLabel,
@@ -430,9 +419,10 @@ function PatternBubble({
             type="button"
             aria-label={accessibleLabel}
             className={cn(
-              "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-mono font-semibold tabular-nums text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              compact ? "text-[9px]" : "text-xs",
+              "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              compact ? "text-[10px]" : "text-sm",
             )}
+            data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
             onKeyDown={pointerAnchor.onKeyDown}
             onPointerMove={pointerAnchor.onPointerMove}
           >
@@ -450,11 +440,13 @@ function PatternBubble({
               )}
               style={{ height: indicatorSize, width: indicatorSize }}
             >
-              {isFlat ? null : directionArrow}
+              {isFlat ? (
+                <Minus aria-hidden="true" className="size-3" />
+              ) : (
+                <DirectionIcon aria-hidden="true" className="size-3" />
+              )}
             </span>
-            <span>
-              {isFlat ? (compact ? "No pattern" : "No clear pattern") : label}
-            </span>
+            {isFlat ? null : <span>{label}</span>}
           </button>
         }
       />
@@ -508,15 +500,24 @@ function PatternPopoverContent({
           {isFlat ? "Checked" : formatEvidenceLabel(cell)}
         </p>
         <PopoverTitle className="font-serif text-lg font-semibold leading-6">
-          {describeResult({
-            cell,
-            factorLabel,
-            outcomeLabel,
-            outcomeLagDays,
-          })}
+          {isFlat
+            ? "No clear pattern"
+            : describeResult({
+                cell,
+                factorLabel,
+                outcomeLabel,
+                outcomeLagDays,
+              })}
         </PopoverTitle>
-        <PopoverDescription className="sr-only">
-          Comparison details for this personal pattern
+        <PopoverDescription
+          className={cn(
+            "text-xs leading-5 text-muted-foreground",
+            !isFlat && "sr-only",
+          )}
+        >
+          {isFlat
+            ? `${factorLabel} and ${outcomeLabel.toLocaleLowerCase()} did not move together consistently in the checked days.`
+            : "Comparison details for this personal pattern"}
         </PopoverDescription>
       </PopoverHeader>
 
@@ -580,12 +581,72 @@ function findPatternCell(
   );
 }
 
-function formatObservedDays(days: number): string {
-  return `${days} ${days === 1 ? "day" : "days"}`;
-}
-
 function formatPercent(value: number): string {
   return `${Math.abs(value) < 10 ? value.toFixed(1) : Math.round(value)}%`;
+}
+
+function ObservedDaysMeter({
+  className,
+  days,
+}: {
+  className?: string;
+  days: number;
+}) {
+  const level = getObservedDaysLevel(days);
+  const label = `Seen on ${formatDayCount(days)}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        aria-label={label}
+        className={cn(
+          "flex w-fit items-center rounded-sm py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          className,
+        )}
+        data-observed-days={days}
+      >
+        <span aria-hidden="true" className="flex items-center gap-1">
+          {Array.from({ length: 5 }, (_, index) => (
+            <span
+              className={cn(
+                "h-2.5 w-px rounded-full",
+                index < level ? "bg-primary" : "bg-border",
+              )}
+              key={index}
+            />
+          ))}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function getObservedDaysLevel(days: number): number {
+  if (days <= 2) return 1;
+  if (days <= 5) return 2;
+  if (days <= 10) return 3;
+  if (days <= 20) return 4;
+  return 5;
+}
+
+function selectVisiblePatternReport(
+  report: PersonalPatternReport,
+): PersonalPatternReport {
+  const factors = report.factors.filter((factor) =>
+    report.outcomes.some((outcome) => {
+      const cell = findPatternCell(report, factor.id, outcome.id);
+      return cell !== undefined && cell.stage !== "insufficient";
+    }),
+  );
+  const outcomes = report.outcomes.filter((outcome) =>
+    factors.some((factor) => {
+      const cell = findPatternCell(report, factor.id, outcome.id);
+      return cell !== undefined && cell.stage !== "insufficient";
+    }),
+  );
+
+  return { ...report, factors, outcomes };
 }
 
 function describeResult({
