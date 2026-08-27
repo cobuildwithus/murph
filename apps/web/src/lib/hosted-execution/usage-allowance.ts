@@ -230,6 +230,7 @@ type HostedAiUsageAllowanceTokenPricingBasesByModel = Record<
   HostedAiUsageOpenAiFlexTokenPricingModel,
   {
     "openai-flex": HostedAiUsageAllowanceTokenPricingBasisConfig;
+    "openai-priority": HostedAiUsageAllowanceTokenPricingBasisConfig;
   }
 >;
 
@@ -452,6 +453,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_PRIORITY_PRICING_VERSION =
+  "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
   "venice-api-pricing-2026-08-04-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
@@ -646,6 +649,14 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
     multiplierNumerator: 1n,
     pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION,
+    requiredProviderKind: "openai",
+  },
+  "openai-priority": {
+    multiplierDenominator: 1n,
+    multiplierNumerator: 2n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
+    pricingVersion:
+      HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_PRIORITY_PRICING_VERSION,
     requiredProviderKind: "openai",
   },
   standard: {
@@ -2657,7 +2668,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
   if (config.requiredProviderKind === "openai") {
     if (!isHostedAiUsageOpenAiTokenPricingProviderName(input.record.providerName)) {
       throw new TypeError(
-        "OpenAI flex token pricing requires OpenAI provider evidence.",
+        "OpenAI token pricing adjustments require OpenAI provider evidence.",
       );
     }
   }

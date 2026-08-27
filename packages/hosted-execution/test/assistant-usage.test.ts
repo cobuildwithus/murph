@@ -183,6 +183,13 @@ test("usage records default and validate token pricing basis", () => {
     }).tokenPricingBasis,
     "openai-flex",
   );
+  assert.equal(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      tokenPricingBasis: "openai-priority",
+    }).tokenPricingBasis,
+    "openai-priority",
+  );
   assert.throws(
     () => parseAssistantUsageRecord({
       ...baseRecord,
