@@ -1,6 +1,6 @@
 # Appointment memory reuse and browser recovery
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -139,3 +139,8 @@ Updated: 2026-08-27
   state machine with five browser actions, four opens, exactly one OS fallback,
   no takeover, verified completion, and a truthful current-task-only statement
   for the synthetic insurance identifier.
+- After the latest `origin/main` advanced, the branch merged it cleanly with no
+  task-file conflict. The resulting tree passed all six focused files (95 tests;
+  124 opt-in provider cases skipped), Assistant Engine typecheck, and
+  `git diff --check`.
+Completed: 2026-08-27
