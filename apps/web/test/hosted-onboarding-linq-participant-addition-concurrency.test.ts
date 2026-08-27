@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
@@ -63,7 +63,11 @@ import {
 } from "@/src/lib/hosted-execution/usage-limit-notice-claim";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  readHostedMailboxWakeByDedupeKey,
+} from "@/src/lib/hosted-mailbox/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   recordHostedLaunchRequiredConsent,
@@ -76,7 +80,6 @@ import {
 } from "@/src/lib/hosted-groups/participant-action-authority";
 import {
   ensureHostedThreadContainerRouteTx,
-  refreshHostedThreadContainerDeliveryRouteTx,
   type PreparedHostedThreadContainerCreation,
   type PreparedHostedThreadContainerDeliveryRoute,
 } from "@/src/lib/hosted-routing/thread-container-service";
@@ -99,12 +102,12 @@ import {
 import {
   buildHostedMemberIdentityPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
-import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   planHostedOnboardingLinqWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import {
   applyHostedLinqParticipantChangeToRouteTx,
+  handleHostedOnboardingLinqWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import {
   HOSTED_CRYPTO_DOMAINS,
@@ -519,6 +522,37 @@ function observeParticipantContextRouteWrite(input: {
   });
 }
 
+function pauseHostedParticipantWebhookAfterContextWrite(input: {
+  ciphertext: Deferred<string>;
+  client: PrismaClient;
+  pid: Deferred<number>;
+  release: Deferred<void>;
+}): PrismaClient {
+  return new Proxy(input.client, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return <TResult>(
+          callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
+          options?: {
+            isolationLevel?: Prisma.TransactionIsolationLevel;
+            maxWait?: number;
+            timeout?: number;
+          },
+        ) => target.$transaction(async (tx) => {
+          input.pid.resolve(await readBackendPid(tx));
+          return callback(observeParticipantContextRouteWrite({
+            ciphertext: input.ciphertext,
+            release: input.release,
+            tx,
+          }));
+        }, options);
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 function pauseAddressBookClearBeforeCommit(input: {
   cleared: Deferred<void>;
   client: PrismaClient;
@@ -692,35 +726,48 @@ function pauseHostedMemberRoutingDemotionAfterWrite(input: {
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "Linq participant-addition PostgreSQL ordering",
+  "Linq participant-change PostgreSQL ordering",
   () => {
     it.each([
       {
-        startOrder: "route-refresh-first",
-        title: "route refresh starts first",
+        eventType: "participant.added",
+        startOrder: "message-first",
       },
       {
-        startOrder: "participant-webhook-first",
-        title: "participant webhook starts first",
+        eventType: "participant.added",
+        startOrder: "participant-first",
+      },
+      {
+        eventType: "participant.removed",
+        startOrder: "message-first",
+      },
+      {
+        eventType: "participant.removed",
+        startOrder: "participant-first",
       },
     ] as const)(
-      "keeps member-before-route ordering when $title",
-      async ({ startOrder }) => {
-        const routeMemberLocked = createDeferred();
-        const releaseRouteMember = createDeferred();
-        const webhookDemoted = createDeferred();
-        const releaseWebhookDemotion = createDeferred();
-        const routePid = createDeferred<number>();
-        const webhookPid = createDeferred<number>();
+      "serializes $eventType with an owner-sent routed message when $startOrder",
+      async ({ eventType, startOrder }) => {
+        const messageDemoted = createDeferred();
+        const releaseMessage = createDeferred();
+        const participantContext = createDeferred<string>();
+        const releaseParticipant = createDeferred();
+        const messagePid = createDeferred<number>();
+        const participantPid = createDeferred<number>();
         let fixture: RouteFixture | null = null;
-        let routeRefreshTransaction: ReturnType<
-          typeof refreshHostedThreadContainerDeliveryRouteTx
-        > | null = null;
-        let webhookTransaction: ReturnType<
+        let messageTransaction: ReturnType<
           typeof planHostedOnboardingLinqWebhook
         > | null = null;
+        let participantWebhook: ReturnType<
+          typeof handleHostedOnboardingLinqWebhook
+        > | null = null;
+        let participantEventLookupKey: string | null = null;
+        const previousWebhookSecret = process.env.LINQ_WEBHOOK_SECRET;
+        const webhookSecret = "linq-lock-order-test-secret";
 
         try {
+          process.env.LINQ_WEBHOOK_SECRET = webhookSecret;
+          clearHostedOnboardingEnvCache();
           fixture = await createRouteFixture();
           const activeFixture = fixture;
           const numericSuffix = String(
@@ -816,15 +863,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               },
             },
           });
-          const route = await readHostedThreadRouteByThreadIdentity({
-            channel: "linq",
-            prisma: activeFixture.observer,
-            threadId: activeFixture.threadId,
-          });
-          if (!route) {
-            throw new Error("Expected a canonical hosted thread route.");
-          }
-
           const deliveringRoute = buildHostedThreadDeliveryRoute({
             accountLookupKey: deliveringAccountLookupKey,
             channel: "linq",
@@ -873,41 +911,32 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               webhook_version: "2026-02-03",
             }),
           );
+          const participantEvent = buildParticipantChangeEvent({
+            eventType,
+            handle: participantPhone,
+            threadId: activeFixture.threadId,
+          });
+          participantEventLookupKey = createHostedLinqProviderEventLookupKey(
+            participantEvent.event_id,
+          );
+          const participantRawBody = JSON.stringify(participantEvent);
+          const participantTimestamp = String(Math.floor(Date.now() / 1_000));
+          const participantSignature = `sha256=${createHmac(
+            "sha256",
+            webhookSecret,
+          ).update(`${participantTimestamp}.${participantRawBody}`).digest("hex")}`;
 
-          const runRouteRefresh = (pauseAfterMemberLock: boolean) => {
-            routeRefreshTransaction = activeFixture.messageClient.$transaction(
+          const runOwnerMessage = (pauseAfterDemotion: boolean) => {
+            messageTransaction = activeFixture.messageClient.$transaction(
               async (tx) => {
-                routePid.resolve(await readBackendPid(tx));
-                await lockHostedMemberRow(
-                  tx,
-                  activeFixture.ownerMemberId,
-                );
-                if (pauseAfterMemberLock) {
-                  routeMemberLocked.resolve();
-                  await releaseRouteMember.promise;
-                }
-                return refreshHostedThreadContainerDeliveryRouteTx({
-                  accountLookupKey: deliveringAccountLookupKey,
-                  accountLookupKeys: [deliveringAccountLookupKey],
-                  preparedDeliveryRoute,
-                  prisma: tx,
-                  route,
-                  threadId: activeFixture.threadId,
-                });
-              },
-            );
-          };
-          const runParticipantWebhook = (pauseAfterDemotion: boolean) => {
-            webhookTransaction = activeFixture.participantClient.$transaction(
-              async (tx) => {
-                webhookPid.resolve(await readBackendPid(tx));
+                messagePid.resolve(await readBackendPid(tx));
                 return planHostedOnboardingLinqWebhook({
                   event,
                   preparedThreadDeliveryRoute: preparedDeliveryRoute,
                   prisma: pauseAfterDemotion
                     ? pauseHostedMemberRoutingDemotionAfterWrite({
-                        demoted: webhookDemoted,
-                        release: releaseWebhookDemotion,
+                        demoted: messageDemoted,
+                        release: releaseMessage,
                         tx,
                       })
                     : tx,
@@ -915,45 +944,63 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               },
             );
           };
+          const runParticipantWebhook = () => {
+            participantWebhook = handleHostedOnboardingLinqWebhook({
+              prisma: pauseHostedParticipantWebhookAfterContextWrite({
+                ciphertext: participantContext,
+                client: activeFixture.participantClient,
+                pid: participantPid,
+                release: releaseParticipant,
+              }),
+              rawBody: participantRawBody,
+              signature: participantSignature,
+              timestamp: participantTimestamp,
+            });
+          };
 
-          if (startOrder === "route-refresh-first") {
-            runRouteRefresh(true);
-            await routeMemberLocked.promise;
-            runParticipantWebhook(false);
+          if (startOrder === "message-first") {
+            releaseParticipant.resolve();
+            runOwnerMessage(true);
+            await messageDemoted.promise;
+            runParticipantWebhook();
             await waitForBlockedBackend({
               observer: activeFixture.observer,
-              pid: await webhookPid.promise,
+              pid: await participantPid.promise,
             });
-            releaseRouteMember.resolve();
+            releaseMessage.resolve();
           } else {
-            runParticipantWebhook(true);
-            await webhookDemoted.promise;
-            runRouteRefresh(false);
+            runParticipantWebhook();
+            await participantContext.promise;
+            runOwnerMessage(false);
             await waitForBlockedBackend({
               observer: activeFixture.observer,
-              pid: await routePid.promise,
+              pid: await messagePid.promise,
             });
-            releaseWebhookDemotion.resolve();
+            releaseParticipant.resolve();
           }
 
-          if (!routeRefreshTransaction || !webhookTransaction) {
-            throw new Error("Expected both Linq routing transactions.");
+          if (!messageTransaction || !participantWebhook) {
+            throw new Error("Expected both Linq webhook transactions.");
           }
-          await expect(routeRefreshTransaction).resolves.toMatchObject({
-            deliveryRoute: canonicalDeliveryRoute,
-          });
-          await expect(webhookTransaction).resolves.toMatchObject({
+          await expect(messageTransaction).resolves.toMatchObject({
             response: {
               ignored: false,
               ok: true,
               reason: "wake-appended-thread-route",
             },
           });
-          await expect(
-            activeFixture.observer.hostedThreadRoute.findUnique({
+          await expect(participantWebhook).resolves.toMatchObject({
+            ignored: true,
+            ok: true,
+            reason: `recorded-linq-provider-event:${eventType}`,
+          });
+          const storedRoute = await activeFixture.observer.hostedThreadRoute
+            .findUnique({
               select: {
                 accountLookupKey: true,
                 deliveryRouteEncrypted: true,
+                pendingGroupReactionContextEncrypted: true,
+                pendingParticipantAddition: true,
                 threadLookupKey: true,
               },
               where: {
@@ -963,22 +1010,71 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                     activeFixture.threadIdentityLookupKey,
                 },
               },
-            }),
-          ).resolves.toEqual({
+            });
+          expect(storedRoute).toMatchObject({
             accountLookupKey: canonicalAccountLookupKey,
             deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
             threadLookupKey: canonicalThreadLookupKey,
           });
+          expect(await activeFixture.observer.hostedLinqProviderEvent.count({
+            where: { eventId: participantEventLookupKey },
+          })).toBe(1);
+
+          const wake = await readHostedMailboxWakeByDedupeKey({
+            dedupeKey: event.event_id,
+            prisma: activeFixture.observer,
+            userId: activeFixture.containerMemberId,
+          });
+          if (
+            !wake
+            || wake.kind !== "conversation.message"
+            || wake.message.channel !== "linq"
+          ) {
+            throw new Error("Expected a routed Linq conversation wake.");
+          }
+          const expectedContext = eventType === "participant.added"
+            ? "was added to the group"
+            : "was removed from the group";
+          if (startOrder === "participant-first") {
+            expect(wake.message.groupReactionContext).toContain(expectedContext);
+            if (eventType === "participant.added") {
+              expect(wake.message.groupParticipantAdded).toBe(true);
+            } else {
+              expect(wake.message).not.toHaveProperty("groupParticipantAdded");
+            }
+            expect(storedRoute).toMatchObject({
+              pendingGroupReactionContextEncrypted: null,
+              pendingParticipantAddition: false,
+            });
+          } else {
+            expect(wake.message).not.toHaveProperty("groupParticipantAdded");
+            expect(wake.message).not.toHaveProperty("groupReactionContext");
+            expect(storedRoute?.pendingParticipantAddition).toBe(
+              eventType === "participant.added",
+            );
+            expect(storedRoute?.pendingGroupReactionContextEncrypted)
+              .toMatch(/^hsb-test:/u);
+            expect(readHostedSecureBoxTestValue(
+              storedRoute?.pendingGroupReactionContextEncrypted ?? "",
+            )).toContain(expectedContext);
+          }
         } finally {
-          releaseRouteMember.resolve();
-          releaseWebhookDemotion.resolve();
+          releaseMessage.resolve();
+          releaseParticipant.resolve();
           await Promise.allSettled([
-            ...(routeRefreshTransaction ? [routeRefreshTransaction] : []),
-            ...(webhookTransaction ? [webhookTransaction] : []),
+            ...(messageTransaction ? [messageTransaction] : []),
+            ...(participantWebhook ? [participantWebhook] : []),
           ]);
           if (fixture) {
+            if (participantEventLookupKey) {
+              await fixture.observer.hostedLinqProviderEvent.deleteMany({
+                where: { eventId: participantEventLookupKey },
+              });
+            }
             await cleanupRouteFixture(fixture);
           }
+          restoreEnvValue("LINQ_WEBHOOK_SECRET", previousWebhookSecret);
+          clearHostedOnboardingEnvCache();
         }
       },
     );

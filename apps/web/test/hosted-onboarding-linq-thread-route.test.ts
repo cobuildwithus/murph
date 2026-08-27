@@ -3682,7 +3682,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
-  it("locks a verified routed participant before route refresh and reuses that lock", async () => {
+  it("locks the routed group before its verified participant and reuses both locks", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
       routeParticipantActive: true,
@@ -3740,11 +3740,11 @@ describe("Linq explicit external-thread routing", () => {
     expect(memberLockCallIndex).toBeGreaterThanOrEqual(0);
     const memberLockCallOrder =
       prisma.$queryRaw.mock.invocationCallOrder[memberLockCallIndex];
-    const routeLockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[0];
+    const chatLockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[0];
     const demotionCallOrder = vi.mocked(
       memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
     ).mock.invocationCallOrder[0];
-    expect(memberLockCallOrder).toBeLessThan(routeLockCallOrder!);
+    expect(chatLockCallOrder).toBeLessThan(memberLockCallOrder);
     expect(memberLockCallOrder).toBeLessThan(demotionCallOrder!);
     expect(
       memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,

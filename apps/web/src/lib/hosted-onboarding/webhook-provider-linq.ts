@@ -3048,6 +3048,12 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
       retryable: true,
     });
   }
+  if (isHostedLinqGroupChat(messageEvent)) {
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: summary.chatId,
+      tx: input.prisma,
+    });
+  }
   const lockedInboundParticipant =
     await resolveAndLockHostedThreadContainerInboundParticipantTx({
       context: input.context,
