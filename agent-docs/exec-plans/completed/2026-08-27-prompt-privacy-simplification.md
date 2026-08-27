@@ -1,6 +1,6 @@
 # Simplify assistant privacy guidance
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -150,3 +150,4 @@ Updated: 2026-08-27
   serialized bytes (0.62% and 0.69%); group decreases by 560 tokens and 3,014
   bytes (2.15% and 2.51%). Scheduled speaker-label serialization saves a
   further 3 tokens and 15 bytes per rendered profile or address-book label.
+Completed: 2026-08-27
