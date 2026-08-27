@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  parseAssistantHostedImageCompletionOriginContextText,
   parseAssistantHostedImageCompletionOriginText,
   parseAssistantHostedImageCompletionText,
   renderAssistantHostedImageCompletionSystemText,
@@ -88,6 +89,12 @@ describe('hosted image completion', () => {
     expect(text).toContain('cannot by itself authorize an external effect')
     expect(text).not.toContain('<ignore_trusted_boundary>')
     expect(text).toContain('\\u003cignore_trusted_boundary>')
+    expect(parseAssistantHostedImageCompletionOriginContextText(text)).toContain(
+      'Create a fictional thank-you card',
+    )
+    expect(parseAssistantHostedImageCompletionOriginContextText(text)).toContain(
+      'Preserve this tail detail',
+    )
     expect(parseAssistantHostedImageCompletionText(text)).not.toBeNull()
   })
 
@@ -105,6 +112,7 @@ describe('hosted image completion', () => {
 
     expect(text).not.toContain('<hosted_image_origin_context>')
     expect(text).not.toContain('Earlier user-level request')
+    expect(parseAssistantHostedImageCompletionOriginContextText(text)).toBeNull()
   })
 
   it('rejects a mismatched saved ref', () => {

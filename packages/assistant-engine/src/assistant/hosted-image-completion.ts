@@ -194,6 +194,38 @@ export function parseAssistantHostedImageCompletionOriginText(
   return parseAssistantHostedImageCompletionEnvelope(text)?.origin ?? null
 }
 
+export function parseAssistantHostedImageCompletionOriginContextText(
+  text: string,
+): string | null {
+  const openIndex = text.indexOf(HOSTED_IMAGE_ORIGIN_CONTEXT_OPEN)
+  const closeIndex = text.indexOf(
+    HOSTED_IMAGE_ORIGIN_CONTEXT_CLOSE,
+    openIndex + HOSTED_IMAGE_ORIGIN_CONTEXT_OPEN.length,
+  )
+  if (
+    openIndex < 0 ||
+    closeIndex < 0 ||
+    text.indexOf(
+      HOSTED_IMAGE_ORIGIN_CONTEXT_OPEN,
+      openIndex + HOSTED_IMAGE_ORIGIN_CONTEXT_OPEN.length,
+    ) >= 0 ||
+    text.indexOf(
+      HOSTED_IMAGE_ORIGIN_CONTEXT_CLOSE,
+      closeIndex + HOSTED_IMAGE_ORIGIN_CONTEXT_CLOSE.length,
+    ) >= 0
+  ) {
+    return null
+  }
+
+  const context = text.slice(
+    openIndex + HOSTED_IMAGE_ORIGIN_CONTEXT_OPEN.length,
+    closeIndex,
+  ).trim()
+  return context && context.length <= HOSTED_IMAGE_ORIGIN_CONTEXT_MAX_LENGTH
+    ? context
+    : null
+}
+
 function parseAssistantHostedImageCompletionEnvelope(text: string): {
   origin: AssistantHostedImageCompletionOrigin
   value: Record<string, unknown>

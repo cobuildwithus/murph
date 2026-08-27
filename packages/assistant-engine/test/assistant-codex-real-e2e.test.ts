@@ -148,6 +148,7 @@ import {
 } from '../src/assistant/cron/runtime-state.ts'
 import {
   buildAssistantAutoReplyPrompt,
+  buildTrustedHostedImageCompletionTurnContext,
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
@@ -8926,7 +8927,6 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
         'The mailing destination is 42 Example Lane, Sampleton, GA 30303.',
         'Show me the finished artwork first. Do not mail it until I approve it.',
       ].join('\n\n')
-      const launchedOperationIds: string[] = []
       const sendRequests: unknown[] = []
 
       try {
@@ -8987,64 +8987,67 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
           status: 'denied' as const,
         })
 
-        const generation = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          excludeResumeTurns: true,
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentAssistantInputId: () => originInputId,
-            currentHostedDeliveryContext: () => null,
-            currentHostedMailboxItemIds: () => [],
-            currentUserActionScope: () => ({
-              acceptedInputIds: [originInputId],
-              conversationId: 'conversation-physical-note-continuity',
-              conversationScope: 'direct',
-              inboundMailboxItemIds: ['mailbox-physical-note-continuity'],
-              originSessionId: 'session-physical-note-continuity',
-              recipientKey: 'recipient-physical-note-continuity',
-            }),
-            imageGenerationLauncher: {
-              launch(input) {
-                launchedOperationIds.push(input.operationId)
-                return 'started' as const
-              },
+        const completionPromptInputs: AssistantAutoReplyPromptInput[] = [{
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [],
+            optionalInboxCaptureId: null,
+            reasonCode: null,
+            source: null,
+            status: 'not_attempted',
+            updatedAt: null,
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-physical-note-requester',
+            actorIsSelf: false,
+            source: 'linq',
+            threadId: 'synthetic-physical-note-continuity',
+            threadIsDirect: true,
+          },
+          inputId: completionInputId,
+          occurredAt: '2026-08-27T15:00:01.000Z',
+          projection: null,
+          receivedAt: '2026-08-27T15:00:01.000Z',
+          replyTarget: {
+            channel: 'linq',
+            messageId: 'synthetic-image-completion',
+            threadId: 'synthetic-physical-note-continuity',
+          },
+          source: 'linq',
+          sourceMetadata: null,
+          telegramMetadata: null,
+          text: null,
+          trustedHostedImageCompletion: {
+            originContextText: originRequest,
+            result: {
+              media: [media],
+              originAssistantInputId: originInputId,
+              originAssistantInputIdExact: true,
+              savedImageRef: media.ref,
+              status: 'ready',
             },
-            physicalNotes,
-            privateImageUrlPublisher,
-            sendVaultFile: unavailableVaultFileSend,
-            vaultFileSendAvailable: false,
           },
-          prompt: originRequest,
-        })
-        const generationActions = readCapabilityRoutingActions(
-          generation.jsonEvents,
+        }]
+        const completionPrompt = buildAssistantAutoReplyPrompt(
+          completionPromptInputs,
         )
-        expect(generationActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
-        )).toHaveLength(1)
-        expect(generationActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
-        )).toHaveLength(0)
-        expect(launchedOperationIds).toHaveLength(1)
-        expect(sendRequests).toHaveLength(0)
-        if (!generation.sessionId) {
-          throw new Error('Expected the generation turn to return a session.')
+        const completionTurnContext =
+          buildTrustedHostedImageCompletionTurnContext(completionPromptInputs)
+        if (completionPrompt.kind !== 'ready' || !completionTurnContext) {
+          throw new Error('Expected production completion provider input.')
         }
+        expect(completionPrompt.prompt).not.toContain('42 Example Lane')
+        expect(completionTurnContext).toContain('42 Example Lane')
 
-        const completionText = renderAssistantHostedImageCompletionSystemText({
-          originAssistantInputId: originInputId,
-          originAssistantInputIdExact: true,
-          originContextText: originRequest,
-          result: {
-            media,
-            runtimeIssue: null,
-            savedImageRef: media.ref,
-          },
-        })
         const completion = await executeRealCodexAppServerTurn({
           ...commonInput,
+          developerInstructions: [
+            commonInput.developerInstructions,
+            completionTurnContext,
+          ].join('\n\n'),
+          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -9059,8 +9062,7 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
             sendVaultFile: unavailableVaultFileSend,
             vaultFileSendAvailable: false,
           },
-          prompt: completionText,
-          resumeSessionId: generation.sessionId,
+          prompt: completionPrompt.prompt,
         })
         const completionActions = readCapabilityRoutingActions(
           completion.jsonEvents,
@@ -9156,6 +9158,13 @@ describeRealCodex('real Codex physical-note completion continuity e2e', () => {
         expect(approval.finalMessage).toMatch(/accepted|printing/iu)
         expect(approval.finalMessage).not.toMatch(
           /(?:address|city|state|zip).{0,80}\?/iu,
+        )
+        process.stdout.write(
+          `[physical-note-continuity-e2e] ${JSON.stringify({
+            approvalReply: approval.finalMessage.trim(),
+            completionReply: completion.finalMessage.trim(),
+            sendCount: sendRequests.length,
+          })}\n`,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

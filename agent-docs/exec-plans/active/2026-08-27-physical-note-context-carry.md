@@ -49,8 +49,9 @@ without depending exclusively on native provider-thread memory.
    text cannot authorize a new external effect.
 3. Add deterministic coverage for context presence, bounds, missing content,
    same-route batching, and current-input authority.
-4. Add one synthetic real-Codex journey covering request with destination,
-   trusted completion, and terse later approval with one physical-note send.
+4. Add one synthetic real-Codex journey that starts from production-built
+   trusted completion input with no origin provider history, then proves a
+   terse later approval performs one physical-note send.
 5. Update the hosted runtime contract and a privacy-safe changelog fragment.
 6. Run focused tests and typecheck, ReviewGPT gates, exact-head CI, merge proof,
    and deployment verification.
@@ -67,4 +68,24 @@ without depending exclusively on native provider-thread memory.
 
 ## Verification
 
-- Pending.
+- `pnpm --filter @murphai/assistant-engine exec vitest run --config
+  vitest.config.ts --no-coverage
+  test/assistant-automation-reply-event-path.test.ts
+  test/assistant-hosted-image-completion.test.ts
+  test/assistant-hosted-image-completion-authority.test.ts` — 117 passed.
+- `pnpm --filter @murphai/assistant-runtime exec vitest run --config
+  vitest.config.ts --isolate=true --no-coverage
+  test/hosted-runtime-image-generation.test.ts
+  test/hosted-runtime-turn-input.test.ts` — 41 passed.
+- Assistant Engine and Assistant Runtime typechecks passed.
+- `pnpm test:assistant:live -- --test "keeps the originating destination
+  through completion and a terse approval"` — passed with `gpt-5.6-terra`
+  through local subscription auth. The isolated completion attached the exact
+  synthetic image once, the later approval sent once using the carried
+  synthetic destination, and neither turn asked for destination fields. Reply
+  review: Ready.
+- ReviewGPT round 1 found that the initial candidate stored but discarded the
+  origin excerpt at the production prompt boundary. The accepted correction
+  extends the existing trusted in-memory projection, keeps result authority
+  separate from historical context, and leaves late completions queued for
+  normal trusted turn-context admission. Final remediation review is pending.

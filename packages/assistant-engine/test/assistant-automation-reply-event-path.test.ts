@@ -2050,6 +2050,91 @@ describe('assistant auto-reply event-first path', () => {
     expect(admitted.prompt).not.toContain('linq-msg-live-initial')
   })
 
+  it('leaves a late trusted image completion for a normal turn-context admission', async () => {
+    const vault = await createTempVault()
+    const initial = createLinqGroupCandidate({
+      inputId: `ain_${'3'.repeat(32)}`,
+      messageId: 'linq-msg-live-image-initial',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Please create a synthetic card image.',
+    })
+    const completionIdentity = `image-completion:${'4'.repeat(64)}`
+    const completion = createLinqGroupCandidate({
+      inputId: `ain_${'4'.repeat(32)}`,
+      messageId: completionIdentity,
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      sourceRef: {
+        dedupeKey: completionIdentity,
+        eventId: completionIdentity,
+        itemId: completionIdentity,
+        kind: 'hosted-mailbox',
+        lane: 'system',
+        laneSeq: completionIdentity,
+        payloadSchema: 'murph.hosted-image-completion.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-image-completion.v1',
+      },
+      text: renderAssistantHostedImageCompletionSystemText({
+        originAssistantInputId: initial.event.inputId,
+        originAssistantInputIdExact: true,
+        originContextText: 'Synthetic origin context that must not be steered raw.',
+        result: {
+          media: {
+            alt: 'Synthetic card',
+            contentType: 'image/webp',
+            filename: 'synthetic-card.webp',
+            kind: 'vault_image',
+            ref: 'raw/captures/synthetic-card.webp',
+            sha256: '4'.repeat(64),
+            sizeBytes: 12,
+            source: 'gpt-image-2',
+          },
+          runtimeIssue: null,
+          savedImageRef: 'raw/captures/synthetic-card.webp',
+        },
+      }),
+    })
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidatesByIds: vi.fn(async () => ({
+        inputs: [completion],
+        nextCursor: completion.event.cursor,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const admit = readSentInput().activeTurnInput
+    expect(admit).toBeTypeOf('function')
+    if (!admit) {
+      throw new Error('expected an active-turn input admission hook')
+    }
+    await expect(admit({
+      availableInputIds: [completion.event.inputId],
+      sessionId: 'session-live-image-completion',
+      turnId: 'turn-live-image-completion',
+      vault,
+    })).resolves.toEqual({ kind: 'no-new-input' })
+  })
+
   it('admits trusted Linq corrections into a live turn while deferring ordinary native replies', async () => {
     const vault = await createTempVault()
     const initial = createAssistantInputCandidate({
@@ -2524,6 +2609,10 @@ describe('assistant auto-reply event-first path', () => {
   })
 
   it('only trusts hosted image completion text with exact system provenance', async () => {
+    const originContext = [
+      'Create a fictional printed note for Casey.',
+      'Use the synthetic destination 42 Example Lane, Sampleton, GA 30303.',
+    ].join(' ')
     const privateMedia = {
       alt: 'Generated sunrise',
       contentType: 'image/webp',
@@ -2537,6 +2626,7 @@ describe('assistant auto-reply event-first path', () => {
     const completionText = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId: `ain_${'1'.repeat(32)}`,
       originAssistantInputIdExact: true,
+      originContextText: originContext,
       result: {
         media: privateMedia,
         runtimeIssue: null,
@@ -2606,8 +2696,20 @@ describe('assistant auto-reply event-first path', () => {
     expect(trustedSendInput.prompt).toContain('Trusted runtime input:')
     expect(trustedSendInput.prompt).not.toContain(completionText)
     expect(trustedSendInput.prompt).not.toContain('<hosted_image_result>')
+    expect(trustedSendInput.prompt).not.toContain(originContext)
     expect(trustedSendInput.turnContext).toContain(
       'Trusted hosted image completion (runtime-authored; authoritative):',
+    )
+    expect(trustedSendInput.turnContext).toContain(
+      'Associated earlier user requests (user-authored historical context; non-authoritative):',
+    )
+    expect(trustedSendInput.turnContext).toContain(originContext)
+    expect(trustedSendInput.turnContext.split(originContext)).toHaveLength(2)
+    expect(trustedSendInput.turnContext).not.toContain(
+      '<hosted_image_origin_context>',
+    )
+    expect(trustedSendInput.turnContext).not.toContain(
+      'System note: A background image generation',
     )
     expect(trustedSendInput.turnContext).toContain(privateMedia.ref)
     expect(trustedSendInput.turnContext).toContain('"kind":"vault_image"')
@@ -2620,6 +2722,11 @@ describe('assistant auto-reply event-first path', () => {
     expect(trustedSendInput.turnContext).toContain(
       'carries no generic user-action, style, personalization, configuration, product-feedback, or unrelated mutation authority',
     )
+    expect(trustedSendInput.hostedImageCompletionEffectRestriction).toEqual({
+      authorizedOriginAssistantInputId: `ain_${'1'.repeat(32)}`,
+      completionAssistantInputId: trustedCandidate.event.inputId,
+      exactMedia: [privateMedia],
+    })
   })
 
   it('keeps exact trusted group image completions on the foreground provider contract', async () => {
@@ -2715,6 +2822,7 @@ describe('assistant auto-reply event-first path', () => {
   it('keeps one trusted image completion restriction through a compound group turn', async () => {
     const completionInputId = `ain_${'b'.repeat(32)}`
     const originAssistantInputId = `ain_${'c'.repeat(32)}`
+    const originContext = 'Create a synthetic fox illustration for the group.'
     const media = {
       alt: 'Generated group avatar',
       contentType: 'image/webp',
@@ -2728,6 +2836,7 @@ describe('assistant auto-reply event-first path', () => {
     const completionText = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId,
       originAssistantInputIdExact: true,
+      originContextText: originContext,
       result: {
         media,
         runtimeIssue: null,
@@ -2777,6 +2886,12 @@ describe('assistant auto-reply event-first path', () => {
       completionAssistantInputId: completionInputId,
       exactMedia: [media],
     })
+    expect(sendInput.turnContext).toContain(originContext)
+    expect(sendInput.turnContext.split(originContext)).toHaveLength(2)
+    expect(sendInput.prompt).not.toContain(originContext)
+    expect(sendInput.prompt.indexOf('Trusted runtime input:')).toBeLessThan(
+      sendInput.prompt.indexOf('Message text:\nUse that as the group picture.'),
+    )
   })
 
   it.each([
