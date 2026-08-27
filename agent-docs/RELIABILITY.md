@@ -855,10 +855,11 @@ Last verified: 2026-08-23
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
   the marker must skip send and finish remaining work. When the same attempt
-  committed activation mailbox items, notification failure best-effort signals
-  those exact durable pointers through the existing activation-wake owner
-  before returning the receipt to its retry lane. Zero-dollar invoices and
-  no-charge plan changes complete without notification.
+  committed activation mailbox items, the unsent notification stage first
+  best-effort signals those exact durable pointers through the existing
+  activation-wake owner. Provider failure and sent-marker persistence failure
+  therefore return only the notification receipt to its retry lane. Zero-dollar
+  invoices and no-charge plan changes complete without notification.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.

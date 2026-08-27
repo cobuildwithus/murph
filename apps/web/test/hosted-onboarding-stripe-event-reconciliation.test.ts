@@ -687,6 +687,20 @@ describe("hosted Stripe event reconciliation", () => {
     const event = makeInvoicePaidEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid
+      .mockResolvedValueOnce({
+        activatedMemberId: "member_123",
+        hostedExecutionEventId: "dispatch_123",
+        hostedExecutionMailboxItemId: "mailbox_dispatch_123",
+        newlyActivatedMemberIds: ["member_123"],
+        welcomeEmailMemberId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        activatedMemberId: null,
+        hostedExecutionEventId: null,
+        newlyActivatedMemberIds: [],
+        welcomeEmailMemberId: null,
+      });
     mocks.sendHostedStripePaymentNotificationEmail
       .mockRejectedValueOnce(new Error("resend unavailable"))
       .mockResolvedValueOnce("sent");
@@ -716,10 +730,10 @@ describe("hosted Stripe event reconciliation", () => {
       source: "stripe.webhook.activation",
     });
     expect(
-      mocks.sendHostedStripePaymentNotificationEmail.mock.invocationCallOrder[0],
-    ).toBeLessThan(
       mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
         .mock.invocationCallOrder[0] ?? 0,
+    ).toBeLessThan(
+      mocks.sendHostedStripePaymentNotificationEmail.mock.invocationCallOrder[0],
     );
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
@@ -734,6 +748,103 @@ describe("hosted Stripe event reconciliation", () => {
     ).toHaveBeenCalledOnce();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 7,
+      paymentNotificationEmailSentAt: expect.any(Date),
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("wakes activation before a payment email sent-marker write can fail", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid
+      .mockResolvedValueOnce({
+        activatedMemberId: "member_123",
+        hostedExecutionEventId: "dispatch_123",
+        hostedExecutionMailboxItemId: "mailbox_dispatch_123",
+        newlyActivatedMemberIds: ["member_123"],
+        welcomeEmailMemberId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        activatedMemberId: null,
+        hostedExecutionEventId: null,
+        newlyActivatedMemberIds: [],
+        welcomeEmailMemberId: null,
+      });
+    mocks.sendHostedStripePaymentNotificationEmail.mockResolvedValue("sent");
+
+    let failedMarkerWrite = false;
+    const defaultUpdateMany = vi.mocked(prisma.client.hostedStripeEvent.updateMany)
+      .getMockImplementation();
+    vi.mocked(prisma.client.hostedStripeEvent.updateMany).mockImplementation(async (input) => {
+      if (
+        !failedMarkerWrite &&
+        input.data.paymentNotificationEmailSentAt instanceof Date
+      ) {
+        failedMarkerWrite = true;
+        throw new Error("payment notification marker unavailable");
+      }
+      if (!defaultUpdateMany) {
+        throw new Error("missing default hostedStripeEvent.updateMany mock");
+      }
+      return defaultUpdateMany(input);
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledOnce();
+    expect(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    ).toHaveBeenCalledWith({
+      hostedExecutionEventId: "dispatch_123",
+      mailboxItemId: "mailbox_dispatch_123",
+      memberId: "member_123",
+      prisma: prisma.client,
+      source: "stripe.webhook.activation",
+    });
+    const markerWriteCallIndex = vi.mocked(
+      prisma.client.hostedStripeEvent.updateMany,
+    ).mock.calls.findIndex(
+      ([input]) => input.data.paymentNotificationEmailSentAt instanceof Date,
+    );
+    expect(markerWriteCallIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+        .mock.invocationCallOrder[0] ?? 0,
+    ).toBeLessThan(
+      mocks.sendHostedStripePaymentNotificationEmail.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.sendHostedStripePaymentNotificationEmail.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prisma.client.hostedStripeEvent.updateMany)
+        .mock.invocationCallOrder[markerWriteCallIndex] ?? 0,
+    );
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      claimExpiresAt: null,
+      paymentNotificationEmailSentAt: null,
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    ).toHaveBeenCalledOnce();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
       paymentNotificationEmailSentAt: expect.any(Date),
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,

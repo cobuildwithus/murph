@@ -1085,6 +1085,10 @@ async function processClaimedHostedStripeEvent(
       paymentNotificationCandidate &&
       !claimed.paymentNotificationEmailSentAt
     ) {
+      await signalHostedStripeActivationRuntimeWakeBeforePaymentNotification({
+        prisma,
+        result,
+      });
       let paymentNotificationOutcome;
       try {
         paymentNotificationOutcome =
@@ -1092,10 +1096,6 @@ async function processClaimedHostedStripeEvent(
             candidate: paymentNotificationCandidate,
           });
       } catch (error) {
-        await signalHostedStripeActivationRuntimeWakeAfterPaymentNotificationFailure({
-          prisma,
-          result,
-        });
         throw new HostedStripePaymentNotificationPendingError(error);
       }
       if (paymentNotificationOutcome === "sent") {
@@ -1932,7 +1932,7 @@ function buildHostedStripeActivationResultJson(result: {
   };
 }
 
-async function signalHostedStripeActivationRuntimeWakeAfterPaymentNotificationFailure(
+async function signalHostedStripeActivationRuntimeWakeBeforePaymentNotification(
   input: {
     prisma: PrismaClient;
     result: {

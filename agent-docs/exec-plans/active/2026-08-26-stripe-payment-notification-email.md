@@ -118,9 +118,13 @@ and no visual surface or screenshot proof applies.
   11,199 tests across 801 files, lint with zero errors, dev smoke, and the
   production build.
 - [x] Resolve the final ReviewGPT activation finding at the existing wake
-  boundary: operator-email failure now signals every exact activation mailbox
-  target before leaving the receipt failed and claimable. Focused proof covers
-  the failure, retry, and no-duplicate-activation path. The separate preliminary
+  boundary: the unsent notification stage now signals every exact activation
+  mailbox target before provider delivery or sent-marker persistence. Focused
+  proof covers both failures, retry, and the no-duplicate-activation path.
+  ReviewGPT round 2 correctly required a retrospective after the first tactical
+  placement covered provider failure but not marker-write failure; the recorded
+  decision moved the handoff to the whole stage boundary without adding state,
+  a queue, or another owner. The separate preliminary
   suggestion to suppress later-refunded positive invoice events is intentionally
   out of scope after the operator clarified that every observed positive payment
   event should notify.

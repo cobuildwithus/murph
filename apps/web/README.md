@@ -1374,11 +1374,12 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   Node conditions.
   Positive invoice and fulfilled usage-credit events send one privacy-safe
   operator email from the existing receipt after canonical reconciliation.
-  Provider or configuration failure leaves delivery pending on that receipt;
-  any activation mailbox items already committed by the same attempt are still
-  handed to the existing runtime-wake owner, so email delivery cannot delay
-  member activation. The receipt-local sent marker plus provider idempotency
-  prevents a later replay from sending twice. Deploy the additive
+  Before entering an unsent notification stage, any activation mailbox items
+  already committed by that attempt are handed to the existing runtime-wake
+  owner. Provider, configuration, or sent-marker persistence failure can leave
+  delivery pending on the receipt without delaying member activation. The
+  receipt-local sent marker plus provider idempotency prevents a later replay
+  from sending twice. Deploy the additive
   `payment_notification_email_sent_at` column before or with the Web build.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
