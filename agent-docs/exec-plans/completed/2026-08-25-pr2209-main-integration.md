@@ -1,8 +1,8 @@
 # PR 2209 current-main integration
 
-Status: active
+Status: completed
 Created: 2026-08-25
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -118,6 +118,13 @@ generic projector, validation framework, or recovery state owner.
   build that owns `MurphAgeLocalModelCardArtifactWarning`. No Murph Age source
   or compatibility workaround changed. This base-only update does not require
   another ReviewGPT round; required CI on the merged head owns broad proof.
+- Required CI is green on merged candidate
+  `1da7be341bbae52188f0e56577f626d5b89ddca8`: both CLI host-matrix jobs,
+  the hosted Stripe boundary, and exact-SHA Temporal reader compatibility pass.
+- A fresh non-mutating current-base merge check succeeds and produces tree
+  `522c9d6136830f7c556467c2378e277a29ed7b1c`. The PR body names the exact
+  candidate and records the round-seven PASS, base-only resolution, and
+  current-base line accounting.
 
 ## Round-four retrospective
 
@@ -166,8 +173,10 @@ generic projector, validation framework, or recovery state owner.
    authored plans, generated health contracts, and measured bundle allowance.
 3. [done] Run focused health tests, affected typechecks, generated-contract checks,
    prepared/package-shape checks, docs gates, and canonical runner parity proof.
-4. Push the exact candidate, retarget the PR to `main`, update the PR contract,
-   and run a sensitive full ReviewGPT round with the prior finding ledger.
-   [done through the next full-snapshot finding and local correction]
-5. Resolve accepted findings, close the plan, admit the exact head to required
-   CI, prove a clean current-base merge, merge, and retire the worktree.
+4. [done] Push the exact candidate, retarget the PR to `main`, update the PR
+   contract, and run a sensitive full ReviewGPT round with the prior finding
+   ledger.
+5. [done] Resolve accepted findings, admit the exact head to required CI, and
+   prove a clean current-base merge. Merge and guarded worktree retirement
+   follow this plan archive at the authorized merge boundary.
+Completed: 2026-08-27
