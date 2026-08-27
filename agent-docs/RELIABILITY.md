@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-23
+Last verified: 2026-08-26
 
 ## Current Guardrails
 
@@ -2277,7 +2277,10 @@ Last verified: 2026-08-23
   Provider, assistant, and ordinary runtime multi-row writers use the same
   trace-id lock order. This common order prevents cross-writer row-lock cycles,
   while the fresh checkpoint snapshot prevents an older waiting lease from
-  overwriting a newer one, without a broad transaction retry.
+  overwriting a newer one, without a broad transaction retry. Provider-start
+  and assistant-milestone writers additionally skip contended rows and report
+  them unmatched so their existing bounded 250 ms / 1 s caller retries own
+  recovery; writers without that retry contract keep ordinary ordered locking.
   Persistence failures emit only event type, source, input cardinality, query
   tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
   stay out of failure logs. The bounded transaction-local trace-id list passes
