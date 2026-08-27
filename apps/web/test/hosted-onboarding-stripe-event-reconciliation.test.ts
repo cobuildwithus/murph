@@ -1276,6 +1276,86 @@ describe("hosted Stripe event reconciliation", () => {
     }
   });
 
+  it("starts usage runtime recovery without waiting for payment email", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makePaidUsageCreditCheckoutCompletedEvent();
+    const paymentNotification = makeDeferred<"sent">();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+    mocks.sendHostedStripePaymentNotificationEmail.mockReturnValueOnce(
+      paymentNotification.promise,
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    const reconciliation = reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        mocks.sendHostedStripePaymentNotificationEmail,
+      ).toHaveBeenCalledOnce();
+    });
+    try {
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    } finally {
+      paymentNotification.resolve("sent");
+      await expect(reconciliation).resolves.toMatchObject({
+        status: "completed",
+      });
+    }
+  });
+
+  it("starts payment email without waiting for usage runtime recovery", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makePaidUsageCreditCheckoutCompletedEvent();
+    const runtimeRecheck = makeDeferred<{
+      signalAccepted: boolean;
+      workflowId: string;
+    }>();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockReturnValueOnce(
+      runtimeRecheck.promise,
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    const reconciliation = reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    });
+    try {
+      expect(
+        mocks.sendHostedStripePaymentNotificationEmail,
+      ).toHaveBeenCalledOnce();
+    } finally {
+      runtimeRecheck.resolve({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_123",
+      });
+      await expect(reconciliation).resolves.toMatchObject({
+        status: "completed",
+      });
+    }
+  });
+
   it("materializes a replayed direct PaymentIntent success through the same owner", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = {

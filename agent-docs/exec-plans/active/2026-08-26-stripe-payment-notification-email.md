@@ -57,8 +57,10 @@ Effort: Feature.
   completion failure still retries the exact target through the existing
   activation-wake owner. The notification and existing post-canonical effects
   are independent attempts within the same receipt: neither failure suppresses
-  the other; an unmarked notification keeps the receipt retryable, and after it
-  is marked the other effect retains its existing retry and poison behavior.
+  the other, and both start before either is awaited so provider latency cannot
+  delay member recovery; an unmarked notification keeps the receipt retryable,
+  and after it is marked the other effect retains its existing retry and poison
+  behavior.
 - Proof: provider-shaped positive invoice, usage Checkout, asynchronous Checkout,
   and saved-card events reach one email; zero-dollar and unrelated events do not;
   send failure retries; marked success does not resend after finalization loss.
@@ -97,8 +99,9 @@ receipts are not replayed or backfilled.
 - Usage recovery: a fulfilled synchronous or asynchronous Checkout, or the
   exact saved-card PaymentIntent owner, sends one `usage credit` email after the
   canonical grant. Runtime recheck and sponsorship work remain independent
-  receipt obligations, so a failure on either side cannot suppress attempting
-  the other.
+  receipt obligations. Both attempts start immediately after activation
+  handoff, so a slow notification provider cannot delay reopening the member's
+  pending accepted work and a slow runtime recheck cannot delay the email.
 - Replay and recovery: provider failure keeps delivery pending on the existing
   receipt; provider success followed by receipt-finalization loss does not
   resend because the local marker and provider idempotency converge. A first
@@ -108,6 +111,13 @@ receipts are not replayed or backfilled.
 - Privacy and absence: email includes only payment metadata and an opaque event
   reference. Zero-dollar invoices, unpaid Checkout, unrelated PaymentIntents,
   and no-charge scheduled downgrades remain silent.
+
+Corrected-head Product UX revalidation: Ready. The irreducible purpose is prompt
+operator visibility without making a paying member wait on operator-email
+infrastructure. The smallest complete experience starts notification and the
+existing member-recovery chain independently after canonical payment and
+activation handoff, then preserves the receipt's existing retry outcome. The
+two unresolved-promise tests directly prove both start-time directions.
 
 The walkthrough is Ready: the plain-text output is directly asserted in unit
 tests, the receipt ordering and retries are asserted in reconciliation tests,
@@ -151,5 +161,12 @@ and no visual surface or screenshot proof applies.
   existing effect, remains notification-retryable until marked, then resumes
   the effect's original completion or poison policy without duplicating a
   refund.
+- [x] Resolve ReviewGPT round 5's latency-ordering finding by replacing the two
+  serial error-capture blocks with two local promises joined once through
+  `Promise.allSettled`. A deliberately unresolved payment-email promise proves
+  the usage runtime recheck starts immediately, and an unresolved runtime
+  recheck proves the payment email starts immediately. Peak concurrency remains
+  one notification request plus the existing single post-canonical effect
+  chain; no state, queue, lifecycle, or owner was added.
 - [ ] Push the exact candidate, run CI and ReviewGPT, resolve findings, and
   close the plan.

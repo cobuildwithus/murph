@@ -1075,19 +1075,17 @@ async function processClaimedHostedStripeEvent(
         usageCreditEventHandled: usageCreditReconciliation.handled,
       });
     let paymentNotificationSent = false;
-    let paymentNotificationFailure:
-      HostedStripePaymentNotificationPendingError | null = null;
     if (paymentNotificationCandidate) {
       await signalHostedStripeActivationRuntimeWakeBeforePaymentNotification({
         prisma,
         result,
       });
     }
-    if (
-      paymentNotificationCandidate &&
-      !claimed.paymentNotificationEmailSentAt
-    ) {
-      try {
+    const paymentNotificationAttempt = (async () => {
+      if (
+        paymentNotificationCandidate &&
+        !claimed.paymentNotificationEmailSentAt
+      ) {
         const paymentNotificationOutcome =
           await sendHostedStripePaymentNotificationEmail({
             candidate: paymentNotificationCandidate,
@@ -1100,14 +1098,10 @@ async function processClaimedHostedStripeEvent(
           });
           paymentNotificationSent = true;
         }
-      } catch (error) {
-        paymentNotificationFailure =
-          new HostedStripePaymentNotificationPendingError(error);
       }
-    }
+    })();
 
-    let postCanonicalFailure: { error: unknown } | null = null;
-    try {
+    const postCanonicalAttempt = (async () => {
       if (result.newlyActivatedMemberIds.length > 0) {
         scheduleHostedSignupNotificationEmails({
           memberIds: result.newlyActivatedMemberIds,
@@ -1240,14 +1234,19 @@ async function processClaimedHostedStripeEvent(
           }
         }
       }
-    } catch (error) {
-      postCanonicalFailure = { error };
+    })();
+    const [paymentNotificationResult, postCanonicalResult] =
+      await Promise.allSettled([
+        paymentNotificationAttempt,
+        postCanonicalAttempt,
+      ]);
+    if (paymentNotificationResult.status === "rejected") {
+      throw new HostedStripePaymentNotificationPendingError(
+        paymentNotificationResult.reason,
+      );
     }
-    if (paymentNotificationFailure) {
-      throw paymentNotificationFailure;
-    }
-    if (postCanonicalFailure) {
-      throw postCanonicalFailure.error;
+    if (postCanonicalResult.status === "rejected") {
+      throw postCanonicalResult.reason;
     }
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {

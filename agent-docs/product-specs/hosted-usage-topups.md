@@ -60,7 +60,9 @@ billing authority. Delivery retries on the receipt independently of the
 already-committed purchase and grant, with a receipt-local sent marker and
 provider idempotency preventing duplicate email. Payment notification and the
 existing runtime-recheck and sponsorship effects are each attempted even when
-the other fails; an unmarked notification keeps the receipt retryable.
+the other fails. Both attempts start before either is awaited, so operator-email
+latency cannot delay the runtime recheck that reopens pending accepted work; an
+unmarked notification keeps the receipt retryable.
 
 An active Family owner may fund one exact active member through Family
 Settings. The owner is the payer, the selected member is the beneficiary, and

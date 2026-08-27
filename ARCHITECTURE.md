@@ -2319,10 +2319,13 @@ already-committed billing, entitlement, and usage-credit result remains intact.
 The notification and the receipt's existing post-canonical effects are separate
 attempts inside that one owner: failure of runtime recheck, sponsorship,
 cleanup, or member email work cannot suppress the payment email attempt, and
-payment-email failure cannot suppress those effects. If both fail while the
-sent marker is absent, notification delivery keeps the receipt retryable; after
-the marker exists, the other effect retains its existing retry and poison
-policy.
+payment-email failure cannot suppress those effects. Both attempts start before
+either is awaited, so Resend latency cannot delay paid usage recovery and a
+stalled post-canonical effect cannot delay the operator notification. Peak new
+concurrency is bounded to one payment-email request plus the existing single
+post-canonical effect chain. If both fail while the sent marker is absent,
+notification delivery keeps the receipt retryable; after the marker exists,
+the other effect retains its existing retry and poison policy.
 
 If reconciliation also commits one or more activation mailbox items, it stores
 their exact pointers on the same receipt in the activation transaction. Every
