@@ -1,6 +1,7 @@
 ---
 title: 'Live assistant journey hides reply behind state assertions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2391'
 ---
 
 ## Expected Behavior

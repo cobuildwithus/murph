@@ -1,6 +1,7 @@
 ---
 title: 'Prisma format rewrites the full hosted schema and breaks format guards'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2377'
 ---
 
 ## Expected Behavior

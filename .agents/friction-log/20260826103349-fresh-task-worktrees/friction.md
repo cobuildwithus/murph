@@ -1,6 +1,7 @@
 ---
 title: 'Fresh task worktrees cannot open execution plans before full dependency linking'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2389'
 ---
 
 ## Expected Behavior

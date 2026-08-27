@@ -1,6 +1,7 @@
 ---
 title: 'Assistant review package omits required verification skill'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2390'
 ---
 
 ## Expected Behavior
