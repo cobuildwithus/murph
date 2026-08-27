@@ -1562,6 +1562,9 @@ describe("Kernel managed-login handoffs", () => {
     expect(serialized).not.toContain("private-capability");
     expect(serialized).not.toContain("private provider failure");
     expect(serialized).not.toContain("handoff-token");
+    expect(kernel.deleteBrowserByIdOrName).toHaveBeenCalledWith(
+      "kernel-session-2",
+    );
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
     expect(store.reclaimHandoffForCompletion).not.toHaveBeenCalled();
     expect(store.markHandoffExpired).not.toHaveBeenCalled();

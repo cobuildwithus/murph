@@ -9,10 +9,6 @@ const MAX_TOOL_CALL_REPAIR_HINTS = 4
 const MAX_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 1_600
 const MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 60_000
 
-export interface ToolCallValidationFeedbackOptions {
-  error: string
-}
-
 interface ToolCallRepairHint {
   code: string
   expected?: string
@@ -26,9 +22,9 @@ interface ToolCallRepairHint {
  */
 export function buildToolCallValidationFeedback(
   digest: SafeToolCallValidationDigest,
-  options: ToolCallValidationFeedbackOptions,
+  errorCode: string,
 ): string {
-  const error = normalizeFeedbackToken(options.error, 96)
+  const error = normalizeFeedbackToken(errorCode, 96)
     ?? 'invalid_tool_arguments'
   const modelValidationIssues = readModelToolCallValidationIssues(digest)
   if (modelValidationIssues) {
@@ -65,7 +61,9 @@ export function buildToolCallValidationFeedback(
     `${hint.field}:${hint.code}:${hint.expected ?? ''}`,
     hint,
   ])).values()].slice(0, MAX_TOOL_CALL_REPAIR_HINTS)
-  const genericFeedback = JSON.stringify({ error })
+  const genericFeedback = JSON.stringify({
+    error,
+  })
   if (uniqueHints.length === 0) {
     return genericFeedback
   }
