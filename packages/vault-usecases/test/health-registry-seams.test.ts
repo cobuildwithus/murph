@@ -238,6 +238,142 @@ describe("health registry family seams", () => {
     }
   });
 
+  it("preserves producer-owned nested validation paths without echoing strict-object keys", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-vault-usecases-health-validation-"));
+    let runtimeLoads = 0;
+    const services = createExplicitHealthCoreServices(async () => {
+      runtimeLoads += 1;
+      throw new Error("Validation must finish before loading the write runtime.");
+    });
+    const privateRootKey = "privateRootUnknownKeySentinel";
+    const privateNestedKey = "privateNestedUnknownKeySentinel";
+
+    try {
+      const cases = [
+        {
+          fileName: "blood-test.json",
+          payload: {
+            occurredAt: "2026-03-12T12:00:00.000Z",
+            title: "Synthetic panel",
+            testName: "Synthetic panel",
+            results: [{
+              analyte: "Synthetic analyte",
+              slug: "private-result-slug-sentinel".repeat(8),
+              value: 1,
+            }],
+          },
+          privateTokens: ["private-result-slug-sentinel"],
+          publicPath: ["results", 0, "slug"],
+          run(input: string) {
+            return services.upsertBloodTest({ input, requestId: null, vault: vaultRoot });
+          },
+        },
+        {
+          fileName: "condition.json",
+          payload: {
+            title: "Synthetic condition",
+            links: [{
+              type: "related_goal",
+              targetId: "private-invalid-target-id-sentinel",
+            }],
+          },
+          privateTokens: ["private-invalid-target-id-sentinel"],
+          publicPath: ["links", 0, "targetId"],
+          run(input: string) {
+            return services.upsertCondition({ input, requestId: null, vault: vaultRoot });
+          },
+        },
+        {
+          fileName: "immunization-evidence.json",
+          payload: {
+            occurredAt: "2026-03-12T12:00:00.000Z",
+            title: "Synthetic vaccine",
+            vaccineName: "Synthetic vaccine",
+            evidence: [{
+              sourceDocumentId: "private-invalid-document-id-sentinel",
+            }],
+          },
+          privateTokens: ["private-invalid-document-id-sentinel"],
+          publicPath: ["evidence", 0, "sourceDocumentId"],
+          run(input: string) {
+            return services.upsertImmunization({ input, requestId: null, vault: vaultRoot });
+          },
+        },
+        {
+          fileName: "family-history.json",
+          payload: {
+            title: "Synthetic family history",
+            relationship: "parent",
+            conditionHistory: [{
+              condition: "Synthetic condition",
+              onsetText: "private-onset-text-sentinel".repeat(8),
+            }],
+          },
+          privateTokens: ["private-onset-text-sentinel"],
+          publicPath: ["conditionHistory", 0, "onsetText"],
+          run(input: string) {
+            return services.upsertFamilyMember({ input, requestId: null, vault: vaultRoot });
+          },
+        },
+        {
+          fileName: "immunization-root-unknown.json",
+          payload: {
+            occurredAt: "2026-03-12T12:00:00.000Z",
+            title: "Synthetic vaccine",
+            vaccineName: "Synthetic vaccine",
+            [privateRootKey]: "private-root-unknown-value-sentinel",
+          },
+          privateTokens: [privateRootKey, "private-root-unknown-value-sentinel"],
+          publicPath: [],
+          run(input: string) {
+            return services.upsertImmunization({ input, requestId: null, vault: vaultRoot });
+          },
+        },
+        {
+          fileName: "family-history-nested-unknown.json",
+          payload: {
+            title: "Synthetic family history",
+            relationship: "parent",
+            conditionHistory: [{
+              condition: "Synthetic condition",
+              [privateNestedKey]: "private-nested-unknown-value-sentinel",
+            }],
+          },
+          privateTokens: [privateNestedKey, "private-nested-unknown-value-sentinel"],
+          publicPath: ["conditionHistory", 0],
+          run(input: string) {
+            return services.upsertFamilyMember({ input, requestId: null, vault: vaultRoot });
+          },
+        },
+      ];
+
+      for (const entry of cases) {
+        const payloadPath = path.join(vaultRoot, entry.fileName);
+        await writeFile(payloadPath, JSON.stringify(entry.payload), "utf8");
+        const error = await entry.run(payloadPath).catch((cause: unknown) => cause);
+
+        expect(error).toBeInstanceOf(VaultCliError);
+        expect(error).toMatchObject({
+          code: "invalid_payload",
+          context: {
+            issues: expect.arrayContaining([
+              expect.objectContaining({ publicPath: entry.publicPath }),
+            ]),
+            stage: "validation",
+          },
+        });
+        const serialized = JSON.stringify(error);
+        for (const privateToken of entry.privateTokens) {
+          expect(serialized).not.toContain(privateToken);
+        }
+      }
+
+      expect(runtimeLoads).toBe(0);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps submitted protocol validation field-correctable", async () => {
     const coreServices = createExplicitHealthCoreServices(async () => ({
       core: {

@@ -910,9 +910,9 @@ test('built validation owners project safe field repair details', async () => {
         ],
         errorCode: 'invalid_option',
         fieldMessage: 'This field is invalid.',
-        issueCode: 'invalid_union',
+        issueCode: 'invalid_type',
         message: 'Invalid --result blood-test analyte payload.',
-        path: 'result.0',
+        path: 'result.0.analyte',
         privateText: 'Ferritin private marker',
       },
     ] as const
