@@ -442,22 +442,8 @@ export async function recordHostedIngressProviderStarted(input: {
        AND trace.user_id = input.user_id
        AND trace.source = input.source
     ),
-    eligible AS (
-      SELECT DISTINCT requested.assistant_input_id
-      FROM requested
-      CROSS JOIN input
-      JOIN hosted_ingress_latency_trace AS trace
-        ON trace.assistant_input_id = requested.assistant_input_id
-       AND trace.user_id = input.user_id
-       AND trace.source = input.source
-       AND (
-         trace.runtime_attempt_id IS NULL
-         OR input.runtime_attempt_id IS NULL
-         OR trace.runtime_attempt_id = input.runtime_attempt_id
-       )
-    ),
     locked AS MATERIALIZED (
-      SELECT trace.id
+      SELECT requested.assistant_input_id, trace.id
       FROM requested
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
@@ -470,7 +456,7 @@ export async function recordHostedIngressProviderStarted(input: {
          OR trace.runtime_attempt_id = input.runtime_attempt_id
        )
       ORDER BY trace.id
-      FOR UPDATE OF trace
+      FOR UPDATE OF trace SKIP LOCKED
     ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
@@ -515,8 +501,8 @@ export async function recordHostedIngressProviderStarted(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
-        FROM eligible
-        WHERE eligible.assistant_input_id = requested.assistant_input_id
+        FROM locked
+        WHERE locked.assistant_input_id = requested.assistant_input_id
       ) AS matched
     FROM requested
   `);
@@ -609,21 +595,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
        AND trace.user_id = input.user_id
        AND trace.source = input.source
     ),
-    eligible AS (
-      SELECT DISTINCT requested.assistant_input_id
-      FROM requested
-      CROSS JOIN input
-      JOIN hosted_ingress_latency_trace AS trace
-        ON trace.assistant_input_id = requested.assistant_input_id
-       AND trace.user_id = input.user_id
-       AND trace.source = input.source
-       AND (
-         input.terminal_non_reply_projection
-         OR trace.runtime_attempt_id = input.runtime_attempt_id
-       )
-    ),
     locked AS MATERIALIZED (
-      SELECT trace.id
+      SELECT requested.assistant_input_id, trace.id
       FROM requested
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
@@ -635,7 +608,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
          OR trace.runtime_attempt_id = input.runtime_attempt_id
        )
       ORDER BY trace.id
-      FOR UPDATE OF trace
+      FOR UPDATE OF trace SKIP LOCKED
     ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
@@ -671,8 +644,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
-        FROM eligible
-        WHERE eligible.assistant_input_id = requested.assistant_input_id
+        FROM locked
+        WHERE locked.assistant_input_id = requested.assistant_input_id
       ) AS matched
     FROM requested
   `);

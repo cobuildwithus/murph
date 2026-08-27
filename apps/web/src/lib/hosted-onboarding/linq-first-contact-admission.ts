@@ -30,6 +30,7 @@ export type HostedLinqFirstContactAdmissionRequest = {
   partTypes: readonly string[];
   service: "imessage" | "rcs" | "sms" | "unknown";
   text: string | null;
+  textWasTruncated: boolean;
 };
 
 type HostedLinqFirstContactAdmissionDecisionRecord = {

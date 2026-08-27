@@ -126,7 +126,7 @@ jobs:
     name: Live hosted-local Stripe browser matrix
     needs:
       - billing-hermetic
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}
     environment: hosted-stripe-billing-sandbox
     runs-on: ubuntu-24.04
     timeout-minutes: 60

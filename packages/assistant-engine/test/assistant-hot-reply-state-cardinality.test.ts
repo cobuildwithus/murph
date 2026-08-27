@@ -32,6 +32,7 @@ import {
   sendAssistantNotificationLocal,
 } from '../src/assistant/notification-turn.ts'
 import {
+  listAssistantOutboxIntents,
   listAssistantOutboxIntentsForAutoReplyRoute,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
@@ -40,6 +41,7 @@ import {
   hashAssistantOutboxIdentity,
 } from '../src/assistant/outbox/intents.ts'
 import {
+  listAssistantTranscriptEntries,
   readAssistantAutomationState,
   resolveAssistantSession as seedAssistantSession,
   saveAssistantAutomationState,
@@ -375,6 +377,135 @@ it('dedupes a distinct-key notification retry after rebuilding 101 current image
       status: 'pending',
     })
 }, 180_000)
+
+it('recovers an operator message retry from its original outbox intent before provider admission', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-operator-message-retry-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const target = createAssistantModelTarget({
+    approvalPolicy: 'never',
+    model: 'gpt-5.6-test',
+    provider: 'codex-cli',
+    sandbox: 'danger-full-access',
+  })
+  if (!target) {
+    throw new Error('Expected a test assistant target.')
+  }
+  await seedAssistantSession({
+    actorId: 'actor-operator-message',
+    channel: 'email',
+    identityId: 'identity-operator-message',
+    target,
+    threadId: 'thread-operator-message',
+    threadIsDirect: true,
+    vault: vaultRoot,
+  })
+  boundaries.executeProvider.mockImplementation(async (input) => {
+    const codexContinuation = {
+      kind: 'explicit-structured-history' as const,
+    }
+    const releaseAcceptedInputs = await input.onProviderRequestPlanned?.({
+      codexContinuation,
+      providerAttemptId: null,
+    })
+    try {
+      const text = boundaries.executeProvider.mock.calls.length === 1
+        ? 'Original operator continuation.'
+        : 'Different retry continuation.'
+      const response = JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Operator continuation prepared.',
+        text,
+      })
+      return {
+        kind: 'succeeded' as const,
+        providerTurn: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          attemptCount: 1,
+          codexContinuation,
+          codexThreadId: null,
+          provider: input.route.provider,
+          providerOptions: input.route.providerOptions,
+          rawEvents: [],
+          response,
+          responseDeliveryContextOrdinal: 0,
+          responseMedia: [],
+          route: input.route,
+          session: input.resolvedSession,
+          stderr: '',
+          stdout: '',
+          transcriptResponse: response,
+          usage: null,
+          workingDirectory: input.plan.requestedWorkingDirectory,
+        },
+      }
+    } finally {
+      await releaseAcceptedInputs?.()
+    }
+  })
+  const authorize = vi.fn()
+  const deliveryIdempotencyKey = 'operator-task:stable-delivery'
+  const notificationInput = {
+    actorId: 'actor-operator-message',
+    beforeProviderAcceptedInputs: authorize,
+    channel: 'email' as const,
+    deliveryDedupeToken: deliveryIdempotencyKey,
+    deliveryDispatchMode: 'queue-only' as const,
+    deliveryIdempotencyKey,
+    deliveryTarget: 'thread-operator-message',
+    executionContext: {
+      hosted: {
+        defaultTarget: target,
+        memberId: 'member-operator-message',
+        userEnvKeys: [],
+      },
+    },
+    identityId: 'identity-operator-message',
+    instructions: 'Continue the existing private conversation.',
+    notificationPromptProfile: 'operator-message' as const,
+    responsePolicy: { kind: 'require_send' as const },
+    sessionId: null,
+    threadId: 'thread-operator-message',
+    threadIsDirect: true,
+    vault: vaultRoot,
+    workingDirectory: vaultRoot,
+  }
+
+  const first = await sendAssistantNotificationLocal(notificationInput)
+  const retry = await sendAssistantNotificationLocal(notificationInput)
+
+  expect(first.deliveryOutcome).toMatchObject({
+    intentId: expect.any(String),
+    kind: 'queued',
+  })
+  expect(retry).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      text: 'Original operator continuation.',
+    },
+    deliveryOutcome: {
+      intentId: first.deliveryOutcome && 'intentId' in first.deliveryOutcome
+        ? first.deliveryOutcome.intentId
+        : null,
+      kind: 'queued',
+    },
+    response: 'Original operator continuation.',
+    session: { sessionId: first.session.sessionId },
+  })
+  expect(boundaries.executeProvider).toHaveBeenCalledOnce()
+  expect(authorize).toHaveBeenCalledOnce()
+  await expect(listAssistantOutboxIntents(vaultRoot)).resolves.toHaveLength(1)
+  const transcript = await listAssistantTranscriptEntries(
+    vaultRoot,
+    first.session.sessionId,
+  )
+  expect(transcript.filter((entry) => entry.kind === 'assistant'))
+    .toEqual([
+      expect.objectContaining({ text: 'Original operator continuation.' }),
+    ])
+})
 
 it('preserves an older exact native-reply anchor beyond the route window', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(

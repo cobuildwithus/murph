@@ -445,10 +445,37 @@ jobs:
           echo "::error::Mark the pull request ready for review to run exact-head CI."
           exit 1
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Check out exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          fetch-depth: 2
+          path: candidate
+          ref: ${{ github.sha }}
+
+      - name: Prove candidate and exact first parent
+        id: revisions
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_CANDIDATE_SHA: ${{ github.sha }}
+          EXPECTED_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_sha="$(git -C candidate rev-parse HEAD)"
+          base_sha="$(git -C candidate rev-parse HEAD^1)"
+          test "$candidate_sha" = "$EXPECTED_CANDIDATE_SHA"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            test "$(git -C candidate rev-parse HEAD^2)" = "$EXPECTED_PR_HEAD_SHA"
+          fi
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact first parent
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          path: base
+          ref: ${{ steps.revisions.outputs.base_sha }}
 
       - name: Require deployment runner platform
         shell: bash
@@ -459,18 +486,36 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          package_json_file: candidate/package.json
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version-file: .nvmrc
+          node-version-file: candidate/.nvmrc
           cache: pnpm
+          cache-dependency-path: |
+            base/pnpm-lock.yaml
+            candidate/pnpm-lock.yaml
 
-      - name: Install deps
+      - name: Install base deps
+        working-directory: base
         run: pnpm install --frozen-lockfile
 
-      - name: Measure production Linux runner bundle budget
+      - name: Install candidate deps
+        working-directory: candidate
+        run: pnpm install --frozen-lockfile
+
+      - name: Assemble base production runner bundle
+        working-directory: base
         run: pnpm --dir apps/cloudflare runner:bundle
+
+      - name: Assemble candidate production runner bundle
+        working-directory: candidate
+        run: pnpm --dir apps/cloudflare runner:bundle
+
+      - name: Compare exact total output
+        run: node candidate/scripts/check-runner-bundle-budget-ci.mjs compare base candidate
 
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)

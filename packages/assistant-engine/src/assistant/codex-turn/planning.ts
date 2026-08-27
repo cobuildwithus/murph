@@ -97,6 +97,7 @@ import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantCreativeNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -229,7 +230,7 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
     stage: 'target_capabilities',
   },
 ]
-const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 24
+const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 72
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES = 4_000
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES = 12_000
 
@@ -258,6 +259,7 @@ export type AssistantCodexTurnPromptProfile =
   | 'assistant-ask-continuation'
   | 'system-notification'
   | 'creative-notification'
+  | 'operator-message'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
@@ -519,15 +521,24 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.profile.threadScope === 'isolated-thread' &&
     outputOnlyTurn
+  const operatorMessageNotificationTurn =
+    input.profile.promptProfile === 'operator-message' &&
+    input.profile.threadScope === 'isolated-thread' &&
+    outputOnlyTurn
   const onboardingGoalCheckinTurn =
     input.input.scheduledInvocationAuthority?.automationId ===
       MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
   const systemNotificationTurn =
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'system-notification' ||
-    input.profile.promptProfile === 'creative-notification'
+    input.profile.promptProfile === 'creative-notification' ||
+    operatorMessageNotificationTurn
   const privateInteractiveProviderTurn =
     privateInteractiveAudience &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
+  const authenticatedGroupProviderTurn =
+    authenticatedGroupChatRuntime &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const ordinaryInboundTurn =
@@ -581,11 +592,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'assistant-ask-continuation' ||
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'creative-notification' ||
+    operatorMessageNotificationTurn ||
     onboardingGoalCheckinTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
           currentUserPrompt: input.input.prompt,
+          includeTimestamps:
+            privateInteractiveAudience
+            && input.input.scheduledOccurrenceAt != null,
           sessionId: input.session.sessionId,
           vault: input.input.vault,
         })
@@ -825,6 +840,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
     }
 
+    if (input.profile.promptProfile === 'operator-message') {
+      return buildAssistantOperatorMessagePromptWithCacheMetadata({
+        channel: resolvedChannel,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
     return buildAssistantSystemPromptWithCacheMetadata({
       assistantAndroidAppAvailable: isMurphAndroidAppEnabled(
         input.sharedPlan.cliAccess.env,
@@ -1050,7 +1073,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         analyzeVideoAvailable:
-          privateInteractiveProviderTurn &&
+          (privateInteractiveProviderTurn || authenticatedGroupProviderTurn) &&
           userActionAcceptedInputIds.length > 0 &&
           normalizeNullableString(
             input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
@@ -1229,6 +1252,7 @@ type TranscriptHistoryCandidate = {
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   currentUserPrompt: string
+  includeTimestamps: boolean
   sessionId: string
   vault: string
 }): Promise<readonly AssistantProviderConversationMessage[]> {
@@ -1295,6 +1319,14 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
           contentIncomplete,
           message: {
             content,
+            ...(input.includeTimestamps
+              ? {
+                  occurredAt:
+                    entry.kind === 'user'
+                      ? entry.contentReceivedAt ?? entry.createdAt
+                      : entry.createdAt,
+                }
+              : {}),
             role: entry.kind,
           },
           standaloneAssistantContext:
@@ -1381,8 +1413,8 @@ function limitAssistantConversationHistoryMessages(
     if (typeof candidate.message.content !== 'string') {
       continue
     }
-    const messageBytes = assistantConversationHistoryUtf8Bytes(
-      candidate.message.content,
+    const messageBytes = assistantConversationHistoryMessageBytes(
+      candidate.message,
     )
     if (messageBytes === 0) {
       continue
@@ -1421,13 +1453,23 @@ function limitAssistantConversationHistoryMessages(
     if (!removed || typeof removed.message.content !== 'string') {
       continue
     }
-    retainedBytes -= assistantConversationHistoryUtf8Bytes(
-      removed.message.content,
-    )
+    retainedBytes -= assistantConversationHistoryMessageBytes(removed.message)
   }
   dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
   return [marker, ...retained.map(({ message }) => message)]
+}
+
+function assistantConversationHistoryMessageBytes(
+  message: AssistantProviderConversationMessage,
+): number {
+  if (typeof message.content !== 'string') {
+    return 0
+  }
+  return (
+    assistantConversationHistoryUtf8Bytes(message.content)
+    + assistantConversationHistoryUtf8Bytes(message.occurredAt ?? '')
+  )
 }
 
 function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
@@ -1453,9 +1495,7 @@ function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
     removed = messages.splice(0, firstUserIndex)
   }
   return removed.reduce((total, candidate) => (
-    typeof candidate.message.content === 'string'
-      ? total + assistantConversationHistoryUtf8Bytes(candidate.message.content)
-      : total
+    total + assistantConversationHistoryMessageBytes(candidate.message)
   ), 0)
 }
 

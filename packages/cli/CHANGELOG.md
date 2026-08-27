@@ -2,6 +2,814 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.3.2] - 2026-08-27
+
+### Added
+- return canonical apply cards
+- energize referral section
+- allow workout exercise renames
+- track silent group conversions
+- track group-to-private conversions (#2311)
+- link directly to connect source cards
+- make wearable no-data outreach adaptive
+- admit versioned Temporal worker bindings (#2158)
+- accept focused group tool parsers (#2151)
+- allow fifty dollar group sponsorship caps
+- analyze attached videos on request (#2108)
+- accept manual meal photo uploads (#2098)
+- add timeout failure diagnostics (#2092)
+- enrich signup notifications
+- add ops usage search and reset all
+- reconsider unsent group replies once
+- trace device-sync interruptions (#2043)
+- verify and render OG image routes (#2056)
+- preserve complete Junction summaries (#1702)
+- preserve Junction metabolic context (#1700)
+- enrich bounded Junction workout streams
+- add authoritative Junction temporal features
+- default sparse clinical facts
+- preserve Junction summary details
+- finalize Junction body composition
+- preserve Junction body composition
+- finalize Junction body composition
+- register sparse clinical Junction resources
+- retain bounded Junction workout features
+- preserve bounded Junction temporal features
+- govern Junction resources and sparse history
+- preserve Junction body composition
+- preserve Junction summary details
+- preserve sparse Junction clinical facts
+
+### Fixed
+- package assistant verification contract (#2403)
+- isolate child-runtime package coverage (#2397)
+- parse coordinated workout exercises (#2340)
+- preserve Docker isolation on macOS (#2367)
+- clarify referral rewards
+- validate Kernel handoffs before publication
+- order roster observation upserts
+- keep referral estimates concise
+- restore live Stripe main proof
+- keep Kernel automation independent of live view
+- complete silent conversion lifecycle
+- negotiate Environment reconciliation fact
+- reconsider live group input (#2321)
+- require absolute alternate Codex home
+- complete Environment priority handoff
+- allow alternate Codex home for live journeys
+- ratchet device sync bundle budget (#2326)
+- preserve canonical preemption ordering
+- make activity errors recoverable (#2204)
+- make workout card authoring deterministic (#2295)
+- make database pool retries observable (#2292)
+- route autofix reviews to isolated lanes (#2309)
+- order latency trace row locks (#2293)
+- bind Junction ECG voltage to summaries (#2300)
+- make experiment and Age errors recoverable (#2207)
+- preserve connect dialog ownership
+- preserve database health provenance (#2290)
+- make held group replies complete
+- honor selected group journey model
+- prevent blank nutrition dead ends
+- keep meal recovery routing compact
+- keep child model live config local
+- keep blank meals in owner recovery
+- route card recovery through owners
+- make nutrition errors recoverable (#2205)
+- bound workout inventory continuation
+- ask before card recovery refusal
+- focus live assistant test runner
+- preserve ordinary resume cleanup
+- converge Browser Vault refresh work (#2226)
+- prioritize nutrition card recovery
+- require nutrition card data recovery
+- preserve composed release provenance
+- require meal recovery before nutrition cards
+- grant draft reset GraphQL authority (#2277)
+- ignore zero-limit overshoot periods
+- close reconsideration failure paths
+- isolate temporary CLI evaluation (#2270)
+- recover unresolved meals for nutrition cards
+- preserve model-repair error details (#2202)
+- preserve workout progress through authority failures
+- preserve stable skill recipes
+- remove contact details from signup notifications (#2260)
+- filter workout index before cap
+- apply direct usage settlements
+- strengthen connect target contrast
+- ratchet workout delivery bundle budget (#2266)
+- preserve current workout admission
+- preserve reconsidered group requests
+- make reminder saves replay-safe
+- use live workout capability
+- prevent duplicate wearable preference calls
+- preserve outreach settings through abort guard
+- require email authority for outreach settings
+- delete wearable outreach preferences with accounts
+- close adaptive outreach review gaps
+- document changelog-only review proof (#2255)
+- validate hosted-local temporal doctor (#2250)
+- propagate typecheck guard failures (#2248)
+- authorize pull request draft resets (#2251)
+- bound migration guard patterns to SQL statements (#2239)
+- classify provider requests by static host (#2249)
+- preserve finish-task deletion scope (#2247)
+- gate scoped workout stream sources
+- decouple DST recovery from titles
+- log completed hosted invocations
+- harden runtime issue provenance
+- gate workout streams by source capability
+- keep titles out of identity checks
+- use generated ids for reminder saves
+- correlate runtime issues with releases and attempts
+- bound model retry usage storms
+- hand off environment work after foreground
+- reactivate archived reminders by stable identity
+- recover the canonical live successor
+- prevent duplicate archived-name retries
+- cover incomplete private handoffs
+- distinguish private handoff continuations
+- anchor group draft cutoff at completion
+- tolerate accepted Temporal run visibility (#2215)
+- allow archived reminder name reuse
+- validate live Temporal compatibility runs (#2198)
+- handle in-flight one-shot edits
+- finalize child usage accounting
+- keep inbound videos transient
+- clarify reminder occurrence projection
+- recover usage link from later work (#2193)
+- preserve Garmin authorization guards
+- wait for Garmin consent readiness
+- await late subagent usage persistence
+- wait for disconnect hydration
+- classify empty workout streams
+- honor terminal garmin departure
+- drop unused reasoning profile field
+- preserve empty replay across retries
+- retain empty stream replay horizon
+- recover empty workout streams
+- submit garmin confirmation once
+- complete garmin consent progression
+- expose bounded pass queue diagnostics (#2160)
+- preserve replacement across delayed stop (#2171)
+- align group guidance with admitted tools
+- simplify split tool validation
+- enforce split group tool contracts
+- simplify workout follow-up identity
+- expose repairable group tool contracts
+- align hosted tool expectation (#2161)
+- include Max in ops growth MRR split
+- require fresh environment conditions
+- harden workout follow-up context
+- harden Kernel canary lifecycle proof
+- load environment conditions from OpenWeather
+- retire native E2E aliases before deployments
+- retain detached subagent usage
+- preserve canonical narrow-read semantics
+- isolate delayed lifecycle errors
+- prepare handoff authority crypto
+- preserve workout follow-up context
+- bind legacy nutrition authority
+- preserve Starter activation lifecycle
+- replay handoffs across transport failures
+- preserve pending health ownership
+- fence handoff replay crypto
+- bind recovery replay intent
+- disambiguate legacy nutrition calories
+- restore Temporal reconciliation compatibility (#2129)
+- accept optional realtime updates (#2128)
+- align environment realtime tools (#2126)
+- make context handoff retries exact
+- keep signup email enrichment optional
+- update GPT-5.6 Sol pricing (#2122)
+- preserve concurrent recovery usage
+- preserve signup notification fallback
+- remove homepage nav links
+- cover code-mode deferred discovery
+- discover deferred tools before denial
+- commit held input transcripts once
+- harden reset-all operator recovery
+- bound signup notification context retention
+- bound reset-all runtime wake latency
+- bound migration guard to SQL statements
+- defer held no-reply persistence
+- centralize progress prompt ownership
+- lock controls during reset restoration
+- harden nutrition card prompt ownership
+- persist exact delivery retry
+- guard refreshed ambiguous usage targets
+- resolve ops recovery review findings
+- fence exact telegram delivery
+- gate signup context capture
+- preserve ambiguous reset recovery
+- remount reset state across operators
+- keep reset wake logs scalar
+- preserve reset-all across tab reloads
+- release exact delivery claim on yield
+- preserve reset-all recovery ownership
+- reconcile exact delivery recovery
+- consolidate nutrition card workflow
+- scope reset-all wake recovery to receipts
+- advance reset-all past empty periods
+- make reset-everyone retries receipt-safe
+- make signup context provenance truthful
+- make physical-note recovery atomic
+- support legacy nutrition card calories
+- keep precommit segments provisional
+- fence recovery turn replays
+- bind cleanup to container starts
+- preserve partial Queue metrics (#2103)
+- close reconsideration review gaps
+- classify checked guard deterministically
+- complete blocked exact notifications
+- separate checked and remaining guards
+- fence legacy history reads
+- use the production Junction config path
+- unblock hosted runtime frontiers
+- restore runner bundle headroom (#2104)
+- fit recovery into runner budget
+- preserve recovery uncertainty
+- align startup convergence budgets
+- document all-resource rollout
+- restore all Junction resources
+- bind destroy ownership to starts
+- bind recovered source history
+- add explicit recovery control
+- bind readiness to replacement starts
+- scope readiness to current start
+- retain pending source webhooks
+- preserve startup transport convergence
+- retain observed pending starts
+- include Apollo in auto lane pool
+- preserve rollout cold starts
+- bind freshness to exact imports
+- require data-bearing import proof
+- prove exact Vercel production deployment (#2085)
+- preserve recovery delivery timer
+- preserve partial recovery windows
+- stop duplicate due reconcile signals (#2081)
+- harden worktree retirement (#2052)
+- project canonical imports into freshness
+- recover missing junction sources
+- make frontend evidence reproducible (#2066)
+- sync existing lockfile importers transactionally (#2061)
+- preserve native iOS cleanup failures (#2053)
+- bound and retry the Playwright Chromium install (#2022)
+- require provider occurrence for Fitbit cutover
+- tighten Fitbit migration copy
+- bind migration freshness to logical facts
+- advance usage link recovery claim
+- retry usage limit rich link partial
+- bind migration freshness to webhook trace
+- resume missing usage limit link
+- replay partial usage limit links
+- preserve delivery-only wake ownership
+- honor provider day timezone
+- admit model-free delivery retries
+- reconcile terminal foreground replies
+- isolate foreground quiet windows
+- supersede stale migration proof jobs
+- preserve source authorization epochs
+- unify Junction canonical imports
+- prove Fitbit history before migration
+- preserve source-scoped history evidence
+- fence migration freshness
+- simplify Fitbit migration continuation
+- keep migration identity browser safe
+- apply ReviewGPT remediation
+- preserve member deletions on changed replay
+- preserve activity heart-rate facts
+- preserve profile replay identity
+- pin extended history to 180 days
+- preserve ordinary sync ahead of temporal history
+- harden Junction workout feature projection
+- refresh generated skill hash
+- expose bounded Junction workout details
+- enforce repository trust floor
+- pin review trust floor
+- open explicit reconnect lifecycle
+- remove speculative routing policy
+- bind workout remote authority by id
+- gate onboarding subagent routing
+- preserve semantic source lifecycle
+- migrate unversioned Junction profiles
+- preserve established source lifecycle
+- migrate Junction profile identity safely
+- preserve capped webhook days
+- keep ordinary pull floor unconditional
+- preserve Junction history completion
+- fence Junction webhook pulls
+- retry superseded Junction fetches
+- preserve deployed m1 history
+- reconcile summary ownership after restack
+- preserve delayed provider revision ordering
+- preserve legacy activity heart-rate aliases
+- align Junction replay verification
+- recover Junction member edit conflicts
+- preserve member summary edits
+- resolve Junction summary review findings
+- reconcile Junction summary corrections
+- bound Junction menstrual evidence
+- complete rejected body history
+- harden body composition history
+- reconcile body composition stack
+- rebuild legacy body projections
+- unify sparse body selection
+- close body composition read gaps
+- complete body composition reads
+- pin exact workout connection
+- ignore physical alias rekeys in webhook proof
+- close workout authority gaps
+- retain ordinary reconcile completion
+- align Link callback lifecycle admission
+- resolve workout lifecycle source
+- fence workout source lifecycles
+- preserve Junction window ownership
+- advance each completed Link lifecycle
+- ratchet runner bundle budget
+- ratchet runner bundle size
+- fence hosted source reconnect history
+- fence reconnect-start worker completion
+- make history priority fair
+- bound reopened history priority
+- preserve legacy epoch wire absence
+- unify Junction alias lifecycle identity
+- close reconnect lifecycle gaps
+- resolve device sync reconnect subpath
+- finalize Junction lifecycle candidate
+- fence Junction lifecycle history
+- checkpoint Junction lifecycle fences
+- persist sparse history terminal state
+- preserve sparse history lineage
+- preserve delayed provider revision ordering
+- preserve legacy activity heart-rate aliases
+- align Junction replay verification
+- reopen local junction history
+- require current history terminality
+- close moving sparse history gaps
+- persist terminal history coordinates
+- terminate empty history scans
+- require workout companions for history
+- checkpoint Junction resource progress
+- co-import historical workout summaries
+- resume Junction reconcile resources safely
+- expand hosted lifecycle epoch safely
+- cover historical workout identity shapes
+- preserve Junction reconnect history fences
+- complete temporal history recovery
+- fence reconnect history by source epoch
+- recover Junction member edit conflicts
+- close temporal authority gaps
+- preserve grouped workout attribution
+- preserve workout identity and retries
+- align temporal day ownership
+- preserve member summary edits
+- preserve bounded clinical durability
+- bound sparse clinical daily imports
+- preserve Junction resource progress
+- unify sparse body selection
+- consolidate workout ingestion ownership
+- fence temporal facts to complete days
+- close body composition read gaps
+- resolve Junction summary review findings
+- complete body composition reads
+- tighten Junction history ownership
+- reconcile Junction summary corrections
+- harden bounded workout imports
+- require bounded temporal evidence
+- bound sparse clinical imports deterministically
+- harden bounded temporal features
+- reserve stacked history coverage
+- bound Junction menstrual evidence
+- bound sparse history completion
+- refresh Junction release artifacts
+- preserve compact webhook payloads
+- preserve sparse clinical record identity
+
+### Changed
+- gate local shell proof by platform (#2415)
+- Suppress completed reminder occurrences (#2406)
+- Bound growth dashboard database fanout (#2346)
+- Fix Codex token usage compatibility (#2408)
+- align mailbox fixture sequences (#2410)
+- Warn while long database transactions are still open (#2399)
+- Fix consent reposts and restaurant nutrition lookup (#2386)
+- Keep phone-transfer locks provider-free (#2405)
+- Add Stripe reconciliation error telemetry (#2409)
+- cover Linux MinIO bridge endpoint (#2411)
+- stop local production-secret work (#2380)
+- Classify wrapped Prisma pool failures accurately (#2355)
+- Fail fast on hosted latency trace lock contention (#2350)
+- Prepare Codex auth mailbox crypto before transaction (#2341)
+- Reuse saved nutrition context before card recovery (#2336)
+- Add recent-member retention view to Growth (#2384)
+- bound meal nutrition reads to events (#2394)
+- sync friction log (#2398)
+- archive weekly digest prompt plan (#2395)
+- ignore generated Graft graph (#2396)
+- sync friction log (#2376)
+- Keep Messages workout auth renewable (#2370)
+- Recover product-feedback validation errors (#2349)
+- Honor saved prompts for weekly digest automations (#2359)
+- Document alternate Codex home approval (#2379)
+- finish ReviewGPT 0.5.138 rollout
+- update ReviewGPT to 0.5.138
+- prove canonical apply receipts
+- close silent conversion implementation
+- defer workout card changelog
+- sync friction log (#2362)
+- harden Stripe skip regression proof
+- tighten referral copy
+- Retire the legacy Frog autofixer (#2357)
+- state roster evidence expiry contract
+- Improve cold conversation reconstruction (#2342)
+- keep roster evidence expiry-only
+- note clearer referral rewards
+- polish referral section
+- sync friction log (#2316)
+- note browser task resilience
+- Fix broad private food search timeouts (#2318)
+- exercise negotiated Environment fact
+- Add durable hosted operator tasks (#2304)
+- close Environment wire compatibility
+- Compare vault-cli bundle growth to exact base (#2344)
+- remove completed group backfill (#2339)
+- close Environment priority handoff
+- align Environment wire fixtures
+- announce easier workout card editing
+- clarify alternate Codex home fallback
+- Complete Environment voice report coverage (#2335)
+- Refresh expanded workout cards from canonical state (#2332)
+- compose alternate Codex home selection
+- Route group backfill through protected production workflow (#2324)
+- Fix physical-note recovery lookup (#2327)
+- Preserve speakers in private-to-group handoffs (#2319)
+- make Markdown-only pull requests cheap (#2313)
+- close foreground preemption plan
+- Correlate workspace snapshot start diagnostics (#2323)
+- prove shared foreground wake handoff
+- Remove the Fitbit Junction note (#2320)
+- Fix hosted device-sync snapshot import bottleneck (#2322)
+- Fix organic group discovery (#2303)
+- Enforce production food-search index contract (#2294)
+- bound static generation concurrency (#2312)
+- split oversized runtime suites (#2307)
+- Add foreground reply changelog entry
+- Prioritize foreground replies over system work
+- Fix Codex 0.149.1 auth deploy guard (#2310)
+- Resume approved files in active hosted turns (#2269)
+- upgrade Codex CLI to 0.149.1 (#2288)
+- bound home projection fanout (#2289)
+- complete live assistant verification plan
+- Fix connection deep links with a dialog (#2283)
+- remove redundant reconciliation reads (#2291)
+- print group journey reply
+- record canonical Murph domain (#2296)
+- Compact broad group consent offers (#2298)
+- sync friction log (#2302)
+- Add stage diagnostics for companion address-book timeouts (#2276)
+- split local service runtime coverage (#2299)
+- close group reconsideration rollout
+- record autofix launcher gate failure (#2297)
+- close nutrition card meal recovery
+- Compact iMessage workout comparison cards (#2285)
+- record live verification retrospective
+- close workout stream remediation
+- Extend hosted device-sync pass telemetry (#2267)
+- Preserve exact context for direct native replies (#2279)
+- Make the Environment voice report readable on a phone (#2282)
+- clarify workout failure handling
+- distinguish meal edit help from mutation
+- require verification steps in final handoffs (#2287)
+- sync friction log (#2272)
+- trim Terra recovery diagnostics
+- model live card turn as private direct
+- launch live meal CLI without IPC
+- summarize live meal recovery actions
+- make live meal fixture self-contained
+- expose live meal recovery actions
+- execute overshoot predicate in postgres
+- Fix scheduled card delivery intent (#2262)
+- use the repository Node version for live prompt proof
+- prove live disconnect blocks workout egress
+- drop replay fingerprinting
+- record PR draft reset permission gap
+- distinguish Luna child from parent
+- align live Starter settings check (#2263)
+- expose live child model override
+- record draft-reset workflow friction
+- smoke live Luna subagent selection
+- register runtime issue provenance migration
+- Pin hosted subagent model selection on (#2225)
+- complete runtime issue provenance plan
+- track group reconsideration rollout
+- streamline live assistant verification
+- align usage settlement mock
+- attribute group reconsideration fix
+- Preserve exact workout identity across replies (#2254)
+- close model loop cap hardening plan
+- remove duplicate image provenance proof
+- catalog Vault CLI recovery gaps (#2203)
+- prove usage settlement fails closed
+- prove image issue provenance export
+- announce direct connection links
+- complete adaptive wearable outreach
+- pin wearable outreach rollback floor
+- sync friction log (#2256)
+- Fix hosted web prebuilt workflow triggers (#2258)
+- Fix repeated scans during batch worktree retirement (#2259)
+- generate prisma before hosted vitest (#2257)
+- sync friction log (#2246)
+- Recover nutrition cards and automatic meal captures (#2240)
+- add adaptive outreach changelog
+- Ask when automatic meal nutrition is unclear (#2241)
+- Prune completed generated deliveries from hosted checkpoints (#2231)
+- record terminal event rollout
+- cover default completion mode
+- Answer every rapid group request in one reply (#2232)
+- close workout stream capability fix
+- note mixed-source workout recovery
+- Reduce reply recovery delay during runner shutdown (#2235)
+- Raise worktree ceiling to 200
+- allow ordinary managed-name reminders
+- Stop obsolete device-sync environment log churn (#2233)
+- note reliable environment saves
+- sync friction log (#2073)
+- continue specialist remediation
+- Speed up Android hosted E2E admission (#2227)
+- drop cross-repository Frog entries (#2230)
+- Archive stale reminder projection plan
+- Keep stale reminder timing authoritative
+- close group reply reconsideration
+- record handoff proof
+- note reliable private handoffs
+- complete hosted video transience
+- Simplify nutrition card safety prompts (#2196)
+- Keep workout set confirmations on one canonical owner (#2195)
+- clarify quiet draft selection
+- define held group draft exception
+- Fix delegated Murph message recovery (#2168)
+- Fix stale reminder occurrence projection
+- note reminder name recovery
+- Stop inactive runtime mailbox churn (#2165)
+- allow non-production review fixes
+- complete Temporal compatibility rollout (#2214)
+- protect active zero-window videos
+- Text members when Garmin delivery stalls (#2189)
+- advance Temporal compatibility controller (#2201)
+- clarify shared native Privy client (#2118)
+- announce temporary chat videos
+- announce clearer reminder edits
+- close Garmin consent readiness
+- unify Garmin authorization readiness
+- close Garmin canary recovery
+- cover complexity collapse exception
+- continue accepted complexity collapses
+- Recover stalled usage-limit links after overlapping receipts (#2185)
+- record draft reset permission gap
+- prove hydrated disconnect
+- align onboarding proofs with checkpoints (#2184)
+- close workout stream recovery plan
+- expose garmin confirmation surface
+- prove delayed garmin departure
+- note workout sync recovery
+- align ReviewGPT policy assertions
+- preserve current index guidance
+- record pr draft reset failure
+- preserve garmin canary index truth
+- restore garmin route departure proof
+- reserve Ready for merge candidates
+- record PR draft reset permission failure
+- Make Starter signup completion consent-owned (#2166)
+- close workout stream diagnostics
+- use split newsletter tools
+- skip pause after final ReviewGPT pass
+- Make onboarding follow-up enrollment activation-owned (#2097)
+- expose workout stream cardinality diagnostics
+- Gate expensive CI on ready PR heads (#2136)
+- Pin authenticated Temporal deployment controller (#2177)
+- Require exact Temporal reader compatibility before merge (#2147)
+- Complete Garmin consent in the Junction canary (#2174)
+- Fix Garmin canary Cloudflare challenge with headed Kernel (#2172)
+- delete legacy group tool schema
+- Switch the live Junction canary to Garmin (#2170)
+- Simplify child usage finalization
+- Simplify Codex child usage accounting
+- close pass-budget plan (#2146)
+- Prove Kernel tunnel child lifetime
+- complete ops growth Max MRR fix
+- Fix Kernel canary tunnel lifetime
+- note reliable environment conditions
+- close native E2E alias retirement plan
+- enforce complete native E2E alias retirement
+- complete Codex subagent usage plan
+- complete vault query narrow-reader plan
+- Clean up timed-out subagent metadata requests
+- Fix Codex subagent usage review findings
+- bound vault query reads by family
+- Meter Codex child-agent provider usage
+- compact automation tool schema (#2125)
+- Meter exact Codex subagent usage
+- Improve public agent readiness (#2120)
+- keep workout replies connected
+- complete mailbox test mock
+- Remove brittle Codex permission attestation (#2143)
+- Use Kernel for WHOOP canary browser
+- record ReviewGPT composer friction
+- Extend hosted device-sync passes to 90 seconds (#2119)
+- Self-heal duplicate Junction daily event aliases (#2089)
+- keep sponsorship verification current
+- update group email mailbox mock
+- cover fifty dollar sponsorship choices
+- Extend ReviewGPT default timeout to 250 minutes (#2138)
+- link sponsorship changelog to pr
+- ratchet nutrition authority prompt
+- keep foreground storm on generic owner (#2139)
+- mirror startup lifecycle state
+- Keep automatic sponsorship refills retryable (#2132)
+- preserve mailbox completion contracts (#2137)
+- verify system mailbox checkpoint (#2135)
+- keep ReviewGPT findings proportional
+- wait for interview mailbox consumption (#2134)
+- use valid interview completion id (#2131)
+- cover environment interview system wake (#2130)
+- Polish the group funding success mark (#2046)
+- complete signup notification follow-up
+- Require literal Junction connection proof for webhook recovery (#2117)
+- Add realtime Environment interview (#2100)
+- Disambiguate physical-note recovery targets
+- record schema 7 workout card plan
+- Remove redundant member-memory sandbox profile (#2086)
+- Fix hosted Android E2E credential ownership (#2115)
+- centralize scheduled nutrition safety
+- trust Codex for ordinary tasks
+- Batch workout starts and bypass exact-command projection rebuilds (#2070)
+- Classify terminal recovery targets
+- Recheck nonterminal recovery targets
+- Complete device webhooks for unregistered sources (#2114)
+- Forward physical-note recovery targets
+- Bind physical-note recovery targets
+- close nutrition card legacy compatibility
+- stabilize signup route test env
+- Fix legacy nutrition card eligibility owner
+- record runtime review retrospective
+- Cover paid recovery replay after note deletion
+- Report recovered physical-note usage
+- Fix group handoff release contracts (#2113)
+- log hosted-local doctor friction
+- Add private-to-group context handoff
+- acknowledge ops reset receipt schema
+- type signup context fixture
+- preserve Prisma schema formatting
+- Add protected native Android hosted E2E (#2109)
+- note nutrition card compatibility
+- record product walkthrough
+- record candidate verification
+- note current group replies
+- update mailbox frontier projection
+- Let existing members email Murph from any inbox (#2083)
+- note hosted runtime recovery
+- prove durable retry checkpoint order
+- Migrate stable Junction profile timestamps (#2096)
+- Retry transient hosted device-sync reads (#2095)
+- link recovery changelog PR
+- Delete obsolete device-sync dirty retention (#2094)
+- Fix signup notification ownership (#2068)
+- Prioritize approved foreground continuations (#2077)
+- align six-lane release contract
+- update recovery pr reference
+- prove missing-source replay
+- Simplify record-scoped workout tracking (#2063)
+- Recover KMS reads and Garmin sync (#2048)
+- Confirm safe partial database telemetry before warning (#2050)
+- Prove Messages workout rep contract (#2075)
+- parallelize release verification (#2042)
+- Honor scheduled device retries in runtime progress alerts (#2049)
+- Restore silent hosted memory maintenance (#2047)
+- Prune restored delivery residue before cold snapshots (#2074)
+- clarify import freshness proof
+- update freshness signal mock
+- define ordinary merge commit exception (#2082)
+- stabilize usage-credit fixture assertions (#2080)
+- Keep pre-merge and release guards aligned (#2072)
+- Route native iOS reruns through a fresh validated run (#2071)
+- Harden ReviewGPT configuration and consume v0.5.136 (#2076)
+- Serialize concurrent ReviewGPT base refreshes (#2051)
+- Separate test and release heap budgets (#2058)
+- note Apple Health freshness recovery
+- enforce runner bundle budgets (#2057)
+- note wearable recovery
+- fail closed on Prisma mutation drift (#2067)
+- Keep focused schema checks and CLI test commits narrow (#2060)
+- Stop re-signaling imported mailbox handoffs (#2044)
+- Retry untouched group sponsorship refills (#2035)
+- Reduce native iOS hosted E2E queue waste (#2040)
+- Add actionable blood oxygen normalization diagnostics (#2036)
+- Simplify the group funding success receipt (#2034)
+- close PR 1977 completion plan
+- update review-gpt to 0.5.134 (#1975)
+- Stop sponsorship near-cap notices (#2038)
+- Publish system mailbox frontier ownership (#2024)
+- Keep reliability work out of Murph product notes (#2023)
+- Restore PR review disclosures and LOC breakdown (#2020)
+- track current usage recovery link
+- Fix retained hosted device-sync retries (#2021)
+- Fix group sponsorship payment recovery (#2010)
+- finalize ReviewGPT completion watcher rule
+- prefer ReviewGPT completion watchers
+- extend ReviewGPT wake timeout
+- require exclusive PR ownership
+- track dirty-marker mutation boundary
+- require UI screenshots
+- note usage recovery delivery
+- record round seven remediation evidence
+- record combined Junction rollout decision
+- clear ReviewGPT lint warning
+- align ReviewGPT migration fixtures
+- Replace Fitbit migration with Google Health
+- refresh generated skill hash
+- align hosted temporal priority
+- reconcile current Junction base
+- fix training week boundary
+- reconcile runner bundle baselines
+- anchor training week fixture
+- ratchet runner bundle baselines
+- pin workout projection schema version
+- rebaseline Junction runner bundle budgets
+- Require a unique zone instant for floating temporal clocks
+- Require semantics agreement before authorized-day exclusion
+- Prove Gregorian validity inside complete-day timestamp acceptance
+- Own complete-day timestamp acceptance with one anchored parse
+- Anchor temporal replacement identity and fail closed on ambiguity
+- Require array shapes inside strict grouped collection proof
+- Guard raw retention and member deletions under temporal authority
+- Derive temporal samples only from provider clocks
+- Preserve temporal authority across hosted cold restore
+- Converge temporal facets through the symmetric set seam
+- Make temporal imports facet-only with fail-closed authority
+- Regenerate event-record schema for merged qualifiers
+- Align device-sync tests with merged dual-owner shape
+- Restore ordinary Junction ingestion ownership
+- Make the ReviewGPT wrapper own the trust floor
+- Close ReviewGPT config override bypass
+- refresh vault cli skill hash
+- update review gpt to 0.5.132
+- record ReviewGPT lane preference friction
+- update ReviewGPT to 0.5.132
+- Fix Junction temporal history refresh
+- sync friction log
+- sync friction log
+- align runner bundle budget expectation
+- align profile replay regression
+- record ReviewGPT round 13
+- assert automatic member precedence
+- preserve member edits at event spine
+- preserve Junction policy order
+- refresh generated skill hash
+- use stable Junction row identities
+- bound clinical lifecycle reads
+- cover member edit conflict jobs
+- expect member ownership after event edit
+- announce complete summaries
+- complete Junction summary details
+- align interval timestamp rejection
+- refresh generated vault skill hash
+- align body integration coverage
+- align body hint and schemas
+- announce body composition
+- record round 12 pass
+- make source fixtures type-safe
+- cover workout lifecycle export
+- expect current Junction coverage encoding
+- expect current Junction coverage encoding
+- reuse hosted source authority read
+- regenerate config schema from clean build
+- refresh generated config schema
+- assert compact coverage semantics
+- reproduce prepared reconnect race
+- Fix Junction temporal parent continuation
+- ratchet runner bundle budget
+- coalesce Junction source projection reads
+- close temporal remediation plan
+- expect member ownership after event edit
+- ratchet stacked runner bundle budget
+- record Junction temporal ownership retrospective
+- align body hint and schemas
+- refresh generated skill hash
+- close Junction temporal remediation
+- prove Junction retry and fanout bounds
+- compose reserved history coordinates
+- keep history coordinates composable
+- announce body composition
+- announce complete summaries
+- announce temporal features
+- announce workout context
+- announce sparse clinical events
+- close Junction workout feature plan
+- complete Junction summary details
+- complete temporal feature integration
+- narrow sparse history window payload
+
 ## [1.3.1] - 2026-08-19
 
 ### Added

@@ -141,6 +141,7 @@ import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import {
+  createAnalyzeVideoTurnState,
   snapshotAnalyzeVideoAttachmentAuthorities,
   type AnalyzeVideoAttachmentAuthority,
 } from '../assistant-codex/analyze-video-tool.js'
@@ -745,6 +746,7 @@ export async function sendAssistantMessageLocal(
           string,
           AnalyzeVideoAttachmentAuthority
         >()
+        const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
         const snapshotAnalyzeVideoAuthorities = async (
           acceptedInputIds: readonly string[],
@@ -1601,6 +1603,7 @@ export async function sendAssistantMessageLocal(
           const providerOutcome = await executeCodexTurnWithRecovery({
             acceptedInputItems: providerRequestAcceptedInputItems,
             activeTurnSteering,
+            analyzeVideoTurnState,
             authorizeAcceptedMessageTarget,
             input: currentInput,
             onFinishWithoutReplyAccepted: async (event) => {
@@ -1806,6 +1809,15 @@ export async function sendAssistantMessageLocal(
               providerResult: failedProviderResult,
               turnId: currentUserTurn.turnId,
             })
+            if (
+              requestInput.allowFailedNoReplyRecovery &&
+              recoverableNoReplyDeliveryContextOrdinal !== null
+            ) {
+              await executionContext?.hosted?.assertTurnCommitAuthority?.({
+                acceptedInputs: providerRequestAcceptedInputItems,
+                turnId: currentUserTurn.turnId,
+              })
+            }
             const failedProviderResumeStateAction =
               providerRequestOrdinal === 1
                 ? 'preserve-existing'
@@ -2091,20 +2103,22 @@ export async function sendAssistantMessageLocal(
           if (draftWindowOutcome.kind === 'review') {
             providerRequestOrdinal = 1
             try {
-              const accepted = await acceptActiveTurnInput({
-                activeTurnInput: draftWindowOutcome.acceptedInput,
-                providerRequestAcceptedInputIds,
-                providerRequestOrdinal,
-                sessionId: currentSession.sessionId,
-              })
-              replyDeliveryContexts.push(
-                pickAssistantReplyDeliveryContext(currentInput),
-              )
+              if (draftWindowOutcome.acceptedInput) {
+                const accepted = await acceptActiveTurnInput({
+                  activeTurnInput: draftWindowOutcome.acceptedInput,
+                  providerRequestAcceptedInputIds,
+                  providerRequestOrdinal,
+                  sessionId: currentSession.sessionId,
+                })
+                replyDeliveryContexts.push(
+                  pickAssistantReplyDeliveryContext(currentInput),
+                )
+                acceptedInputIdsByDeliveryContextOrdinal[
+                  replyDeliveryContexts.length - 1
+                ] = accepted.acceptedInputItems.map((item) => item.id)
+              }
               providerRequestDeliveryContextBaseOrdinal =
                 replyDeliveryContexts.length - 1
-              acceptedInputIdsByDeliveryContextOrdinal[
-                providerRequestDeliveryContextBaseOrdinal
-              ] = accepted.acceptedInputItems.map((item) => item.id)
               currentSession = applyAssistantProviderTurnResumeInMemory({
                 providerResult,
                 session: currentSession,
@@ -2148,6 +2162,10 @@ export async function sendAssistantMessageLocal(
           rawResponse: providerResult.response,
           session: currentSession,
           sharedPlan,
+        })
+        await executionContext?.hosted?.assertTurnCommitAuthority?.({
+          acceptedInputs: providerRequestAcceptedInputItems,
+          turnId: currentUserTurn.turnId,
         })
 
         const resolvedFinalReplyDeliveryContext =
