@@ -229,6 +229,7 @@ import {
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
+  type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
   compactHostedConversationMailboxHandledItemSelection,
@@ -1400,6 +1401,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
   let startExactDetachedAssistantAsk: (() => Promise<void>) | null = null;
   let ordinaryConsentedAssistantAskSelected = false;
+  let selectedSystemMailboxOwnerItem: HostedSystemMailboxPendingItem | null = null;
   let imageGenerationController: HostedImageGenerationController | null = null;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
@@ -1628,16 +1630,46 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
-    const kickDetachedAssistantAskAfterImport = (
+    const kickDetachedAssistantAskAfterImport = async (
       item: HostedMailboxResolvedImportItem,
       outcome: HostedMailboxItemImportOutcome,
-    ): void => {
+    ): Promise<void> => {
       if (
         item.route.action === "run-assistant-ask"
         && (outcome.status === "imported" || outcome.status === "skipped")
-        && !ordinaryConsentedAssistantAskSelected
       ) {
-        detachedAssistantAskController?.kick();
+        const controller = detachedAssistantAskController;
+        if (controller) {
+          if (!ordinaryConsentedAssistantAskSelected) {
+            controller.kick();
+          } else {
+            const state = await readHostedSystemMailboxState(restored.vaultRoot);
+            const selectedItem = findNextHostedSystemMailboxQueueItem({
+              allowedRouteActions: null,
+              now: new Date().toISOString(),
+              state,
+            });
+            if (
+              selectedItem
+              && isHostedApprovedContinuationSystemMailboxItem(selectedItem)
+            ) {
+              const exactOwnerItemId = selectedSystemMailboxOwnerItem?.itemId ?? null;
+              startExactDetachedAssistantAsk = null;
+              controller.resume();
+              if (
+                exactDetachedAssistantAskCompletion === null
+                && exactOwnerItemId
+                && state.pending.some((pendingItem) =>
+                  pendingItem.itemId === exactOwnerItemId
+                )
+              ) {
+                void controller.kickExact(selectedItem.itemId).catch(() => undefined);
+              } else {
+                controller.kick();
+              }
+            }
+          }
+        }
       }
       if (
         outcome.status === "imported"
@@ -1666,7 +1698,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           const outcome = await options.importItem(importItem, context);
           assertRuntimeNotAborted();
-          kickDetachedAssistantAskAfterImport(importItem, outcome);
+          await kickDetachedAssistantAskAfterImport(importItem, outcome);
           return outcome;
         },
         createMailboxImportContext(context),
@@ -1678,7 +1710,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       assertRuntimeNotAborted();
       const outcome = await options.importItem(item, createMailboxImportContext(context));
       assertRuntimeNotAborted();
-      kickDetachedAssistantAskAfterImport(item, outcome);
+      await kickDetachedAssistantAskAfterImport(item, outcome);
       return outcome;
     };
     emitPhaseLog({
@@ -3425,7 +3457,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
     let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
     const systemMailboxOwnerSelectionAt = new Date().toISOString();
-    const selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
+    selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
       && !assistantExecutionBlocked
       ? findNextHostedSystemMailboxQueueItem({
           allowedRouteActions: null,
@@ -4080,9 +4112,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (exactDetachedAssistantAskCompletion) {
           return exactDetachedAssistantAskCompletion;
         }
+        startExactDetachedAssistantAsk = null;
         const completion = exactController.kickExact(exactItemId);
         exactDetachedAssistantAskCompletion = completion;
-        void completion.catch(() => undefined);
+        const releaseExactCompletion = () => {
+          if (exactDetachedAssistantAskCompletion === completion) {
+            exactDetachedAssistantAskCompletion = null;
+          }
+        };
+        void completion.then(releaseExactCompletion, releaseExactCompletion);
         return completion;
       };
     } else {

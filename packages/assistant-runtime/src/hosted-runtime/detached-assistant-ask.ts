@@ -135,12 +135,13 @@ export function createHostedDetachedAssistantAskController(
           return;
         }
         const exactRequest = activeExactItemId !== null;
-        if (result === "handoff" || exactRequest) {
+        if (result === "handoff") {
           closed = true;
           paused = true;
           kickRequested = false;
         }
-        const shouldKick = !closed && (kickRequested || result === "settled");
+        const shouldKick = !closed
+          && (kickRequested || (!exactRequest && result === "settled"));
         kickRequested = false;
         activeAbortController = null;
         activeExactItemId = null;
@@ -172,6 +173,7 @@ export function createHostedDetachedAssistantAskController(
     }
     if (activePromise !== null) {
       if (activeExactItemId !== null) {
+        kickRequested = true;
         return;
       }
       kickRequested = true;

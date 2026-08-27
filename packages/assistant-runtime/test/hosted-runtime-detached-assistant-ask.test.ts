@@ -172,7 +172,7 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("runs one exact ask without draining a later ask across intervening work", async () => {
+  test("runs one exact ask without automatically draining across intervening work", async () => {
     const vaultRoot = await createVaultRoot();
     const preparedRequestIds: string[] = [];
 
@@ -208,7 +208,6 @@ describe("hosted detached assistant ask controller", () => {
       });
 
       await controller.kickExact("item_exact");
-      controller.kick();
       await Promise.resolve();
       assert.deepEqual(preparedRequestIds, ["ask_event_exact"]);
       assert.deepEqual(
@@ -223,6 +222,63 @@ describe("hosted detached assistant ask controller", () => {
       );
       await controller.closeAndRequeue();
     } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("admits an explicitly kicked continuation after an active exact ask settles", async () => {
+    const vaultRoot = await createVaultRoot();
+    const firstPrepareStarted = createDeferred<void>();
+    const firstPrepareRelease = createDeferred<void>();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_exact_active", itemId: "item_exact_active" }),
+        createPendingAsk({ eventId: "ask_event_approved_later", itemId: "item_approved_later" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            if (request.requestId === "ask_event_exact_active") {
+              firstPrepareStarted.resolve();
+              await firstPrepareRelease.promise;
+            }
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      const exactCompletion = controller.kickExact("item_exact_active");
+      await firstPrepareStarted.promise;
+      controller.kick();
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact_active"]);
+
+      firstPrepareRelease.resolve();
+      await exactCompletion;
+      await waitUntil(() => {
+        assert.deepEqual(preparedRequestIds, [
+          "ask_event_exact_active",
+          "ask_event_approved_later",
+        ]);
+      });
+      await controller.closeAndRequeue();
+    } finally {
+      firstPrepareRelease.resolve();
       await removeVaultRoot(vaultRoot);
     }
   });

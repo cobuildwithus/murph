@@ -1,6 +1,6 @@
 # Hosted device catch-up and system-mailbox recovery
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-27
 
@@ -82,8 +82,13 @@ Updated: 2026-08-27
 10. [x] Prove exact-owner mode cannot be reopened by a later generic Ask import
     and foreground input cannot abort an approved detached continuation; scope
     both callbacks to the already-selected invocation mode.
-11. [ ] Commit, push, run final review with required CI, deploy, and prove live
-   mailbox and device-sync convergence.
+11. [x] Prove invocation-wide exact-mode suppression cannot strand a later
+    approved continuation; reuse the existing durable selector and detached
+    controller without admitting a later ordinary Ask ahead of device work.
+12. [x] Finish and verify the exact remediation candidate, then close this
+    implementation plan. Final ReviewGPT, required CI, merge, deployment, live
+    convergence proof, and worktree retirement remain release follow-through
+    after the plan commit.
 
 ## Decisions
 
@@ -135,6 +140,14 @@ Updated: 2026-08-27
 - Accepted final-review finding: the foreground observer applied ordinary exact-
   Ask abort/requeue semantics to approved detached continuations. Preserve those
   independent continuations by returning before exact-mode preemption logic.
+- Accepted final-review finding: the invocation-wide generic-kick veto and
+  permanent exact-controller closure also suppressed approved consultations
+  imported later in the same warm runtime. Keep exact attempts one-shot without
+  closing the shared controller; after import, reuse the existing global durable
+  selector and approved-continuation predicate. A selector-confirmed approved
+  item may reuse the controller, while an ordinary item remains durable behind
+  intervening device work. If foreground retired the unstarted ordinary owner,
+  claim only the selected approved item so the retired Ask stays pending.
 - Seven-round cap retrospective: review-driven changes stayed within the same
   existing invocation-local Ask controller, durable selector, and foreground
   watcher. The latest correction added no persisted state, selector, queue,
@@ -151,6 +164,11 @@ Updated: 2026-08-27
 
 - Run focused Junction request/provider tests and assistant-runtime durable-head
   owner-selection coverage, then the affected package typechecks.
+- Round-9 remediation proof: the two complete affected assistant-runtime test
+  files pass (59 tests), including ordinary-versus-approved post-exact ordering,
+  approved admission beside foreground work after the exact starter is retired,
+  and explicit controller reuse after an active exact attempt. The affected
+  package typecheck and diff check pass.
 - Inspect the final diff for removal of every multi-hour branch and privacy-safe
   evidence only; expand checks only when direct evidence or CI requires it.
 - After deployment, require the expired head to terminalize, the system frontier
@@ -178,3 +196,4 @@ Updated: 2026-08-27
   the immediate owner edge avoids waiting for periodic recovery, and the next
   invocation proves the staged input is still serviceable.
 - Provider failure preserves the same one-hour cursor and outer retry path.
+Completed: 2026-08-27

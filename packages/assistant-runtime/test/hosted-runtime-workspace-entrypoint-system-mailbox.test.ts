@@ -3,6 +3,7 @@ import {
   TEST_USER_ID,
   createBrowserVaultReplicaRef,
   createBundleRef,
+  createAssistantAskRequestedWake,
   createConsentedMemberAssistantAskRequestedWake,
   createDeferred,
   createDeviceSyncResolvedConfig,
@@ -4630,7 +4631,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("retires an unstarted exact ask across a foreground causal rerun", async () => {
+  test.each([
+    { approved: false, laterKind: "ordinary" },
+    { approved: true, laterKind: "approved" },
+  ])("retires an unstarted exact ask across a foreground causal rerun with a $laterKind later ask", async ({
+    approved,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -4643,6 +4649,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const firstAssistantPhaseRelease = createDeferred<void>();
     const secondAssistantPhaseStarted = createDeferred<void>();
     const secondAssistantPhaseRelease = createDeferred<void>();
+    const conversationImported = createDeferred<void>();
     const runtimeAbortController = new AbortController();
     const deviceSyncPort = createEmptyDeviceSyncPort();
     const firstAsk = createMailboxItem({
@@ -4758,9 +4765,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               return await enqueueHostedSystemMailboxItem({
                 item,
                 vaultRoot,
-                wake: createConsentedMemberAssistantAskRequestedWake({
-                  eventId: lateAsk.dedupeKey,
-                }),
+                wake: approved
+                  ? createAssistantAskRequestedWake({ eventId: lateAsk.dedupeKey })
+                  : createConsentedMemberAssistantAskRequestedWake({
+                      eventId: lateAsk.dedupeKey,
+                    }),
               });
             }
             assert.ok(
@@ -4773,6 +4782,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               vaultRoot,
             });
             importedAssistantInputIds.set(item.item.id, importedAssistantInputId);
+            if (item.item.id === conversationItem.id) {
+              conversationImported.resolve();
+            }
             events.push(`conversation.imported:${item.item.laneSeq}`);
             return {
               assistantInputId: importedAssistantInputId,
@@ -4786,6 +4798,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 if (request.action === "complete") {
                   throw new Error("A preempted startup-window ask must not complete.");
                 }
+                assert.equal(approved, true);
+                assert.equal(request.requestId, lateAsk.dedupeKey);
                 assistantAskPrepareCalls += 1;
                 events.push("ask.prepare");
                 assistantAskPrepareStarted.resolve();
@@ -4851,40 +4865,61 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         30_000,
         () => events.join(","),
       );
-
-      remoteItems.push(followUpConversationItem);
-      runtimeWakeSignal.notify();
-      firstAssistantPhaseRelease.resolve();
-      await withRealTimeout(
-        secondAssistantPhaseStarted.promise,
-        30_000,
-        () => events.join(","),
-      );
+      if (approved) {
+        await withRealTimeout(
+          assistantAskPrepareStarted.promise,
+          30_000,
+          () => events.join(","),
+        );
+        await withRealTimeout(
+          conversationImported.promise,
+          30_000,
+          () => events.join(","),
+        );
+      }
 
       const importedAssistantInputId = importedAssistantInputIds.get(
         conversationItem.id,
       );
-      const importedFollowUpAssistantInputId = importedAssistantInputIds.get(
-        followUpConversationItem.id,
-      );
-      assert.ok(importedAssistantInputId);
-      assert.ok(importedFollowUpAssistantInputId);
-      assert.deepEqual(assistantPhaseInputIds, [
-        [importedAssistantInputId],
-        [importedFollowUpAssistantInputId],
-      ]);
-      assert.equal(assistantAskPrepareCalls, 0);
+      assert.ok(importedAssistantInputId, events.join(","));
+      if (approved) {
+        assert.deepEqual(assistantPhaseInputIds, [[]]);
+      } else {
+        remoteItems.push(followUpConversationItem);
+        runtimeWakeSignal.notify();
+        firstAssistantPhaseRelease.resolve();
+        await withRealTimeout(
+          secondAssistantPhaseStarted.promise,
+          30_000,
+          () => events.join(","),
+        );
+        const importedFollowUpAssistantInputId = importedAssistantInputIds.get(
+          followUpConversationItem.id,
+        );
+        assert.ok(importedFollowUpAssistantInputId);
+        assert.deepEqual(assistantPhaseInputIds, [
+          [importedAssistantInputId],
+          [importedFollowUpAssistantInputId],
+        ]);
+      }
+      assert.equal(assistantAskPrepareCalls, approved ? 1 : 0);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
           item.itemId,
           item.status,
         ]),
-        [
-          [firstAsk.id, "pending"],
-          [deviceItem.id, "pending"],
-          [lateAsk.id, "pending"],
-        ],
+        approved
+          ? [
+              [firstAsk.id, "pending"],
+              [deviceItem.id, "pending"],
+              [lateAsk.id, "sending"],
+            ]
+          : [
+              [firstAsk.id, "pending"],
+              [deviceItem.id, "pending"],
+              [lateAsk.id, "pending"],
+            ],
       );
     } finally {
       runtimeAbortController.abort(
@@ -4905,10 +4940,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   }, 45_000);
 
-  test("holds later device maintenance behind the exact durable-head consented ask", async () => {
+  test.each([
+    { approved: false, laterKind: "ordinary" },
+    { approved: true, laterKind: "approved" },
+  ])("orders a later $laterKind ask after the exact durable-head ask", async ({
+    approved,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const remoteItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const firstPrepareStarted = createDeferred<void>();
     const firstPrepareRelease = createDeferred<void>();
     const deviceAttempted = createDeferred<void>();
@@ -4993,9 +5035,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             return await enqueueHostedSystemMailboxItem({
               item,
               vaultRoot,
-              wake: createConsentedMemberAssistantAskRequestedWake({
-                eventId: laterAsk.dedupeKey,
-              }),
+              wake: approved
+                ? createAssistantAskRequestedWake({ eventId: laterAsk.dedupeKey })
+                : createConsentedMemberAssistantAskRequestedWake({
+                    eventId: laterAsk.dedupeKey,
+                  }),
             });
           },
           platform: createPlatform({
@@ -5009,6 +5053,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                   events.push("ask.first.prepare");
                   firstPrepareStarted.resolve();
                   await firstPrepareRelease.promise;
+                  remoteItems.push(laterAsk);
+                  runtimeWakeSignal.notify();
                   events.push("ask.first.terminal");
                 } else {
                   events.push("ask.later.prepare");
@@ -5022,7 +5068,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             },
             deviceSyncPort,
             events,
-            mailboxPort: createMailboxPort({ events, items: [laterAsk] }),
+            mailboxPort: createMailboxPort({ events, items: remoteItems }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -5032,6 +5078,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               }),
             }),
           }),
+          runtimeWakeSignal,
           vaultRoot,
         },
       );
@@ -5061,17 +5108,20 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           < events.indexOf("device.snapshot"),
       );
       const laterAskIndex = events.indexOf("ask.later.prepare");
-      if (laterAskIndex >= 0) {
+      if (approved) {
+        assert.notEqual(laterAskIndex, -1);
+        assert.ok(laterAskIndex < events.indexOf("device.snapshot"));
+      } else if (laterAskIndex >= 0) {
         assert.ok(events.indexOf("device.snapshot") < laterAskIndex);
       }
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(result.status, "scheduled");
+      assert.equal(result.status, approved ? "idle" : "scheduled");
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
           item.itemId,
           item.status,
         ]),
-        [[laterAsk.id, "pending"]],
+        approved ? [] : [[laterAsk.id, "pending"]],
       );
     } finally {
       firstPrepareRelease.resolve();
