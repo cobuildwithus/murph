@@ -1,6 +1,6 @@
 # Remove weekly digest prompt override
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-26
 
@@ -60,13 +60,11 @@ Updated: 2026-08-26
 3. [x] Run the production-derived synthetic real-Codex journey. The default
    subscription returned `ASSISTANT_CODEX_USAGE_LIMIT` before provider entry;
    the explicitly authorized alternate-home retry passed with the target model.
-4. [ ] Complete the repository PR/review workflow after the live journey is
-   `Ready`. The preliminary specialist pass returned two findings; parent
-   dispositions and the accepted coverage remediation are recorded below. Two
-   Ready-event attempts reached the host-support production-bundle job but
-   failed its pre-build revision assertion when the mutable pull-request merge
-   ref advanced beyond the event's base revision; the patch was not built by
-   that job. The reproducible repository friction is recorded in Frog.
+4. [x] Complete the repository PR/review workflow and production rollout. The
+   preliminary specialist pass returned two findings; parent dispositions and
+   the accepted coverage remediation are recorded below. Exact-head CI passed,
+   the pull request merged, and the protected production deployment completed
+   with deployed-endpoint and live-model smoke proof.
 5. [x] Remove the redundant event-base comparison from the bundle-budget job.
    The job still proves the exact candidate SHA and pull-request head, derives
    its baseline from that candidate's exact first parent, and checks out that
@@ -108,14 +106,20 @@ Updated: 2026-08-26
 - Preliminary specialist result: findings. The parent rejected the requested
   prompt-overlay restoration and accepted/remediated the production-composition
   coverage finding; no coverage patch artifact was attached.
-- Blocked CI evidence: the host-support production-bundle job failed before
-  dependency installation on both the original and refreshed Ready events
-  because its mutable candidate first parent differed from the immutable event
-  base. Other completed checks remained green; this is separate from the
-  product patch and remains a required-CI blocker.
+- Historical CI diagnosis: the host-support production-bundle job initially
+  failed before dependency installation because its mutable candidate first
+  parent differed from the immutable event base. The stale event-base check was
+  removed while preserving exact candidate and pull-request head validation.
 - Passed: bundle-budget workflow contract (12 tests), pull-request CI policy
   (21 tests), and the direct workflow contract executable after removing the
   stale event-base assertion.
+- Passed: all required exact-head pull-request checks, including production
+  runner bundle budget, Assistant coverage, Platform coverage, App
+  verification, and the release aggregate.
+- Passed: protected production deployment from the merged public commit, 100%
+  traffic convergence on the new Worker version, deployed-endpoint smoke, and
+  live-model smoke. A bounded post-deploy runtime-log aggregate found no error
+  or fatal events. The public changelog entry is live on the production domain.
 - Unrelated local broad-lane failures: `pnpm test:diff` passed syntax,
   architecture, privacy/logging, provider-boundary, tooling typecheck, and
   dependency-policy gates, then finished with 711 passing repo-tools tests and
@@ -123,3 +127,4 @@ Updated: 2026-08-26
   one Crabbox signal-forwarding test timed out before its synthetic descendant
   became ready. Neither failed suite imports or exercises the changed workflow
   or bundle-budget policy.
+Completed: 2026-08-26
