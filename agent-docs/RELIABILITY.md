@@ -863,8 +863,13 @@ Last verified: 2026-08-23
   and optional staging run in one transaction under chat, owner, then route
   lock order. Established group messages and active-group edits likewise take
   chat ownership before participant/member or route ownership, so current Linq
-  group transactions have one order across that shared lock pair. The next
-  ordinary group message cannot overtake a unique change after ledger insertion,
+  group transactions have one order across that shared lock pair. A visible
+  signup handoff for an already-existing direct chat takes that same chat lock
+  before its member row and rechecks live thread ownership under both locks. A
+  direct-to-group takeover therefore suppresses the stale personal send without
+  cycling against a concurrent group edit; a fallback that creates a new chat
+  remains member-only because no chat exists to lock. The next ordinary group
+  message cannot overtake a unique change after ledger insertion,
   and projection cleanup cannot deadlock against a labeled append. A unique
   addition atomically retains the existing anonymous
   route bit; a removal has no send or wake fallback. Identity and

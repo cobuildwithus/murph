@@ -425,6 +425,37 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("locks an existing signup chat before its member row", async () => {
+    const lockOrder: string[] = [];
+    transportBoundaryMocks.acquireHostedLinqChatOwnershipLockTx
+      .mockImplementation(async () => {
+        lockOrder.push("chat");
+      });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-signup-lock-order",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    prisma.$queryRaw.mockImplementation(async () => {
+      lockOrder.push("member");
+      return [{ id: "member-1" }];
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+    expect(lockOrder).toEqual(["chat", "member"]);
+  });
+
   it("commits accepted group delivery with the exact reply time before the provider fence returns", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",

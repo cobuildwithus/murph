@@ -1309,6 +1309,9 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   const signupEffect = isHostedLinqSignupMessageSideEffect(input.effect)
     ? input.effect
     : null;
+  const existingSignupChatId = signupEffect?.payload.template === "invite_signup"
+    ? signupEffect.payload.chatId
+    : null;
   const groupLineRecoveryEffect =
     isHostedLinqGroupLineRecoverySideEffect(input.effect)
       ? input.effect
@@ -1327,6 +1330,15 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     let dispatchSourceRef = input.effect.effectId;
     let recoveryCapacityClaimed = false;
     if (signupEffect) {
+      // Existing-thread dispatch composes with group ingress and edits. Take
+      // their shared chat authority before the signup member row; create-chat
+      // fallback has no chat authority and remains member-only.
+      if (existingSignupChatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId: existingSignupChatId,
+          tx: prisma,
+        });
+      }
       await lockHostedMemberRow(
         prisma,
         signupEffect.payload.memberId,
@@ -1477,10 +1489,12 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     const template = dispatchEffect.payload.template;
     const target = readHostedLinqSideEffectDeliveryTarget(dispatchEffect.payload);
     if (target.linqChatId) {
-      await acquireHostedLinqChatOwnershipLockTx({
-        chatId: target.linqChatId,
-        tx: prisma,
-      });
+      if (target.linqChatId !== existingSignupChatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId: target.linqChatId,
+          tx: prisma,
+        });
+      }
       await assertHostedLinqSideEffectRouteAuthority(dispatchEffect, prisma);
     }
     const groupJoinOutreachId = isHostedLinqSignupMessageSideEffect(dispatchEffect)
