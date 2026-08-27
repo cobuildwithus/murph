@@ -100,8 +100,12 @@ const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
 const HOSTED_GROUP_CONTEXT_HANDOFF_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-context-handoff.request.v1";
+const HOSTED_GROUP_CONTEXT_HANDOFF_DELIVERY_KEY_NAMESPACE =
+  "murph.hosted-group-context-handoff.delivery.v1";
 const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-member-assistant-ask.request.v2";
+const HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX =
+  "participant-target-sha256:";
 const HOSTED_ASSISTANT_ASK_COMPLETION_ID_PREFIX = "aask_done_";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE =
   "hosted-assistant-ask";
@@ -200,6 +204,28 @@ export function createHostedGroupContextHandoffEventId(input: {
     .update(input.memberId)
     .update("\0")
     .update(input.originAssistantInputId)
+    .digest("hex")}`;
+}
+
+function createHostedGroupParticipantAskBinding(
+  participantTargetDigest: string,
+): string {
+  return `${HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX}${participantTargetDigest}`;
+}
+
+function createHostedGroupContextHandoffDeliveryKey(input: {
+  eventId: string;
+  participantTargetDigest: string | null;
+}): string {
+  if (input.participantTargetDigest === null) {
+    return input.eventId;
+  }
+  return `group_handoff_delivery_${createHash("sha256")
+    .update(HOSTED_GROUP_CONTEXT_HANDOFF_DELIVERY_KEY_NAMESPACE)
+    .update("\0")
+    .update(input.eventId)
+    .update("\0")
+    .update(input.participantTargetDigest)
     .digest("hex")}`;
 }
 
@@ -435,6 +461,7 @@ async function requestHostedGroupAssistantAskByParticipants(input: {
   });
   const participantTargetDigest = createHostedGroupParticipantTargetDigest(
     input.participantTarget,
+    requestedLabel,
   );
 
   const existing = await readHostedMailboxItemById({
@@ -556,9 +583,9 @@ async function requestHostedGroupAssistantAskByParticipants(input: {
           target: {
             kind: "joined_group",
             membershipId: authority.membership.id,
-            participantTargetDigest: selection.participantTargetDigest,
-            requestedLabel,
-            targetDisplayLabel: selection.targetLabel,
+            requestedLabel: createHostedGroupParticipantAskBinding(
+              participantTargetDigest,
+            ),
           },
         },
         eventId: requestId,
@@ -624,7 +651,10 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     originAssistantInputId: input.originAssistantInputId,
   });
   const participantTargetDigest = input.participantTarget
-    ? createHostedGroupParticipantTargetDigest(input.participantTarget)
+    ? createHostedGroupParticipantTargetDigest(
+        input.participantTarget,
+        requestedLabel,
+      )
     : null;
 
   if (await readHostedMailboxItemById({
@@ -682,8 +712,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
           }
         : {
             membershipId: participantSelection.membershipId,
-            participantTargetDigest:
-              participantSelection.participantTargetDigest,
+            participantTargetDigest: participantTargetDigest ?? undefined,
             routeAuthority: participantSelection.routeAuthority,
             targetLabel: participantSelection.targetLabel,
             targetRuntimeMemberId: participantSelection.targetRuntimeMemberId,
@@ -750,24 +779,22 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
   const expiresAt = new Date(
     now.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   ).toISOString();
+  const deliveryKey = createHostedGroupContextHandoffDeliveryKey({
+    eventId,
+    participantTargetDigest:
+      preparedSelection.participantTargetDigest ?? null,
+  });
   const wake = buildHostedExecutionAssistantNotificationRequestedWake({
     eventId,
     memberId: preparedSelection.targetRuntimeMemberId,
     notification: {
-      deliveryDedupeToken: eventId,
+      deliveryDedupeToken: deliveryKey,
       deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: eventId,
+      deliveryIdempotencyKey: deliveryKey,
       externalThreadRouteAuthority: routeAuthority,
       groupContextHandoff: {
         membershipId: preparedSelection.membershipId,
         originAssistantInputId: input.originAssistantInputId,
-        ...(preparedSelection.participantTargetDigest
-          ? {
-              participantTargetDigest:
-                preparedSelection.participantTargetDigest,
-              targetDisplayLabel: preparedSelection.targetLabel,
-            }
-          : {}),
       },
       instructions: buildHostedGroupContextHandoffInstructions({ context }),
       notificationPromptProfile: "context-handoff",
@@ -2175,6 +2202,10 @@ async function replayHostedGroupContextHandoffTx(input: {
   const expiresAtMs = input.existingExpiresAt
     ? Date.parse(input.existingExpiresAt)
     : Number.NaN;
+  const deliveryKey = createHostedGroupContextHandoffDeliveryKey({
+    eventId: input.eventId,
+    participantTargetDigest: input.participantTargetDigest,
+  });
   if (
     !wake
     || wake.kind !== "assistant.notification.requested"
@@ -2184,8 +2215,8 @@ async function replayHostedGroupContextHandoffTx(input: {
     || expiresAtMs
       !== occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS
     || !notification
-    || notification.deliveryDedupeToken !== input.eventId
-    || notification.deliveryIdempotencyKey !== input.eventId
+    || notification.deliveryDedupeToken !== deliveryKey
+    || notification.deliveryIdempotencyKey !== deliveryKey
     || notification.deliveryDispatchMode !== "queue-only"
     || notification.firstContact != null
     || notification.privateAssistantAskCompletion != null
@@ -2195,8 +2226,6 @@ async function replayHostedGroupContextHandoffTx(input: {
       !== buildHostedGroupContextHandoffInstructions({ context: input.context })
     || !handoff
     || handoff.originAssistantInputId !== input.originAssistantInputId
-    || (handoff.participantTargetDigest ?? null)
-      !== input.participantTargetDigest
     || !routeAuthority
     || routeAuthority.containerMemberId !== wake.userId
     || !route
@@ -2259,7 +2288,7 @@ async function replayHostedGroupContextHandoffTx(input: {
     },
     result: {
       status: "accepted",
-      targetLabel: handoff.targetDisplayLabel ?? authority.targetLabel,
+      targetLabel: authority.targetLabel,
     },
   };
 }
@@ -2310,9 +2339,11 @@ async function replayHostedGroupAssistantAskTx(input: {
     wake.ask.originAssistantInputId !== input.originAssistantInputId
     || wake.ask.originSessionId !== input.originSessionId
     || wake.ask.question !== input.question
-    || wake.ask.target.requestedLabel !== input.requestedLabel
-    || (wake.ask.target.participantTargetDigest ?? null)
-      !== (input.participantTargetDigest ?? null)
+    || wake.ask.target.requestedLabel !== (
+      input.participantTargetDigest
+        ? createHostedGroupParticipantAskBinding(input.participantTargetDigest)
+        : input.requestedLabel
+    )
     || createHostedAssistantAskRequestId({
       memberId: input.memberId,
       originAssistantInputId: wake.ask.originAssistantInputId,
@@ -2340,7 +2371,7 @@ async function replayHostedGroupAssistantAskTx(input: {
     },
     result: {
       status: "accepted",
-      targetLabel: wake.ask.target.targetDisplayLabel ?? authority.targetLabel,
+      targetLabel: authority.targetLabel,
     },
   };
 }
@@ -2535,9 +2566,7 @@ async function readHostedAssistantAskAuthorityTx(input: {
         originMemberId: membershipAuthority.membership.memberId,
         originSessionId: wake.ask.originSessionId,
         question: wake.ask.question,
-        targetLabel:
-          wake.ask.target.targetDisplayLabel
-          ?? membershipAuthority.targetLabel,
+        targetLabel: membershipAuthority.targetLabel,
       },
       terminalReason: null,
     };

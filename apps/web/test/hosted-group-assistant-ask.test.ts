@@ -167,9 +167,7 @@ function createPrisma(input: {
 
 function requestWake(input: {
   membershipId?: string;
-  participantTargetDigest?: string;
   requestedLabel?: string | null;
-  targetDisplayLabel?: string;
 } = {}) {
   const requestId = createHostedAssistantAskRequestId({
     memberId: ORIGIN_MEMBER_ID,
@@ -186,13 +184,7 @@ function requestWake(input: {
       target: {
         kind: "joined_group",
         membershipId: input.membershipId ?? "membership-one",
-        ...(input.participantTargetDigest
-          ? { participantTargetDigest: input.participantTargetDigest }
-          : {}),
         requestedLabel: input.requestedLabel ?? null,
-        ...(input.targetDisplayLabel
-          ? { targetDisplayLabel: input.targetDisplayLabel }
-          : {}),
       },
     },
     eventId: requestId,
@@ -348,7 +340,6 @@ describe("Hosted group Assistant Ask admission", () => {
     );
     mocks.selectHostedGroupByParticipants.mockResolvedValue({
       membershipId: "membership-one",
-      participantTargetDigest: "d".repeat(64),
       routeAuthority: groupDestination().bound.externalThreadRouteAuthority,
       status: "selected",
       targetLabel: "1 person: Jordan",
@@ -442,7 +433,7 @@ describe("Hosted group Assistant Ask admission", () => {
     );
   });
 
-  it("persists only safe participant evidence after final authority checks", async () => {
+  it("persists only a normalized participant binding after final authority checks", async () => {
     const { prisma } = createPrisma();
     const participantTarget = {
       participants: [{ displayName: "Jordan" }],
@@ -478,9 +469,9 @@ describe("Hosted group Assistant Ask admission", () => {
             target: {
               kind: "joined_group",
               membershipId: "membership-one",
-              participantTargetDigest: "d".repeat(64),
-              requestedLabel: null,
-              targetDisplayLabel: "1 person: Jordan",
+              requestedLabel: `participant-target-sha256:${
+                createHostedGroupParticipantTargetDigest(participantTarget)
+              }`,
             },
           }),
         }),
@@ -493,9 +484,9 @@ describe("Hosted group Assistant Ask admission", () => {
       participants: [{ displayName: "Jordan" }],
     } as const;
     const wake = requestWake({
-      participantTargetDigest:
-        createHostedGroupParticipantTargetDigest(originalTarget),
-      targetDisplayLabel: "1 person: Jordan",
+      requestedLabel: `participant-target-sha256:${
+        createHostedGroupParticipantTargetDigest(originalTarget)
+      }`,
     });
     const { prisma } = createPrisma();
     mocks.readHostedMailboxItemById.mockResolvedValue(mailboxItemForWake(wake));
@@ -713,7 +704,6 @@ describe("Hosted private-to-group context handoff admission", () => {
     );
     mocks.selectHostedGroupByParticipants.mockResolvedValue({
       membershipId: "membership-one",
-      participantTargetDigest: "d".repeat(64),
       routeAuthority: groupDestination().bound.externalThreadRouteAuthority,
       status: "selected",
       targetLabel: "1 person: Jordan",
@@ -807,11 +797,15 @@ describe("Hosted private-to-group context handoff admission", () => {
       .toHaveBeenCalledWith(expect.objectContaining({
         envelope: expect.objectContaining({
           notification: expect.objectContaining({
+            deliveryDedupeToken: expect.stringMatching(
+              /^group_handoff_delivery_[0-9a-f]{64}$/u,
+            ),
+            deliveryIdempotencyKey: expect.stringMatching(
+              /^group_handoff_delivery_[0-9a-f]{64}$/u,
+            ),
             groupContextHandoff: {
               membershipId: "membership-one",
               originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-              participantTargetDigest: "d".repeat(64),
-              targetDisplayLabel: "1 person: Jordan",
             },
           }),
         }),

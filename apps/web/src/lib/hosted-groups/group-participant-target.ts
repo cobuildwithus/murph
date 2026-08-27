@@ -77,13 +77,11 @@ interface HostedGroupParticipantCandidate {
 
 export type HostedGroupParticipantTargetSelection =
   | {
-      participantTargetDigest: string;
       result: HostedRuntimeGroupAskResult;
       status: "result";
     }
   | {
       membershipId: string;
-      participantTargetDigest: string;
       routeAuthority: HostedExecutionExternalThreadRouteAuthority;
       status: "selected";
       targetLabel: string;
@@ -92,6 +90,7 @@ export type HostedGroupParticipantTargetSelection =
 
 export function createHostedGroupParticipantTargetDigest(
   target: HostedRuntimeGroupParticipantTarget,
+  requestedLabel: string | null = null,
 ): string {
   const participants = (target.participants ?? [])
     .map((cue) => ({
@@ -121,6 +120,7 @@ export function createHostedGroupParticipantTargetDigest(
         ? {}
         : { participantCount: target.participantCount }),
       ...(participants.length === 0 ? {} : { participants }),
+      ...(requestedLabel === null ? {} : { requestedLabel }),
     }))
     .digest("hex");
 }
@@ -132,21 +132,18 @@ export async function selectHostedGroupByParticipants(input: {
   prisma: PrismaClient;
   requestedLabel: string | null;
 }): Promise<HostedGroupParticipantTargetSelection> {
-  const participantTargetDigest = createHostedGroupParticipantTargetDigest(
-    input.participantTarget,
-  );
   const memberships = await readParticipantTargetMemberships({
     memberId: input.memberId,
     prisma: input.prisma,
   });
   if (memberships.length === 0) {
-    return selectionResult(participantTargetDigest, { status: "no_groups" });
+    return selectionResult({ status: "no_groups" });
   }
   if (
     memberships.length
     > HOSTED_GROUP_PARTICIPANT_TARGET_MEMBERSHIPS_MAX
   ) {
-    return selectionUnavailable(participantTargetDigest, "too_many_groups");
+    return selectionUnavailable("too_many_groups");
   }
 
   const runtimeMemberIds = memberships.flatMap(({ group }) =>
@@ -162,7 +159,7 @@ export async function selectHostedGroupByParticipants(input: {
     && allowedRuntimeMemberIds.has(group.runtimeMemberId)
   );
   if (activeMemberships.length === 0) {
-    return selectionUnavailable(participantTargetDigest, "membership_unavailable");
+    return selectionUnavailable("membership_unavailable");
   }
 
   const providerSignal = AbortSignal.timeout(
@@ -186,13 +183,10 @@ export async function selectHostedGroupByParticipants(input: {
       || !routes.authorities.has(group.runtimeMemberId)
     )
   ) {
-    return selectionUnavailable(
-      participantTargetDigest,
-      "participant_evidence_unavailable",
-    );
+    return selectionUnavailable("participant_evidence_unavailable");
   }
   if (linqMemberships.length === 0) {
-    return selectionUnavailable(participantTargetDigest, "group_route_unavailable");
+    return selectionUnavailable("group_route_unavailable");
   }
 
   const candidates = await readParticipantCandidates({
@@ -203,10 +197,7 @@ export async function selectHostedGroupByParticipants(input: {
     signal: providerSignal,
   });
   if (!candidates) {
-    return selectionUnavailable(
-      participantTargetDigest,
-      "participant_evidence_unavailable",
-    );
+    return selectionUnavailable("participant_evidence_unavailable");
   }
 
   const matches = candidates.filter((candidate) =>
@@ -223,11 +214,10 @@ export async function selectHostedGroupByParticipants(input: {
     const selected = matches[0]!;
     const targetRuntimeMemberId = selected.membership.group.runtimeMemberId;
     if (!targetRuntimeMemberId) {
-      return selectionUnavailable(participantTargetDigest, "membership_unavailable");
+      return selectionUnavailable("membership_unavailable");
     }
     return {
       membershipId: selected.membership.id,
-      participantTargetDigest,
       routeAuthority: selected.routeAuthority,
       status: "selected",
       targetLabel: describeParticipantCandidate(selected),
@@ -238,12 +228,11 @@ export async function selectHostedGroupByParticipants(input: {
   const clarificationCandidates = matches.length > 1 ? matches : candidates;
   const labels = readUniqueCandidateDescriptions(clarificationCandidates);
   return labels.length > 0 && labels.length <= HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX
-    ? selectionResult(participantTargetDigest, {
+    ? selectionResult({
         groupLabels: labels,
         status: "clarification_required",
       })
     : selectionUnavailable(
-        participantTargetDigest,
         matches.length > 1
           ? "ambiguous_participant_target"
           : "participant_target_unavailable",
@@ -561,17 +550,15 @@ function pluralizePeople(count: number): string {
 }
 
 function selectionResult(
-  participantTargetDigest: string,
   result: HostedRuntimeGroupAskResult,
 ): HostedGroupParticipantTargetSelection {
-  return { participantTargetDigest, result, status: "result" };
+  return { result, status: "result" };
 }
 
 function selectionUnavailable(
-  participantTargetDigest: string,
   unavailableReason: string,
 ): HostedGroupParticipantTargetSelection {
-  return selectionResult(participantTargetDigest, {
+  return selectionResult({
     status: "unavailable",
     unavailableReason,
   });

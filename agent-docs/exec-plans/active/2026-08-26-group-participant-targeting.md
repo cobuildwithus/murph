@@ -75,9 +75,9 @@ Updated: 2026-08-26
 4. Risk: this PR conflicts with the concurrent membership-list-bound change.
    Mitigation: keep the provider-scan ceiling Web-local, prove selection above
    25 memberships, and do not duplicate its presentation cap as authority.
-5. Risk: Web, Worker, and warm runner deploy out of order. Mitigation: use an
-   additive reader-first wire shape or gate the producer, document rollback
-   floor, and verify mixed-version behavior.
+5. Risk: Web, Worker, and warm runner deploy out of order. Mitigation: keep the
+   existing mailbox shapes unchanged, use only old-reader-compatible encrypted
+   fields for replay bindings, and verify mixed-version behavior.
 
 ## Tasks
 

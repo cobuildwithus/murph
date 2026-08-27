@@ -1857,7 +1857,8 @@ Last verified: 2026-08-23
   duplicate/ambiguous safe description fails closed without choosing or
   queueing. Provider and KMS work remains outside transactions. The final
   transaction rechecks the selected membership and exact route, while exact
-  replay compares the persisted normalized participant-target digest.
+  replay compares a versioned normalized participant-target digest binding in
+  the existing encrypted request fields. No new mailbox shape is required.
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
   `5xx`. This applies only to group `ask`, `ask_member`, the canonical

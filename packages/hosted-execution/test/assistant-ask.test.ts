@@ -110,30 +110,6 @@ describe("hosted Assistant Ask contracts", () => {
     expect(isHostedExecutionAssistantAskRequestedWake(completedWake)).toBe(false);
   });
 
-  it("preserves participant-selection replay evidence on joined-group asks", () => {
-    const participantTargetDigest = "a".repeat(64);
-    const ask = createRequestedAsk({
-      target: {
-        kind: "joined_group",
-        membershipId: "hgrpm_generation_123",
-        participantTargetDigest,
-        requestedLabel: null,
-        targetDisplayLabel: "2 people: Jordan, number ending 0456",
-      },
-    });
-
-    expect(parseHostedExecutionAssistantAskRequestedPayload(ask))
-      .toEqual(ask);
-    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
-      ...ask,
-      target: { ...ask.target, participantTargetDigest: "not-a-digest" },
-    })).toThrow(/SHA-256 digest/u);
-    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
-      ...ask,
-      target: { ...ask.target, targetDisplayLabel: undefined },
-    })).toThrow(/must appear together/u);
-  });
-
   it("parses paired events and the canonical cannot-answer result", () => {
     const requestedEvent = {
       ask: createRequestedAsk({

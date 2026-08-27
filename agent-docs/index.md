@@ -73,8 +73,8 @@ group by exact title or complete live participant evidence. Participant names
 come only from the authenticated requester's shared Contacts projection;
 otherwise the model sees bounded area-code/last-four or generic email hints.
 Selection fails closed on incomplete evidence and persists only a normalized
-evidence digest plus a safe target label. Provider titles are sanitized and
-stored only when a new group row is materialized, with no backfill or rename
+evidence-digest binding in existing encrypted request fields. Provider titles
+are sanitized and stored only when a new group row is materialized, with no backfill or rename
 sync. The ownership, privacy, and load boundaries are specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/product-specs/ios-address-book-advisory-names.md`, and

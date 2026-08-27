@@ -289,8 +289,6 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
 export interface HostedExecutionGroupContextHandoffNotification {
   membershipId: string;
   originAssistantInputId: string;
-  participantTargetDigest?: string;
-  targetDisplayLabel?: string;
 }
 
 export interface HostedExecutionOperatorTaskNotification {
@@ -336,9 +334,7 @@ export const HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS = 10 * 60 * 1_000;
 export interface HostedExecutionAssistantAskJoinedGroupTarget {
   kind: "joined_group";
   membershipId: string;
-  participantTargetDigest?: string;
   requestedLabel: string | null;
-  targetDisplayLabel?: string;
 }
 
 export interface HostedExecutionAssistantAskConsentedMemberTarget {

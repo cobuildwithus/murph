@@ -122,6 +122,13 @@ describe("hosted group participant targeting", () => {
 
     expect(first).toBe(reordered);
     expect(first).toMatch(/^[0-9a-f]{64}$/u);
+    expect(createHostedGroupParticipantTargetDigest(
+      { participants: [{ displayName: "Taylor" }] },
+      "morning crew",
+    )).not.toBe(createHostedGroupParticipantTargetDigest(
+      { participants: [{ displayName: "Taylor" }] },
+      "evening crew",
+    ));
   });
 
   it("selects for a current non-owner member across more than 25 groups", async () => {
@@ -257,7 +264,6 @@ describe("hosted group participant targeting", () => {
       prisma: prisma as never,
       requestedLabel: null,
     })).resolves.toEqual({
-      participantTargetDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
       result: {
         status: "unavailable",
         unavailableReason: "participant_evidence_unavailable",
