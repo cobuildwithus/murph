@@ -3742,14 +3742,14 @@ result explicitly attributed to the earlier request and says the later request
 was not analyzed. This prevents either a duplicate-call status from replacing
 the first result or the first video's evidence from being presented as the
 second video's answer. This adds no durable result owner or retry.
-For completed turns, the exact trusted tool-failure status replaces model
-wording so Murph cannot infer whether Gemini processed the clip. A successful
-observation fills blank output and also replaces a narrow false-unavailable
-reply when the model says the returned result was missing; other non-empty
-model/card wording still wins. If the primary provider transport itself fails
-after the tool result but before final assembly, the ordinary outer turn retry
-remains the owner; v1 does not promote the fallback through failed-attempt
-delivery state.
+For completed turns, Codex owns every non-empty semantic reply. The runtime
+does not classify, replace, or append to model wording. It retains the latest
+structured video-tool fallback only for blank or no-reply recovery, including
+the composed earlier-result attribution and later-request-not-analyzed status
+from a distinct same-turn request. If the primary provider transport itself
+fails after the tool result but before final assembly, the ordinary outer turn
+retry remains the owner; v1 does not promote the fallback through
+failed-attempt delivery state.
 
 Hosted execution carries only the Gemini sentinel in the runner. The exact
 Google host, model path, method, JSON shape, MIME set, sampling profile,

@@ -205,7 +205,9 @@ completed provider result remains bound in turn memory to its accepted message,
 attachment ordinal, complete question, and sampling mode across group-draft
 reconsideration. Exact repeats reuse it without another Gemini call; distinct
 later requests remain explicitly unanalyzed and cannot inherit its evidence.
-There is no durable result state. The
+Codex owns every non-empty semantic reply; the runtime retains only the latest
+structured result for blank or no-reply recovery. There is no prose classifier
+or durable result state. The
 architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and

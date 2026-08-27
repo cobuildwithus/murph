@@ -1,6 +1,6 @@
 # Focused Gemini video analysis with selectable temporal detail
 
-Status: active
+Status: completed
 Created: 2026-08-26
 Updated: 2026-08-27
 
@@ -154,11 +154,11 @@ Updated: 2026-08-27
   the instruction to one call, and explains that untrusted observational
   content is evidence rather than instructions. Focused deterministic tests
   cover success, exact failure status, the duplicate-call guard, and preserving
-  the first truthful result. The final runtime fallback also returns the exact
-  failure status and replaces a narrow false-unavailable reply after a
-  successful observation. The detailed-motion, standard-speech, and focused
-  no-usable-result live journeys each passed with one tool call, one Gemini
-  call, and a direct truthful reply.
+  the first truthful result. Codex owns every non-empty reply; the runtime uses
+  the latest structured video fallback only for blank or no-reply recovery.
+  The detailed-motion, standard-speech, and focused no-usable-result live
+  journeys each passed with one tool call, one Gemini call, and a direct
+  truthful reply.
 - The assistant verification workflow now has standing authorization to try
   every available authenticated local Codex home once, in stable order, when a
   run fails before provider action. It stops rotating as soon as one run reaches
@@ -205,14 +205,30 @@ Updated: 2026-08-27
   changed group-turn lifecycle. Production-shaped held-draft proof uses two
   distinct accepted video identities for first-call success and first-call
   failure, asserts one Gemini call, and checks the combined truthful reply.
-  Exact-head round 6 remains required.
+- Round 6 accepted two bounded findings. The existing stateful dynamic-tool
+  chain now serializes video calls before provider egress, so overlapping exact
+  or distinct requests cannot race into two Gemini calls. Its attempted
+  free-form reply correction proved too broad in round 7: prose classifiers
+  could erase valid compound replies and still miss the structured status for
+  a distinct later request.
+- The recorded round-7 retrospective returned response ownership to the
+  smallest boundary. Codex owns every non-empty semantic reply; the runtime
+  uses the latest structured tool fallback only for blank or no-reply recovery.
+  Candidate `6dad9fe9dca5c5b4a5090c554da4075c4c2bcbcf` deletes both regex
+  catalogs, the success/failure outcome field, and the whole-message resolver.
+  The correction is 7 source additions / 64 deletions. Thirteen focused App
+  Server cases, 32 direct tool cases, four overlap cases, and Assistant Engine
+  typecheck passed. Final ReviewGPT round 7 then passed the full exact-head
+  snapshot without a blocking finding.
 - Current `main`, including the separately merged authenticated-group video
   capability, was merged into the candidate. The four bounded conflicts kept
   both the group authority contract and this PR's complete-question, sampling,
   one-provider-call, and truthful-result behavior. Focused direct/group tests,
   typecheck, and real-Codex detailed, standard, failure, and cross-participant
   group journeys passed on the combined tree.
-- Draft PR #2373 is mergeable. Product UX is `Ready`; the PR remains draft while
-  the corrected candidate completes exact-head final ReviewGPT round 6. Broad
-  exact-head CI, merge, deployment proof, and guarded retirement have not
-  started.
+- PR #2373 reached merge admission on exact head
+  `6dad9fe9dca5c5b4a5090c554da4075c4c2bcbcf`: Product UX is `Ready`, focused
+  proof is green, and the final full-snapshot ReviewGPT gate passed. Broad
+  exact-head CI, merge, deployment proof, and guarded retirement follow after
+  this plan is archived.
+Completed: 2026-08-27

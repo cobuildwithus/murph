@@ -398,13 +398,13 @@ Last verified: 2026-08-27
   request while saying the later request was not analyzed. It must neither
   replace the completed result with an internal duplicate-call status nor use
   earlier-video evidence to answer the later request.
-  Completed turns use the exact trusted failure status instead of model
-  wording, so a failed result does not become a guess about provider
-  processing. A successful observation fills blank output and replaces only a
-  narrow false-unavailable reply; other non-empty model/card wording wins. A
-  terminal primary provider failure after the tool result remains under
-  ordinary outer-turn retry ownership; the failed attempt does not
-  independently deliver that fallback.
+  Codex owns every non-empty semantic reply; the runtime does not classify,
+  replace, or append to model wording. The runtime retains the latest
+  structured video-tool fallback only for blank or no-reply recovery,
+  including the composed status for a distinct later request. A terminal
+  primary provider failure after the tool result remains under ordinary
+  outer-turn retry ownership; the failed attempt does not independently
+  deliver that fallback.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no
