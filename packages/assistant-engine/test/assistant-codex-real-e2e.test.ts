@@ -79,6 +79,7 @@ import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -2999,6 +3000,128 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'binds a requested native access repost to the current group message',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-access-repost-e2e-'),
+      )
+      const messageRef = `ain_${'a'.repeat(32)}`
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-group-repost',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox-group-repost'],
+              originSessionId: 'session-group-repost',
+              recipientKey: 'recipient-group-repost',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'post_join_offer',
+                  result: {
+                    group: {
+                      displayName: null,
+                      id: 'group_synthetic_repost',
+                      kind: 'friends',
+                      memberCount: 1,
+                      members: [],
+                      requestedVaultShareProjectionKinds: [],
+                      requestedVaultShareProjectionScopes: [],
+                      status: 'active',
+                    },
+                    joinUrl: 'https://example.test/groups/join/synthetic',
+                    offeredAt: '2026-08-26T18:00:00.000Z',
+                    offerState: 'posted',
+                    status: 'sent',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            'Sender: participant-a',
+            'Current member message:',
+            '"The group access prompt is buried now. Please post a fresh native one in this chat so another participant can join."',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const accessCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_DATA_TOOL.name
+        )
+
+        process.stdout.write(
+          `[group-access-repost-e2e] ${JSON.stringify({
+            accessCallCount: accessCalls.length,
+            finalMessage: result.finalMessage,
+            groupRequests,
+          })}\n`,
+        )
+        expect(accessCalls).toHaveLength(1)
+        expect(accessCalls[0]).toMatchObject({
+          argumentsValue: {
+            action: 'offer_access',
+            message_ref: messageRef,
+          },
+        })
+        expect(groupRequests).toHaveLength(1)
+        expect(groupRequests[0]).toMatchObject({
+          action: 'post_join_offer',
+          repostOriginAssistantInputId: messageRef,
+        })
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
   )
 
   it(
@@ -9220,6 +9343,205 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 })
+
+describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
+  it('resolves an exact menu label before saving a restaurant meal', {
+    timeout: 900_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-restaurant-meal-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'meal-commands.log')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+        materializeRestaurantMealVaultCli({
+          binDirectory,
+          commandLogPath,
+        }),
+        writeFile(commandLogPath, '', 'utf8'),
+      ])
+
+      const inheritedPath = normalizeEnvString(config.env.PATH)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: {
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+          turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: inheritedPath
+            ? `${binDirectory}${path.delimiter}${inheritedPath}`
+            : binDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
+          'The standard plate is the complete item and portion description.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      const searchIndex = commands.findIndex((command) =>
+        command.startsWith('food search-labels ')
+      )
+      const addIndex = commands.findIndex((command) =>
+        command.startsWith('meal add ')
+        && !command.includes(' --help')
+        && command.includes(' --note ')
+        && !command.includes(' --name ')
+      )
+      const addCommand = commands[addIndex] ?? ''
+
+      process.stdout.write(
+        `[restaurant-meal-nutrition-e2e] ${JSON.stringify({
+          commands,
+          finalMessage: result.finalMessage,
+        })}\n`,
+      )
+      expect(searchIndex).toBeGreaterThanOrEqual(0)
+      expect(addIndex).toBeGreaterThan(searchIndex)
+      expect(addCommand).toMatch(/--nutrition-calories\s+620\b/u)
+      expect(addCommand).toMatch(/--nutrition-protein-grams\s+42\b/u)
+      expect(addCommand).toMatch(
+        /--nutrition-source(?:=|\s+)["']?(?:database|label)["']?(?:\s|$)/u,
+      )
+      expect(result.finalMessage).not.toMatch(
+        /what (?:did you|was)|which (?:item|meal)|\?\s*$/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  })
+})
+
+async function materializeRestaurantMealVaultCli(input: {
+  binDirectory: string
+  commandLogPath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const exactMenuResult = {
+    items: [{
+      brand: 'Harbor Bowl',
+      contaminantSummary: { status: 'no_known_product_tests' },
+      dataOrigin: 'restaurant_menu',
+      id: 'menu:harbor-bowl:chicken-plate',
+      label: {
+        calories: 620,
+        carbohydrateGrams: 68,
+        fatGrams: 20,
+        fiberGrams: 8,
+        proteinGrams: 42,
+        servingSize: 1,
+        servingSizeUnit: 'plate',
+      },
+      name: 'Harbor Bowl Standard Chicken Plate',
+    }],
+    source: 'murph-data-api',
+  }
+  const savedMeal = {
+    entity: {
+      id: 'meal_01SYNTHETICRESTAURANT00001',
+      kind: 'meal',
+      mealId: 'meal_01SYNTHETICRESTAURANT00001',
+      note: 'One standard chicken plate from Harbor Bowl, no substitutions.',
+      nutrition: {
+        provenance: {
+          confidence: 'high',
+          source: 'database',
+          sourceDetail: 'menu:harbor-bowl:chicken-plate',
+        },
+        totals: {
+          calories: 620,
+          carbsGrams: 68,
+          fatGrams: 20,
+          fiberGrams: 8,
+          proteinGrams: 42,
+        },
+      },
+      occurredAt: '2026-08-26T19:00:00-04:00',
+      source: 'manual',
+    },
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'case "$*" in',
+      `  meal\\ --help|meal\\ add\\ --help) printf '%s\\n' ${quoteNutritionShellLiteral([
+        'Usage: vault-cli meal add [options]',
+        'Options:',
+        '  --note <text>',
+        '  --occurred-at <ISO-8601-or-date>',
+        '  --nutrition-calories <number>',
+        '  --nutrition-protein-grams <number>',
+        '  --nutrition-carbs-grams <number>',
+        '  --nutrition-fat-grams <number>',
+        '  --nutrition-fiber-grams <number>',
+        '  --nutrition-source <database|label|estimated>',
+        '  --nutrition-confidence <level>',
+        '  --nutrition-source-detail <text>',
+        '  --format json',
+      ].join('\\n'))} ;;`,
+      `  food\\ search-labels\\ *) ${emit(exactMenuResult)} ;;`,
+      '  meal\\ add*--name*) printf \'unknown option: --name\\n\' >&2; exit 64 ;;',
+      `  meal\\ add\\ *) ${emit(savedMeal)} ;;`,
+      `  meal\\ show\\ *) ${emit(savedMeal)} ;;`,
+      `  goal\\ list\\ *) ${emit({ count: 0, items: [], nextCursor: null })} ;;`,
+      `  memory\\ show\\ *) ${emit({ document: { records: [] }, memory: null })} ;;`,
+      '  *) printf \'unsupported restaurant meal fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
 
 describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
   it('recovers one automatic meal edit and retains unresolved photos', {

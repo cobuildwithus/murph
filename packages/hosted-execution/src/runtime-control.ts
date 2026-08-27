@@ -1586,6 +1586,8 @@ export type HostedRuntimeGroupToolRequest =
       action: "post_join_offer";
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      /** Exact accepted-input identity for an explicitly requested native repost. */
+      repostOriginAssistantInputId?: string;
     }
   | {
       action: "preflight_set_chat_avatar";

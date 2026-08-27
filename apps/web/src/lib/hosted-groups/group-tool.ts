@@ -232,6 +232,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   joinCode: string;
   offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
+  repostOriginAssistantInputId?: string;
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.projectionScopes,
@@ -247,6 +248,11 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
     joinCode: input.joinCode,
     offerGeneration: input.offerGeneration,
     projectionScopeKeys,
+    ...(input.repostOriginAssistantInputId === undefined
+      ? {}
+      : {
+          repostOriginAssistantInputId: input.repostOriginAssistantInputId,
+        }),
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
     0,
@@ -469,6 +475,8 @@ export async function handleHostedRuntimeGroupTool(input: {
       joinOffer: input.request.joinOffer ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
+      repostOriginAssistantInputId:
+        input.request.repostOriginAssistantInputId ?? null,
     });
   }
 
@@ -1369,6 +1377,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   joinOffer: HostedRuntimeGroupPostJoinOfferRequest | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
+  repostOriginAssistantInputId: string | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "post_join_offer",
@@ -1413,6 +1422,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       groupId: result.group.id,
       now,
       projectionScopes,
+      ...(input.repostOriginAssistantInputId === null
+        ? {}
+        : { replaceActiveOffer: true }),
       tx,
     });
     if (offerPost.kind === "unavailable") {
@@ -1463,6 +1475,12 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         joinCode: created.offerPost.joinCode,
         offerGeneration,
         projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : {
+              repostOriginAssistantInputId:
+                input.repostOriginAssistantInputId,
+            }),
       }),
       message,
     });
@@ -1502,6 +1520,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
         projectionScopes,
+        ...(input.repostOriginAssistantInputId === null
+          ? {}
+          : { replaceActiveOffersAt: providerSendCompletedAt }),
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);

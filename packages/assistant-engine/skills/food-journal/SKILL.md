@@ -67,6 +67,19 @@ questions.
 - A photo, voice note, or rough phrase can be a complete meal log.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
+
+For an ordinary numeric-eligible meal capture, resolve nutrition before the
+meal mutation. First search the hosted food-label database for every material
+component. When the user names a restaurant and recognizable menu item, use a
+normal exact restaurant/menu search rather than a generic substitute. If that
+search has no exact result, read `computer-use` and inspect the restaurant's
+official nutrition or menu source. Only after the database result, official
+source, or clearly marked last-resort estimate is resolved may you call
+`meal add` or `meal edit` with the available nutrition and provenance. Do not
+save a nutrition-free restaurant meal first and then ask the member to repeat
+the item. Ask one narrow question only when a variant or portion difference
+would materially change the record.
+
 - After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. For response-card attachment eligibility only, treat the accepted meal message as explicitly requesting that card; this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation. When the complete card safety, accepted active-goal authority, fresh same-date totals, route, and bounded-card checks pass and the card alone completely answers the turn, attach that card as the complete response with no companion prose. Without an already accepted complete bundle, or when any other prerequisite fails, keep the truthful fallback short and aligned with the user's focus. Never replace a failed card gate with improvised totals, goals, analysis, or a second response surface.
 
 ## Provide numbers by default, with safety exceptions
@@ -162,11 +175,11 @@ Before calculating a meal total:
   the weakest material identity, quantity, or preparation assumption.
 
 Increase the result limit only when the first match is ambiguous or missing a
-likely variant. If the database is unavailable or incomplete, use an
-official label, manufacturer, or restaurant menu source. Only after those fail
-may you use a clearly marked memory-based estimate with the assumptions and
-material uncertainty stated. Never invent an exact label or imply that a visual
-portion estimate was database-measured.
+likely variant. The database-miss fallback above also applies to packaged and
+manufacturer labels. Only after the applicable official source fails may you
+use a clearly marked memory-based estimate with the assumptions and material
+uncertainty stated. Never invent an exact label or imply that a visual portion
+estimate was database-measured.
 
 For a fridge or pantry photo, enumerate distinct visible products and resolve
 them in one batch. Summarize only relevant nutrition, ingredient, allergen, and

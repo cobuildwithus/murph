@@ -1189,6 +1189,36 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("retires older active offers only after a replacement binding is created", async () => {
+    const tx = buildTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+
+    await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: "group_1",
+      message: { channel: "linq", messageId: "msg_offer_replacement" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffersAt: postedAt,
+      tx,
+    });
+
+    expect(
+      tx.hostedGroupJoinOffer.create.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      tx.hostedGroupJoinOffer.updateMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: postedAt },
+      where: {
+        groupId: "group_1",
+        messageLookupKey: { not: expect.stringMatching(/^hbidx:linq-message:/u) },
+        revokedAt: null,
+      },
+    });
+  });
+
   it("rejects a provider completion from a replaced offer generation", async () => {
     const tx = buildTx();
     tx.hostedGroup.findUnique.mockResolvedValueOnce({
@@ -1241,6 +1271,35 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       select: { projectionKindsJson: true },
       take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
     });
+  });
+
+  it("prepares an explicit replacement without inspecting or revoking the active offer", async () => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
+        })),
+      },
+      hostedGroupJoinOffer: { findMany, updateMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      replaceActiveOffer: true,
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_generation_1",
+      kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
+    });
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("revokes a broader active offer before posting a narrower replacement", async () => {

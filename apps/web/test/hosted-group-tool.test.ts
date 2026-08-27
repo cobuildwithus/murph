@@ -4013,6 +4013,63 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
+  it("posts a request-bound replacement for an explicit consent resend", async () => {
+    const requestedScopes = [{ projectionKind: "steps-days.v0" as const }];
+    const repostOriginAssistantInputId = `ain_${"a".repeat(32)}`;
+    mocks.prepareHostedGroupJoinOfferPostTx.mockResolvedValueOnce({
+      joinCode: "abc123",
+      kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionScopes: requestedScopes },
+        linqThread: LINQ_THREAD,
+        repostOriginAssistantInputId,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { offerState: "posted", status: "sent" },
+    });
+
+    expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
+      projectionScopes: requestedScopes,
+      replaceActiveOffer: true,
+      tx: fakeTx,
+    });
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_1" },
+      postedAt: expect.any(Date),
+      projectionScopes: requestedScopes,
+      replaceActiveOffersAt: expect.any(Date),
+      tx: fakeTx,
+    });
+
+    const ordinaryKey = buildHostedGroupJoinOfferProviderIdempotencyKey({
+      groupId: GROUP_SUMMARY.id,
+      joinCode: "abc123",
+      offerGeneration: OFFER_GENERATION_A,
+      projectionScopes: requestedScopes,
+    });
+    const repostKey = mocks.sendHostedLinqChatMessage.mock.calls[0]?.[0]
+      .idempotencyKey;
+    expect(repostKey).not.toBe(ordinaryKey);
+    expect(buildHostedGroupJoinOfferProviderIdempotencyKey({
+      groupId: GROUP_SUMMARY.id,
+      joinCode: "abc123",
+      offerGeneration: OFFER_GENERATION_A,
+      projectionScopes: requestedScopes,
+      repostOriginAssistantInputId,
+    })).toBe(repostKey);
+  });
+
   it("posts an explicit offer when every current member already grants every requested scope", async () => {
     const requestedScopes = [{ projectionKind: "steps-days.v0" as const }];
     const fullyGrantedGroup = {

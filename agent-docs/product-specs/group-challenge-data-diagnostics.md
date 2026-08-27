@@ -401,10 +401,11 @@ inside the current send attempt adds `offeredAt` evidence. This matches Linq's
 accepted whole-second timestamp precision. An idempotent replay
 retains its original provider time, is still durably bound, and returns
 unavailable recency evidence instead of claiming a new adjacent message or
-minting a fresh window. When Web finds a covering active native offer instead
-of posting another card, assistant-engine exposes the returned first-party URL
-as `presentation="link"` so the model never claims another native message
-appeared. Standalone and scheduled links use the same presentation. Murph
+minting a fresh window. Absent an explicit current-message repost request, when
+Web finds a covering active native offer instead of posting another card,
+assistant-engine exposes the returned first-party URL as `presentation="link"`
+so the model never claims another native message appeared. Standalone and
+scheduled links use the same presentation. Murph
 includes a returned `joinUrl` once in the substantive response, but link
 delivery has no canonical presentation receipt and therefore returns
 unavailable recency evidence. Neither presentation proves acceptance.

@@ -180,6 +180,21 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')
+    expect(skill).toContain(
+      'For an ordinary numeric-eligible meal capture, resolve nutrition before the\nmeal mutation.',
+    )
+    expect(skill).toContain(
+      'When the user names a restaurant and recognizable menu item, use a\nnormal exact restaurant/menu search rather than a generic substitute.',
+    )
+    expect(skill).toContain(
+      "If that\nsearch has no exact result, read `computer-use` and inspect the restaurant's\nofficial nutrition or menu source.",
+    )
+    expect(skill).toContain(
+      'Only after the database result, official\nsource, or clearly marked last-resort estimate is resolved may you call\n`meal add` or `meal edit`',
+    )
+    expect(skill).toContain(
+      'Do not\nsave a nutrition-free restaurant meal first and then ask the member to repeat\nthe item.',
+    )
     expect(skill).toContain('Use `--generic` for ordinary ingredients')
     expect(skill).toContain(
       'For a fridge or pantry photo, enumerate distinct visible products and resolve\nthem in one batch.',
