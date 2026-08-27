@@ -26,6 +26,7 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -56,10 +57,11 @@ import {
   buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import type {
-  MemberActionRequestV1,
-  WorkoutLiveApplyMemberActionV1,
-  WorkoutLiveSnapshotMemberActionV1,
+import {
+  parseWorkoutSessionAppCardEnvelopeV4,
+  type MemberActionRequestV1,
+  type WorkoutLiveApplyMemberActionV1,
+  type WorkoutLiveSnapshotMemberActionV1,
 } from "@murphai/contracts";
 import {
   addLiveWorkoutExercise,
@@ -841,6 +843,12 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                             result: { kind: "reps", reps: 9 },
                             setPosition: 1,
                           }],
+                          presentation: {
+                            footer: null,
+                            subtitle: null,
+                            title: "Workout",
+                            workout: initialCard.workout,
+                          },
                           version: 1,
                         }
                       : {
@@ -986,6 +994,21 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
 
         if (actionKind === "workout.live.apply") {
           assert.equal(recordedOutcomes[0]?.status, "applied");
+          const applyResult = recordedOutcomes[0]?.result;
+          assert.equal(applyResult?.kind, "workout.live.apply");
+          if (applyResult?.kind !== "workout.live.apply") {
+            throw new TypeError("Expected the canonical direct-save card result.");
+          }
+          const encoded = new URL(applyResult.cardUrl).hash
+            .replace(/^#murph-card=/u, "");
+          const envelope = JSON.parse(
+            Buffer.from(encoded, "base64url").toString("utf8"),
+          );
+          assert.equal(
+            parseWorkoutSessionAppCardEnvelopeV4(envelope)
+              ?.workout.exercises[0]?.sets[0]?.actual,
+            "9 reps",
+          );
           assert.ok(workoutId);
           const refreshedCard = await readLiveWorkoutCardEditor({
             presentation: embeddedWorkout,

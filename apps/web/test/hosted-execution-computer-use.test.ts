@@ -29,6 +29,7 @@ describe("ComputerUseService", () => {
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -78,6 +79,40 @@ describe("ComputerUseService", () => {
       suggestedReply: "done",
     });
     expect(store.handoff?.tokenHash).toHaveLength(64);
+  });
+
+  it("does not publish a direct handoff when the stored Live View origin is not allowed", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({ updatedAt: now });
+    const store = new FakeComputerUseStore({ run });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret:
+          "https://proxy.untrusted.example.test:8443/browser/live/token",
+      }),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
+      handoffPurpose: "login",
+      memberId: "member_123",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+      retryable: true,
+    });
+    expect(store.handoff).toBeNull();
+    expect(store.run).toMatchObject({
+      pendingHandoffId: null,
+      status: "running",
+    });
   });
 
   it("requires a fresh persisted HTTPS browser domain before creating a managed-login handoff", async () => {
@@ -211,6 +246,7 @@ describe("ComputerUseService", () => {
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -269,6 +305,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -485,6 +522,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -544,6 +582,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -615,6 +654,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -679,6 +719,7 @@ describe("ComputerUseService", () => {
       }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -803,6 +844,7 @@ describe("ComputerUseService", () => {
     });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -880,6 +922,7 @@ describe("ComputerUseService", () => {
       run: createRunRecord({ updatedAt: now }),
     });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -3648,7 +3691,7 @@ describe("ComputerUseService", () => {
     expect(firstStore.run.kernelProfileName).not.toBe(secondStore.run.kernelProfileName);
   });
 
-  it("deletes a newly created browser when its live-view origin is not allowed", async () => {
+  it("keeps browser automation running when its live-view origin cannot be exposed", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -3659,6 +3702,11 @@ describe("ComputerUseService", () => {
       }),
     });
     const kernel = createFakeKernel({
+      executeResult: {
+        title: "Scheduler",
+        url: "https://dentist.example.test",
+        visibleText: "Appointment details",
+      },
       liveViewUrlForBrowser: (browserCount) =>
         `https://kernel.example.test/live/${browserCount}`,
     });
@@ -3671,11 +3719,18 @@ describe("ComputerUseService", () => {
     await expect(service.startRun({
       memberId: "member_123",
       startUrl: "https://dentist.example.test",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
     });
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-2"]);
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      kernelLiveViewUrlEncrypted: expect.any(String),
+      kernelSessionId: "kernel-session-2",
+      lastUrl: "https://dentist.example.test/",
+      status: "running",
+    });
   });
 
   it("keeps a reserved run retryable when ambiguous browser provisioning cleanup fails", async () => {
@@ -3840,6 +3895,7 @@ describe("ComputerUseService", () => {
     });
     const store = new FakeComputerUseStore({ run });
     const service = new ComputerUseService({
+      crypto: createAllowedLiveViewCrypto(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
@@ -5577,7 +5633,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("deletes a replacement browser when login handoff checkpointing rejects its live-view origin", async () => {
+  it("restores browser automation after login when its live-view origin cannot be exposed", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "login" });
     const store = new FakeComputerUseStore({
@@ -5615,20 +5671,21 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       resumeAfterMailboxItemId: "hmi_user_reply",
       startUrl: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      status: "running",
     });
     expect(kernel.deletedSessionIds).toEqual([
       "kernel-session-1",
       deterministicRunBrowserNameMatcher(),
-      "kernel-session-2",
     ]);
     expect(store.handoff).toMatchObject({
-      status: "checkpointing",
+      status: "completed",
     });
     expect(store.run).toMatchObject({
-      kernelSessionId: null,
-      status: "awaiting_user",
+      kernelLiveViewUrlEncrypted: expect.any(String),
+      kernelSessionId: "kernel-session-2",
+      lastUrl: "https://shop.example.test/account",
+      status: "running",
     });
   });
 
@@ -9709,6 +9766,13 @@ function createFakeCrypto(input: {
       return encryptInput.value ?? null;
     },
   };
+}
+
+function createAllowedLiveViewCrypto(): ComputerUseCrypto {
+  return createFakeCrypto({
+    decryptedRunSecret:
+      "https://proxy.test-browser.kernel.sh:8443/browser/live/token",
+  });
 }
 
 function deterministicRunBrowserNameMatcher() {

@@ -92,6 +92,9 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+} from "./group-private-attribution-policy";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   requestHostedGroupAssistantAsk,
@@ -2293,6 +2296,15 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         prisma: input.prisma,
       })).filter((participant) => boundedHandleValues.has(participant.handle));
     const now = new Date();
+    const observationExpiresAt = new Date(
+      now.getTime() + HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+    );
+    const observationLookupKeys = [...new Set(participantHandles.flatMap((handle) => {
+      const lookupKey = createHostedThreadContainerParticipantHandleLookupKey(
+        handle.handle,
+      );
+      return lookupKey ? [lookupKey] : [];
+    }))];
     const seenByMemberId = new Map<string, {
       handleLookupKey: string;
       participantMemberId: string;
@@ -2312,6 +2324,16 @@ export async function reconcileHostedThreadContainerParticipants(input: {
     }
 
     const seenParticipants = [...seenByMemberId.values()];
+    const inputObservationRows = observationLookupKeys.length === 0
+      ? Prisma.sql`
+          SELECT NULL::text
+          WHERE FALSE
+        `
+      : Prisma.sql`
+          VALUES ${Prisma.join(observationLookupKeys.map((lookupKey) => Prisma.sql`
+            (${lookupKey}::text)
+          `))}
+        `;
     const inputParticipantRows = seenParticipants.length === 0
       ? Prisma.sql`
           SELECT NULL::text, NULL::text
@@ -2324,7 +2346,38 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         `;
 
     await input.prisma.$executeRaw(Prisma.sql`
-      WITH input_participant(participant_member_id, handle_lookup_key) AS (
+      WITH input_observation(contact_lookup_key) AS (
+        ${inputObservationRows}
+      ),
+      upserted_observation AS (
+        INSERT INTO hosted_group_participant_observation (
+          contact_lookup_key,
+          first_observed_at,
+          expires_at
+        )
+        SELECT
+          input_observation.contact_lookup_key,
+          ${now},
+          ${observationExpiresAt}
+        FROM input_observation
+        ORDER BY input_observation.contact_lookup_key
+        ON CONFLICT (contact_lookup_key)
+        DO UPDATE SET
+          first_observed_at = CASE
+            WHEN hosted_group_participant_observation.expires_at <= EXCLUDED.first_observed_at
+              THEN EXCLUDED.first_observed_at
+            ELSE LEAST(
+              hosted_group_participant_observation.first_observed_at,
+              EXCLUDED.first_observed_at
+            )
+          END,
+          expires_at = GREATEST(
+            hosted_group_participant_observation.expires_at,
+            EXCLUDED.expires_at
+          )
+        RETURNING contact_lookup_key
+      ),
+      input_participant(participant_member_id, handle_lookup_key) AS (
         ${inputParticipantRows}
       ),
       upserted AS (
@@ -2348,6 +2401,7 @@ export async function reconcileHostedThreadContainerParticipants(input: {
           ${now},
           ${now}
         FROM input_participant
+        CROSS JOIN (SELECT COUNT(*) FROM upserted_observation) AS observation_barrier
         ON CONFLICT (container_member_id, participant_member_id)
         DO UPDATE SET
           handle_lookup_key = EXCLUDED.handle_lookup_key,

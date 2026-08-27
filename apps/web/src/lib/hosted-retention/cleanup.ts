@@ -63,6 +63,7 @@ export interface HostedRetentionCleanupResult {
   expiredDeviceOauthSessionsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredEmailPublicBootstrapAttemptsDeleted: number;
+  expiredGroupParticipantObservationsDeleted: number;
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
@@ -115,6 +116,8 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const expiredGroupCurrentSenderClarificationsDeleted =
     await deleteExpiredGroupCurrentSenderClarifications({ now, prisma });
+  const expiredGroupParticipantObservationsDeleted =
+    await deleteExpiredGroupParticipantObservations({ now, prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
     now,
     prisma,
@@ -160,6 +163,7 @@ export async function runHostedRetentionCleanup(input: {
     expiredDeviceOauthSessionsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredEmailPublicBootstrapAttemptsDeleted,
+    expiredGroupParticipantObservationsDeleted,
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
@@ -221,6 +225,25 @@ async function deleteExpiredGroupCurrentSenderClarifications(input: {
     WHERE clarification."group_runtime_member_id" =
         doomed."group_runtime_member_id"
       AND clarification."target_member_id" = doomed."target_member_id"
+  `);
+}
+
+async function deleteExpiredGroupParticipantObservations(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "contact_lookup_key"
+      FROM "hosted_group_participant_observation"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "contact_lookup_key" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM "hosted_group_participant_observation" AS observation
+    USING doomed
+    WHERE observation."contact_lookup_key" = doomed."contact_lookup_key"
   `);
 }
 
