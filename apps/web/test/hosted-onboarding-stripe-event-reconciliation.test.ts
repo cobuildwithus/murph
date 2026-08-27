@@ -538,6 +538,39 @@ async function expectActivationTargetRetainedAcrossPaymentStageFailure(input: {
   errorSpy.mockRestore();
 }
 
+function mockPartialLegacyFamilyRefundSupportCase(): void {
+  mocks.findMemberForStripeInvoice.mockResolvedValue(null);
+  mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue("sub_123");
+  mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+    status: "canceled",
+  }));
+  mocks.stripe.invoicePayments.list.mockResolvedValue({
+    data: [{
+      amount_paid: 2_000,
+      amount_requested: 2_000,
+      payment: {
+        payment_intent: {
+          amount_received: 2_000,
+          id: "pi_exact",
+          status: "succeeded",
+        },
+        type: "payment_intent",
+      },
+      status: "paid",
+    }],
+    has_more: false,
+  });
+  mocks.stripe.refunds.list.mockResolvedValue({
+    data: [{
+      amount: 1_000,
+      id: "re_partial",
+      metadata: { hosted_family_legacy_invoice_id: "in_123" },
+      status: "succeeded",
+    }],
+    has_more: false,
+  });
+}
+
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1093,19 +1126,7 @@ describe("hosted Stripe event reconciliation", () => {
 
   it("emails a fulfilled usage-credit Checkout payment", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const baseEvent = makeCheckoutCompletedEvent();
-    const event = {
-      ...baseEvent,
-      data: {
-        object: {
-          ...baseEvent.data.object,
-          amount_total: 1000,
-          currency: "usd",
-          mode: "payment",
-          payment_status: "paid",
-        },
-      },
-    } as Stripe.Event;
+    const event = makePaidUsageCreditCheckoutCompletedEvent();
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
       beneficiaryMemberId: "member_123",
@@ -1136,7 +1157,7 @@ describe("hosted Stripe event reconciliation", () => {
 
   it("wakes paid usage work before attempting the optional sponsorship moment", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeCheckoutCompletedEvent();
+    const event = makePaidUsageCreditCheckoutCompletedEvent();
     const ordering: string[] = [];
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
@@ -1160,6 +1181,12 @@ describe("hosted Stripe event reconciliation", () => {
         throw new Error("Sponsorship moment unavailable");
       },
     );
+    mocks.sendHostedStripePaymentNotificationEmail.mockImplementationOnce(
+      async () => {
+        ordering.push("payment-email");
+        return "sent";
+      },
+    );
 
     try {
       await recordHostedStripeEvent({ event, prisma: prisma.client });
@@ -1168,10 +1195,81 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       })).resolves.toMatchObject({ status: "failed" });
 
-      expect(ordering).toEqual(["usage-recheck", "sponsorship-moment"]);
+      expect(ordering).toEqual([
+        "payment-email",
+        "usage-recheck",
+        "sponsorship-moment",
+      ]);
       expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        paymentNotificationEmailSentAt: expect.any(Date),
         processedAt: null,
         status: HostedStripeEventStatus.failed,
+      }));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("keeps payment email retryable while still attempting optional sponsorship work", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makePaidUsageCreditCheckoutCompletedEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent
+      .mockResolvedValueOnce({
+        beneficiaryMemberId: "member_123",
+        granted: true,
+        handled: true,
+        purchaseId: "hucp_purchase_123",
+        wakeRequired: true,
+      })
+      .mockResolvedValueOnce({
+        beneficiaryMemberId: "member_123",
+        granted: false,
+        handled: true,
+        purchaseId: "hucp_purchase_123",
+        wakeRequired: false,
+      });
+    mocks.sendHostedStripePaymentNotificationEmail
+      .mockRejectedValueOnce(new Error("Payment email unavailable"))
+      .mockResolvedValueOnce("sent");
+    mocks.materializeHostedGroupSponsorshipIfApplicable
+      .mockRejectedValueOnce(new Error("Sponsorship moment unavailable"))
+      .mockResolvedValueOnce(false);
+
+    try {
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "failed" });
+
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        lastErrorCode: "HOSTED_STRIPE_PAYMENT_NOTIFICATION_PENDING",
+        paymentNotificationEmailSentAt: null,
+        status: HostedStripeEventStatus.failed,
+      }));
+      expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledOnce();
+      expect(mocks.materializeHostedGroupSponsorshipIfApplicable).toHaveBeenCalledOnce();
+
+      prisma.rows[0]!.nextAttemptAt = new Date(0);
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "completed" });
+
+      expect(mocks.reconcileHostedUsageCreditStripeEvent).toHaveBeenCalledTimes(2);
+      expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledTimes(2);
+      expect(mocks.materializeHostedGroupSponsorshipIfApplicable).toHaveBeenCalledTimes(2);
+      expect(
+        mocks.materializeHostedGroupSponsorshipIfApplicable,
+      ).toHaveBeenNthCalledWith(2, {
+        prisma: prisma.client,
+        purchaseId: "hucp_purchase_123",
+      });
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        paymentNotificationEmailSentAt: expect.any(Date),
+        status: HostedStripeEventStatus.completed,
       }));
     } finally {
       errorSpy.mockRestore();
@@ -2404,36 +2502,7 @@ describe("hosted Stripe event reconciliation", () => {
     const event = makeInvoicePaidEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.findMemberForStripeInvoice.mockResolvedValue(null);
-    mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue("sub_123");
-    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
-      status: "canceled",
-    }));
-    mocks.stripe.invoicePayments.list.mockResolvedValue({
-      data: [{
-        amount_paid: 2_000,
-        amount_requested: 2_000,
-        payment: {
-          payment_intent: {
-            amount_received: 2_000,
-            id: "pi_exact",
-            status: "succeeded",
-          },
-          type: "payment_intent",
-        },
-        status: "paid",
-      }],
-      has_more: false,
-    });
-    mocks.stripe.refunds.list.mockResolvedValue({
-      data: [{
-        amount: 1_000,
-        id: "re_partial",
-        metadata: { hosted_family_legacy_invoice_id: "in_123" },
-        status: "succeeded",
-      }],
-      has_more: false,
-    });
+    mockPartialLegacyFamilyRefundSupportCase();
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     prisma.rows[0]!.attemptCount = 5;
@@ -2446,8 +2515,10 @@ describe("hosted Stripe event reconciliation", () => {
       attemptCount: 6,
       lastErrorCode: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
       lastErrorMessage: "[redacted]",
+      paymentNotificationEmailSentAt: expect.any(Date),
       status: HostedStripeEventStatus.poisoned,
     }));
+    expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted Stripe event reconciliation failed.",
       expect.objectContaining({
@@ -2464,6 +2535,53 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toBeNull();
     expect(mocks.stripe.refunds.list).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
+  });
+
+  it("does not poison a legacy cleanup receipt until its payment email is marked", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mockPartialLegacyFamilyRefundSupportCase();
+    mocks.sendHostedStripePaymentNotificationEmail
+      .mockRejectedValueOnce(new Error("Payment email unavailable"))
+      .mockResolvedValueOnce("sent");
+
+    try {
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+      prisma.rows[0]!.attemptCount = 5;
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "failed" });
+
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        attemptCount: 6,
+        lastErrorCode: "HOSTED_STRIPE_PAYMENT_NOTIFICATION_PENDING",
+        paymentNotificationEmailSentAt: null,
+        status: HostedStripeEventStatus.failed,
+      }));
+      expect(mocks.stripe.refunds.list).toHaveBeenCalledOnce();
+      expect(mocks.stripe.refunds.create).not.toHaveBeenCalled();
+
+      prisma.rows[0]!.nextAttemptAt = new Date(0);
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "failed" });
+
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        attemptCount: 7,
+        lastErrorCode: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
+        paymentNotificationEmailSentAt: expect.any(Date),
+        status: HostedStripeEventStatus.poisoned,
+      }));
+      expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledTimes(2);
+      expect(mocks.stripe.refunds.list).toHaveBeenCalledTimes(2);
+      expect(mocks.stripe.refunds.create).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("does not send the Resend welcome when a later paid invoice has no new activation", async () => {
@@ -4499,6 +4617,22 @@ function makeCheckoutCompletedEvent(): Stripe.Event {
     },
     type: "checkout.session.completed",
   });
+}
+
+function makePaidUsageCreditCheckoutCompletedEvent(): Stripe.Event {
+  const event = makeCheckoutCompletedEvent();
+  return {
+    ...event,
+    data: {
+      object: {
+        ...event.data.object,
+        amount_total: 1_000,
+        currency: "usd",
+        mode: "payment",
+        payment_status: "paid",
+      },
+    },
+  } as Stripe.Event;
 }
 
 function makePulseTrialCheckoutCompletedEvent(): Stripe.Event {

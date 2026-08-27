@@ -855,8 +855,14 @@ Last verified: 2026-08-23
   marker is written only after provider success, while an event-derived Resend
   idempotency key covers response loss before that marker. Receipt replay after
   the marker must skip send and finish remaining work. When canonical billing
-  commits activation mailbox items, their exact pointers are retained on the
-  receipt in that same transaction. Every positive-payment attempt restores
+  succeeds, the notification and all existing post-canonical effects are
+  attempted independently inside the same receipt owner. Neither side's
+  failure suppresses the other. While the marker is absent, a notification
+  failure keeps the receipt retryable even if another effect would otherwise
+  poison it; once marked, the other effect keeps its existing retry and poison
+  behavior. When canonical billing commits activation mailbox items, their
+  exact pointers are retained on the receipt in that same transaction. Every
+  positive-payment attempt restores
   retained pointers and best-effort signals them through the existing
   activation-wake owner before notification work, even when provider success
   already wrote the sent marker. A rejected first wake can therefore overlap

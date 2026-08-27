@@ -58,7 +58,9 @@ Stripe event receipt sends one privacy-safe operator payment email before it
 completes. That projection contains payment metadata only and is not grant or
 billing authority. Delivery retries on the receipt independently of the
 already-committed purchase and grant, with a receipt-local sent marker and
-provider idempotency preventing duplicate email.
+provider idempotency preventing duplicate email. Payment notification and the
+existing runtime-recheck and sponsorship effects are each attempted even when
+the other fails; an unmarked notification keeps the receipt retryable.
 
 An active Family owner may fund one exact active member through Family
 Settings. The owner is the payer, the selected member is the beneficiary, and

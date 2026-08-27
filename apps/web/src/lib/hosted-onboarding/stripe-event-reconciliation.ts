@@ -1069,124 +1069,14 @@ async function processClaimedHostedStripeEvent(
       result: processing.result,
       storedActivationResultJson: claimed.activationResultJson,
     });
-    if (result.newlyActivatedMemberIds.length > 0) {
-      scheduleHostedSignupNotificationEmails({
-        memberIds: result.newlyActivatedMemberIds,
-        prisma,
-      });
-    }
-    if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
-      throw new Error("Pulse Trial cleanup requires a direct billing member.");
-    }
-    if (result.cleanupFamilySponsoredStripeSubscriptionId && !processingMemberId) {
-      throw new Error("Family-sponsored cleanup requires a direct billing member.");
-    }
-    if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
-      throw new Error("Family-sponsored Checkout cleanup requires a direct billing member.");
-    }
-    if (result.cleanupStandardCheckout && !processingMemberId) {
-      throw new Error("Standard Checkout cleanup requires a direct billing member.");
-    }
-    if (legacyFamilySubscriptionId) {
-      await executeHostedLegacySyntheticFamilyCleanup({
-        invoice: stripeEvent.type === "invoice.paid"
-          ? stripeEvent.data.object as Stripe.Invoice
-          : null,
-        subscriptionId: legacyFamilySubscriptionId,
-      });
-    }
-    const runtimeRecheckMemberIds = new Set(result.runtimeRecheckMemberIds);
-    if (usageCreditReconciliation.handled && usageCreditReconciliation.wakeRequired) {
-      runtimeRecheckMemberIds.add(usageCreditReconciliation.beneficiaryMemberId);
-    }
-    if (
-      claimed.retryDirectPaidRuntimeRecheck
-      && !usageCreditReconciliation.handled
-      && processingMemberId
-      && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent)
-      && await hasHostedMemberActiveDirectPaidAccess({
-        memberId: processingMemberId,
-        prisma,
-      })
-    ) {
-      runtimeRecheckMemberIds.add(processingMemberId);
-    }
-    for (const memberId of runtimeRecheckMemberIds) {
-      await signalHostedBillingRuntimeRecheckIgnoringInactive({
-        prisma,
-        userId: memberId,
-      });
-    }
-    if (
-      usageCreditReconciliation.handled &&
-      usageCreditReconciliation.purchaseId
-    ) {
-      await materializeHostedGroupSponsorshipIfApplicable({
-        prisma,
-        purchaseId: usageCreditReconciliation.purchaseId,
-      });
-    }
-    if (result.cleanupFamilySponsoredStripeSubscriptionId && processingMemberId) {
-      await cleanupHostedFamilySponsoredDirectSubscription({
-        memberId: processingMemberId,
-        prisma,
-        sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
-        subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
-      });
-    }
-    if (result.cleanupFamilySponsoredCheckout && processingMemberId) {
-      await cleanupHostedFamilySponsoredDirectSubscription({
-        checkoutSessionId: result.cleanupFamilySponsoredCheckout.checkoutSessionId,
-        memberId: processingMemberId,
-        prisma,
-        sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
-        subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
-      });
-    }
-    if (result.cleanupPulseTrialStripeSubscriptionId && processingMemberId) {
-      await cancelHostedPulseTrialCheckoutLoserSubscription({
-        memberId: processingMemberId,
-        prisma,
-        subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
-      });
-    }
-    if (result.cleanupStandardCheckout && processingMemberId) {
-      await cleanupHostedStandardCheckoutAndRetireAttempt({
-        checkoutSessionId: result.cleanupStandardCheckout.checkoutSessionId,
-        memberId: processingMemberId,
-        prisma,
-        subscriptionId: result.cleanupStandardCheckout.subscriptionId,
-      });
-    }
-    if (result.welcomeEmailMemberId) {
-      await sendHostedSignupWelcomeEmailForMemberBestEffort({
-        memberId: result.welcomeEmailMemberId,
-        prisma,
-      });
-    }
-    if (result.subscriptionCancellationEmail) {
-      if (!claimed.subscriptionCancellationEmailSentAt) {
-        const cancellationEmailResult = await sendHostedSubscriptionCancellationEmailForMember({
-          memberId: result.subscriptionCancellationEmail.memberId,
-          prisma,
-          stripeSubscriptionId: result.subscriptionCancellationEmail.stripeSubscriptionId,
-        });
-
-        if (cancellationEmailResult.status === "sent") {
-          await markHostedStripeSubscriptionCancellationEmailSent({
-            eventId: claimed.eventId,
-            prisma,
-            sentAt: new Date(),
-          });
-        }
-      }
-    }
     const paymentNotificationCandidate =
       resolveHostedStripePaymentNotificationCandidate({
         event: stripeEvent,
         usageCreditEventHandled: usageCreditReconciliation.handled,
       });
     let paymentNotificationSent = false;
+    let paymentNotificationFailure:
+      HostedStripePaymentNotificationPendingError | null = null;
     if (paymentNotificationCandidate) {
       await signalHostedStripeActivationRuntimeWakeBeforePaymentNotification({
         prisma,
@@ -1197,23 +1087,167 @@ async function processClaimedHostedStripeEvent(
       paymentNotificationCandidate &&
       !claimed.paymentNotificationEmailSentAt
     ) {
-      let paymentNotificationOutcome;
       try {
-        paymentNotificationOutcome =
+        const paymentNotificationOutcome =
           await sendHostedStripePaymentNotificationEmail({
             candidate: paymentNotificationCandidate,
           });
+        if (paymentNotificationOutcome === "sent") {
+          await markHostedStripePaymentNotificationEmailSent({
+            eventId: claimed.eventId,
+            prisma,
+            sentAt: new Date(),
+          });
+          paymentNotificationSent = true;
+        }
       } catch (error) {
-        throw new HostedStripePaymentNotificationPendingError(error);
+        paymentNotificationFailure =
+          new HostedStripePaymentNotificationPendingError(error);
       }
-      if (paymentNotificationOutcome === "sent") {
-        await markHostedStripePaymentNotificationEmailSent({
-          eventId: claimed.eventId,
+    }
+
+    let postCanonicalFailure: { error: unknown } | null = null;
+    try {
+      if (result.newlyActivatedMemberIds.length > 0) {
+        scheduleHostedSignupNotificationEmails({
+          memberIds: result.newlyActivatedMemberIds,
           prisma,
-          sentAt: new Date(),
         });
-        paymentNotificationSent = true;
       }
+      if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
+        throw new Error("Pulse Trial cleanup requires a direct billing member.");
+      }
+      if (
+        result.cleanupFamilySponsoredStripeSubscriptionId &&
+        !processingMemberId
+      ) {
+        throw new Error(
+          "Family-sponsored cleanup requires a direct billing member.",
+        );
+      }
+      if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
+        throw new Error(
+          "Family-sponsored Checkout cleanup requires a direct billing member.",
+        );
+      }
+      if (result.cleanupStandardCheckout && !processingMemberId) {
+        throw new Error(
+          "Standard Checkout cleanup requires a direct billing member.",
+        );
+      }
+      if (legacyFamilySubscriptionId) {
+        await executeHostedLegacySyntheticFamilyCleanup({
+          invoice: stripeEvent.type === "invoice.paid"
+            ? stripeEvent.data.object as Stripe.Invoice
+            : null,
+          subscriptionId: legacyFamilySubscriptionId,
+        });
+      }
+      const runtimeRecheckMemberIds = new Set(result.runtimeRecheckMemberIds);
+      if (
+        usageCreditReconciliation.handled &&
+        usageCreditReconciliation.wakeRequired
+      ) {
+        runtimeRecheckMemberIds.add(
+          usageCreditReconciliation.beneficiaryMemberId,
+        );
+      }
+      if (
+        claimed.retryDirectPaidRuntimeRecheck
+        && !usageCreditReconciliation.handled
+        && processingMemberId
+        && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent)
+        && await hasHostedMemberActiveDirectPaidAccess({
+          memberId: processingMemberId,
+          prisma,
+        })
+      ) {
+        runtimeRecheckMemberIds.add(processingMemberId);
+      }
+      for (const memberId of runtimeRecheckMemberIds) {
+        await signalHostedBillingRuntimeRecheckIgnoringInactive({
+          prisma,
+          userId: memberId,
+        });
+      }
+      if (
+        usageCreditReconciliation.handled &&
+        usageCreditReconciliation.purchaseId
+      ) {
+        await materializeHostedGroupSponsorshipIfApplicable({
+          prisma,
+          purchaseId: usageCreditReconciliation.purchaseId,
+        });
+      }
+      if (
+        result.cleanupFamilySponsoredStripeSubscriptionId &&
+        processingMemberId
+      ) {
+        await cleanupHostedFamilySponsoredDirectSubscription({
+          memberId: processingMemberId,
+          prisma,
+          sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
+          subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
+        });
+      }
+      if (result.cleanupFamilySponsoredCheckout && processingMemberId) {
+        await cleanupHostedFamilySponsoredDirectSubscription({
+          checkoutSessionId:
+            result.cleanupFamilySponsoredCheckout.checkoutSessionId,
+          memberId: processingMemberId,
+          prisma,
+          sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
+          subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
+        });
+      }
+      if (result.cleanupPulseTrialStripeSubscriptionId && processingMemberId) {
+        await cancelHostedPulseTrialCheckoutLoserSubscription({
+          memberId: processingMemberId,
+          prisma,
+          subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
+        });
+      }
+      if (result.cleanupStandardCheckout && processingMemberId) {
+        await cleanupHostedStandardCheckoutAndRetireAttempt({
+          checkoutSessionId: result.cleanupStandardCheckout.checkoutSessionId,
+          memberId: processingMemberId,
+          prisma,
+          subscriptionId: result.cleanupStandardCheckout.subscriptionId,
+        });
+      }
+      if (result.welcomeEmailMemberId) {
+        await sendHostedSignupWelcomeEmailForMemberBestEffort({
+          memberId: result.welcomeEmailMemberId,
+          prisma,
+        });
+      }
+      if (result.subscriptionCancellationEmail) {
+        if (!claimed.subscriptionCancellationEmailSentAt) {
+          const cancellationEmailResult =
+            await sendHostedSubscriptionCancellationEmailForMember({
+              memberId: result.subscriptionCancellationEmail.memberId,
+              prisma,
+              stripeSubscriptionId:
+                result.subscriptionCancellationEmail.stripeSubscriptionId,
+            });
+
+          if (cancellationEmailResult.status === "sent") {
+            await markHostedStripeSubscriptionCancellationEmailSent({
+              eventId: claimed.eventId,
+              prisma,
+              sentAt: new Date(),
+            });
+          }
+        }
+      }
+    } catch (error) {
+      postCanonicalFailure = { error };
+    }
+    if (paymentNotificationFailure) {
+      throw paymentNotificationFailure;
+    }
+    if (postCanonicalFailure) {
+      throw postCanonicalFailure.error;
     }
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
