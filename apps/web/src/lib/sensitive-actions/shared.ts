@@ -1,6 +1,5 @@
 export const SETTINGS_SENSITIVE_ACTION_KINDS = [
   "vault.export",
-  "account.delete",
 ] as const;
 
 export const SENSITIVE_ACTION_KINDS = [

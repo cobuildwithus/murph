@@ -180,7 +180,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
     let receivedReplacementHeaders = false;
 
     try {
-      const authorization = await authorize("account.delete");
       publishBrowserVaultSessionEnding();
       sessionEndingDispatched = true;
       const response = await requestHostedOnboardingJson<HostedAccountDeleteResponse>({
@@ -191,7 +190,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
           publishBrowserVaultSessionInvalidation();
         },
         payload: {
-          authorization,
           confirmationPhrase,
           ...(exitReason ? { exitNote, exitReason } : {}),
           ...(providerAccessRemovalConfirmed && providerAccessRemovalConfirmationToken
