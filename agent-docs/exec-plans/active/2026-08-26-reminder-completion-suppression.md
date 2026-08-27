@@ -141,6 +141,6 @@ Updated: 2026-08-27
 - `pnpm --dir packages/assistant-engine typecheck`: passed.
 - `pnpm --dir apps/web test -- changelog-page.test.tsx`: 9 passed.
 - `pnpm --dir apps/web typecheck`: passed.
-- The recurring scheduled instruction fragment grows from 500 to 679
-  `o200k_harmony` tokens and from 2,801 to 3,883 UTF-8 bytes. No tool schema or
+- The recurring scheduled instruction fragment grows from 500 to 641
+  `o200k_harmony` tokens and from 2,801 to 3,648 UTF-8 bytes. No tool schema or
   foreground-turn prompt changes.

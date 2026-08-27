@@ -4335,10 +4335,10 @@ describe('assistant cron runtime orchestration', () => {
       | { instructions?: string }
       | undefined
     expect(providerInput?.instructions).toContain(
-      'if a relevant human message clearly proves the exact requested action already happened in the current occurrence window, return `skip` even when this automation has no prior confirmed output.',
+      'In a direct conversation, before applying any cadence or silence policy below, if a relevant human message clearly proves the exact requested action already happened in the current occurrence window, return `skip` even when this automation has no prior confirmed output.',
     )
     expect(providerInput?.instructions).toContain(
-      'Before applying any cadence or silence policy below',
+      'before applying any cadence or silence policy below',
     )
     expect(providerInput?.instructions).toContain(
       'This completion skip consumes only the current occurrence. Future recurrence remains unchanged',
@@ -4538,7 +4538,7 @@ describe('assistant cron runtime orchestration', () => {
         'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
-        'When exact current-occurrence completion is absent, send those cues normally unless the member explicitly changes or pauses them or another authoritative skip condition applies.',
+        'Send those cues normally unless the direct-conversation completion rule above applies, the member explicitly changes or pauses them, or another authoritative skip condition applies.',
       )
       if (occurrenceIndex > 0) {
         expect(notificationInput.instructions).toContain(

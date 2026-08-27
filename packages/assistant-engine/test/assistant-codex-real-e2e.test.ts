@@ -5904,7 +5904,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions:
-          buildIndependentReminderDeveloperInstructions('direct'),
+          buildScheduledAutomationDeveloperInstructions('direct'),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
