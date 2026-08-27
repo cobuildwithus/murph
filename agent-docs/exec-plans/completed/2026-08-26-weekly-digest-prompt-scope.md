@@ -119,7 +119,7 @@ Updated: 2026-08-26
 - Passed: protected production deployment from the merged public commit, 100%
   traffic convergence on the new Worker version, deployed-endpoint smoke, and
   live-model smoke. A bounded post-deploy runtime-log aggregate found no error
-  or fatal events. The public changelog entry is live on the production domain.
+  or fatal events. The changelog entry is live on the production domain.
 - Unrelated local broad-lane failures: `pnpm test:diff` passed syntax,
   architecture, privacy/logging, provider-boundary, tooling typecheck, and
   dependency-policy gates, then finished with 711 passing repo-tools tests and
@@ -127,4 +127,5 @@ Updated: 2026-08-26
   one Crabbox signal-forwarding test timed out before its synthetic descendant
   became ready. Neither failed suite imports or exercises the changed workflow
   or bundle-budget policy.
+Completed: 2026-08-26
 Completed: 2026-08-26
