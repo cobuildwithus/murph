@@ -15,10 +15,16 @@ test("each development persona exercises the real Journal and Patterns projectio
     );
 
     assert.ok(replica.journal);
-    assert.ok(replica.journal.eventCount > 0, persona.id);
     assert.ok(replica.personalPatterns);
-    assert.ok(replica.personalPatterns.factors.length > 0, persona.id);
-    if (persona.id === "family") {
+    if (persona.id === "new") {
+      assert.equal(replica.journal.eventCount, 0);
+      assert.equal(replica.personalPatterns.factors.length, 0);
+      assert.equal(replica.personalPatterns.outcomes.length, 0);
+    } else {
+      assert.ok(replica.journal.eventCount > 0, persona.id);
+      assert.ok(replica.personalPatterns.factors.length > 0, persona.id);
+    }
+    if (persona.id === "family" || persona.id === "new") {
       assert.equal(replica.personalPatterns.outcomes.length, 0);
     } else {
       assert.ok(replica.personalPatterns.outcomes.length > 2, persona.id);
@@ -47,23 +53,25 @@ test("Family persona covers a member without a connected wearable", async () => 
   );
 });
 
-test("Oura persona keeps frequent Yard work visible even without useful comparison days", async () => {
+test("Oura persona covers a varied activity history", async () => {
   const replica = await buildDevelopmentPersonaReplica(
     "oura",
     new Date("2026-08-26T20:00:00.000Z"),
   );
-  const yardWork = replica.personalPatterns?.factors.find(
-    (factor) => factor.id === "yardwork",
+  const factorIds = new Set(
+    replica.personalPatterns?.factors.map((factor) => factor.id),
   );
 
-  assert.ok(yardWork);
-  assert.ok(yardWork.observedDays > 30);
-  assert.equal(
-    replica.personalPatterns?.cells.some(
-      (cell) => cell.factorId === "yardwork",
-    ),
-    true,
-  );
+  for (const expected of [
+    "cycling",
+    "hiking",
+    "running",
+    "strength",
+    "tennis",
+    "yardwork",
+  ]) {
+    assert.ok(factorIds.has(expected), expected);
+  }
 });
 
 test("Whoop persona exposes provider-specific sleep and recovery outcomes", async () => {
@@ -101,6 +109,40 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
   );
   assert.match(sleep.details.join(" "), /deep sleep/iu);
   assert.match(sleep.details.join(" "), /SpO₂/iu);
+
+  const factorIds = new Set(
+    replica.personalPatterns?.factors.map((factor) => factor.id),
+  );
+  for (const expected of [
+    "cycling",
+    "functional-fitness",
+    "running",
+    "strength",
+  ]) {
+    assert.ok(factorIds.has(expected), expected);
+  }
+  const metricKeys = new Set(replica.metricRows.map((row) => row.metricKey));
+  for (const expected of [
+    "active-calories",
+    "activity-average-heart-rate",
+    "max-heart-rate",
+    "workout-strain",
+  ]) {
+    assert.ok(metricKeys.has(expected), expected);
+  }
+});
+
+test("New member exercises the empty Journal and Patterns states", async () => {
+  const replica = await buildDevelopmentPersonaReplica(
+    "new",
+    new Date("2026-08-26T20:00:00.000Z"),
+  );
+
+  assert.equal(replica.journal?.eventCount, 0);
+  assert.deepEqual(replica.personalPatterns?.factors, []);
+  assert.deepEqual(replica.personalPatterns?.outcomes, []);
+  assert.equal(replica.entities.length, 0);
+  assert.equal(replica.metricRows.length, 0);
 });
 
 test("context-rich persona joins meals and context into one private timeline", async () => {
@@ -148,7 +190,7 @@ test("training and group personas show completed actions and private context", a
   const trainingEvents =
     training.journal?.days.flatMap((day) => day.events) ?? [];
   assert.equal(
-    trainingEvents.some((event) => event.title === "Strength plan"),
+    trainingEvents.some((event) => event.title === "Strength Base"),
     true,
   );
   assert.equal(
@@ -160,6 +202,13 @@ test("training and group personas show completed actions and private context", a
       (event) => event.title === "Suggested mobility session",
     ),
     false,
+  );
+  assert.ok(
+    training.entities.filter(
+      (entity) =>
+        entity.kind === "activity_session" &&
+        entity.attributes.source === "murph-live",
+    ).length >= 12,
   );
 
   const familyEvents = family.journal?.days.flatMap((day) => day.events) ?? [];

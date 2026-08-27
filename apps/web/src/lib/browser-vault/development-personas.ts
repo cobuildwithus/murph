@@ -6,6 +6,7 @@ export const DEVELOPMENT_PERSONAS = [
   { id: "coach", label: "Training member" },
   { id: "family", label: "Family and groups" },
   { id: "context", label: "Context-rich member" },
+  { id: "new", label: "New member" },
 ] as const;
 
 export type DevelopmentPersonaId = (typeof DEVELOPMENT_PERSONAS)[number]["id"];

@@ -16,6 +16,7 @@ const PERSONA_HASH_CHAR: Record<DevelopmentPersonaId, string> = {
   coach: "c",
   context: "d",
   family: "e",
+  new: "f",
   oura: "a",
   whoop: "b",
 };
@@ -66,7 +67,7 @@ function buildPersonaFixture(
   );
 
   for (let offset = 83; offset >= 0; offset -= 1) {
-    if (personaId === "family") continue;
+    if (personaId === "family" || personaId === "new") continue;
     const date = addDays(asOfDate, -offset);
     const followsFactor = factorDates.has(addDays(date, -1));
     const wave = offset % 5;
@@ -188,7 +189,7 @@ function buildPersonaFixture(
         ),
       );
     }
-    if (personaId === "oura" && offset % 7 < 5) {
+    if (personaId === "oura" && offset % 14 === 3) {
       entities.push(
         activityEntity(
           personaId,
@@ -201,7 +202,9 @@ function buildPersonaFixture(
     }
   }
 
-  for (const date of personaId === "family" ? [] : factorDates) {
+  for (const date of personaId === "family" || personaId === "new"
+    ? []
+    : factorDates) {
     entities.push(
       eventEntity({
         attributes: {
@@ -225,7 +228,7 @@ function buildPersonaFixture(
     );
   }
 
-  addPersonaSpecificEvents(personaId, asOfDate, entities);
+  addPersonaSpecificEvents(personaId, asOfDate, entities, metricPoints);
 
   return {
     entities,
@@ -241,6 +244,7 @@ function addPersonaSpecificEvents(
   personaId: DevelopmentPersonaId,
   asOfDate: string,
   entities: CanonicalEntity[],
+  metricPoints: MetricPoint[],
 ) {
   if (personaId === "oura") {
     for (let offset = 6; offset <= 76; offset += 14) {
@@ -254,18 +258,14 @@ function addPersonaSpecificEvents(
         ),
       );
     }
-    return;
-  }
-
-  if (personaId === "whoop") {
-    for (let offset = 5; offset <= 75; offset += 7) {
+    for (let offset = 4; offset <= 80; offset += 12) {
       entities.push(
         activityEntity(
           personaId,
           addDays(asOfDate, -offset),
-          "strength-training",
-          54,
-          "whoop",
+          "cycling",
+          42 + (offset % 4) * 8,
+          "oura",
         ),
       );
     }
@@ -274,11 +274,85 @@ function addPersonaSpecificEvents(
         activityEntity(
           personaId,
           addDays(asOfDate, -offset),
-          "cycling",
-          78,
-          "whoop",
+          "running",
+          32 + (offset % 3) * 7,
+          "oura",
         ),
       );
+    }
+    for (let offset = 12; offset <= 75; offset += 21) {
+      entities.push(
+        activityEntity(
+          personaId,
+          addDays(asOfDate, -offset),
+          "hiking",
+          105 + (offset % 2) * 35,
+          "oura",
+        ),
+      );
+    }
+    for (let offset = 3; offset <= 80; offset += 10) {
+      entities.push(
+        activityEntity(
+          personaId,
+          addDays(asOfDate, -offset),
+          "strength-training",
+          46 + (offset % 3) * 5,
+          "oura",
+        ),
+      );
+    }
+    return;
+  }
+
+  if (personaId === "whoop") {
+    for (let offset = 5; offset <= 75; offset += 8) {
+      const date = addDays(asOfDate, -offset);
+      entities.push(
+        activityEntity(personaId, date, "strength-training", 54, "whoop"),
+      );
+      addWhoopWorkoutMetricPoints(metricPoints, {
+        activityType: "strength-training",
+        date,
+        durationMinutes: 54,
+        personaId,
+        strain: 13.8 + (offset % 3),
+      });
+    }
+    for (let offset = 9; offset <= 79; offset += 15) {
+      const date = addDays(asOfDate, -offset);
+      entities.push(activityEntity(personaId, date, "cycling", 78, "whoop"));
+      addWhoopWorkoutMetricPoints(metricPoints, {
+        activityType: "cycling",
+        date,
+        durationMinutes: 78,
+        personaId,
+        strain: 15.4 + (offset % 2),
+      });
+    }
+    for (let offset = 13; offset <= 73; offset += 15) {
+      const date = addDays(asOfDate, -offset);
+      entities.push(activityEntity(personaId, date, "running", 41, "whoop"));
+      addWhoopWorkoutMetricPoints(metricPoints, {
+        activityType: "running",
+        date,
+        durationMinutes: 41,
+        personaId,
+        strain: 14.6 + (offset % 2),
+      });
+    }
+    for (let offset = 3; offset <= 75; offset += 18) {
+      const date = addDays(asOfDate, -offset);
+      entities.push(
+        activityEntity(personaId, date, "functional-fitness", 47, "whoop"),
+      );
+      addWhoopWorkoutMetricPoints(metricPoints, {
+        activityType: "functional-fitness",
+        date,
+        durationMinutes: 47,
+        personaId,
+        strain: 12.9 + (offset % 3),
+      });
     }
     return;
   }
@@ -286,12 +360,12 @@ function addPersonaSpecificEvents(
   if (personaId === "coach") {
     entities.push(
       journalNote({
-        date: addDays(asOfDate, -20),
+        date: addDays(asOfDate, -45),
         id: "coach_plan_started",
-        note: "Started a six-week strength plan with three sessions each week.",
+        note: "Murph prepared Strength Base, an eight-week plan with four sessions each week.",
         noteType: "journal-plan",
         tags: ["key-training-plan"],
-        title: "Strength plan",
+        title: "Strength Base",
       }),
       eventEntity({
         attributes: { source: "murph" },
@@ -302,8 +376,9 @@ function addPersonaSpecificEvents(
         title: "Suggested mobility session",
       }),
     );
-    for (let offset = 2; offset <= 20; offset += 3) {
+    for (let offset = 2; offset <= 44; offset += 3) {
       const date = addDays(asOfDate, -offset);
+      const isLowerBodyDay = offset % 2 === 0;
       entities.push(
         eventEntity({
           attributes: {
@@ -312,11 +387,24 @@ function addPersonaSpecificEvents(
             source: "murph-live",
             workout: {
               endedAt: `${date}T18:48:00.000Z`,
-              exercises: [
-                { name: "Squat", sets: [{ completed: true, reps: 8 }] },
-                { name: "Row", sets: [{ completed: true, reps: 10 }] },
-              ],
-              routineName: "Strength Base",
+              exercises: isLowerBodyDay
+                ? [
+                    { name: "Squat", sets: [{ completed: true, reps: 8 }] },
+                    {
+                      name: "Romanian deadlift",
+                      sets: [{ completed: true, reps: 10 }],
+                    },
+                  ]
+                : [
+                    {
+                      name: "Bench press",
+                      sets: [{ completed: true, reps: 8 }],
+                    },
+                    { name: "Row", sets: [{ completed: true, reps: 10 }] },
+                  ],
+              routineName: isLowerBodyDay
+                ? "Strength Base: Lower"
+                : "Strength Base: Upper",
               sourceApp: "murph-live",
               startedAt: `${date}T18:00:00.000Z`,
             },
@@ -352,6 +440,10 @@ function addPersonaSpecificEvents(
         title: "Muscle soreness",
       }),
     );
+    return;
+  }
+
+  if (personaId === "new") {
     return;
   }
 
@@ -463,6 +555,61 @@ function activityEntity(
   });
 }
 
+function addWhoopWorkoutMetricPoints(
+  metricPoints: MetricPoint[],
+  input: {
+    activityType: string;
+    date: string;
+    durationMinutes: number;
+    personaId: DevelopmentPersonaId;
+    strain: number;
+  },
+): void {
+  const averageHeartRate = 132 + (input.durationMinutes % 11);
+  const options = {
+    context: { activityType: input.activityType },
+    recordSuffix: input.activityType,
+  };
+  metricPoints.push(
+    metricPoint(
+      input.personaId,
+      "whoop",
+      input.date,
+      "workout-strain",
+      input.strain,
+      "strain",
+      options,
+    ),
+    metricPoint(
+      input.personaId,
+      "whoop",
+      input.date,
+      "activity-average-heart-rate",
+      averageHeartRate,
+      "bpm",
+      options,
+    ),
+    metricPoint(
+      input.personaId,
+      "whoop",
+      input.date,
+      "max-heart-rate",
+      averageHeartRate + 36,
+      "bpm",
+      options,
+    ),
+    metricPoint(
+      input.personaId,
+      "whoop",
+      input.date,
+      "active-calories",
+      Math.round(input.durationMinutes * 8.4),
+      "kcal",
+      options,
+    ),
+  );
+}
+
 function observationEntity(
   personaId: DevelopmentPersonaId,
   date: string,
@@ -560,15 +707,21 @@ function metricPoint(
   metricKey: string,
   value: number,
   unit: string,
+  options: {
+    context?: Record<string, boolean | number | string>;
+    recordSuffix?: string;
+  } = {},
 ): MetricPoint {
-  const id = `${personaId}_${metricKey}_${date}`;
+  const id = [personaId, metricKey, date, options.recordSuffix]
+    .filter(Boolean)
+    .join("_");
   return {
     biomarkerKey: null,
     canonicalUnit: unit,
     canonicalValue: value,
     comparator: null,
     confidence: "high",
-    context: {},
+    context: options.context ?? {},
     effectiveDate: date,
     grain: "day",
     id: `metric-point:${id}`,
