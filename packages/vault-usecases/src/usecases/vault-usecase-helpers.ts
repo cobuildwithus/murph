@@ -325,7 +325,7 @@ function contractValidationDetails(details: Record<string, unknown>) {
   const errors = Array.isArray(details.errors) ? details.errors : []
 
   return {
-    stage: 'validation',
+    stage: details.stage === 'read' ? 'read' : 'validation',
     issues: errors.map((issue) => ({
       publicPath: contractIssuePublicPath(issue),
       code: 'custom',

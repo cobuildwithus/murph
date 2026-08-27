@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-25
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -65,6 +65,18 @@ truthful stages, and no duplicate projector, repair transport, or state owner.
   two focused Core cases, all 11 event/document built-CLI recovery cases, and
   all 8 Vault-usecase helper seam cases pass; Core, Vault-usecases, and CLI
   typechecks plus `git diff --check` and the scoped identifier scan pass.
+- Integrated current `main` through merged core-runtime recovery
+  `bf4fb93d22` at merge candidate `2c8317be8f`. The obsolete absolute bundle
+  cap was deleted in favor of `main`'s relative first-parent guard, generated
+  CLI metadata was rebuilt canonically, and the two Vault-usecase import
+  conflicts retained both existing owner-local recovery sets.
+- A recovered final audit found that invalid stored event records were emitted
+  as input `validation` failures. Stored-record validation now marks its source
+  as `read`, while the existing projector preserves only that finite marker and
+  otherwise defaults to `validation`. The 12-case built-CLI recovery suite
+  proves the corrupted ledger is not written, private stored content is not
+  echoed, storage repair makes the same import succeed, and input validation
+  behavior remains unchanged. Core, Vault-usecases, and CLI typechecks pass.
 
 ## Design
 

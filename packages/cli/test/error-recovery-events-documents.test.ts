@@ -155,6 +155,82 @@ test.sequential('built CLI returns bounded event import and edit fields', async 
   }
 })
 
+test.sequential('built CLI reports invalid stored events as read failures without writing', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stored-event-recovery-'))
+  const ledgerPath = path.join(vaultRoot, 'ledger', 'events', '2026', '2026-08.jsonl')
+  const payloadPath = path.join(vaultRoot, 'stored-event-input.json')
+  const privateStoredTitle = `private-stored-event-title-${'x'.repeat(170)}`
+
+  try {
+    await initializeVault({ vaultRoot })
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        kind: 'note',
+        occurredAt: '2026-08-24T12:00:00.000Z',
+        title: 'Stored event baseline',
+        note: 'Stored event baseline',
+      }),
+      'utf8',
+    )
+    const created = await runCli<{ eventId: string }>([
+      'event',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(created.ok, true, JSON.stringify(created))
+    const eventId = requireData(created).eventId
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        id: eventId,
+        kind: 'note',
+        occurredAt: '2026-08-24T12:00:00.000Z',
+        title: 'Recovered stored event',
+        note: 'Recovered stored event',
+      }),
+      'utf8',
+    )
+    const healthyLedger = await readFile(ledgerPath, 'utf8')
+    const storedRecord = JSON.parse(healthyLedger.trim()) as Record<string, unknown>
+    await writeFile(
+      ledgerPath,
+      `${JSON.stringify({ ...storedRecord, title: privateStoredTitle })}\n`,
+      'utf8',
+    )
+    const filesBeforeRejectedImport = await snapshotVaultFiles(vaultRoot)
+    const importArgs = [
+      'event',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ]
+
+    const rejected = await runCli(importArgs)
+    const rejectedError = requireError(rejected)
+
+    assert.equal(rejectedError.code, 'contract_invalid')
+    assert.equal(rejectedError.retryable, false)
+    assert.equal(rejectedError.stage, 'read')
+    assertDoesNotEcho(rejected, [privateStoredTitle, eventId, ledgerPath, payloadPath, vaultRoot])
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeRejectedImport)
+
+    await writeFile(ledgerPath, healthyLedger, 'utf8')
+    const recovered = await runCli<{ created: boolean, eventId: string }>(importArgs)
+
+    assert.equal(recovered.ok, true, JSON.stringify(recovered))
+    assert.equal(requireData(recovered).created, false)
+    assert.equal(requireData(recovered).eventId, eventId)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('built CLI maps event identity aliases to canonical id without rejected writes', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-id-recovery-'))
   const payloadPath = path.join(vaultRoot, 'event-input.json')

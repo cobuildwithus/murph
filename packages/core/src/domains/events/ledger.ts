@@ -354,6 +354,7 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
     record,
     "EVENT_CONTRACT_INVALID",
     "Stored event record is invalid.",
+    { stage: "read" },
   );
 }
 
