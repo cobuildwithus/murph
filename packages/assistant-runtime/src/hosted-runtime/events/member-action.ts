@@ -44,6 +44,9 @@ export async function executeHostedMemberActionWake(input: {
             actionId: input.wake.request.actionId,
             completedAt: new Date().toISOString(),
             reason: result.status === "rejected" ? result.reason : null,
+            ...(result.status !== "rejected" && result.result !== undefined
+              ? { result: result.result }
+              : {}),
             schemaVersion: 1,
             status: result.status,
           },

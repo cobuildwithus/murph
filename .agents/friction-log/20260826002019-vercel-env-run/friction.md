@@ -1,6 +1,7 @@
 ---
 title: 'Vercel env run supplies empty protected production database variables'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2337'
 ---
 
 ## Expected Behavior

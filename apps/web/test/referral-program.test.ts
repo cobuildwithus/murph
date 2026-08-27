@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatHostedPublicReferralRewardCompactValue,
   formatHostedPublicReferralRewardValue,
   getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
@@ -13,7 +14,6 @@ import {
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES,
   HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_MESSAGES,
-  HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_SPEAKERS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
 } from "@/src/lib/hosted-growth/usage-referral";
 
@@ -114,6 +114,12 @@ describe("public referral program projection", () => {
     );
     expect(formatHostedPublicReferralRewardValue(activeGroup)).toBe(
       "About 14 more days of Murph usage",
+    );
+    expect(formatHostedPublicReferralRewardCompactValue(signup)).toBe(
+      "10",
+    );
+    expect(formatHostedPublicReferralRewardCompactValue(activeGroup)).toBe(
+      "14",
     );
   });
 

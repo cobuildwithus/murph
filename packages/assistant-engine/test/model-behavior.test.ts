@@ -11,6 +11,7 @@ import {
 import {
   buildAssistantSystemPrompt,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -67,6 +68,20 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('externally controlled text')
     expect(prompt).toContain('Delivery adapter contract:')
     expect(prompt).not.toContain('Treat the user prompt as the execution instructions for this scheduled run')
+  })
+
+  it('gives operator messages one private direct JSON delivery contract', () => {
+    const prompt = buildAssistantOperatorMessagePromptWithCacheMetadata({
+      channel: 'linq',
+    }).prompt
+
+    expect(prompt).toContain('existing private direct Murph conversation')
+    expect(prompt).toContain('bounded committed private conversation history')
+    expect(prompt).toContain('The platform owns delivery')
+    expect(prompt).toContain('"kind":"send_message"')
+    expect(prompt).not.toContain('bound group')
+    expect(prompt).not.toContain('private-Murph handoff')
+    expect(prompt).not.toContain('Return only that final group message')
   })
 
   it('adds Murph-specific execution behavior without changing the calmer Murph voice', () => {
@@ -1181,15 +1196,18 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain('Still help with the immediate request or best fallback')
     expect(prompt).toContain(
-      'Otherwise, when the problem is clear or Murph observed the friction, capture it silently',
+      'capture the single most material gap; at most one candidate may be accepted',
     )
+    expect(prompt).toContain('Ordinary feedback stays silent for every result')
+    expect(prompt).toContain('Persistence is best-effort after the reply')
+    expect(prompt).toContain('Reserved support follows Support and skips discovery')
     expect(prompt).toContain(
-      'select the single most material gap and call the tool at most once for the accepted request',
+      'On the first input-schema rejection, correct only the returned issues and retry once',
     )
-    expect(prompt).toContain('Do not mention ordinary acceptance')
-    expect(prompt).toContain('persistence is best-effort after the reply')
-    expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
-    expect(prompt).toContain('Never retry after any tool result')
+    expect(prompt).toContain('A second rejection is terminal')
+    expect(prompt).toContain(
+      'Accepted, already accepted, unavailable, and callback-failure results are terminal',
+    )
     expect(prompt).toContain('external/transient failures')
     expect(prompt).toContain('Use `feature_request` for missing paths')
     expect(prompt).toContain(
@@ -1205,6 +1223,19 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')
     expect(prompt).not.toContain('flagged for the product team')
+    expect(prompt).not.toContain('one-candidate, no-retry')
+    const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${prompt}`
+    expect(
+      composedPrompt.split(
+        'On the first input-schema rejection, correct only the returned issues and retry once',
+      ),
+    ).toHaveLength(2)
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'For support, follow the Product feedback contract',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'ordinary results stay silent',
+    )
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {

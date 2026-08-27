@@ -17,6 +17,7 @@ import {
   initializeVault,
   readHabitatAspect,
   removeAutomaticMealPhoto,
+  upsertAutomation,
   upsertGoal,
   upsertHabitatAspect,
 } from '@murphai/core'
@@ -39,6 +40,10 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantRealCodexRunEnv,
+  parseAssistantRealCodexRunArgs,
+} from '../../../scripts/run-assistant-real-codex-e2e.ts'
+import {
   executeCodexAppServerTurn,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
@@ -51,7 +56,11 @@ import {
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_COMPUTER_OS_CONTROL_TOOL,
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -97,6 +106,9 @@ import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
 import {
+  sendAssistantMessageLocal,
+} from '../src/assistant/service.ts'
+import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
@@ -114,7 +126,17 @@ import {
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+  buildAssistantCronExecutionInstructions,
 } from '../src/assistant/cron/execution.ts'
+import {
+  findCanonicalAssistantCronRecordInList,
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  resolveCanonicalAssistantCronJobId,
+} from '../src/assistant/cron/canonical-jobs.ts'
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+} from '../src/assistant/cron/runtime-state.ts'
 import {
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
@@ -141,7 +163,10 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
-import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import {
+  extractCodexAssistantProviderUsage,
+  resolveAssistantProviderPrompt,
+} from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
@@ -317,6 +342,145 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
+
+describeRealCodex('real Codex cold conversation reconstruction e2e', () => {
+  it(
+    'answers from an early detail retained across sixty committed messages',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-cold-conversation-reconstruction-e2e-'),
+      )
+      const conversationHistoryMessages = Array.from(
+        { length: 30 },
+        (_, index) => index === 0
+          ? [
+              {
+                content:
+                  'For the synthetic packing checklist, put the train tickets in the cobalt folder.',
+                role: 'user' as const,
+              },
+              {
+                content:
+                  'Got it. The train tickets go in the cobalt folder.',
+                role: 'assistant' as const,
+              },
+            ]
+          : [
+              {
+                content:
+                  `Synthetic checklist item ${index + 1}: ${'routine packing note '.repeat(8)}`,
+                role: 'user' as const,
+              },
+              {
+                content:
+                  `Synthetic checklist response ${index + 1}: ${'routine confirmation '.repeat(8)}`,
+                role: 'assistant' as const,
+              },
+            ],
+      ).flat()
+      const userPrompt = 'Which folder did we pick for the train tickets?'
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        const session = parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'telegram',
+            conversationKey: 'telegram:direct:cold-reconstruction',
+            delivery: null,
+            identityId: null,
+            threadId: 'thread-cold-reconstruction',
+            threadIsDirect: true,
+          },
+          createdAt: '2026-08-26T12:00:00.000Z',
+          lastTurnAt: '2026-08-26T12:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session-cold-reconstruction',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: config.codexHome,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'read-only',
+          },
+          turnCount: 30,
+          updatedAt: '2026-08-26T12:30:00.000Z',
+        })
+        await saveAssistantSession(workingDirectory, session)
+        await appendAssistantTranscriptEntries(
+          workingDirectory,
+          session.sessionId,
+          conversationHistoryMessages.map((message) => ({
+            kind: message.role,
+            text: message.content,
+          })),
+        )
+        const historyBytes = conversationHistoryMessages.reduce(
+          (total, message) =>
+            total + Buffer.byteLength(message.content, 'utf8'),
+          0,
+        )
+        expect(historyBytes).toBeLessThanOrEqual(12_000)
+
+        const result = await sendAssistantMessageLocal({
+          channel: 'telegram',
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          deliverResponse: false,
+          executionContext: null,
+          includeEarlySessionOnboarding: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          persistUserPromptOnFailure: false,
+          prompt: userPrompt,
+          provider: 'codex-cli',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          sessionId: session.sessionId,
+          threadId: 'thread-cold-reconstruction',
+          threadIsDirect: true,
+          turnEnvironment: {
+            currentWorkingDirectory: workingDirectory,
+            env: config.env,
+          },
+          vault: workingDirectory,
+          workingDirectory,
+        })
+
+        process.stdout.write(
+          `[cold-conversation-reconstruction-e2e] ${JSON.stringify({
+            historyBytes,
+            historyMessages: conversationHistoryMessages.length,
+            reply: result.response.trim(),
+          })}\n`,
+        )
+        expect(result.response).toMatch(/cobalt/iu)
+        expect(result.response).not.toMatch(
+          /do not (?:know|remember)|don't (?:know|remember)|no context|which folder/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
 
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
@@ -5287,6 +5451,119 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
+describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', () => {
+  it(
+    'keeps a current-day readout on the saved automation task',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-weekly-digest-prompt-only-e2e-'),
+      )
+
+      try {
+        await initializeVault({ vaultRoot: workingDirectory })
+        const savedInstructions = [
+          'Send one concise current-day hydration readout from the supplied evidence.',
+          'Mention the measured intake and whether the current status is on track.',
+          'Do not compare against earlier days.',
+        ].join(' ')
+        const createdAutomation = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: savedInstructions,
+          now: new Date('2026-08-05T12:00:00.000Z'),
+          route: {
+            channel: 'linq',
+            deliveryTarget: 'synthetic-current-day-readout',
+            identityId: null,
+            participantId: null,
+            threadId: 'synthetic-current-day-readout',
+            threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '08:00' },
+          slug: 'synthetic-current-day-readout',
+          status: 'active',
+          supportKind: 'weekly_digest',
+          tags: [
+            'system:support-series:experiment:exp_synthetic_hydration',
+          ],
+          title: 'Synthetic current-day readout',
+          vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory),
+          createdAutomation.record.automationId,
+        )
+        expect(source?.kind).toBe('automation')
+        if (!source || source.kind !== 'automation') {
+          throw new Error('Expected the canonical automation source.')
+        }
+        const jobId = resolveCanonicalAssistantCronJobId(source)
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: '2026-08-05T12:00:00.000Z',
+        })
+        const prompt = buildAssistantCronExecutionInstructions(
+          {
+            job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+            kind: 'canonical',
+            runtimeState,
+            source,
+          },
+          { automationId: null, contextReferences: [] },
+        )
+        expect(prompt).toContain(savedInstructions)
+        expect(prompt).not.toContain('Accepted support scope (engine-supplied')
+        expect(prompt).not.toContain('agreed weekly summary shape')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            prompt,
+            'Current trusted evidence for this scheduled occurrence:',
+            '- Today\'s measured fluid intake is 1.4 liters.',
+            '- The current status is on track toward the established 2.3-liter target.',
+          ].join('\n\n'),
+          reasoningEffort: 'medium',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/1\.4 liters?/iu)
+          expect(decision.text).toMatch(/on track/iu)
+          expect(decision.text).not.toMatch(
+            /weekly?|recap|earlier days|past seven days/iu,
+          )
+          console.info(
+            `[real-codex weekly-digest prompt-only] ${decision.text.replaceAll(/\s+/gu, ' ').trim()}`,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -5336,7 +5613,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
           ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        developerInstructions: buildScheduledAutomationDeveloperInstructions(),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5453,7 +5730,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions:
-          buildIndependentReminderDeveloperInstructions(scope),
+          buildScheduledAutomationDeveloperInstructions(scope),
         dynamicTools: [],
         env: config.env,
         excludeResumeTurns: true,
@@ -5501,7 +5778,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildIndependentReminderDeveloperInstructions('group'),
+        buildScheduledAutomationDeveloperInstructions('group'),
       dynamicTools: [],
       env: config.env,
       excludeResumeTurns: true,
@@ -7814,6 +8091,179 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
 
 describeRealCodex('real Codex support escalation e2e', () => {
   it(
+    'product-feedback schema recovery contract accepts one corrected support call',
+    async () => {
+      const recordedFeedback: Array<{
+        kind: string
+        summary: string
+      }> = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push({
+              kind: feedback.kind,
+              summary: feedback.summary,
+            })
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic validation-recovery probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const firstCall = calls[0]
+      const correctedCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected two product-feedback dynamic tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.kind).toBe('frustration')
+      expect(correctedCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+      expect(correctedCall.argumentsValue.summary).toMatch(
+        /^Support escalation: \S/iu,
+      )
+      expect(readString(correctedCall.argumentsValue.summary)?.length)
+        .toBeLessThanOrEqual(5_000)
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+      expect(result.finalMessage).not.toMatch(/direct notification failed/iu)
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract stops after a second support rejection',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-support-schema-terminal-e2e-',
+        probeDeveloperInstructions: [
+          'Synthetic terminal-validation probe contract:',
+          'On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value automation.',
+          'On a second call only, if one occurs, omit supportArea and include an unsupported top-level supportProblem field with the value classification.',
+        ].join(' '),
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic terminal-validation probe in a verified private conversation.',
+          'Murph grouped a paused generic automation as active, and I need human support to take over the product issue.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[product-feedback-schema-terminal-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'two rejected calls and no third attempt').toHaveLength(2)
+      const firstCall = calls[0]
+      const secondCall = calls[1]
+      if (firstCall?.kind !== 'dynamic' || secondCall?.kind !== 'dynamic') {
+        throw new Error('Expected two rejected product-feedback tool calls.')
+      }
+      expect(firstCall.argumentsValue.supportArea).toBe('automation')
+      expect(secondCall.argumentsValue.supportArea).toBeUndefined()
+      expect(secondCall.argumentsValue.supportProblem).toBe('classification')
+      expect(recordedFeedback).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/direct notification failed/iu)
+      expect(result.finalMessage).not.toMatch(
+        /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
+    'product-feedback schema recovery contract keeps ordinary acceptance silent',
+    async () => {
+      const recordedFeedback: string[] = []
+      const result = await executeRealCodexProductFeedbackProbe({
+        directoryPrefix: 'murph-ordinary-feedback-schema-recovery-e2e-',
+        probeDeveloperInstructions:
+          'Synthetic validation-probe contract: On the first murph.submit_product_feedback call only, include an unsupported top-level supportArea field with the value dashboard.',
+        productFeedbackRecorder: {
+          async recordProductFeedback(feedback) {
+            recordedFeedback.push(feedback.summary)
+            return { recorded: true }
+          },
+          discardProductFeedback() {},
+          readProductFeedback() {
+            return null
+          },
+        },
+        prompt: [
+          'This is a synthetic ordinary-feedback probe in a verified private conversation.',
+          'Murph keeps classifying a pinned generic dashboard item as inactive, which is frustrating. Give me the smallest safe workaround.',
+        ].join(' '),
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+      )
+
+      process.stdout.write(
+        `[ordinary-product-feedback-schema-recovery-e2e] ${JSON.stringify({
+          reply: result.finalMessage.trim(),
+          toolCallCount: calls.length,
+        })}\n`,
+      )
+      expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
+      const correctedCall = calls[1]
+      if (correctedCall?.kind !== 'dynamic') {
+        throw new Error('Expected one corrected ordinary-feedback call.')
+      }
+      expect(correctedCall.argumentsValue.supportArea).toBeUndefined()
+      expect(correctedCall.argumentsValue.summary).not.toMatch(
+        /^Support escalation:/iu,
+      )
+      expect(recordedFeedback).toHaveLength(1)
+      expect(result.finalMessage).not.toMatch(
+        /feedback|recorded|logged|triage|account-linked escalation|direct notification|support@/iu,
+      )
+    },
+    720_000,
+  )
+
+  it(
     'sends once from an explicit private request and never from a group',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -7996,6 +8446,193 @@ describeRealCodex('real Codex support escalation e2e', () => {
       }
     },
     720_000,
+  )
+})
+
+describeRealCodex('real Codex Kernel browser continuation e2e', () => {
+  it(
+    'opens an account portal, reports setup readiness, and does not enter private information',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-kernel-browser-inspection-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const requests: Array<{
+        body: Record<string, unknown>
+        url: string
+      }> = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'computer-use',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          fetchImpl: async (
+            request: string | URL | Request,
+            init?: RequestInit,
+          ): Promise<Response> => {
+            const url = request instanceof Request
+              ? request.url
+              : String(request)
+            const body = JSON.parse(String(init?.body)) as Record<
+              string,
+              unknown
+            >
+            requests.push({ body, url })
+
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs'
+            ) {
+              return new Response(JSON.stringify({
+                expiresAt: '2026-08-26T19:00:00.000Z',
+                reused: false,
+                runId: 'run_synthetic_portal',
+                status: 'running',
+                title: 'Account portal',
+                url: 'https://portal.example.test/setup',
+                visibleText: [
+                  'Account portal loaded.',
+                  'Setup is ready.',
+                  'A mailing address is required to continue.',
+                ].join('\n'),
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            if (
+              url
+              === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish'
+            ) {
+              return new Response(JSON.stringify({
+                ok: true,
+                runId: 'run_synthetic_portal',
+                status: 'completed',
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            throw new Error(`Unexpected hosted computer request: ${url}`)
+          },
+          hostedToolContext: createRealCodexComputerHostedToolContext(),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Open https://portal.example.test/setup and tell me whether account setup is ready.',
+            'Do not enter or submit personal or payment information.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const computerToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_FINISH_RUN_TOOL.name,
+          MURPH_COMPUTER_OPEN_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const prohibitedToolNames = new Set<string>([
+          MURPH_COMPUTER_ACT_TOOL.name,
+          MURPH_COMPUTER_OS_CONTROL_TOOL.name,
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        ])
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('computer-use/SKILL.md')
+          && action.output.includes('# Computer Use')
+        )
+        const computerCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && computerToolNames.has(action.tool)
+        )
+        const openCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_OPEN_TOOL.name
+        )
+        const finishCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_COMPUTER_FINISH_RUN_TOOL.name
+        )
+        const prohibitedCalls = computerCalls.filter((action) =>
+          action.kind === 'dynamic'
+          && prohibitedToolNames.has(action.tool)
+        )
+
+        expect(skillRead, 'computer-use skill read').toBeDefined()
+        expect(openCalls).toHaveLength(1)
+        expect(finishCalls).toHaveLength(1)
+        expect(prohibitedCalls).toHaveLength(0)
+        expect(openCalls[0]?.eventIndex).toBeGreaterThan(
+          skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(openCalls[0]).toMatchObject({
+          argumentsValue: {
+            startUrl: 'https://portal.example.test/setup',
+          },
+        })
+        expect(finishCalls[0]).toMatchObject({
+          argumentsValue: {
+            outcome: 'completed',
+            runId: 'run_synthetic_portal',
+          },
+        })
+        expect(requests).toEqual([
+          {
+            body: {
+              goal: 'Hosted computer task.',
+              resumeAfterMailboxItemId: null,
+              resumeDeliveryContext: null,
+              startUrl: 'https://portal.example.test/setup',
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs',
+          },
+          {
+            body: {
+              outcome: 'completed',
+              summary: null,
+            },
+            url: 'http://web-control.worker/api/internal/computer/runs/run_synthetic_portal/finish',
+          },
+        ])
+        const reply = result.finalMessage.trim()
+        expect(reply).toMatch(/setup/iu)
+        expect(reply).toMatch(/ready/iu)
+        expect(reply).not.toMatch(
+          /setup (?:is )?complete|information (?:was|has been) submitted/iu,
+        )
+        expect(reply).not.toMatch(/HOSTED_COMPUTER|LIVE_VIEW_ORIGIN/iu)
+        process.stdout.write(
+          `[kernel-browser-continuation-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'account-setup-readiness',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
@@ -8893,6 +9530,42 @@ describe('real Codex app-server cache usage e2e harness', () => {
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
       temporaryPaths: [],
     })
+  })
+
+  it('composes one explicit runner Codex home only in subscription mode', async () => {
+    const sourceEnv = buildAssistantRealCodexRunEnv({
+      options: parseAssistantRealCodexRunArgs([
+        'focused journey',
+        '--codex-home',
+        '/alternate-codex-home',
+      ]),
+      sourceEnv: {
+        CODEX_HOME: '/ambient-codex-home',
+        HOME: '/synthetic-home',
+        MURPH_REAL_CODEX_HOME: '/ambient-real-codex-home',
+        PATH: '/usr/bin:/bin',
+      },
+    })
+    const config = await resolveRealCodexE2eConfig({ sourceEnv })
+
+    expect(config).toEqual({
+      codexHome: '/alternate-codex-home',
+      env: {
+        HOME: '/synthetic-home',
+        PATH: '/usr/bin:/bin',
+      },
+      model: DEFAULT_REAL_CODEX_MODEL,
+      modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      temporaryPaths: [],
+    })
+    await expect(resolveRealCodexE2eConfig({
+      sourceEnv: {
+        MURPH_REAL_CODEX_AUTH: 'provider',
+        MURPH_REAL_CODEX_HOME: '/alternate-codex-home',
+      },
+    })).rejects.toThrow(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
+    )
   })
 
   it('keeps the built-in OpenAI provider out of provider-key mode', async () => {
@@ -11122,6 +11795,69 @@ function createRealCodexSupportHostedToolContext(
   }
 }
 
+async function executeRealCodexProductFeedbackProbe(input: {
+  directoryPrefix: string
+  probeDeveloperInstructions?: string
+  productFeedbackRecorder: AssistantTurnProductFeedbackRecorder
+  prompt: string
+}) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), input.directoryPrefix),
+  )
+
+  try {
+    return await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: [
+        buildDirectConversationDeveloperInstructions(),
+        input.probeDeveloperInstructions,
+      ].filter((value) => value !== undefined).join('\n\n'),
+      dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+      env: config.env,
+      hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+      model: config.model,
+      modelProvider: config.modelProvider,
+      productFeedbackRecorder: input.productFeedbackRecorder,
+      prompt: input.prompt,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+function createRealCodexComputerHostedToolContext(): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: true,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_computer'],
+      conversationId: 'conversation-computer-direct',
+      conversationScope: 'direct',
+      inboundMailboxItemIds: ['mailbox-computer'],
+      originSessionId: 'session-computer-direct',
+      recipientKey: 'recipient-computer-direct',
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
+  }
+}
+
 function createRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
   return {
     async recordProductFeedback() {
@@ -12470,7 +13206,7 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(
+function buildScheduledAutomationDeveloperInstructions(
   conversationScope: 'direct' | 'group' = 'direct',
 ): string {
   return buildAssistantSystemPrompt({
@@ -13679,18 +14415,17 @@ async function resolveRealCodexE2eConfig(
   const model =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
-  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
-  if (configuredCodexHome) {
-    throw new Error(
-      'MURPH_REAL_CODEX_HOME is not supported; provider mode creates an isolated home and subscription mode uses the normal local Codex home.',
-    )
-  }
-
   const authMode =
     normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_AUTH) ?? 'provider'
   if (authMode !== 'provider' && authMode !== 'subscription') {
     throw new Error(
       'MURPH_REAL_CODEX_AUTH must be provider or subscription.',
+    )
+  }
+  const configuredCodexHome = normalizeEnvString(sourceEnv.MURPH_REAL_CODEX_HOME)
+  if (authMode === 'provider' && configuredCodexHome) {
+    throw new Error(
+      'MURPH_REAL_CODEX_HOME is available only with subscription auth.',
     )
   }
   const explicitModelProvider =
@@ -13705,7 +14440,7 @@ async function resolveRealCodexE2eConfig(
       )
     }
     return {
-      codexHome: null,
+      codexHome: configuredCodexHome,
       env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
       model,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,

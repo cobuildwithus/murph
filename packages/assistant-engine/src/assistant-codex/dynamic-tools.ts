@@ -6741,7 +6741,7 @@ function invalidDynamicToolArgumentsResult(
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     false,
-    buildToolCallValidationFeedback(validationDigest, { error }),
+    buildToolCallValidationFeedback(validationDigest, error),
   )
 }
 

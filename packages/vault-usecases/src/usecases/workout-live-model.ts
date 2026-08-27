@@ -1,6 +1,7 @@
 import {
   renderWorkoutSessionEditorResultV1,
   workoutSessionCardV1Bounds,
+  type WorkoutLiveApplyMemberActionResultV1,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutSessionDetailV1,
@@ -113,7 +114,10 @@ export interface ApplyLiveWorkoutMemberActionInput {
 }
 
 export type ApplyLiveWorkoutMemberActionResult =
-  | { status: 'applied' | 'unchanged' }
+  | {
+      result?: WorkoutLiveApplyMemberActionResultV1
+      status: 'applied' | 'unchanged'
+    }
   | { reason: 'workout_changed'; status: 'rejected' }
 
 export function isOpenLiveWorkout(workout: WorkoutSession): boolean {
