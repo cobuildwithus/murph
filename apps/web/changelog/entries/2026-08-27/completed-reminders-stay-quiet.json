@@ -9,6 +9,6 @@
     "summary": "When you tell Murph in a private chat that the action for a current reminder is already done, that occurrence now stays quiet instead of repeating the cue.",
     "details": "Only the matching occurrence is skipped; future reminders remain active, and unclear or older completion messages do not suppress a cue.",
     "relevanceTags": ["assistant", "reminders", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2406]
   }
 }
