@@ -873,9 +873,13 @@ Hosted onboarding extras:
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
   uses it for metadata-only alerts when a provider rejection aborts a complete
   billing action, for new verified payment-failure events, and for the first
-  failed reconciliation attempt. Both website and iMessage Assistant billing
-  use the same Web-owned Stripe services, so there is no separate
-  channel-specific configuration.
+  failed reconciliation attempt. Every verified positive subscription invoice
+  or fulfilled usage-credit payment also sends one metadata-only notification
+  through this channel. Production must configure all three values: a missing
+  configuration or provider failure keeps that payment's existing receipt
+  retryable while its already-committed billing result remains intact. Both
+  website and iMessage Assistant billing use the same Web-owned Stripe
+  services, so there is no separate channel-specific configuration.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -1353,11 +1357,14 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
 - The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
-  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts. No
-  time-zone setting is required for Stripe alerts. Confirm that the Stripe
-  webhook endpoint subscribes to `checkout.session.async_payment_failed`,
-  `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`. Checkout action owners cover mandatory
+  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts and
+  positive-payment notifications. No time-zone setting is required. Confirm
+  that the Stripe webhook endpoint subscribes to positive `invoice.paid`,
+  `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  and `payment_intent.succeeded` events as well as
+  `checkout.session.async_payment_failed`, `payment_intent.payment_failed`,
+  `invoice.payment_failed`, and `invoice.finalization_failed`. Checkout action
+  owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. Paid-plan upgrades, paid-trial transitions, and
   scheduled plan switches use the same complete-action ownership. An owner
@@ -1377,6 +1384,17 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   is dependency-free so production migration line sync and standalone Stripe
   tooling can continue importing the general onboarding runtime under ordinary
   Node conditions.
+  Positive invoice and fulfilled usage-credit events send one privacy-safe
+  operator email from the existing receipt after canonical reconciliation.
+  An activation attempt retains its exact mailbox pointers on that receipt in
+  the same transaction as activation. Every positive-payment attempt restores
+  and hands those pointers to the existing runtime-wake owner before
+  notification work, including a retry where the email sent marker already
+  exists. Provider, configuration, sent-marker, or receipt-completion failure
+  can therefore leave delivery pending without losing the activation retry
+  target. The receipt-local sent marker plus provider idempotency prevents a
+  later replay from sending twice. Deploy the additive
+  `payment_notification_email_sent_at` column before or with the Web build.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
