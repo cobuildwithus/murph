@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 75,
+  "item": {
+    "id": "scheduled-reminders-retry-on-time",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Scheduled reminders retry on time",
+    "summary": "When a scheduled reminder hits a brief connection interruption, Murph now retries near the promised time instead of waiting several extra minutes.",
+    "details": "Only the retry created by that failed reminder is accelerated; ordinary reminder timing and delivery behavior stay unchanged.",
+    "relevanceTags": [
+      "assistant",
+      "reminders",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2453
+    ]
+  }
+}
