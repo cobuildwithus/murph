@@ -1,6 +1,7 @@
 ---
 title: 'Document local crypto prerequisites for the hosted group PostgreSQL suite'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2450'
 ---
 
 ## Expected Behavior
