@@ -1,8 +1,8 @@
 # Group consent repost and restaurant nutrition resolution
 
-Status: active
+Status: completed
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -73,8 +73,9 @@ Updated: 2026-08-26
    replay, privacy inspection, and candidate diff review.
 4. [x] Commit and push the candidate, open the draft PR, and start the required
    specialist and final ReviewGPT passes concurrently with exact-head CI.
-5. [ ] Resolve accepted findings, run ReviewGPT round two, archive this plan
-   with `scripts/finish-task`, and confirm the final PR head is green.
+5. [x] Resolve accepted findings, complete the required retrospective and
+   ReviewGPT follow-up, then archive this plan with `scripts/finish-task` for
+   exact-head CI and merge.
 
 ## Verification
 
@@ -100,7 +101,11 @@ Updated: 2026-08-26
   and do not ask the member to repeat the item. The production-shaped fixture
   rejects generic restaurant queries and unsupported meal fields.
 - Existing exclusions: deterministic food-journal coverage preserves the
-  official-source fallback and existing number-sensitive safety exception.
+  official-source fallback and existing number-sensitive safety exception. A
+  focused real-Codex protected-context journey performed no nutrition lookup,
+  saved one meal without nutrition fields, asked no question, and returned a
+  short confirmation. The ordinary database-hit and database-miss journeys
+  continued to resolve nutrition before their single meal writes.
 - Regression proof: Assistant Engine completed 4,133 tests, Assistant Runtime
   2,516 tests, Hosted Execution 560 tests, focused Web consent coverage 247
   tests, and all four affected package typechecks passed.
@@ -111,6 +116,10 @@ Updated: 2026-08-26
 - Walkthrough result: **Ready**. Both existing journeys reach their promised
   observable result, failure preserves the prior working consent offer, and
   there were no differences from the Patch plan.
+- Final review: ReviewGPT round three returned `ROUND_OUTCOME: PASS` with no
+  qualifying findings on the production-bearing candidate. The current-base
+  merge-tree proof is clean, focused deterministic and real-model checks pass,
+  and the final plan archive is non-production-only.
 
 ## Deployment concerns
 
@@ -119,3 +128,4 @@ Updated: 2026-08-26
   waits for a consumer that understands request-bound reposting.
 - The food-journal change is prompt-only at runtime and has no cross-service
   skew requirement.
+Completed: 2026-08-27
