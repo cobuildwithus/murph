@@ -374,24 +374,6 @@ async function refreshHostedMemberForPhoneTx(input: {
   return input.member;
 }
 
-export async function ensureHostedMemberForPrivyIdentity(input: {
-  allowVerifiedEmailRebinding?: boolean;
-  authMethod?: HostedPrivyAuthMethod;
-  identity: HostedPrivyIdentity;
-  now: Date;
-  prisma?: PrismaClient;
-}): Promise<HostedMemberCoreState> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return prisma.$transaction((tx) => ensureHostedMemberForPrivyIdentityTx({
-    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
-    authMethod: input.authMethod,
-    identity: input.identity,
-    now: input.now,
-    prisma: tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
 export async function reconcileHostedPrivyIdentityOnMember(input: {
   allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
@@ -436,6 +418,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
+  preparedExistingMemberId?: string | null;
   preparedLiveIdentity?: HostedPrivyIdentity;
   preparedNewMemberId?: string;
   now: Date;
@@ -469,6 +452,13 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     identity: input.identity,
     prisma: input.prisma,
   }))?.core ?? null;
+
+  if (
+    input.preparedExistingMemberId !== undefined
+    && (existingMember?.id ?? null) !== input.preparedExistingMemberId
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
 
   if (
     existingMember
