@@ -7,6 +7,11 @@ Last verified: 2026-08-26
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Local agents treat production secret values as unavailable and stop for user
+discussion before implementing or executing work that depends on them. The
+canonical trust boundary and authorization requirements for any later hosted or
+protected path are specified by `agent-docs/SECURITY.md`.
+
 Markdown-only pull requests keep their seven existing required contexts, while
 flat, dated release-note records may use base-trusted exact-inventory receipts
 instead of runtime-heavy proof. Every other Markdown path retains full CI, and

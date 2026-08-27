@@ -32,56 +32,53 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
    The guarded line sync backfills current env-configured lines and verifies at least one configured assignable DB line exists before DB-backed assignment code serves traffic. Provider inventory sync stays on the explicit operator/contact-card path so production deploys do not depend on the Linq inventory API.
 
-2. Wait until the new application build is live, then add a reviewed,
-   task-specific route-projection step to the existing `Hosted Web Contract
-   Migrations` workflow as described in
-   `apps/web/README.md#production-database-maintenance`. The protected step maps
-   `HOSTED_WEB_DIRECT_DATABASE_URL` to `DATABASE_URL` after exact-deployment
-   proof, then dry-runs one bounded batch:
+2. Wait until the new application build is live, then stop before route
+   projection. The backfill requires both production database access and hosted
+   crypto authority, and it has no approved local execution path. Explain the
+   required operation, authorities, alias proofs, drain, and convergence gates
+   to the user before implementation or execution. Do not retrieve or inject a
+   production secret locally, start a rollback freeze, or invent a workflow or
+   endpoint while waiting for the decision.
 
-   ```bash
-   NODE_OPTIONS=--conditions=react-server \
-     pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
-   ```
+3. Any later user-authorized hosted or protected path must first run an
+   aggregate-only dry run. A nonzero `invalidRows` count means encrypted route
+   material or its blinded lookup authority needs operator investigation; the
+   backfill leaves those rows null and readiness incomplete.
 
-   Output is aggregate-only. A nonzero `invalidRows` count means encrypted route material or its blinded lookup authority needs operator investigation; the script leaves those rows null and readiness incomplete.
+4. Before apply, the authorized path must freeze rollbacks, prove the
+   production alias points at the replacement build, wait
+   `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`, and prove the alias again. If
+   the alias changes, it must restart the full drain against the selected
+   compatible build. Applying before this point is unsafe because an in-flight
+   previous function can still create a null projection after a batch has
+   passed it.
 
-3. Freeze rollbacks, prove the production alias points at the replacement build, wait `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`, and prove the alias again. If the alias changes, restart the full drain against the selected compatible build. Applying before this point is unsafe because an in-flight previous function can still create a null projection after a batch has passed it.
+5. The authorized path must apply bounded, idempotent batches until
+   `remainingRows` reaches zero. Each write rechecks the legacy row's null
+   projection, channel, container, encrypted route value, lookup keys, and
+   `updated_at`, so concurrent canonical refresh wins instead of being
+   overwritten.
 
-4. Apply bounded, idempotent batches until `remainingRows` reaches zero:
+6. The authorized path must finish with the count-only readiness check.
+   Readiness remains incomplete while any Linq or Telegram route is
+   unprojected. Assignment remains available during backfill; it surfaces
+   incomplete coverage and applies the same conservative unknown group weight
+   to every candidate rather than attributing a group to an owner line or
+   claiming exact spare capacity.
 
-   ```bash
-   NODE_OPTIONS=--conditions=react-server \
-     pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
-   ```
+7. An explicit operator repair, provider inventory sync, or one-off line
+   cutover that requires production credentials follows the same stop boundary.
+   Discuss its operation and execution owner with the user before beginning.
 
-   Each write rechecks the legacy row's null projection, channel, container, encrypted route value, lookup keys, and `updated_at`, so concurrent canonical refresh wins instead of being overwritten.
-
-5. Prove readiness:
-
-   ```bash
-   NODE_OPTIONS=--conditions=react-server \
-     pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
-   ```
-
-   `--check` exits nonzero while any Linq or Telegram route remains unprojected. Assignment remains available during backfill; it surfaces incomplete coverage and applies the same conservative unknown group weight to every candidate rather than attributing a group to an owner line or claiming exact spare capacity.
-
-6. For an explicit operator repair or a one-off line cutover outside the guarded production deploy path, run:
-
-   ```bash
-   pnpm --dir apps/web linq:sync-lines
-   ```
-
-   This full command also syncs provider inventory before the final readiness check.
-
-7. Confirm each assignable line row has:
+8. Confirm each assignable line row has:
 
    - `configured_at IS NOT NULL`
    - `phone_number_encrypted IS NOT NULL`
    - `egress_policy = 'enabled'`
    - `health_status IN ('healthy', 'unknown')`
 
-8. Configure per-line proactive warmup caps directly on `hosted_linq_line`.
+9. Configure per-line proactive warmup caps directly on `hosted_linq_line` only
+   through a separately authorized production execution path.
 
 ## Assignment and Warmup Policy
 

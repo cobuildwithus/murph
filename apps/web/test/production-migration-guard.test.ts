@@ -57,7 +57,7 @@ const productionVercelEnvRun =
   /vercel env run[^\n]*(?:--environment(?:=|\s+)|-e(?:=|\s+))production/u;
 
 describe("hosted web production migration guard", () => {
-  test("keeps production database maintenance on the protected workflow path", async () => {
+  test("stops local work before production-secret maintenance", async () => {
     const repoRoot = path.resolve(appRoot, "..", "..");
     const scriptPaths = (await readdir(path.join(appRoot, "scripts")))
       .filter((entry) => entry.endsWith(".ts"))
@@ -80,15 +80,39 @@ describe("hosted web production migration guard", () => {
       assert.doesNotMatch(
         normalizeShellContinuations(surface),
         productionVercelEnvRun,
-        `${path.relative(repoRoot, surfacePath)} must route production database maintenance through the protected workflow`,
+        `${path.relative(repoRoot, surfacePath)} must not read production secrets into a local command`,
       );
     }
 
+    const agentPolicy = await readFile(path.join(repoRoot, "AGENTS.md"), "utf8");
+    assert.match(
+      agentPolicy,
+      /Treat production secret values as unavailable to local agents and local commands/u,
+    );
+    assert.match(agentPolicy, /Do not build that path before the user decides/u);
+
+    const securityPolicy = await readFile(
+      path.join(repoRoot, "agent-docs", "SECURITY.md"),
+      "utf8",
+    );
+    assert.match(securityPolicy, /### Local production-secret stop boundary/u);
+    assert.match(securityPolicy, /stop before\s+implementation or execution/u);
+    assert.match(securityPolicy, /discuss the decision with the user/u);
+
     const webReadme = await readFile(path.join(appRoot, "README.md"), "utf8");
-    assert.match(webReadme, /### Production database maintenance/u);
+    assert.match(webReadme, /### Production-secret boundary for maintenance/u);
     assert.match(webReadme, /Vercel\s+Sensitive values/u);
-    assert.match(webReadme, /secrets\.HOSTED_WEB_DIRECT_DATABASE_URL/u);
-    assert.match(webReadme, /Do not add a\ngeneric command input/u);
+    assert.match(
+      webReadme,
+      /Local agents and local commands must treat every production secret value/u,
+    );
+    assert.match(webReadme, /stop before implementation or execution/u);
+    assert.match(webReadme, /discuss the decision with the user/u);
+    assert.doesNotMatch(webReadme, /secrets\.HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.doesNotMatch(
+      webReadme,
+      /task-specific step in the existing `Hosted Web Contract Migrations` workflow/u,
+    );
     assert.doesNotMatch(
       webReadme,
       /production\s+environment\s+wrapper\s+shown\s+by\s+the\s+script's\s+`--help`/u,
@@ -100,28 +124,36 @@ describe("hosted web production migration guard", () => {
     assert.ok(phoneCallMigration, "the phone-call migration guide must remain present");
     assert.match(
       phoneCallMigration,
-      /reviewed,\s+task-specific step in the protected\s+`Hosted Web Contract Migrations`\s+workflow/u,
+      /no approved local execution path/u,
+    );
+    assert.match(
+      phoneCallMigration,
+      /discuss the required\s+operation and execution owner with the user/u,
     );
   });
 
-  test("renders the intended maintenance owner in changed script help", () => {
+  test("renders the production-secret boundary in changed script help", () => {
     const repoRoot = path.resolve(appRoot, "..", "..");
     const helpExpectations = [
       {
         path: "apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
-        productionOwner: /protected\s+Hosted Web Contract Migrations workflow/u,
+        productionOwner: /no approved local production execution path/u,
+        requiresDiscussion: true,
       },
       {
         path: "apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
-        productionOwner: /protected\s+Hosted Web Contract Migrations workflow/u,
+        productionOwner: /no approved local production execution path/u,
+        requiresDiscussion: true,
       },
       {
         path: "apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts",
-        productionOwner: /protected\s+Hosted Web Contract Migrations workflow/u,
+        productionOwner: /no approved local production execution path/u,
+        requiresDiscussion: true,
       },
       {
         path: "apps/web/scripts/prepare-app-review-member.ts",
         productionOwner: /authenticated same-origin hosted Ops route/u,
+        requiresDiscussion: false,
       },
     ];
 
@@ -147,6 +179,20 @@ describe("hosted web production migration guard", () => {
       assert.match(result.stdout, /Local\/test usage from the repository root/u);
       assert.match(result.stdout, /approved non-production DATABASE_URL/u);
       assert.match(result.stdout, expectation.productionOwner);
+      if (expectation.requiresDiscussion) {
+        assert.match(
+          result.stdout,
+          /Stop before\s+production work and discuss the required operation and execution owner with\s+the user/u,
+        );
+        assert.match(
+          result.stdout,
+          /Do not retrieve or inject production secrets locally/u,
+        );
+        assert.doesNotMatch(
+          result.stdout,
+          /Hosted Web Contract Migrations workflow/u,
+        );
+      }
       assert.doesNotMatch(result.stdout, /Perform production writes/u);
       assert.doesNotMatch(
         normalizeShellContinuations(result.stdout),

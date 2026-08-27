@@ -30,9 +30,9 @@ Local/test usage from the repository root (the caller must provide an approved n
     apps/web/scripts/backfill-hosted-thread-route-account-projections.ts --check
 
 Production:
-  Add the exact bounded command to a reviewed task-specific step in the
-  protected Hosted Web Contract Migrations workflow. See
-  apps/web/README.md#production-database-maintenance.
+  This script has no approved local production execution path. Stop before
+  production work and discuss the required operation and execution owner with
+  the user. Do not retrieve or inject production secrets locally.
 
 Options:
   --apply                 Project one bounded batch. Dry-run is the default.

@@ -1490,47 +1490,34 @@ roll back independently because final provider authorization remains Web-owned.
 exact SQL transition, while `production-migration-guard.test.ts` pins the
 production-alias proof, drain, second alias proof, and migration-owner order.
 
-### Production database maintenance
+### Production-secret boundary for maintenance
 
 Murph's production `DATABASE_URL` and `DIRECT_DATABASE_URL` are Vercel
 Sensitive values. Their values are non-readable after creation, so
 `vercel env run` is not a production database credential source even when the
 variable names appear in `vercel env ls`.
 
-Run a database-backed production maintenance script only from a reviewed,
-task-specific step in the existing `Hosted Web Contract Migrations` workflow.
-Keep that job attached to the GitHub `production` environment, reuse its exact
-deployed-main verification and pre/post-drain production-alias proofs, and map
-`secrets.HOSTED_WEB_DIRECT_DATABASE_URL` to `DATABASE_URL` only on the bounded
-maintenance step. Preserve the script's dry-run, batch limit, apply gate, and
-terminal check. Remove the task-specific step after convergence. Do not add a
-generic command input, duplicate the production database secret, or download a
-Vercel environment file for local execution.
+Local agents and local commands must treat every production secret value and
+protected production identity as unavailable. Maintenance-script `--help`
+examples are local/test commands only; their caller must provide an approved
+non-production `DATABASE_URL` directly.
 
-Maintenance-script `--help` examples are local/test commands only. Their caller
-must provide an approved non-production `DATABASE_URL` directly.
+If a maintenance task requires a production credential or protected identity,
+stop before implementation or execution. Explain the exact operation, the
+required secret class, and the safety gates that must remain intact, then
+discuss the decision with the user. Do not invent a workflow or endpoint,
+duplicate a secret, download a Vercel environment file, or begin the rollout
+while waiting. Any user-authorized hosted or protected execution path is a
+separate reviewed change.
 
-The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
-`HostedThreadRoute.accountLookupKey` and its index; old application code remains
-compatible if the build fails after migration. Once the replacement build is
-live, a count-and-decrypt dry run may begin. Before applying, prove the
-production alias points at the replacement build, wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
-the alias again. A reviewed task-specific step in the protected workflow then
-runs the exact bounded commands until readiness:
+The Linq weighted-capacity rollout requires both production database access and
+hosted crypto authority, so it has no approved local execution path. Do not
+start its backfill or rollout freeze from a local agent session. The eventual
+user-authorized path must preserve the exact deployed-build proof, configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function drain, second alias
+proof, bounded dry-run/apply batches, and terminal readiness check.
 
-```bash
-NODE_OPTIONS=--conditions=react-server \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
-
-NODE_OPTIONS=--conditions=react-server \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
-
-NODE_OPTIONS=--conditions=react-server \
-  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
-```
-
-The command decrypts only through the existing thread-delivery-route owner,
+The backfill decrypts only through the existing thread-delivery-route owner,
 emits aggregate counts only, and updates rows with an optimistic authority
 check. Do not run `--apply` before the final alias proof and prior-function
 drain, do not treat a dry-run as readiness, and do not drop the legacy
@@ -1756,20 +1743,21 @@ Prove the production alias points at the replacement commit with
 Resolve the alias again after the drain. If it changed, select the replacement
 or a newer compatible commit and restart the full drain.
 
-Before the final alias proof and prior-function drain, only count-only dry runs
-are safe; do not use `--apply` because it scrubs plaintext that a warm previous
-function may still need. Only after that final alias proof, run
-`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` in a
-reviewed, task-specific step in the protected `Hosted Web Contract Migrations`
-workflow described under [Production database maintenance](#production-database-maintenance).
-Review the count-only dry run, add `--apply`, and repeat bounded batches while
-`hasMore` is true or `selectedRows` is nonzero. Rerun the dry run and record the
-zero-row result as the authoritative scrub proof. Apply encrypts and round-trips
-missing ciphertext, proves any existing ciphertext equals the legacy value,
-and scrubs plaintext in one compare-and-set write; conflicts are safe to rerun.
-Output never contains row ids, member ids, plaintext, or ciphertext. Record the
-replacement commit, both alias proofs, elapsed drain, batch summaries, and final
-zero-row dry run before ending the deploy freeze.
+The phone-call backfill requires both production database access and hosted
+crypto authority, so it has no approved local execution path. Stop before
+starting its production rollout or deploy freeze and discuss the required
+operation and execution owner with the user. Do not run the script locally
+against production or invent a workflow, endpoint, or credential path.
+
+Any later user-authorized path must preserve count-only dry-run before apply,
+the final alias proof and prior-function drain, bounded apply batches until
+`hasMore` is false and `selectedRows` is zero, and a final zero-row dry run.
+Apply encrypts and round-trips missing ciphertext, proves any existing
+ciphertext equals the legacy value, and scrubs plaintext in one compare-and-set
+write; conflicts are safe to rerun. Output never contains row ids, member ids,
+plaintext, or ciphertext. Record the replacement commit, both alias proofs,
+elapsed drain, batch summaries, and final zero-row dry run before ending any
+later authorized deploy freeze.
 
 Live Retell consultation decrypts under one 10-second deadline spanning token
 exchange and KMS, while honoring an earlier caller abort. This path does not
