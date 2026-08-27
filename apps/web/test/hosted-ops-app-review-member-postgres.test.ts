@@ -2,20 +2,30 @@ import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+interface PrivyProviderUser {
+  id: string;
+  linked_accounts: Array<
+    | {
+        address: string;
+        type: "email";
+        verified_at: number;
+      }
+    | {
+        phone_number: string;
+        type: "phone";
+        verified_at: number;
+      }
+  >;
+}
+
 const privyProvider = vi.hoisted(() => ({
   afterExactRead: null as null | ((userId: string) => Promise<void>),
   deleteAfterInitialRead: false,
+  exactUsersById: new Map<string, PrivyProviderUser>(),
   exactReads: vi.fn(),
   initialReads: vi.fn(),
   missingUserIds: new Set<string>(),
-  usersByEmail: new Map<string, {
-    id: string;
-    linked_accounts: Array<{
-      address: string;
-      type: "email";
-      verified_at: number;
-    }>;
-  }>(),
+  usersByEmail: new Map<string, PrivyProviderUser>(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -36,8 +46,9 @@ vi.mock("@privy-io/node", async (importOriginal) => {
                 status: 404,
               });
             }
-            const user = [...privyProvider.usersByEmail.values()]
-              .find((candidate) => candidate.id === userId);
+            const user = privyProvider.exactUsersById.get(userId)
+              ?? [...privyProvider.usersByEmail.values()]
+                .find((candidate) => candidate.id === userId);
             if (!user) {
               throw new Error("Privy test user is not configured.");
             }
@@ -150,7 +161,13 @@ import {
   readHostedMemberIdentityRecord,
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
-import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedEmailLookupKey,
+  createHostedPrivyUserLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "@/src/lib/hosted-groups/group-join-confirmation";
+import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
+import { activateHostedMemberForPositiveSourceTx } from "@/src/lib/hosted-onboarding/member-activation";
 import { prepareHostedOpsAppReviewMember } from "@/src/lib/hosted-ops/app-review-member";
 import {
   persistHostedAccountDeletionCleanupTx,
@@ -168,7 +185,7 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 const previousPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const previousPrivyAppSecret = process.env.PRIVY_APP_SECRET;
 
-function buildPrivyUser(input: { email: string; userId: string }) {
+function buildPrivyUser(input: { email: string; userId: string }): PrivyProviderUser {
   return {
     id: input.userId,
     linked_accounts: [{
@@ -179,14 +196,28 @@ function buildPrivyUser(input: { email: string; userId: string }) {
   };
 }
 
+function buildPrivyPhoneUser(input: {
+  phoneNumber: string;
+  userId: string;
+}): PrivyProviderUser {
+  return {
+    id: input.userId,
+    linked_accounts: [{
+      phone_number: input.phoneNumber,
+      type: "phone",
+      verified_at: 1_775_203_200,
+    }],
+  };
+}
+
 beforeEach(() => {
+  vi.clearAllMocks();
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_review_test";
   process.env.PRIVY_APP_SECRET = "synthetic-app-review-secret";
   Reflect.deleteProperty(globalThis, "__murphHostedPrivyManagementClient");
   privyProvider.afterExactRead = null;
   privyProvider.deleteAfterInitialRead = false;
-  privyProvider.exactReads.mockClear();
-  privyProvider.initialReads.mockClear();
+  privyProvider.exactUsersById.clear();
   privyProvider.missingUserIds.clear();
   privyProvider.usersByEmail.clear();
   setHostedSecureBoxStringTestCodecForTests(null);
@@ -324,6 +355,169 @@ describe.skipIf(!runPostgresProof)(
           where: { id: cleanup.id },
         });
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("rejects when exact Privy authority no longer contains the discovery email", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_app_review_stale_email_${fixtureId}`;
+      const email = `app-review-stale-email-${fixtureId}@example.test`;
+      const userId = `did:privy:app-review-stale-email-${fixtureId}`;
+      const privyUserLookupKey = createHostedPrivyUserLookupKey(userId);
+      const verifiedEmailLookupKey = createHostedEmailLookupKey(email);
+      if (!verifiedEmailLookupKey) {
+        throw new Error("Expected a verified-email lookup key for the App Review fixture.");
+      }
+      privyProvider.usersByEmail.set(email, buildPrivyUser({ email, userId }));
+      privyProvider.exactUsersById.set(userId, buildPrivyPhoneUser({
+        phoneNumber: "+14155550199",
+        userId,
+      }));
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.hostedMemberEmailAuthorization.create({
+          data: {
+            memberId,
+            verifiedEmailLookupKey,
+            verifiedEmailVerifiedAt: new Date("2026-08-27T12:00:00.000Z"),
+          },
+        });
+        await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+          domain: "control",
+          prisma,
+          reason: "test.app-review-stale-email",
+          userId: memberId,
+        });
+        const controlRootCount = await prisma.hostedUserCryptoEnvelope.count({
+          where: { domain: "control", userId: memberId },
+        });
+
+        await expect(prepareHostedOpsAppReviewMember({
+          mode: "apply",
+          principal: { kind: "email", value: email },
+          prisma,
+        })).rejects.toMatchObject({
+          code: "PRIVY_EMAIL_REQUIRED",
+        });
+
+        expect(privyProvider.initialReads).toHaveBeenCalledOnce();
+        expect(privyProvider.exactReads).toHaveBeenCalledOnce();
+        expect(vi.mocked(activateHostedMemberForPositiveSourceTx)).not.toHaveBeenCalled();
+        expect(
+          vi.mocked(materializePendingHostedGroupJoinConfirmationsBestEffort),
+        ).not.toHaveBeenCalled();
+        expect(vi.mocked(recordHostedLaunchRequiredConsent)).not.toHaveBeenCalled();
+        await expect(prisma.hostedMember.count({
+          where: { id: memberId },
+        })).resolves.toBe(1);
+        await expect(prisma.hostedMemberIdentity.count({
+          where: { privyUserLookupKey },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedConsentGrant.count({
+          where: { memberId },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedUserCryptoEnvelope.count({
+          where: { domain: "control", userId: memberId },
+        })).resolves.toBe(controlRootCount);
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("reprepares after existing-member drift without a deletion receipt", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 3 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_app_review_drift_${fixtureId}`;
+      const email = `app-review-drift-${fixtureId}@example.test`;
+      const userId = `did:privy:app-review-drift-${fixtureId}`;
+      const privyUserLookupKey = createHostedPrivyUserLookupKey(userId);
+      privyProvider.usersByEmail.set(email, buildPrivyUser({ email, userId }));
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+          domain: "control",
+          prisma,
+          reason: "test.app-review-member-drift",
+          userId: memberId,
+        });
+        await runWithHostedDomainRootUnwrapCache(() => prisma.$transaction((tx) =>
+          upsertHostedMemberIdentity({
+            maskedPhoneNumberHint: null,
+            memberId,
+            phoneLookupKey: null,
+            phoneNumber: null,
+            phoneNumberVerifiedAt: null,
+            prisma: tx,
+            privyUserId: userId,
+            signupPhoneCodeSendAttemptId: null,
+            signupPhoneCodeSendAttemptStartedAt: null,
+            signupPhoneCodeSentAt: null,
+            signupPhoneNumber: null,
+          })
+        ));
+        privyProvider.afterExactRead = async (readUserId) => {
+          expect(readUserId).toBe(userId);
+          privyProvider.afterExactRead = null;
+          await prisma.hostedMember.delete({ where: { id: memberId } });
+        };
+
+        await expect(prepareHostedOpsAppReviewMember({
+          mode: "apply",
+          principal: { kind: "email", value: email },
+          prisma,
+        })).resolves.toMatchObject({ action: "applied" });
+
+        expect(privyProvider.initialReads).toHaveBeenCalledOnce();
+        expect(privyProvider.exactReads).toHaveBeenCalledTimes(2);
+        const identities = await prisma.hostedMemberIdentity.findMany({
+          select: { memberId: true },
+          where: { privyUserLookupKey },
+        });
+        expect(identities).toHaveLength(1);
+        const replacementMemberId = identities[0]?.memberId;
+        expect(replacementMemberId).toBeTruthy();
+        expect(replacementMemberId).not.toBe(memberId);
+        await expect(prisma.hostedMember.count({
+          where: { id: memberId },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedUserCryptoEnvelope.count({
+          where: { userId: memberId },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedUserCryptoEnvelope.count({
+          where: {
+            domain: "control",
+            status: "active",
+            userId: replacementMemberId,
+          },
+        })).resolves.toBe(1);
+        expect(vi.mocked(activateHostedMemberForPositiveSourceTx))
+          .toHaveBeenCalledWith(expect.objectContaining({
+            memberId: replacementMemberId,
+          }));
+        expect(
+          vi.mocked(materializePendingHostedGroupJoinConfirmationsBestEffort),
+        ).toHaveBeenCalledWith(expect.objectContaining({
+          memberId: replacementMemberId,
+        }));
+        expect(vi.mocked(recordHostedLaunchRequiredConsent)).toHaveBeenCalledTimes(2);
+      } finally {
+        privyProvider.afterExactRead = null;
+        const members = await prisma.hostedMemberIdentity.findMany({
+          select: { memberId: true },
+          where: { privyUserLookupKey },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [memberId, ...members.map(({ memberId: id }) => id)],
+            },
+          },
+        });
         await prisma.$disconnect();
       }
     });

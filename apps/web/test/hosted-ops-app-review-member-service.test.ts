@@ -529,7 +529,7 @@ describe("prepareHostedOpsAppReviewMember", () => {
     expect(resolutionInput?.preparedLiveIdentity).toEqual(expect.objectContaining({
       userId: PRIVY_USER_ID,
     }));
-    expect(resolutionInput?.preparedLiveIdentity).not.toBe(resolutionInput?.identity);
+    expect(resolutionInput?.preparedLiveIdentity).toBe(resolutionInput?.identity);
     expect(resolutionInput?.prisma).toEqual({
       index: 1,
       transaction: "app-review",
@@ -742,7 +742,9 @@ describe("prepareHostedOpsAppReviewMember", () => {
       .mock.calls[0]?.[0];
     const secondResolution = dependencies.ensureHostedMemberForPrivyIdentityResolutionTx
       .mock.calls[1]?.[0];
-    expect(secondResolution?.identity).toBe(firstResolution?.identity);
+    expect(firstResolution?.identity).toBe(firstResolution?.preparedLiveIdentity);
+    expect(secondResolution?.identity).toBe(secondResolution?.preparedLiveIdentity);
+    expect(secondResolution?.identity).not.toBe(firstResolution?.identity);
     expect(firstResolution?.preparedLiveIdentity).toEqual(expect.objectContaining({
       userId: PRIVY_USER_ID,
     }));

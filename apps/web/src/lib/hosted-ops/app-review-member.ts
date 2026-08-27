@@ -237,7 +237,7 @@ async function resolvePreparedHostedOpsAppReviewMember(input: {
           runWithHostedDomainRootUnwrapCache(async () => (
             await ensureHostedMemberForPrivyIdentityResolutionTx({
               authMethod,
-              identity: input.identity,
+              identity: preparedLiveIdentity,
               now: input.now,
               preparedControlRoot,
               preparedExistingMemberId: existing?.core.id ?? null,
