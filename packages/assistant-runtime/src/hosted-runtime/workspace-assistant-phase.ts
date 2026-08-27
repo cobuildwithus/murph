@@ -325,14 +325,6 @@ const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
   "member.action.requested",
 ] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS = [
-  "apply-runtime-control-request",
-  "run-environment-interview",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_WAKE_KINDS = [
-  "environment-interview.completed",
-  "runtime.browser-vault-refresh-requested",
-] as const;
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS = [
   "dispatch-assistant-notification",
 ] as const;
@@ -5619,8 +5611,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   const phaseInput = input.input;
-  const environmentInterviewOnly =
-    phaseInput.request.processingMode === "environment_interview";
   const hasPendingAssistantInputWakeOverride = Object.hasOwn(
     input,
     "pendingAssistantInputWakeAt",
@@ -5664,14 +5654,10 @@ async function runSystemMailboxMaintenancePhase(input: {
       || phaseInput.foregroundCausalOnly === true
     )
       ? await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: environmentInterviewOnly
-            ? HOSTED_ENVIRONMENT_INTERVIEW_ROUTE_ACTIONS
-            : phaseInput.foregroundCausalOnly === true
+          allowedRouteActions: phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS
             : HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
-          allowedWakeKinds: environmentInterviewOnly
-            ? HOSTED_ENVIRONMENT_INTERVIEW_WAKE_KINDS
-            : phaseInput.foregroundCausalOnly === true
+          allowedWakeKinds: phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS
             : HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS,
           ...(assistantAskCompletionOccurredBefore === undefined
@@ -5699,7 +5685,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   if (
     phaseInput.foregroundCausalOnly === true
-    && !environmentInterviewOnly
     && foregroundCausalPreparation === null
   ) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(
@@ -5737,7 +5722,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   if (
     phaseInput.foregroundCausalOnly === true
-    && !environmentInterviewOnly
     && foregroundCausalPreparation === null
     && pendingAssistantInputWakeAt === null
   ) {

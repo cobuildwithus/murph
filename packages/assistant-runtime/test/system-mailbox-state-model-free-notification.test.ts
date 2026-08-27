@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isHostedSystemMailboxModelFreeExactNotificationItem,
+  projectHostedSystemMailboxModelFreeFrontier,
   projectHostedSystemMailboxModelFreeNotificationFrontier,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 
@@ -51,6 +52,15 @@ function assistantAsk(laneSeq: string): PendingItem {
   } as PendingItem;
 }
 
+function environmentInterview(laneSeq: string): PendingItem {
+  return {
+    mailboxDedupeKey: `environment-interview.completed:${laneSeq}`,
+    mailboxLaneSeq: laneSeq,
+    routeAction: "run-environment-interview",
+    wake: { kind: "environment-interview.completed" },
+  } as PendingItem;
+}
+
 describe("blocked model-free exact notification frontier", () => {
   it("admits a canonical exact group join at the durable frontier before later work", () => {
     const notification = exactNotification({ laneSeq: "1" });
@@ -89,5 +99,17 @@ describe("blocked model-free exact notification frontier", () => {
     expect(projectHostedSystemMailboxModelFreeNotificationFrontier({
       pending: [notification, earlier],
     }).pending).toEqual([earlier]);
+  });
+
+  it("admits Environment only when it is the exact durable frontier", () => {
+    const earlier = assistantAsk("1");
+    const environment = environmentInterview("2");
+
+    expect(projectHostedSystemMailboxModelFreeFrontier({
+      pending: [environment, earlier],
+    }).pending).toEqual([]);
+    expect(projectHostedSystemMailboxModelFreeFrontier({
+      pending: [environment],
+    }).pending).toEqual([environment]);
   });
 });

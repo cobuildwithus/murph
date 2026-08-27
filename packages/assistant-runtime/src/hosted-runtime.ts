@@ -19,6 +19,7 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  classifyHostedSystemMailboxExecutionClass,
   HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -224,9 +225,11 @@ import type {
   HostedImageGenerationController,
 } from "./hosted-runtime/image-generation.ts";
 import {
+  findHostedSystemMailboxDurableFrontierItem,
   findNextHostedSystemMailboxQueueItem,
   isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
+  isHostedSystemMailboxModelFreeFrontierItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -425,14 +428,7 @@ const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "dispatch-assistant-notification",
   "run-device-sync-wake",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_ROUTE_ACTIONS = [
-  "apply-runtime-control-request",
   "run-environment-interview",
-] as const;
-const HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_KINDS = [
-  "environment-interview.completed",
-  "runtime.browser-vault-refresh-requested",
 ] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
@@ -656,15 +652,14 @@ async function hasHostedPreCheckpointLocalExternalCompletion(input: {
   }) !== null;
 }
 
-async function hasHostedQueuedEnvironmentInterview(input: {
-  now: string;
+async function hasHostedModelFreeSystemMailboxFrontier(input: {
   vaultRoot: string;
 }): Promise<boolean> {
-  return findNextHostedSystemMailboxQueueItem({
-    allowedRouteActions: ["run-environment-interview"],
-    now: input.now,
-    state: await readHostedSystemMailboxState(input.vaultRoot),
-  }) !== null;
+  const frontier = findHostedSystemMailboxDurableFrontierItem(
+    (await readHostedSystemMailboxState(input.vaultRoot)).pending,
+  );
+  return frontier !== null
+    && isHostedSystemMailboxModelFreeFrontierItem(frontier);
 }
 
 async function inspectHostedPreCheckpointSystemMailboxPrefetch(
@@ -674,7 +669,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
-  hasEnvironmentInterviewWake: boolean;
+  hasModelFreeSystemMailboxFrontier: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -715,6 +710,19 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
     prefetch.importedSeqByLane.system,
   );
   const systemItems = response.items.filter((item) => item.lane === "system");
+  let firstSystemItem: (typeof systemItems)[number] | null = null;
+  let firstSystemItemSeq: bigint | null = null;
+  for (const item of systemItems) {
+    const itemSeq = parseHostedMailboxSeqOrNull(item.laneSeq);
+    if (itemSeq === null) {
+      firstSystemItem = null;
+      break;
+    }
+    if (firstSystemItemSeq === null || itemSeq < firstSystemItemSeq) {
+      firstSystemItem = item;
+      firstSystemItemSeq = itemSeq;
+    }
+  }
   // Enrollment can start the first owner from conversation before the
   // activation continuation signals it. The shared prefetch can still hold
   // that conversation prefix after it has been imported, so classify only
@@ -756,9 +764,11 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
-    hasEnvironmentInterviewWake: systemItems.some((item) =>
-      item.kind === "environment-interview.completed"
-    ),
+    hasModelFreeSystemMailboxFrontier: firstSystemItem !== null
+      && classifyHostedSystemMailboxExecutionClass({
+        dedupeKey: firstSystemItem.dedupeKey,
+        kind: firstSystemItem.kind,
+      }) === "model_free",
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -1632,22 +1642,25 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     };
     let assistantProviderHandoffRequested = false;
-    let environmentInterviewHandoffRequested = false;
+    let modelFreeSystemMailboxHandoffRequested = false;
     const runtimeOwnerHandoffRequested = (): boolean =>
-      assistantProviderHandoffRequested || environmentInterviewHandoffRequested;
+      assistantProviderHandoffRequested || modelFreeSystemMailboxHandoffRequested;
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
         async (importItem, context) => {
           assertRuntimeNotAborted();
-          if (
-            (input.request.processingMode ?? "default") === "default"
-            && importItem.item.kind === "environment-interview.completed"
-          ) {
-            environmentInterviewHandoffRequested = true;
-          }
           const outcome = await options.importItem(importItem, context);
           assertRuntimeNotAborted();
+          if (
+            (input.request.processingMode ?? "default") === "default"
+            && importItem.item.lane === "system"
+            && await hasHostedModelFreeSystemMailboxFrontier({
+              vaultRoot: options.vaultRoot,
+            })
+          ) {
+            modelFreeSystemMailboxHandoffRequested = true;
+          }
           kickDetachedAssistantAskAfterImport(importItem, outcome);
           return outcome;
         },
@@ -1997,14 +2010,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";
-    const environmentInterviewProcessingMode =
-      input.request.processingMode === "environment_interview";
     const defaultProcessingMode =
       (input.request.processingMode ?? "default") === "default";
-    let restoredEnvironmentInterviewHandoffPending =
+    let restoredModelFreeSystemMailboxHandoffPending =
       defaultProcessingMode
-      && await hasHostedQueuedEnvironmentInterview({
-        now: baseRunnerInput.now?.() ?? new Date().toISOString(),
+      && await hasHostedModelFreeSystemMailboxFrontier({
         vaultRoot: restored.vaultRoot,
       });
     // This marker can only suppress assistant execution. The Cloudflare
@@ -2068,7 +2078,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       });
       return preparedCodexRuntime;
     };
-    if (!systemMailboxProcessingMode && !environmentInterviewProcessingMode) {
+    if (!systemMailboxProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
       invocationAssistantTarget = await readHostedAssistantExecutionDefaultTarget({
         homeDirectory: restored.operatorHomeRoot,
@@ -2124,7 +2134,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     assertRuntimeNotAborted();
     const initialMailboxImportLanes =
       input.request.processingMode === "system_mailbox"
-        || input.request.processingMode === "environment_interview"
         ? (["system"] as const)
         : initialMailboxImportPlan.lanes;
     const initialPendingRuntimeWake = consumePendingHostedRuntimeWake(
@@ -2132,7 +2141,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       options.shutdownSignal ?? null,
     );
     const returnSystemMailboxBeforeInitialImport =
-      input.request.processingMode === "system_mailbox"
+      systemMailboxProcessingMode
         ? async () => {
             const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
               assistantExecutionBlocked,
@@ -2214,10 +2223,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
-        prefetchLanes:
-          input.request.processingMode === "environment_interview"
-            ? initialMailboxImportLanes
-            : HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+        prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
         runnerInput: baseRunnerInput,
         requestId,
       });
@@ -3305,13 +3311,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
       assistantCronDeadlineMs = !assistantExecutionBlocked
-        && !environmentInterviewProcessingMode
         && Number.isFinite(projectedAssistantCronDeadlineMs)
         ? projectedAssistantCronDeadlineMs
         : null;
       if (
         !assistantExecutionBlocked
-        && !environmentInterviewProcessingMode
         && initialProjectedWake.assistantCronDueNow
       ) {
         if (
@@ -3330,12 +3334,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
 
       const modelFreePass = await runSystemMailboxLifecycleItem({
-        allowedRouteActions: environmentInterviewProcessingMode
-          ? HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_ROUTE_ACTIONS
-          : HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-        allowedWakeKinds: environmentInterviewProcessingMode
-          ? HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_KINDS
-          : HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+        allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
+        allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
         stagePrefix: "system_mailbox.model_free",
       });
       assertRuntimeNotAborted();
@@ -3365,9 +3365,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
-    }
-    if (environmentInterviewProcessingMode) {
-      return await returnSystemMailboxProcessingModeAfterInitialImport();
     }
     let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
     let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
@@ -3764,12 +3761,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             workspace: passInput.workspace,
         });
         recordBrowserVaultReplicaRefreshIntent(passResult);
-        if (passForeground && restoredEnvironmentInterviewHandoffPending) {
-          // A foreground owner may restore Environment work staged by the
-          // owner it preempted. Finish this one user-visible pass, then hand
-          // the durable queue back to the dedicated model-free owner.
-          restoredEnvironmentInterviewHandoffPending = false;
-          environmentInterviewHandoffRequested = true;
+        if (passForeground && restoredModelFreeSystemMailboxHandoffPending) {
+          // Finish this user-visible pass, then hand the exact model-free
+          // durable frontier back to the generic system owner.
+          restoredModelFreeSystemMailboxHandoffPending = false;
+          modelFreeSystemMailboxHandoffRequested = true;
         }
         if (
           passResult.runtimeStateDirty
@@ -5183,9 +5179,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (runtimeOwnerHandoffRequested()) {
           return false;
         }
-        const requestRestoredEnvironmentInterviewHandoff = (): void => {
-          restoredEnvironmentInterviewHandoffPending = false;
-          environmentInterviewHandoffRequested = true;
+        const requestRestoredModelFreeSystemMailboxHandoff = (): void => {
+          restoredModelFreeSystemMailboxHandoffPending = false;
+          modelFreeSystemMailboxHandoffRequested = true;
           markIdleCheckpointTimerAfterDirtyWork();
         };
         // Graceful shutdown hands staged work to the durable checkpoint before
@@ -5398,9 +5394,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 initialMailboxPrefetch,
               )
             : null;
-        if (preCheckpointSystemPrefetch?.hasEnvironmentInterviewWake === true) {
-          // The durable row, not the payloadless wake, authorizes this handoff.
-          environmentInterviewHandoffRequested = true;
+        if (
+          preCheckpointSystemPrefetch?.hasModelFreeSystemMailboxFrontier === true
+        ) {
+          // The exact durable frontier, not the payloadless wake, authorizes
+          // this handoff.
+          modelFreeSystemMailboxHandoffRequested = true;
           markIdleCheckpointTimerAfterDirtyWork();
         }
         const hasForegroundConversationWork =
@@ -5420,9 +5419,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (
           !hasForegroundConversationWork
           && !shouldRunLocalPreCheckpointSystemWork
-          && restoredEnvironmentInterviewHandoffPending
+          && restoredModelFreeSystemMailboxHandoffPending
         ) {
-          requestRestoredEnvironmentInterviewHandoff();
+          requestRestoredModelFreeSystemMailboxHandoff();
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
         }
@@ -5642,8 +5641,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
 
       result = await runForegroundPass({
-        foregroundCausalOnly:
-          input.request.processingMode === "environment_interview",
         ...(systemMailboxForegroundWakePrefetch
           ? {
               initialMailboxImportContext:

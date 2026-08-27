@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Environment answers keep moving",
     "summary": "Answers saved during the Environment interview now reach your report even when Murph is already handling another request.",
-    "details": "Your save stays durable while current conversation work finishes, then the report applies it through the existing private Environment path.",
+    "details": "Your save stays durable while current conversation work finishes, then the next mailbox pass applies it in order and refreshes the report.",
     "relevanceTags": ["environment", "reports", "reliability", "web"],
     "sourcePullRequests": [2236],
     "tryIt": {

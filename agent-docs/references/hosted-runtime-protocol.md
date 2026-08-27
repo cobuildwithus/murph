@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 ## Decision
 
@@ -766,50 +766,32 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-If a `system_mailbox` invocation owns the active fence when authenticated Web
-direct foreground/default work arrives, the runner preempts that exact child,
-clears its fence by identity, and starts the foreground request. Preemption
-authority requires both the server-derived Web-direct marker and its valid
-direct-ingress attempt identity; a Temporal or scheduled default request still
-wakes the system child, leaves its fence intact, and retries cooperatively.
-System-mailbox mode may import and run one bounded model-free device-sync,
-operator-maintenance, or browser-vault refresh item. Already committed web
-updates remain authoritative, while an interrupted or not-yet-checkpointed unit
-stays recoverable from the durable system mailbox and its existing continuation
-contract. Other system items remain pending for their default owner. A
-system-mailbox request behind an active default runtime remains deferred and
-cannot broaden that child's admission authority.
-An `environment_interview` request behind an active default runtime is the
-narrow exception: UserRunner wakes the exact default child but returns
-`retry_later`, because that child accepted only a wake, not Environment-mode
-ownership. The dirty default runtime preserves fresh conversation priority,
-classifies the durable mailbox prefix, and, when it sees an Environment item,
-shortens its existing idle checkpoint window to zero. It skips optional
-compaction and post-checkpoint work, returns `immediateRecheckRequested`, and
-leaves the Environment row pending for the dedicated model-free invocation.
-This handoff never aborts a foreground turn and adds no queue, scheduler, or
-persisted mode state.
-The handoff is bidirectional. When fresh foreground/default work arrives behind
-an active `environment_interview` invocation, UserRunner wakes that exact
-child and returns `retry_later` without clearing or replacing its fence. The
-Environment child completes or checkpoints its current model-free unit, sees
-the wake, and releases; ordinary reconciliation then admits the pending
-foreground pass before re-admitting background Environment work. This preserves
-foreground authority without aborting canonical publication midway or creating
-a competing queue.
+`system_mailbox` runs one bounded model-free item only when that item is the
+exact first live durable system frontier. The shared classifier admits
+device-sync, operator maintenance, browser-vault refresh, Environment
+completion, and the narrow exact-notification cases; an earlier default-owned
+row remains a hard ordering barrier. Already committed Web updates remain
+authoritative, while an interrupted or not-yet-checkpointed unit stays
+recoverable from the durable mailbox and its existing continuation contract.
 
-Web projects `environmentInterviewPending` only when the signed Temporal facts
-request uses the exact `?includeEnvironmentInterviewPending=1` compatibility
-search. The legacy no-search response keeps omitting that key because a still-
-routable immutable reader rejects unknown reconciliation keys. The new private
-worker opts in and selects `environment_interview` only when the fact is true
-and no runnable foreground/default work is due; older workflow histories retain
-their former `system_mailbox` command shape behind the private worker's Temporal
-patch marker. The public
-`@murphai/hosted-execution` package version containing both the fact and mode
-must be released before the private worker adopts them. Source links across the
-public/private repository boundary are development proof only and are never a
-deployment contract.
+Default and `system_mailbox` owners hand off cooperatively in either direction.
+When either mode is requested behind the other, UserRunner wakes the exact
+active child, preserves its fence, and returns `retry_later`; it does not abort
+canonical publication. A default runtime revalidates the exact local durable
+frontier after import, finishes at most the current foreground causal pass,
+shortens its existing checkpoint window to zero, skips optional work, and
+returns `immediateRecheckRequested`. A system-mailbox runtime finishes or
+checkpoints its current model-free unit, observes the wake, and releases.
+Ordinary reconciliation then admits the waiting owner. This is the only
+cross-owner rule and adds no queue, scheduler, feature-specific mode, or
+persisted handoff state.
+
+Web derives the generic `systemMailboxFrontier` from the exact first live row
+after `hostedMailboxSystemHandledThroughSeq` by using the same shared
+classifier. Environment's pending-row query remains owned by its product status
+route and is not an orchestration-priority fact. Temporal stays generic: its
+existing `model_free` branch requests `system_mailbox`, and the runtime decides
+which exact handler the row requires.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -826,14 +808,12 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, and for
-authenticated Web-direct foreground/default work behind a `system_mailbox`
-fence, the existing workspace-invocation abort seam is the sole preemption
-authority. UserRunner sends that exact abort directly instead of spending
-foreground command budget on a non-authoritative liveness preflight. A
-non-direct default request behind system-mailbox work retains the exact-child
-wake-and-checkpoint handoff. A local exact-pointer abort enters the same
-inactive-fence replacement path. The container registers the
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the sole preemption authority.
+Default versus system-mailbox work always uses the cooperative exact-child
+wake-and-checkpoint handoff above, including authenticated Web-direct requests.
+A local exact-pointer abort enters the same inactive-fence replacement path.
+The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.

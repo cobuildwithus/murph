@@ -1049,10 +1049,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let assistantPasses = 0;
-    let resolveEnvironmentImport = (): void => undefined;
-    const environmentImported = new Promise<void>((resolve) => {
-      resolveEnvironmentImport = resolve;
-    });
     let resolveCheckpointStarted = (): void => undefined;
     const checkpointStarted = new Promise<void>((resolve) => {
       resolveCheckpointStarted = resolve;
@@ -1092,7 +1088,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             async importItem(item) {
               importedKinds.push(item.item.kind);
               if (item.item.kind === "environment-interview.completed") {
-                resolveEnvironmentImport();
+                await enqueueEnvironmentInterviewSystemMailboxItemForTest({
+                  item: item.item,
+                  vaultRoot,
+                });
               }
               return { status: "imported" };
             },
@@ -1123,7 +1122,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 laneSeq: "1",
               }));
               runtimeWakeSignal.notify();
-              await environmentImported;
               return {
                 checkpointReason: "assistant_runtime_commit",
                 progressed: true,
@@ -1265,7 +1263,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("environment interview mode applies only Habitat answers and refreshes the browser replica", async () => {
+  test("system mailbox mode applies Environment answers without a model and refreshes the browser replica", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -1299,7 +1297,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_environment_interview_entrypoint_isolation",
-            processingMode: "environment_interview",
+            processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
         }),
@@ -1339,9 +1337,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               }),
             }),
           }),
-          async runAssistantPhase(input) {
-            assert.equal(input.foregroundCausalOnly, true);
-            return await runHostedWorkspaceAssistantPhase(input);
+          async runAssistantPhase() {
+            throw new Error("Model-free Environment work must not enter assistant phase.");
           },
           vaultRoot,
         },

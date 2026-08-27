@@ -552,7 +552,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       });
       const environmentFence = await waitForProcessingCheckpointBarrier(
         environmentPriorityProbe.userId,
-        "environment_interview",
+        "system_mailbox",
       );
       const providerRequestBaseline =
         requireScenario().assistantProviderRequests.length;
@@ -606,7 +606,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       });
       await requireProcessingOwnerPreserved(
         environmentPriorityProbe.userId,
-        "environment_interview",
+        "system_mailbox",
         environmentFence.attemptId,
       );
       await releaseBackgroundCheckpointBarrier(
@@ -2522,7 +2522,7 @@ async function waitForSystemWakeStormCanonicalCommit(
 
 async function waitForProcessingCheckpointBarrier(
   userId: string,
-  expectedProcessingMode: "environment_interview",
+  expectedProcessingMode: "system_mailbox",
 ): Promise<{ attemptId: string }> {
   const deadlineAt = Date.now() + 90_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
@@ -2557,7 +2557,6 @@ async function requireProcessingOwnerPreserved(
   userId: string,
   expectedProcessingMode:
     | "default"
-    | "environment_interview"
     | "system_mailbox",
   expectedAttemptId?: string,
 ): Promise<void> {
@@ -2649,7 +2648,6 @@ async function readActiveRuntimeFenceForTest(userId: string): Promise<{
   attemptId: string;
   processingMode:
     | "default"
-    | "environment_interview"
     | "inbox_media_retention"
     | "system_mailbox";
 } | null> {
@@ -2735,7 +2733,6 @@ async function waitForRuntimeInFlight(
   label: string,
   expectedProcessingMode:
     | "default"
-    | "environment_interview"
     | "inbox_media_retention"
     | "system_mailbox",
 ): Promise<void> {
