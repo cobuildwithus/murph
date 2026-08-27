@@ -3048,6 +3048,12 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
       retryable: true,
     });
   }
+  const lockedInboundParticipant =
+    await resolveAndLockHostedThreadContainerInboundParticipantTx({
+      context: input.context,
+      prisma: input.prisma,
+      resolvedParticipantMemberId: input.resolvedParticipantMemberId,
+    });
   let routeAccountLookupKey =
     input.route.accountLookupKey ?? input.accountLookupKey;
   let sourceMailboxConsumedAt: Date | null = null;
@@ -3088,10 +3094,8 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
     accountLookupKey: routeAccountLookupKey,
     context: input.context,
     event: input.event,
+    lockedInboundParticipant,
     prisma: input.prisma,
-    ...(input.resolvedParticipantMemberId
-      ? { resolvedParticipantMemberId: input.resolvedParticipantMemberId }
-      : {}),
     route: input.route,
     sourceMailboxConsumedAt,
   });
@@ -3102,6 +3106,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  lockedInboundParticipant?: VerifiedHostedLinqInboundParticipant | null;
   prisma: Prisma.TransactionClient;
   resolvedParticipantMemberId?: string;
   route: HostedThreadRouteSnapshot;
@@ -3115,55 +3120,42 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   } = input.context;
 
   const participantAccessNow = new Date();
-  let verifiedInboundParticipant: VerifiedHostedLinqInboundParticipant | null = null;
-  if (
-    !summary.isFromMe
-    && messageEvent.data.message.parts.length > 0
-    && participantContact
-    && !shouldIgnoreHostedLinqForLocalInboundGuard({
-      isFromMe: summary.isFromMe,
-      participantContact,
-    })
-  ) {
-    verifiedInboundParticipant =
-      await resolveHostedThreadContainerInboundParticipantTx({
-        participantContact,
-        prisma: input.prisma,
-        resolvedParticipantMemberId: input.resolvedParticipantMemberId,
-      });
-    if (verifiedInboundParticipant) {
-      await lockHostedMemberRow(
-        input.prisma,
-        verifiedInboundParticipant.memberId,
+  const verifiedInboundParticipant =
+    input.lockedInboundParticipant === undefined
+      ? await resolveAndLockHostedThreadContainerInboundParticipantTx({
+          context: input.context,
+          prisma: input.prisma,
+          resolvedParticipantMemberId: input.resolvedParticipantMemberId,
+        })
+      : input.lockedInboundParticipant;
+  if (verifiedInboundParticipant) {
+    const senderAccess = await readHostedRuntimeAiAccessDecision({
+      memberId: verifiedInboundParticipant.memberId,
+      now: participantAccessNow,
+      prisma: input.prisma,
+    });
+    if (
+      !senderAccess.allowed
+      && senderAccess.reason === "health_data_consent_withdrawn"
+    ) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("health-data-consent-withdrawn"),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          accessReason: senderAccess.reason,
+          existingMemberActive: false,
+          existingMemberMatch: "none",
+          reason: "health-data-consent-withdrawn",
+          routeStage: "thread-route-sender-consent-withdrawn",
+        }),
       );
-      const senderAccess = await readHostedRuntimeAiAccessDecision({
-        memberId: verifiedInboundParticipant.memberId,
-        now: participantAccessNow,
-        prisma: input.prisma,
-      });
-      if (
-        !senderAccess.allowed
-        && senderAccess.reason === "health_data_consent_withdrawn"
-      ) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildIgnoredLinqWebhookPlan("health-data-consent-withdrawn"),
-          buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-            accessReason: senderAccess.reason,
-            existingMemberActive: false,
-            existingMemberMatch: "none",
-            reason: "health-data-consent-withdrawn",
-            routeStage: "thread-route-sender-consent-withdrawn",
-          }),
-        );
-      }
-      await renewHostedThreadContainerParticipantAccessTx({
-        containerMemberId: input.route.containerMemberId,
-        now: participantAccessNow,
-        observedAt: new Date(occurredAt),
-        participantMemberId: verifiedInboundParticipant.memberId,
-        prisma: input.prisma,
-      });
     }
+    await renewHostedThreadContainerParticipantAccessTx({
+      containerMemberId: input.route.containerMemberId,
+      now: participantAccessNow,
+      observedAt: new Date(occurredAt),
+      participantMemberId: verifiedInboundParticipant.memberId,
+      prisma: input.prisma,
+    });
   }
 
   let containerAccessActive = (await readHostedRuntimeAiAccessDecision({
@@ -4603,6 +4595,41 @@ function serializedHostedLinqWakeBytes(
   wake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
 ): number {
   return new TextEncoder().encode(JSON.stringify(wake)).byteLength;
+}
+
+async function resolveAndLockHostedThreadContainerInboundParticipantTx(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
+}): Promise<VerifiedHostedLinqInboundParticipant | null> {
+  const { messageEvent, participantContact, summary } = input.context;
+  if (
+    summary.isFromMe
+    || messageEvent.data.message.parts.length === 0
+    || !participantContact
+    || shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+  ) {
+    return null;
+  }
+
+  const verifiedInboundParticipant =
+    await resolveHostedThreadContainerInboundParticipantTx({
+      participantContact,
+      prisma: input.prisma,
+      resolvedParticipantMemberId: input.resolvedParticipantMemberId,
+    });
+  if (!verifiedInboundParticipant) {
+    return null;
+  }
+
+  await lockHostedMemberRow(
+    input.prisma,
+    verifiedInboundParticipant.memberId,
+  );
+  return verifiedInboundParticipant;
 }
 
 async function resolveHostedThreadContainerInboundParticipantTx(input: {

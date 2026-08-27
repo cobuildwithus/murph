@@ -51,6 +51,7 @@ import {
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
+  createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
@@ -75,7 +76,9 @@ import {
 } from "@/src/lib/hosted-groups/participant-action-authority";
 import {
   ensureHostedThreadContainerRouteTx,
+  refreshHostedThreadContainerDeliveryRouteTx,
   type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
 } from "@/src/lib/hosted-routing/thread-container-service";
 import {
   buildHostedThreadDeliveryRoute,
@@ -89,9 +92,17 @@ import {
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
 } from "@/src/lib/hosted-routing/thread-route-store";
-import type {
-  HostedLinqParticipantChangedEvent,
+import {
+  parseHostedLinqWebhookEvent,
+  type HostedLinqParticipantChangedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
+import {
+  buildHostedMemberIdentityPrivateColumns,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import {
+  planHostedOnboardingLinqWebhook,
+} from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import {
   applyHostedLinqParticipantChangeToRouteTx,
 } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -649,9 +660,329 @@ function observeHostedThreadRouteLockAttempt(input: {
   });
 }
 
+function pauseHostedMemberRoutingDemotionAfterWrite(input: {
+  demoted: Deferred<void>;
+  release: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const hostedMemberRouting = new Proxy(input.tx.hostedMemberRouting, {
+    get(target, property) {
+      if (property === "updateMany") {
+        return async (args: Prisma.HostedMemberRoutingUpdateManyArgs) => {
+          const result = await target.updateMany(args);
+          input.demoted.resolve();
+          await input.release.promise;
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedMemberRouting") {
+        return hostedMemberRouting;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
+    it.each([
+      {
+        startOrder: "route-refresh-first",
+        title: "route refresh starts first",
+      },
+      {
+        startOrder: "participant-webhook-first",
+        title: "participant webhook starts first",
+      },
+    ] as const)(
+      "keeps member-before-route ordering when $title",
+      async ({ startOrder }) => {
+        const routeMemberLocked = createDeferred();
+        const releaseRouteMember = createDeferred();
+        const webhookDemoted = createDeferred();
+        const releaseWebhookDemotion = createDeferred();
+        const routePid = createDeferred<number>();
+        const webhookPid = createDeferred<number>();
+        let fixture: RouteFixture | null = null;
+        let routeRefreshTransaction: ReturnType<
+          typeof refreshHostedThreadContainerDeliveryRouteTx
+        > | null = null;
+        let webhookTransaction: ReturnType<
+          typeof planHostedOnboardingLinqWebhook
+        > | null = null;
+
+        try {
+          fixture = await createRouteFixture();
+          const activeFixture = fixture;
+          const numericSuffix = String(
+            Number.parseInt(
+              randomUUID().replaceAll("-", "").slice(0, 7),
+              16,
+            ) % 10_000_000,
+          ).padStart(7, "0");
+          const participantPhone = `+1555${numericSuffix}`;
+          const canonicalRecipientPhone = `+1556${numericSuffix}`;
+          const deliveringRecipientPhone = `+1557${numericSuffix}`;
+          const participantPhoneLookupKey = createHostedPhoneLookupKey(
+            participantPhone,
+          );
+          const canonicalAccountLookupKey = createHostedPhoneLookupKey(
+            canonicalRecipientPhone,
+          );
+          const deliveringAccountLookupKey = createHostedPhoneLookupKey(
+            deliveringRecipientPhone,
+          );
+          if (
+            !participantPhoneLookupKey
+            || !canonicalAccountLookupKey
+            || !deliveringAccountLookupKey
+          ) {
+            throw new Error("Expected valid Linq routing phone inputs.");
+          }
+
+          await activeFixture.observer.hostedMember.update({
+            data: { billingStatus: "active" },
+            where: { id: activeFixture.ownerMemberId },
+          });
+          for (const scope of ["launch.legal", "launch.health-data"] as const) {
+            await recordHostedLaunchRequiredConsent({
+              memberId: activeFixture.ownerMemberId,
+              prisma: activeFixture.observer,
+              scope,
+              source: "linq-route-lock-order-concurrency-test",
+            });
+          }
+          const identityPrivate =
+            await buildHostedMemberIdentityPrivateColumns({
+              memberId: activeFixture.ownerMemberId,
+              phoneNumber: participantPhone,
+              prisma: activeFixture.observer,
+              privyUserId: null,
+              signupPhoneCodeSendAttemptId: null,
+              signupPhoneCodeSendAttemptStartedAt: null,
+              signupPhoneCodeSentAt: null,
+              signupPhoneNumber: null,
+            });
+          await activeFixture.observer.hostedMemberIdentity.create({
+            data: {
+              ...identityPrivate,
+              maskedPhoneNumberHint: "*** test",
+              memberId: activeFixture.ownerMemberId,
+              phoneLookupKey: participantPhoneLookupKey,
+              phoneNumberVerifiedAt: new Date("2026-08-09T11:00:00.000Z"),
+            },
+          });
+
+          const canonicalDeliveryRoute = buildHostedThreadDeliveryRoute({
+            accountLookupKey: canonicalAccountLookupKey,
+            channel: "linq",
+            threadId: activeFixture.threadId,
+          });
+          const canonicalDeliveryRouteEncrypted =
+            await sealHostedThreadDeliveryRoute({
+              containerMemberId: activeFixture.containerMemberId,
+              prisma: activeFixture.observer,
+              route: canonicalDeliveryRoute,
+            });
+          const canonicalThreadLookupKey =
+            createHostedExternalThreadLookupKey({
+              accountLookupKey: canonicalAccountLookupKey,
+              channel: "linq",
+              threadId: activeFixture.threadId,
+            });
+          if (!canonicalThreadLookupKey) {
+            throw new Error("Expected a canonical Linq thread lookup key.");
+          }
+          await activeFixture.observer.hostedThreadRoute.update({
+            data: {
+              accountLookupKey: canonicalAccountLookupKey,
+              deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+              threadLookupKey: canonicalThreadLookupKey,
+            },
+            where: {
+              channel_threadIdentityLookupKey: {
+                channel: "linq",
+                threadIdentityLookupKey:
+                  activeFixture.threadIdentityLookupKey,
+              },
+            },
+          });
+          const route = await readHostedThreadRouteByThreadIdentity({
+            channel: "linq",
+            prisma: activeFixture.observer,
+            threadId: activeFixture.threadId,
+          });
+          if (!route) {
+            throw new Error("Expected a canonical hosted thread route.");
+          }
+
+          const deliveringRoute = buildHostedThreadDeliveryRoute({
+            accountLookupKey: deliveringAccountLookupKey,
+            channel: "linq",
+            threadId: activeFixture.threadId,
+          });
+          const preparedDeliveryRoute:
+            PreparedHostedThreadContainerDeliveryRoute = {
+              containerMemberId: activeFixture.containerMemberId,
+              deliveryRoute: deliveringRoute,
+              deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+                containerMemberId: activeFixture.containerMemberId,
+                prisma: activeFixture.observer,
+                route: deliveringRoute,
+              }),
+              observedDeliveryRouteEncrypted:
+                canonicalDeliveryRouteEncrypted,
+            };
+          const event = parseHostedLinqWebhookEvent(
+            JSON.stringify({
+              api_version: "v3",
+              created_at: "2026-08-09T12:00:00.000Z",
+              data: {
+                chat: {
+                  id: activeFixture.threadId,
+                  is_group: true,
+                  owner_handle: {
+                    handle: deliveringRecipientPhone,
+                    id: "owner-handle",
+                    is_me: true,
+                    service: "iMessage",
+                  },
+                },
+                direction: "inbound",
+                id: `message_${randomUUID()}`,
+                parts: [{ type: "text", value: "Route this group message" }],
+                sender_handle: {
+                  handle: participantPhone,
+                  id: "sender-handle",
+                  service: "iMessage",
+                },
+                sent_at: "2026-08-09T12:00:00.000Z",
+                service: "iMessage",
+              },
+              event_id: `event_${randomUUID()}`,
+              event_type: "message.received",
+              webhook_version: "2026-02-03",
+            }),
+          );
+
+          const runRouteRefresh = (pauseAfterMemberLock: boolean) => {
+            routeRefreshTransaction = activeFixture.messageClient.$transaction(
+              async (tx) => {
+                routePid.resolve(await readBackendPid(tx));
+                await lockHostedMemberRow(
+                  tx,
+                  activeFixture.ownerMemberId,
+                );
+                if (pauseAfterMemberLock) {
+                  routeMemberLocked.resolve();
+                  await releaseRouteMember.promise;
+                }
+                return refreshHostedThreadContainerDeliveryRouteTx({
+                  accountLookupKey: deliveringAccountLookupKey,
+                  accountLookupKeys: [deliveringAccountLookupKey],
+                  preparedDeliveryRoute,
+                  prisma: tx,
+                  route,
+                  threadId: activeFixture.threadId,
+                });
+              },
+            );
+          };
+          const runParticipantWebhook = (pauseAfterDemotion: boolean) => {
+            webhookTransaction = activeFixture.participantClient.$transaction(
+              async (tx) => {
+                webhookPid.resolve(await readBackendPid(tx));
+                return planHostedOnboardingLinqWebhook({
+                  event,
+                  preparedThreadDeliveryRoute: preparedDeliveryRoute,
+                  prisma: pauseAfterDemotion
+                    ? pauseHostedMemberRoutingDemotionAfterWrite({
+                        demoted: webhookDemoted,
+                        release: releaseWebhookDemotion,
+                        tx,
+                      })
+                    : tx,
+                });
+              },
+            );
+          };
+
+          if (startOrder === "route-refresh-first") {
+            runRouteRefresh(true);
+            await routeMemberLocked.promise;
+            runParticipantWebhook(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await webhookPid.promise,
+            });
+            releaseRouteMember.resolve();
+          } else {
+            runParticipantWebhook(true);
+            await webhookDemoted.promise;
+            runRouteRefresh(false);
+            await waitForBlockedBackend({
+              observer: activeFixture.observer,
+              pid: await routePid.promise,
+            });
+            releaseWebhookDemotion.resolve();
+          }
+
+          if (!routeRefreshTransaction || !webhookTransaction) {
+            throw new Error("Expected both Linq routing transactions.");
+          }
+          await expect(routeRefreshTransaction).resolves.toMatchObject({
+            deliveryRoute: canonicalDeliveryRoute,
+          });
+          await expect(webhookTransaction).resolves.toMatchObject({
+            response: {
+              ignored: false,
+              ok: true,
+              reason: "wake-appended-thread-route",
+            },
+          });
+          await expect(
+            activeFixture.observer.hostedThreadRoute.findUnique({
+              select: {
+                accountLookupKey: true,
+                deliveryRouteEncrypted: true,
+                threadLookupKey: true,
+              },
+              where: {
+                channel_threadIdentityLookupKey: {
+                  channel: "linq",
+                  threadIdentityLookupKey:
+                    activeFixture.threadIdentityLookupKey,
+                },
+              },
+            }),
+          ).resolves.toEqual({
+            accountLookupKey: canonicalAccountLookupKey,
+            deliveryRouteEncrypted: canonicalDeliveryRouteEncrypted,
+            threadLookupKey: canonicalThreadLookupKey,
+          });
+        } finally {
+          releaseRouteMember.resolve();
+          releaseWebhookDemotion.resolve();
+          await Promise.allSettled([
+            ...(routeRefreshTransaction ? [routeRefreshTransaction] : []),
+            ...(webhookTransaction ? [webhookTransaction] : []),
+          ]);
+          if (fixture) {
+            await cleanupRouteFixture(fixture);
+          }
+        }
+      },
+    );
+
     it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");

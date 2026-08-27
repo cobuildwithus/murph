@@ -3682,6 +3682,75 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
+  it("locks a verified routed participant before route refresh and reuses that lock", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_active_participant_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      planResetAt: null,
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    await expect(planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      },
+    });
+
+    expect(prisma.$executeRaw).toHaveBeenCalled();
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).toHaveBeenCalledOnce();
+    const memberLockCallIndex = prisma.$queryRaw.mock.calls.findIndex(
+      ([query]) =>
+        Array.isArray(query)
+        && query.join("").includes('from "hosted_member"')
+        && query.join("").includes("for update"),
+    );
+    expect(memberLockCallIndex).toBeGreaterThanOrEqual(0);
+    const memberLockCallOrder =
+      prisma.$queryRaw.mock.invocationCallOrder[memberLockCallIndex];
+    const routeLockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[0];
+    const demotionCallOrder = vi.mocked(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).mock.invocationCallOrder[0];
+    expect(memberLockCallOrder).toBeLessThan(routeLockCallOrder!);
+    expect(memberLockCallOrder).toBeLessThan(demotionCallOrder!);
+    expect(
+      memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+    ).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the newest ten reaction contexts in insertion order", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
