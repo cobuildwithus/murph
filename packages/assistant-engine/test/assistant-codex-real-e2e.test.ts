@@ -10578,12 +10578,28 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 
-  it('pins live turns to the hosted shell and plugin boundaries', () => {
-    expect(REAL_CODEX_HOSTED_CONFIG_OVERRIDES).toEqual([
+  it('pins live turns to the hosted shell and plugin boundaries', async () => {
+    let observedConfigOverrides: readonly string[] | undefined
+
+    await expect(executeRealCodexAppServerTurn(
+      {
+        configOverrides: ['features.shell_tool=false'],
+        dynamicTools: [],
+        prompt: 'Capture the real-Codex harness configuration.',
+        workingDirectory: '/synthetic-workspace',
+      },
+      async (input) => {
+        observedConfigOverrides = input.configOverrides
+        throw new Error('Stop after capturing the launch input.')
+      },
+    )).rejects.toThrow('Real Codex cache probe failed')
+
+    expect(observedConfigOverrides).toEqual([
       'allow_login_shell=false',
       'features.plugins=false',
       'skills.include_instructions=false',
       'skills.bundled.enabled=false',
+      'features.shell_tool=false',
     ])
   })
 
@@ -14333,9 +14349,10 @@ async function executeRealCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
     dynamicTools?: CodexAppServerTurnInput['dynamicTools']
   },
+  executeTurn: typeof executeCodexAppServerTurn = executeCodexAppServerTurn,
 ): ReturnType<typeof executeCodexAppServerTurn> {
   try {
-    return await executeCodexAppServerTurn({
+    return await executeTurn({
       ...input,
       configOverrides: [
         ...REAL_CODEX_HOSTED_CONFIG_OVERRIDES,
