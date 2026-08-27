@@ -5,9 +5,9 @@
     "id": "named-groups-stay-reachable",
     "kind": "improvement",
     "priority": 3,
-    "title": "Named groups stay reachable",
-    "summary": "Murph can now consult or share an update with an explicitly named joined group even when you belong to many groups.",
-    "details": "An exact name still selects only one group. If a name is missing or shared by more than one group, Murph asks you to clarify instead of guessing.",
+    "title": "Group support stays reachable",
+    "summary": "Murph can now reach an explicitly named joined group and continue through later memberships or sharing permissions instead of stopping at the first page.",
+    "details": "An exact name still selects only one group. Detailed group and permission lists load in pages, and health-sharing updates continue in bounded batches, so heavy use does not block adding or using a later group.",
     "relevanceTags": ["groups", "messaging", "reliability"],
     "sourcePullRequests": [2361]
   }

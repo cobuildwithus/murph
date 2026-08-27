@@ -1999,6 +1999,7 @@ model HostedVaultShare {
   projectionScopeJson          Json?        @map("projection_scope_json")
   destinationMemberId          String       @map("destination_member_id")
   projectionSnapshotCiphertext String?      @map("projection_snapshot_ciphertext")
+  projectionSourceWorkspaceVersion BigInt?  @map("projection_source_workspace_version")
   status                       String       @default("granted")
   grantedAt                    DateTime     @map("granted_at")
   revokedAt                    DateTime?    @map("revoked_at")

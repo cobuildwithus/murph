@@ -30,8 +30,10 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
@@ -602,6 +604,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -710,6 +718,18 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('list_memberships'),
+      cursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS)
+        .optional(),
+      disclosureGrantCursor: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS)
+        .optional(),
     })
     .strict(),
   z
@@ -7310,14 +7330,27 @@ function parseGroupArguments(
     }
   }
   if (
-    parsed.data.action === 'list_memberships'
-    || parsed.data.action === 'read_next_group'
+    parsed.data.action === 'read_next_group'
     || parsed.data.action === 'cancel_next_group'
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
+  }
+  if (parsed.data.action === 'list_memberships') {
+    return {
+      ok: true,
+      request: {
+        action: 'list_memberships',
+        ...(parsed.data.cursor === undefined
+          ? {}
+          : { cursor: parsed.data.cursor }),
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   if (parsed.data.action === 'create_signup_referral_link') {
     return {
@@ -7351,7 +7384,15 @@ function parseGroupArguments(
     }
   }
   if (parsed.data.action === 'read_current') {
-    return { ok: true, request: { action: 'read_current' } }
+    return {
+      ok: true,
+      request: {
+        action: 'read_current',
+        ...(parsed.data.disclosureGrantCursor === undefined
+          ? {}
+          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+      },
+    }
   }
   return {
     ok: false,

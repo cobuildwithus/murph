@@ -31,7 +31,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
-  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeAssistantAskControlResponse,
   type HostedRuntimeGroupAskResult,
@@ -2705,7 +2705,7 @@ async function readHostedAssistantAskMemberships(input: {
       memberId: true,
     },
     ...(input.requestedLabel === null
-      ? { take: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1 }
+      ? { take: HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX + 1 }
       : {}),
     where: { memberId: input.memberId },
   });
@@ -2778,7 +2778,7 @@ function readHostedAssistantAskClarificationLabels(
     }
     seen.add(selector);
     result.push(displayLabel);
-    if (result.length === HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX) {
+    if (result.length === HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX) {
       break;
     }
   }

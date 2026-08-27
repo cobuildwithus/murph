@@ -1,4 +1,7 @@
 import {
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
+} from "@murphai/hosted-execution/routes";
+import {
   isHostedVaultShareCurrentStateProjectionKind,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
@@ -27,8 +30,7 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  findActiveHostedVaultShares,
-  buildHostedVaultShareGenerationToken,
+  findActiveHostedVaultSharePage,
   hasUnmaterializedHostedVaultShareProjectionGeneration,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
@@ -38,6 +40,10 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+type HostedVaultShareDeliverPageResponse = HostedVaultShareDeliverResponse & {
+  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]?: string;
+};
 
 const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
   status: "no-active-share",
@@ -85,12 +91,17 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const body = parseHostedVaultShareDeliverRequest(rawBody);
 
-  const shares = await findActiveHostedVaultShares({
+  const continuation = rawBody[
+    HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
+  ];
+  const page = await findActiveHostedVaultSharePage({
+    ...(continuation === undefined ? {} : { continuation }),
     grantorMemberId,
     ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
     projectionScope: body.projectionScope,
+    sourceWorkspaceVersion: body.sourceWorkspaceVersion,
   });
-  if (shares.length === 0) {
+  if (body.expectedGenerationToken !== page.generationToken) {
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,
@@ -99,10 +110,16 @@ export const POST = withJsonError(async (request: Request) => {
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
-  if (
-    body.expectedGenerationToken
-      !== buildHostedVaultShareGenerationToken(shares.map((share) => share.id))
-  ) {
+  if (page.shares.length === 0) {
+    if (page.continuation !== null) {
+      return jsonOk(buildHostedVaultShareDeliverPageResponse(
+        NO_ACTIVE_SHARE_RESPONSE,
+        page.continuation,
+      ));
+    }
+    if (page.hasActiveShares) {
+      return jsonOk(DELIVERED_RESPONSE);
+    }
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,
@@ -121,7 +138,7 @@ export const POST = withJsonError(async (request: Request) => {
   let scopeFailed = false;
   let deliveryDeferred = false;
 
-  for (const share of shares) {
+  for (const share of page.shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
       deliveryFailed = true;
       break;
@@ -175,12 +192,24 @@ export const POST = withJsonError(async (request: Request) => {
   if (deliveryDeferred) {
     throw createHostedVaultShareDeliveryDeferredError();
   }
-  if (deliveryDeferred) {
-    throw createHostedVaultShareDeliveryDeferredError();
-  }
 
-  return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
+  return jsonOk(buildHostedVaultShareDeliverPageResponse(
+    delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE,
+    page.continuation,
+  ));
 });
+
+function buildHostedVaultShareDeliverPageResponse(
+  response: HostedVaultShareDeliverResponse,
+  continuation: string | null,
+): HostedVaultShareDeliverPageResponse {
+  return continuation === null
+    ? response
+    : {
+        ...response,
+        [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]: continuation,
+      };
+}
 
 function createHostedVaultShareDeliveryError(
   code:

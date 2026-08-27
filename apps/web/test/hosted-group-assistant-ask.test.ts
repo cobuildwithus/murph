@@ -119,14 +119,14 @@ function membership(input: {
   };
 }
 
-function manyMembershipsWithTarget() {
+function manyMembershipsWithTarget(leadingMembershipCount = 26) {
   const target = membership({
     displayName: "Trail Crew",
     id: "membership-target",
   });
   return {
     memberships: [
-      ...Array.from({ length: 26 }, (_, index) => membership({
+      ...Array.from({ length: leadingMembershipCount }, (_, index) => membership({
         displayName: `Group ${String(index + 1).padStart(2, "0")}`,
         id: `membership-${String(index + 1).padStart(2, "0")}`,
         runtimeMemberId: `member-group-runtime-${String(index + 1).padStart(2, "0")}`,
@@ -483,7 +483,7 @@ describe("Hosted group Assistant Ask admission", () => {
   });
 
   it("bounds unnamed clarification without making group access unavailable", async () => {
-    const { memberships } = manyMembershipsWithTarget();
+    const { memberships } = manyMembershipsWithTarget(64);
     const { prisma, tx } = createPrisma({ memberships });
 
     await expect(requestHostedGroupAssistantAsk({
@@ -497,14 +497,14 @@ describe("Hosted group Assistant Ask admission", () => {
       mailboxWake: null,
       result: {
         groupLabels: Array.from(
-          { length: 25 },
+          { length: 64 },
           (_, index) => `Group ${String(index + 1).padStart(2, "0")}`,
         ),
         status: "clarification_required",
       },
     });
     expect(tx.hostedGroupMember.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: 26 }),
+      expect.objectContaining({ take: 65 }),
     );
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });

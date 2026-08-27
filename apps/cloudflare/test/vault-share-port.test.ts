@@ -51,6 +51,80 @@ describe("createHostedWebVaultSharePort delivery", () => {
     );
   });
 
+  it("drains every destination page under one effect deadline", async () => {
+    mocks.fetchHostedWebControlPlaneJson
+      .mockResolvedValueOnce({
+        continuation: "member_destination_025",
+        status: "no-active-share",
+      })
+      .mockResolvedValueOnce({
+        continuation: "member_destination_050",
+        status: "delivered",
+      })
+      .mockResolvedValueOnce({ status: "no-active-share" });
+
+    await expect(createPort().deliver(DELIVER_REQUEST)).resolves.toEqual({
+      status: "delivered",
+    });
+
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(3);
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ body: DELIVER_REQUEST }),
+    );
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        body: {
+          ...DELIVER_REQUEST,
+          continuation: "member_destination_025",
+        },
+      }),
+    );
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        body: {
+          ...DELIVER_REQUEST,
+          continuation: "member_destination_050",
+        },
+      }),
+    );
+    const firstHeaders = mocks.fetchHostedWebControlPlaneJson.mock.calls[0]?.[0]
+      .headers as Headers;
+    const secondHeaders = mocks.fetchHostedWebControlPlaneJson.mock.calls[1]?.[0]
+      .headers as Headers;
+    const thirdHeaders = mocks.fetchHostedWebControlPlaneJson.mock.calls[2]?.[0]
+      .headers as Headers;
+    expect(secondHeaders.get("x-murph-vault-share-effect-deadline"))
+      .toBe(firstHeaders.get("x-murph-vault-share-effect-deadline"));
+    expect(thirdHeaders.get("x-murph-vault-share-effect-deadline"))
+      .toBe(firstHeaders.get("x-murph-vault-share-effect-deadline"));
+  });
+
+  it("rejects malformed and repeated delivery continuations", async () => {
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValueOnce({
+      continuation: "invalid/cursor",
+      status: "delivered",
+    });
+    await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toThrow(
+      "Hosted vault-share delivery continuation is invalid.",
+    );
+
+    mocks.fetchHostedWebControlPlaneJson
+      .mockResolvedValueOnce({
+        continuation: "member_destination_025",
+        status: "delivered",
+      })
+      .mockResolvedValueOnce({
+        continuation: "member_destination_025",
+        status: "no-active-share",
+      });
+    await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toThrow(
+      "Hosted vault-share delivery continuation repeated.",
+    );
+  });
+
   it("fails closed on a malformed Web delivery result", async () => {
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
       status: "partial",

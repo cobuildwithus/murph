@@ -5,6 +5,8 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
@@ -992,8 +994,10 @@ describe("parseHostedRuntimeGroupTool", () => {
   it("parses read, join-link, and join-offer requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     })).toEqual({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     });
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_current",
@@ -1004,6 +1008,21 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "list_memberships",
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    })).toEqual({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_current",
+      disclosureGrantCursor: "x".repeat(
+        HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS + 1,
+      ),
+    })).toThrow(/disclosureGrantCursor/u);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "leave_membership",
       membershipId: "hgm_self_123",
@@ -1416,6 +1435,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           groupLabel: "Fun-loving runners",
           permissionText: "Recent sleep timing and duration",
         }],
+        disclosureGrantsTruncated: true,
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
@@ -1442,6 +1462,8 @@ describe("parseHostedRuntimeGroupTool", () => {
           ],
           role: "member",
         }],
+        nextCursor: "membership_page_64",
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
         truncated: false,
       },
@@ -1564,7 +1586,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "list_memberships",
       result: {
         memberships: Array.from(
-          { length: 26 },
+          { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1 },
           () => response.result.memberships[0],
         ),
         status: "ok",
@@ -1961,6 +1983,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -1985,11 +2008,13 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     })).toEqual({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -2014,6 +2039,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     });

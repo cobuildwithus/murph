@@ -475,6 +475,19 @@ This is a consumer-first hard cut:
    rejection, revoke/regrant clearing, device privacy, and the challenge output
    against the deployed route.
 
+The destination-cardinality extension is also consumer first. Deploy the
+Cloudflare continuation consumer before Web can emit a delivery
+`continuation`. Then apply the nullable
+`HostedVaultShare.projectionSourceWorkspaceVersion` column and active
+grantor/scope/destination cursor index before deploying Web's paged producer
+and removing grant admission by destination count. Each Web request remains
+bounded to 25 sequential replacements; successful rows persist the exact
+source version so a retry without a cursor advances unfinished work, while a
+new checkpoint makes those markers stale. Revoke, regrant, and generation
+backfill clear the marker. After any exact scope admits more than 25 active
+destinations, the older capped Web producer is no longer a safe rollback
+target; forward-fix the producer and verify a later page instead.
+
 Once Web can write the encrypted snapshot column or serve `read_shared`, the
 new Cloudflare consumer is the hard rollback floor. Do not roll Cloudflare back
 to a bundle that restores or consumes legacy local projections; disable the Web
