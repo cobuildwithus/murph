@@ -9,7 +9,7 @@
     "summary": "Answers saved during the Environment interview now reach your report even when Murph is already handling another request.",
     "details": "Your save stays durable while current conversation work finishes, then the next mailbox pass applies it in order and refreshes the report.",
     "relevanceTags": ["environment", "reports", "reliability", "web"],
-    "sourcePullRequests": [2236],
+    "sourcePullRequests": [2236, 2448],
     "tryIt": {
       "href": "/environment",
       "label": "Review your Environment"

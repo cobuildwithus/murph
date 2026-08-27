@@ -107,6 +107,8 @@ Updated: 2026-08-27
   head: the production worker workflow accepts only the exact verified `main`
   tip, and that SHA has neither a deployment record nor a worker-deploy run.
   Temporal therefore remains unchanged.
+- Public replacement PR #2448 owns the exact candidate, review, CI, deployment,
+  and closure of the superseded private PR.
 - Keep one durable mailbox and one existing system-mailbox execution lane. An
   Environment completion is model-free work, not a new Temporal workflow mode.
 - Use an explicit Cloudflare-before-Web deploy order. Do not retain an
