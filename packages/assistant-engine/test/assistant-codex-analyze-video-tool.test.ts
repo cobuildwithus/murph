@@ -540,9 +540,26 @@ describe('executeAnalyzeVideoTool', () => {
     })).rejects.toBe(aborted)
   })
 
-  it('enforces the trusted one-call turn ceiling', async () => {
+  it.each([
+    {
+      expectedSuccess: true,
+      name: 'successful observation',
+      response: answerResponse('Visible motion.'),
+    },
+    {
+      expectedSuccess: false,
+      name: 'no-usable-answer failure',
+      response: Response.json({
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      }),
+    },
+  ])('reuses the completed $name within the trusted one-call turn ceiling', async ({
+    expectedSuccess,
+    response,
+  }) => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
-    const fetchImpl = vi.fn<typeof fetch>(async () => answerResponse('Visible motion.'))
+    const fetchImpl = vi.fn<typeof fetch>(async () => response)
     const turnState = createAnalyzeVideoTurnState()
     const input = {
       acceptedInputIds: [fixture.inputId],
@@ -553,14 +570,13 @@ describe('executeAnalyzeVideoTool', () => {
       vaultRoot: fixture.vaultRoot,
     }
 
-    await expect(executeAnalyzeVideoTool(input)).resolves.toMatchObject({
-      rpcSuccess: true,
-    })
-    await expect(executeAnalyzeVideoTool(input)).resolves.toEqual({
-      rpcSuccess: false,
-      rpcText:
-        'No additional video analysis ran; use the prior video-analysis result for this turn',
-    })
+    const firstResult = await executeAnalyzeVideoTool(input)
+    const secondResult = await executeAnalyzeVideoTool(input)
+
+    expect(firstResult.rpcSuccess).toBe(expectedSuccess)
+    expect(secondResult).toEqual(firstResult)
+    expect(turnState.completedProviderResult).toEqual(firstResult)
+    expect(turnState.providerCallCount).toBe(1)
     expect(fetchImpl).toHaveBeenCalledTimes(ANALYZE_VIDEO_MAX_PROVIDER_CALLS_PER_TURN)
   })
 

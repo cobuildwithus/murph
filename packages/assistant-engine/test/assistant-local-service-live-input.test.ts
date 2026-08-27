@@ -28,6 +28,12 @@ import {
 import {
   readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.ts'
+import {
+  createAnalyzeVideoToolRuntimeFromEnv,
+  executeAnalyzeVideoTool,
+  type AnalyzeVideoToolResult,
+  type AnalyzeVideoTurnState,
+} from '../src/assistant-codex/analyze-video-tool.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -4339,9 +4345,72 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   )
 })
 
-test('sendAssistantMessageLocal reconsiders group input live-steered into request zero', async () => {
+test.each([
+  {
+    expectedResponse:
+      'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+    geminiPayload: {
+      candidates: [{
+        content: {
+          parts: [{
+            text:
+              'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+          }],
+          role: 'model',
+        },
+        finishReason: 'STOP',
+      }],
+    },
+    name: 'successful video result',
+  },
+  {
+    expectedResponse:
+      'Video analysis returned no usable answer. Please try again later.',
+    geminiPayload: {
+      candidates: [],
+      usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+    },
+    name: 'no-usable-answer video result',
+  },
+])('sendAssistantMessageLocal reuses a $name during group reconsideration', async ({
+  expectedResponse,
+  geminiPayload,
+}) => {
   vi.useFakeTimers()
   try {
+    const context = await createTempVaultContext(
+      'assistant-local-service-group-video-reconsideration-',
+    )
+    tempRoots.push(context.parentRoot)
+    const inputId = `ain_${'7'.repeat(32)}`
+    const rawPath = 'raw/inbox/group-video/attachments/01__video.mp4'
+    const videoBytes = Buffer.from([
+      0x00, 0x00, 0x00, 0x18,
+      0x66, 0x74, 0x79, 0x70,
+      0x69, 0x73, 0x6f, 0x6d,
+      0x00, 0x00, 0x00, 0x00,
+      0x69, 0x73, 0x6f, 0x6d,
+      0x6d, 0x70, 0x34, 0x32,
+    ])
+    await mkdir(path.dirname(path.join(context.vaultRoot, rawPath)), {
+      recursive: true,
+    })
+    await writeFile(path.join(context.vaultRoot, rawPath), videoBytes)
+    const attachmentAuthorities = [{
+      byteSize: videoBytes.byteLength,
+      messageRef: inputId,
+      mimeType: 'video/mp4',
+      ordinal: 1,
+      rawPath,
+      sha256: createHash('sha256').update(videoBytes).digest('hex'),
+    }]
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(geminiPayload),
+    )
+    const analyzeVideoRuntime = createAnalyzeVideoToolRuntimeFromEnv({
+      env: { GEMINI_API_KEY: 'synthetic-gemini-key' },
+      fetchImpl: geminiFetch,
+    })
     const session = createAssistantSession({
       binding: {
         actorId: null,
@@ -4367,15 +4436,27 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     const reconsiderationAdmissionClosed = createDeferred<void>()
     const reconsiderationFinish = createDeferred<void>()
     const liveSteeredPrompts: string[] = []
-    let requestZeroAnalyzeVideoTurnState: { providerCallCount: number } | null =
-      null
+    let requestZeroAnalyzeVideoTurnState: AnalyzeVideoTurnState | null = null
+    let requestZeroVideoResult: AnalyzeVideoToolResult | null = null
 
     mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
       async (providerInput) => {
-        requestZeroAnalyzeVideoTurnState = providerInput.analyzeVideoTurnState ?? null
-        assert.ok(requestZeroAnalyzeVideoTurnState)
-        expect(requestZeroAnalyzeVideoTurnState.providerCallCount).toBe(0)
-        requestZeroAnalyzeVideoTurnState.providerCallCount += 1
+        const analyzeVideoTurnState = providerInput.analyzeVideoTurnState
+        assert.ok(analyzeVideoTurnState)
+        requestZeroAnalyzeVideoTurnState = analyzeVideoTurnState
+        expect(analyzeVideoTurnState.providerCallCount).toBe(0)
+        requestZeroVideoResult = await executeAnalyzeVideoTool({
+          acceptedInputIds: [inputId],
+          attachmentAuthorities,
+          args: {
+            messageRef: inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          runtime: analyzeVideoRuntime,
+          turnState: analyzeVideoTurnState,
+          vaultRoot: context.vaultRoot,
+        })
+        expect(analyzeVideoTurnState.providerCallCount).toBe(1)
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-0',
           codexContinuation: { kind: 'explicit-structured-history' },
@@ -4401,11 +4482,15 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
             onboardingGuidanceInjected: true,
             codexContinuation: { kind: 'explicit-structured-history' },
             codexThreadId: 'provider-thread-group-live-draft',
-            response: 'Provisional answer to only the second request.',
+            response:
+              requestZeroVideoResult.finalResponseFallback
+              ?? requestZeroVideoResult.rpcText,
             responseDeliveryContextOrdinal: 1,
             route: { routeId: 'route-group-live-draft' },
             session,
-            transcriptResponse: 'Provisional answer to only the second request.',
+            transcriptResponse:
+              requestZeroVideoResult.finalResponseFallback
+              ?? requestZeroVideoResult.rpcText,
           },
         }
       },
@@ -4416,6 +4501,21 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
           requestZeroAnalyzeVideoTurnState,
         )
         expect(providerInput.analyzeVideoTurnState?.providerCallCount).toBe(1)
+        const analyzeVideoTurnState = providerInput.analyzeVideoTurnState
+        assert.ok(analyzeVideoTurnState)
+        const repeatedVideoResult = await executeAnalyzeVideoTool({
+          acceptedInputIds: [inputId],
+          attachmentAuthorities,
+          args: {
+            messageRef: inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          runtime: analyzeVideoRuntime,
+          turnState: analyzeVideoTurnState,
+          vaultRoot: context.vaultRoot,
+        })
+        expect(repeatedVideoResult).toEqual(requestZeroVideoResult)
+        expect(geminiFetch).toHaveBeenCalledOnce()
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: 'attempt-live-1',
           codexContinuation: { kind: 'explicit-structured-history' },
@@ -4443,11 +4543,15 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
             onboardingGuidanceInjected: true,
             codexContinuation: { kind: 'explicit-structured-history' },
             codexThreadId: 'provider-thread-group-live-draft',
-            response: 'One final answer covering all three requests.',
+            response:
+              repeatedVideoResult.finalResponseFallback
+              ?? repeatedVideoResult.rpcText,
             responseDeliveryContextOrdinal: 1,
             route: { routeId: 'route-group-live-draft' },
             session,
-            transcriptResponse: 'One final answer covering all three requests.',
+            transcriptResponse:
+              repeatedVideoResult.finalResponseFallback
+              ?? repeatedVideoResult.rpcText,
           },
         }
       },
@@ -4536,7 +4640,7 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     ]) {
       expect(outcome).toMatchObject({
         prompt: 'First group request\n\nSecond group request\n\nThird group request',
-        response: 'One final answer covering all three requests.',
+        response: expectedResponse,
       })
     }
     expect(
@@ -4554,8 +4658,9 @@ test('sendAssistantMessageLocal reconsiders group input live-steered into reques
     })
     expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
     expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
-      'One final answer covering all three requests.',
+      expectedResponse,
     )
+    expect(geminiFetch).toHaveBeenCalledOnce()
     expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
       expect.objectContaining({ segments: [] }),
     )

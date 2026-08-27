@@ -1779,21 +1779,6 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           })}\n`,
         )
         expect(videoCalls.length).toBeGreaterThanOrEqual(1)
-        if (scenario.providerObservation !== null) {
-          expect(videoCalls).toHaveLength(1)
-        } else {
-          for (const blockedCall of videoCalls.slice(1)) {
-            expect(blockedCall).toMatchObject({
-              kind: 'dynamic',
-              success: false,
-            })
-            if (blockedCall.kind === 'dynamic') {
-              expect(blockedCall.output).toContain(
-                'use the prior video-analysis result',
-              )
-            }
-          }
-        }
         const videoCall = videoCalls[0]
         if (videoCall?.kind !== 'dynamic') {
           throw new Error('Expected a dynamic video-analysis call.')
@@ -1803,6 +1788,18 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           scenario.providerObservation
           ?? 'Video analysis returned no usable answer',
         )
+        for (const repeatedCall of videoCalls.slice(1)) {
+          expect(repeatedCall).toMatchObject({
+            kind: 'dynamic',
+            success: videoCall.success,
+          })
+          if (repeatedCall.kind === 'dynamic') {
+            expect(repeatedCall.output).toContain(
+              scenario.providerObservation
+              ?? 'Video analysis returned no usable answer',
+            )
+          }
+        }
         expect(videoCall).toMatchObject({
           argumentsValue: {
             message_ref: messageRef,

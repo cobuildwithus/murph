@@ -8682,7 +8682,7 @@ text(JSON.stringify(result));
       },
       name: 'failure status',
     },
-  ])('preserves the first video-analysis $name after a later limit failure', {
+  ])('reuses the first video-analysis $name after a later duplicate call', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({ expectedFallback, geminiPayload }) => {
     const scenario = await prepareScriptedTurnScenario()
@@ -8726,13 +8726,12 @@ text(JSON.stringify(result));
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.functionCallOutputs ?? [])
-    expect(toolOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining(expectedFallback),
-      expect.stringContaining('use the prior video-analysis result'),
-    ]))
+    expect(toolOutputs.length).toBeGreaterThanOrEqual(2)
+    for (const toolOutput of toolOutputs) {
+      expect(toolOutput).toContain(expectedFallback)
+    }
     expect(geminiFetch).toHaveBeenCalledOnce()
     expect(result.finalMessage).toContain(expectedFallback)
-    expect(result.finalMessage).not.toContain('No additional video analysis ran')
     expect(result.providerAuthoredFinalMessage).toBe('')
     expect(result.transcriptMessage).toContain(expectedFallback)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)

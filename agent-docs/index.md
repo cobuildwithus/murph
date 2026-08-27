@@ -200,7 +200,10 @@ cross-provider egress, maps standard and detailed-motion intent to allowlisted
 explicit request token cap, and keeps credentials at the Worker boundary.
 Ordinary inbound hosted video bytes stay outside workspace
 snapshots and become immediately retention-eligible when active input no longer
-needs them; explicit canonical durable references are the exception. The
+needs them; explicit canonical durable references are the exception. The first
+completed provider result remains in turn memory across group-draft
+reconsideration, so later tool attempts reuse it without another Gemini call or
+durable result state. The
 architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and

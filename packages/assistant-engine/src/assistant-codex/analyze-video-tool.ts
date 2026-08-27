@@ -59,8 +59,9 @@ export interface AnalyzeVideoAttachmentAuthority {
   sha256: string | null
 }
 
-/** Trusted turn-scoped provider-call ceiling. */
+/** Trusted turn-scoped provider-call ceiling and completed result. */
 export interface AnalyzeVideoTurnState {
+  completedProviderResult: AnalyzeVideoToolResult | null
   providerCallCount: number
 }
 
@@ -92,7 +93,10 @@ const videoExtensionMimeTypes = new Map<string, string>([
 ])
 
 export function createAnalyzeVideoTurnState(): AnalyzeVideoTurnState {
-  return { providerCallCount: 0 }
+  return {
+    completedProviderResult: null,
+    providerCallCount: 0,
+  }
 }
 
 export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
@@ -176,6 +180,14 @@ export async function executeAnalyzeVideoTool(input: {
   turnState?: AnalyzeVideoTurnState | null
   vaultRoot?: string | null
 }): Promise<AnalyzeVideoToolResult> {
+  const turnState = input.turnState ?? createAnalyzeVideoTurnState()
+  if (turnState.completedProviderResult) {
+    return turnState.completedProviderResult
+  }
+  if (turnState.providerCallCount >= ANALYZE_VIDEO_MAX_PROVIDER_CALLS_PER_TURN) {
+    return failure('Video analysis is already in progress for this turn')
+  }
+
   const runtime = input.runtime ?? null
   if (!runtime) {
     return failure('Video analysis is not configured; no analysis ran')
@@ -208,12 +220,6 @@ export async function executeAnalyzeVideoTool(input: {
     return failure(prepared.message)
   }
 
-  const turnState = input.turnState ?? createAnalyzeVideoTurnState()
-  if (turnState.providerCallCount >= ANALYZE_VIDEO_MAX_PROVIDER_CALLS_PER_TURN) {
-    return failure(
-      'No additional video analysis ran; use the prior video-analysis result for this turn',
-    )
-  }
   turnState.providerCallCount += 1
 
   const samplingMode = input.args.samplingMode ?? 'standard'
@@ -262,13 +268,19 @@ export async function executeAnalyzeVideoTool(input: {
       },
     )
     if (response.status === 429) {
-      return failure(
-        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      return completeAnalyzeVideoProviderAttempt(
+        turnState,
+        failure(
+          'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+        ),
       )
     }
     if (!response.ok) {
-      return failure(
-        'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+      return completeAnalyzeVideoProviderAttempt(
+        turnState,
+        failure(
+          'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+        ),
       )
     }
     payload = await readBoundedJsonResponse(response)
@@ -276,8 +288,11 @@ export async function executeAnalyzeVideoTool(input: {
     if (input.abortSignal?.aborted) {
       throw error
     }
-    return failure(
-      'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+    return completeAnalyzeVideoProviderAttempt(
+      turnState,
+      failure(
+        'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+      ),
     )
   } finally {
     timeout.cleanup()
@@ -285,20 +300,31 @@ export async function executeAnalyzeVideoTool(input: {
 
   const answer = readGeminiAnswer(payload)
   if (!answer.text) {
-    return failure(
-      'Video analysis returned no usable answer. Please try again later.',
+    return completeAnalyzeVideoProviderAttempt(
+      turnState,
+      failure(
+        'Video analysis returned no usable answer. Please try again later.',
+      ),
     )
   }
   const framing = answer.truncated
     ? `${ANALYZE_VIDEO_PARTIAL_STATUS}\n\n${analyzeVideoProvenance(fps)}`
     : analyzeVideoProvenance(fps)
-  return {
+  return completeAnalyzeVideoProviderAttempt(turnState, {
     finalResponseFallback: answer.truncated
       ? `Partial video observation: ${answer.text}`
       : answer.text,
     rpcSuccess: true,
     rpcText: `${framing}\n\n${ANALYZE_VIDEO_OUTPUT_BOUNDARY}\n${answer.text}`,
-  }
+  })
+}
+
+function completeAnalyzeVideoProviderAttempt(
+  turnState: AnalyzeVideoTurnState,
+  result: AnalyzeVideoToolResult,
+): AnalyzeVideoToolResult {
+  turnState.completedProviderResult = result
+  return result
 }
 
 function analyzeVideoProvenance(fps: number): string {

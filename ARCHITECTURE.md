@@ -3733,6 +3733,11 @@ Murph-usable idempotency key. V1 accepts that bounded at-least-once residual
 instead of persisting provider prose or adding an analysis-effect state
 machine; exact-once recovery would require a durable pre-egress receipt plus
 cached-result or explicit recovery semantics and a separate retention review.
+Within one host turn, including the in-memory group-draft reconsideration,
+Murph keeps the first completed Gemini tool result in the existing turn state.
+A later tool attempt receives that same success or failure result without new
+egress, so it cannot replace a paid successful analysis with an internal
+duplicate-call status. This adds no durable result owner or retry.
 For completed turns, the exact trusted tool-failure status replaces model
 wording so Murph cannot infer whether Gemini processed the clip. A successful
 observation fills blank output and also replaces a narrow false-unavailable

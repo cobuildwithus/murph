@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -88,8 +88,10 @@ Updated: 2026-08-26
   complete form question, including side, repetition range, and comparison.
 - The authenticated-group path preserves the merged same-turn group-video
   authority while applying the same semantic mode choice and one-provider-call
-  ceiling. A combined real-Codex journey passed when one participant requested
-  another participant's current group video.
+  ceiling. Its held-draft reconsideration reuses the first completed provider
+  result instead of replacing it with a duplicate-call status. A combined
+  real-Codex journey passed when one participant requested another
+  participant's current group video.
 - Negative, unavailable, and failed outcomes remain honest without automatic
   second-pass analysis, diagnosis language, or routine policy recitals.
 - Result: `Ready`. Focused real-Codex journeys selected detailed motion for the
@@ -177,10 +179,17 @@ Updated: 2026-08-26
 - Final ReviewGPT round 3 accepted one result-truth finding: a failed tool result
   cannot always prove that Gemini never processed the video. The correction
   now preserves and reports the exact first failure status instead of inferring
-  more or letting a later blocked duplicate replace it. The separate request to
+  more. The separate request to
   remove all-subscription verification fallback was rejected because the user
-  explicitly authorized that durable workflow in this task. Exact-head round 4
-  remains required for the behavior-bearing correction.
+  explicitly authorized that durable workflow in this task.
+- Final ReviewGPT round 4 accepted one group-reconsideration finding: request 1
+  could attempt the tool again and let its duplicate-call status replace the
+  completed request-0 analysis. The smallest correction retains the first
+  completed provider result in the existing turn state and returns it to later
+  attempts without a second Gemini call, durable state, or retry. Focused unit,
+  scripted-runtime, and held-draft request-0/request-1 tests cover both a
+  successful observation and an HTTP-200 response with no usable candidate.
+  Exact-head round 5 remains required for this behavior-bearing correction.
 - Current `main`, including the separately merged authenticated-group video
   capability, was merged into the candidate. The four bounded conflicts kept
   both the group authority contract and this PR's complete-question, sampling,
@@ -188,5 +197,6 @@ Updated: 2026-08-26
   typecheck, and real-Codex detailed, standard, failure, and cross-participant
   group journeys passed on the combined tree.
 - Draft PR #2373 is mergeable. Product UX is `Ready`; the PR remains draft while
-  the corrected candidate completes exact-head final ReviewGPT. Broad exact-head
-  CI, merge, deployment proof, and guarded retirement have not started.
+  the corrected candidate completes exact-head final ReviewGPT round 5. Broad
+  exact-head CI, merge, deployment proof, and guarded retirement have not
+  started.
