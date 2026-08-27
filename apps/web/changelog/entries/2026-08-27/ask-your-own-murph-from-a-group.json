@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "ask-your-own-murph-from-a-group",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Ask your own Murph from a group",
+    "summary": "When you explicitly ask Murph in a supported group chat to consult your own private Murph, it now starts that consultation instead of refusing.",
+    "details": "The request stays tied to you and that group under the existing notice, permission, and privacy checks. The group never gets direct access to your private Murph or personal vault.",
+    "relevanceTags": ["assistant", "groups", "privacy"],
+    "sourcePullRequests": [2456]
+  }
+}
