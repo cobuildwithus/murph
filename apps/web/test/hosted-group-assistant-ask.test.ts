@@ -781,6 +781,10 @@ describe("Hosted private-to-group context handoff admission", () => {
     const participantTarget = {
       participants: [{ displayName: "Jordan" }],
     } as const;
+    const eventId = createHostedGroupContextHandoffEventId({
+      memberId: ORIGIN_MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
 
     await expect(requestHostedGroupContextHandoff({
       context,
@@ -797,16 +801,15 @@ describe("Hosted private-to-group context handoff admission", () => {
       .toHaveBeenCalledWith(expect.objectContaining({
         envelope: expect.objectContaining({
           notification: expect.objectContaining({
-            deliveryDedupeToken: expect.stringMatching(
-              /^group_handoff_delivery_[0-9a-f]{64}$/u,
-            ),
-            deliveryIdempotencyKey: expect.stringMatching(
-              /^group_handoff_delivery_[0-9a-f]{64}$/u,
-            ),
+            deliveryDedupeToken: eventId,
+            deliveryIdempotencyKey: eventId,
             groupContextHandoff: {
               membershipId: "membership-one",
               originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
             },
+            instructions: buildHostedGroupContextHandoffInstructions({
+              context,
+            }),
           }),
         }),
       }));
@@ -874,6 +877,65 @@ describe("Hosted private-to-group context handoff admission", () => {
     expect(lines[5]).not.toContain(">");
     expect(lines[5]).not.toContain("&");
     expect(JSON.parse(lines[5] ?? "")).toEqual({ context });
+  });
+
+  it("replays a participant-selected duplicate title without title-only resolution", async () => {
+    const context = "The original bounded fact.";
+    const groupLabel = "Family";
+    const participantTarget = {
+      participants: [{ displayName: "Jordan" }],
+    } as const;
+    const wake = contextHandoffWake({ context });
+    const existing = mailboxItemForContextHandoff(wake);
+    const { prisma, tx } = createPrisma({
+      memberships: [
+        membership({ displayName: groupLabel }),
+        membership({
+          displayName: groupLabel,
+          id: "membership-two",
+          runtimeMemberId: "member-other-group-runtime",
+        }),
+      ],
+    });
+    mocks.readHostedMailboxItemById.mockResolvedValue(existing);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      groupLabel,
+      memberId: ORIGIN_MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: TARGET_RUNTIME_MEMBER_ID,
+        mailboxItemId: wake.eventId,
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+    expect(tx.hostedGroupMember.findMany).not.toHaveBeenCalled();
+    expect(mocks.selectHostedGroupByParticipants).not.toHaveBeenCalled();
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      groupLabel,
+      memberId: ORIGIN_MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      participantTarget: {
+        participants: [{ displayName: "Casey" }],
+      },
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: TARGET_RUNTIME_MEMBER_ID,
+        mailboxItemId: wake.eventId,
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+    expect(mocks.selectHostedGroupByParticipants).not.toHaveBeenCalled();
   });
 
   it("replays the pinned wake after time and membership-count changes", async () => {
@@ -1086,7 +1148,7 @@ describe("Hosted private-to-group context handoff admission", () => {
     });
   });
 
-  it("conflicts when a replay changes the context or selects another target", async () => {
+  it("rejects changed content but keeps the first accepted target on replay", async () => {
     const context = "The original bounded fact.";
     const wake = contextHandoffWake({ context });
     const existing = mailboxItemForContextHandoff(wake);
@@ -1095,7 +1157,7 @@ describe("Hosted private-to-group context handoff admission", () => {
       id: "membership-two",
       runtimeMemberId: "member-other-group-runtime",
     });
-    const { prisma } = createPrisma({
+    const { prisma, tx } = createPrisma({
       memberships: [membership(), otherMembership],
     });
     mocks.readHostedMailboxItemById.mockResolvedValue(existing);
@@ -1120,9 +1182,13 @@ describe("Hosted private-to-group context handoff admission", () => {
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       prisma: prisma as never,
     })).resolves.toEqual({
-      mailboxWake: null,
-      result: { status: "unavailable", unavailableReason: "request_conflict" },
+      mailboxWake: {
+        expectedUserId: TARGET_RUNTIME_MEMBER_ID,
+        mailboxItemId: wake.eventId,
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
     });
+    expect(tx.hostedGroupMember.findMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
       .not.toHaveBeenCalled();
   });

@@ -100,8 +100,6 @@ const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
 const HOSTED_GROUP_CONTEXT_HANDOFF_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-context-handoff.request.v1";
-const HOSTED_GROUP_CONTEXT_HANDOFF_DELIVERY_KEY_NAMESPACE =
-  "murph.hosted-group-context-handoff.delivery.v1";
 const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-member-assistant-ask.request.v2";
 const HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX =
@@ -211,22 +209,6 @@ function createHostedGroupParticipantAskBinding(
   participantTargetDigest: string,
 ): string {
   return `${HOSTED_GROUP_PARTICIPANT_ASK_BINDING_PREFIX}${participantTargetDigest}`;
-}
-
-function createHostedGroupContextHandoffDeliveryKey(input: {
-  eventId: string;
-  participantTargetDigest: string | null;
-}): string {
-  if (input.participantTargetDigest === null) {
-    return input.eventId;
-  }
-  return `group_handoff_delivery_${createHash("sha256")
-    .update(HOSTED_GROUP_CONTEXT_HANDOFF_DELIVERY_KEY_NAMESPACE)
-    .update("\0")
-    .update(input.eventId)
-    .update("\0")
-    .update(input.participantTargetDigest)
-    .digest("hex")}`;
 }
 
 export function buildHostedGroupContextHandoffInstructions(input: {
@@ -650,13 +632,6 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
   });
-  const participantTargetDigest = input.participantTarget
-    ? createHostedGroupParticipantTargetDigest(
-        input.participantTarget,
-        requestedLabel,
-      )
-    : null;
-
   if (await readHostedMailboxItemById({
     mailboxItemId: eventId,
     prisma,
@@ -667,9 +642,7 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
       memberId: input.memberId,
       now,
       originAssistantInputId: input.originAssistantInputId,
-      participantTargetDigest,
       prisma,
-      requestedLabel,
     });
   }
 
@@ -712,7 +685,6 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
           }
         : {
             membershipId: participantSelection.membershipId,
-            participantTargetDigest: participantTargetDigest ?? undefined,
             routeAuthority: participantSelection.routeAuthority,
             targetLabel: participantSelection.targetLabel,
             targetRuntimeMemberId: participantSelection.targetRuntimeMemberId,
@@ -779,18 +751,13 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
   const expiresAt = new Date(
     now.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   ).toISOString();
-  const deliveryKey = createHostedGroupContextHandoffDeliveryKey({
-    eventId,
-    participantTargetDigest:
-      preparedSelection.participantTargetDigest ?? null,
-  });
   const wake = buildHostedExecutionAssistantNotificationRequestedWake({
     eventId,
     memberId: preparedSelection.targetRuntimeMemberId,
     notification: {
-      deliveryDedupeToken: deliveryKey,
+      deliveryDedupeToken: eventId,
       deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: deliveryKey,
+      deliveryIdempotencyKey: eventId,
       externalThreadRouteAuthority: routeAuthority,
       groupContextHandoff: {
         membershipId: preparedSelection.membershipId,
@@ -824,8 +791,6 @@ async function requestHostedGroupContextHandoffWithCryptoCache(input: {
             memberId: input.memberId,
             now,
             originAssistantInputId: input.originAssistantInputId,
-            participantTargetDigest,
-            requestedLabel,
             tx,
           });
         }
@@ -906,7 +871,6 @@ type HostedGroupContextHandoffMembershipSelection =
   | { result: HostedGroupAssistantAskAdmission }
   | {
       membershipId: string;
-      participantTargetDigest?: string;
       routeAuthority?: HostedExecutionExternalThreadRouteAuthority;
       targetLabel?: string;
       targetRuntimeMemberId: string;
@@ -2088,9 +2052,7 @@ async function replayHostedGroupContextHandoff(input: {
   memberId: string;
   now: Date;
   originAssistantInputId: string;
-  participantTargetDigest: string | null;
   prisma: PrismaClient;
-  requestedLabel: string | null;
 }): Promise<HostedGroupAssistantAskAdmission> {
   const existing = await readHostedMailboxItemById({
     mailboxItemId: input.eventId,
@@ -2121,8 +2083,6 @@ async function replayHostedGroupContextHandoff(input: {
           memberId: input.memberId,
           now: input.now,
           originAssistantInputId: input.originAssistantInputId,
-          participantTargetDigest: input.participantTargetDigest,
-          requestedLabel: input.requestedLabel,
           tx,
         });
       })
@@ -2173,8 +2133,6 @@ async function replayHostedGroupContextHandoffTx(input: {
   memberId: string;
   now: Date;
   originAssistantInputId: string;
-  participantTargetDigest: string | null;
-  requestedLabel: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
   if (isHostedAssistantAskExpired(input.existingExpiresAt, input.now)) {
@@ -2202,10 +2160,6 @@ async function replayHostedGroupContextHandoffTx(input: {
   const expiresAtMs = input.existingExpiresAt
     ? Date.parse(input.existingExpiresAt)
     : Number.NaN;
-  const deliveryKey = createHostedGroupContextHandoffDeliveryKey({
-    eventId: input.eventId,
-    participantTargetDigest: input.participantTargetDigest,
-  });
   if (
     !wake
     || wake.kind !== "assistant.notification.requested"
@@ -2215,8 +2169,8 @@ async function replayHostedGroupContextHandoffTx(input: {
     || expiresAtMs
       !== occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS
     || !notification
-    || notification.deliveryDedupeToken !== deliveryKey
-    || notification.deliveryIdempotencyKey !== deliveryKey
+    || notification.deliveryDedupeToken !== input.eventId
+    || notification.deliveryIdempotencyKey !== input.eventId
     || notification.deliveryDispatchMode !== "queue-only"
     || notification.firstContact != null
     || notification.privateAssistantAskCompletion != null
@@ -2252,19 +2206,6 @@ async function replayHostedGroupContextHandoffTx(input: {
   if (!authority) {
     return unavailableAdmission("membership_unavailable");
   }
-  if (input.requestedLabel !== null) {
-    const requestedTarget = resolveHostedAssistantAskMembership({
-      memberships: await readHostedAssistantAskMemberships({
-        memberId: input.memberId,
-        prisma: input.tx,
-      }),
-      requestedLabel: input.requestedLabel,
-    });
-    if (requestedTarget.membership?.id !== handoff.membershipId) {
-      return unavailableAdmission("request_conflict");
-    }
-  }
-
   try {
     await assertHostedThreadRouteEgressAuthority({
       authority: routeAuthority,

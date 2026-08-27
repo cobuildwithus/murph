@@ -1,8 +1,8 @@
 # Persist provider group titles and target joined groups by participants
 
-Status: active
+Status: completed
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -155,14 +155,28 @@ Updated: 2026-08-26
   prompts call handoff once without membership listing: a named participant, a
   total three-person chat, and an explicit self plus two named people. The last
   two emit exactly the two other participants and never emit a self cue.
+- The same focused real-Codex journey passes after final remediation on
+  `gpt-5.6-terra` through local subscription auth. All three replies remain
+  concise and truthful about the one queued handoff, so the UX verdict is
+  `Ready`.
+- Final ReviewGPT round 2 identified two accepted replay defects. Web had
+  replaced the canonical event delivery identity with a custom digest that the
+  runtime rejected, and replay reran title-only selection after a participant
+  match. The correction deletes both mechanisms: the shared event id again owns
+  delivery identity, while the first stored membership and route own replay.
+- Remediation proof is green: 205 focused Web tests, three hosted-execution
+  contract tests, the real runtime handoff consumer, four runtime lifecycle
+  tests, and hosted-execution, assistant-runtime, and prepared Web typechecks.
+  Duplicate group titles replay without a title lookup, while changed context,
+  membership generation, or route still fails closed.
 - Pinned real-App-Server measurement of the complete initial provider request
   is byte-for-byte identical at base and head: direct is 24,675
   `o200k_harmony` tokens / 114,319 UTF-8 bytes and group is 20,259 tokens /
   94,076 bytes. The changed group-consult schema remains deferred behind native
   tool discovery, so the initial-request delta is zero for both scopes.
-- PR #2385 is open and Ready, and its changelog source points to that PR. The
-  original exact-head final review remains in flight; accepted preliminary
-  remediation requires a fresh exact-head final round after it is pushed.
+- PR #2385 is open, and its changelog source points to that PR. The accepted
+  round-2 remediation requires a fresh exact-head final round after it is
+  pushed.
 
 ## Product UX walkthrough
 
@@ -183,10 +197,12 @@ Updated: 2026-08-26
    the action fails closed or returns bounded safe clarification descriptions;
    no first/newest/role-based guess, fanout, or partial-candidate uniqueness is
    allowed.
-5. Replay and authority change: normalized participant evidence is digest-bound
-   to the stored wake, while current requester membership and the exact selected
-   route are revalidated immediately before append. Changed evidence conflicts;
-   removed membership or a rebound route cannot effect the old selection.
+5. Replay and authority change: Assistant Ask digest-binds normalized
+   participant evidence in its existing encrypted target field. Handoff uses
+   first-write-wins event identity and reuses the stored membership and route
+   without rerunning title or participant selection. Removed membership or a
+   rebound route still cannot effect the old selection.
 6. Unchanged surfaces: title-only selection remains available, historical rows
    are not backfilled, provider renames are not synchronized, and Telegram is
    outside participant targeting and creation-title persistence.
+Completed: 2026-08-27

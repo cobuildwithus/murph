@@ -382,10 +382,12 @@ email marker. Web scans a separately bounded complete membership universe,
 reads current provider rosters with concurrency four, and may consult only the
 requester's own Contacts projection. Provider handles remain transient, every
 eligible roster must be complete, exactly one group must match, and the final
-transaction revalidates the exact membership and route. A versioned binding of
-the normalized participant-target digest is persisted in the existing encrypted
-request fields so replay cannot change evidence without adding a new runtime
-wire shape. This adds no participant directory or selector state.
+transaction revalidates the exact membership and route. Assistant Ask persists
+a versioned normalized participant-target digest in its existing encrypted
+request field. A handoff instead treats its one accepted-input event id and
+stored membership/route as first-write-wins authority: replay reuses that exact
+effect and never reruns participant or title selection. This adds no participant
+directory, selector state, or new runtime wire shape.
 After Temporal accepts each pointer-only mailbox signal, Web starts the
 same payloadless, no-retry direct `ensure-processing` latency hint used by Linq;
 Temporal remains the only durable wake and reconciliation owner. The target

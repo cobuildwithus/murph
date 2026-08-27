@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 const dependencyMocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
@@ -544,6 +545,14 @@ describe("participant selection composed with Assistant Ask admission", () => {
       },
       userId: SECOND_RUNTIME_MEMBER_ID,
     });
+    const parsedHandoffWake = parseHostedExecutionWake(handoffWake);
+    if (parsedHandoffWake.kind !== "assistant.notification.requested") {
+      throw new TypeError("Expected the participant handoff notification wake.");
+    }
+    expect(parsedHandoffWake.notification.deliveryDedupeToken)
+      .toBe(parsedHandoffWake.eventId);
+    expect(parsedHandoffWake.notification.deliveryIdempotencyKey)
+      .toBe(parsedHandoffWake.eventId);
     expect(
       [...mailboxWakes.values()].some((wake) =>
         wake.userId === FIRST_RUNTIME_MEMBER_ID

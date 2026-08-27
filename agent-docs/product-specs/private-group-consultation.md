@@ -66,7 +66,9 @@ idempotency, or mailbox identifiers. Exact replay reuses one global event/item
 identity derived from the authenticated member and accepted input, decrypts and
 validates the stored notification, and retains its pinned membership and route
 even if the member's group count changed. Changed context, membership
-generation, target group, or route conflicts instead of redirecting. `accepted`
+generation, or route conflicts instead of redirecting. A repeated call for that
+accepted input reuses the first persisted target without rerunning title or
+participant selection. `accepted`
 proves only that the target mailbox item is durable. The runner exact-replays
 the same hidden request once after a retryable Cloudflare-to-Web failure, so a
 lost successful response re-signals the same mailbox item instead of reporting
@@ -220,7 +222,10 @@ provider failure, malformed or incomplete roster evidence, duplicate safe
 descriptions, or an over-budget membership universe fails closed. Resolution
 and the effect stay in one Web action: there is no reusable selector token.
 Immediately before append, Web revalidates the exact membership and current
-route, and replay compares the normalized participant-description digest.
+route. Assistant Ask binds the normalized participant-description digest in its
+existing encrypted target field. Handoff replay instead reuses the stored
+membership and route selected by the first accepted input and performs no
+second title or participant lookup.
 
 Never fuzzy-match, pick the newest or owned group, consult another member's
 Contacts, guess, or fan out. `list_memberships` is not required, and the model never
