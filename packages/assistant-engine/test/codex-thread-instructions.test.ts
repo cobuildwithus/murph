@@ -46,13 +46,19 @@ describe('Codex thread instructions', () => {
       'An explicit task-completion request authorizes necessary use or transmission of reliable canonical facts',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'relevant to its intended destination and purpose',
+      'expected acknowledgements for its destination and purpose',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'do not re-ask saved facts',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'another recipient or purpose, credentials, full payment details, one-time codes, CAPTCHA, new consent',
+      'another destination or purpose, material new choices, password or full payment-card entry',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Human-only challenges need the smallest exact-point handoff; resume yourself',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'one-time codes, CAPTCHA, new consent',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Treat ordinary tool friction as recoverable: inspect state and exhaust the owner's bounded safe recovery",

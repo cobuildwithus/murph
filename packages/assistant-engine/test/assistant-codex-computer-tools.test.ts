@@ -106,7 +106,7 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription).toContain("Never invent data");
     expect(actDescription).toContain("enter credentials/OTP/payment");
     expect(actDescription).toContain("bypass CAPTCHA");
-    expect(actDescription).toContain("accept new consent");
+    expect(actDescription).toContain("accept material consent");
     expect(actDescription).toContain("retry unknown effects");
     expect(actDescription).toContain("After failure, call computer_open");
 

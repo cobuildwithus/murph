@@ -43,11 +43,20 @@ For appointment work, first read
 `$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md`. That skill owns
 intake completeness, reusable scheduling-memory handling, and the ready-to-act
 gate across every transport. Before readiness, use this skill only for bounded,
-non-mutating inspection of public requirements or availability, or of the
-user-authorized official destination when the active browser is already
-authenticated. Do not initiate login, enter credentials, disclose user data, or
-mutate destination state during that inspection. Use this skill for the real
-website action once the appointment brief is ready. Research or an
+non-mutating inspection of public requirements or availability, resumed
+authenticated official-destination state, or authentication establishment when
+the official destination hides requirements behind login. For authentication
+establishment, make reversible progress through ordinary sign-in routing,
+account selection, or supported SSO when no private entry is required. When the
+next step requires a password, stop at that exact loaded form and call
+`computer_pause_for_user` with `reason: "login_needed"` and
+`handoffPurpose: "managed_login"`; do not enter the password yourself. Use the
+smallest exact-point handoff for a human-only authentication challenge. Resume
+the same run afterward. A handoff grants browser access only. Appointment
+readiness still gates the first user-data disclosure or mutating appointment
+step after the hidden requirements are known.
+Use this skill for the real website action once the appointment brief is ready.
+Research or an
 information-only lookup does not make a separate booking request ready.
 
 Before browsing, resolve as much as possible from the current message, recent
@@ -60,14 +69,17 @@ and any sensitive step — login, one-time code, payment, identity, insurance,
 prescription, or health information — that will need owning-policy authority or
 private handoff before transmission.
 
-An explicit request to complete the browser task authorizes use and necessary
-transmission of reliable current facts relevant to its intended destination and
-purpose. Do not re-ask solely because a fact came from canonical memory. This
-does not authorize a different recipient or purpose, stale or conflicting
-facts, credentials, full payment details, one-time codes, CAPTCHA, new consent,
-or anything a task-specific owner reserves. For appointment check-in and
-intake, `appointment-scheduling` determines which destination-driven identity
-fields are necessary before any are entered.
+An explicit request to complete the browser task authorizes ordinary in-scope
+navigation, use and necessary transmission of reliable current facts, expected
+acknowledgements, and bounded recovery relevant to its intended destination and
+purpose. Do not re-ask solely because a fact came from canonical memory, or ask
+the user to perform a step this browser can complete. This does not authorize a
+different destination or purpose, stale or conflicting facts, a materially new
+choice outside the task, password entry, full payment-card entry, or anything a
+task-specific owner reserves. A human-only authentication challenge requires
+only the smallest exact-point handoff; resume and finish the rest of the task.
+For appointment check-in and intake, `appointment-scheduling` determines which
+destination-driven identity fields are necessary before any are entered.
 
 Do not turn this into an interview. For appointment work, follow the
 appointment-scheduling skill's compact missing-field questions. For other
@@ -402,9 +414,10 @@ clinical decision.
 
 ## Secure handoff and resume
 
-Pause only when Murph is actually blocked: expired login, CAPTCHA, missing
-payment or identity details, a choice the user has not authorized, sensitive
-entry that needs private takeover, or a page that needs direct user takeover.
+Pause only when Murph is actually blocked: password or full payment-card entry,
+a human-only authentication challenge, a required fact that no available source
+can answer, a material choice outside the delegated task, or a page that truly
+needs direct user control.
 When pausing, use `computer_pause_for_user`; after the user replies in a way
 that intentionally continues the paused run, call `computer_open`. The runtime
 supplies hidden mailbox proof and delivery context, selects the active awaiting
@@ -420,10 +433,11 @@ task just to get a handoff link.
 
 A handoff with `handoffPurpose: "managed_login"` opens Kernel's secure
 hosted login flow. Every other handoff purpose opens a live view of the
-browser at its current page and does not navigate. Before pausing for sign-in,
-payment, card entry, OTP, identity, or any other private form completion,
-drive the browser all the way to the specific page, form, or modal the user
-must fill in and confirm the page is loaded. If the user opens the handoff and lands on a product page,
+browser at its current page and does not navigate. Before pausing for password
+or full card entry, a human-only authentication challenge, or another
+owner-reserved private step, drive the browser all the way to the specific page,
+form, or modal the user must complete and confirm it is loaded. If the user
+opens the handoff and lands on a product page,
 account hub, or some other intermediate page, the handoff has missed its goal.
 Pause earlier only when the next click would itself transmit data or create a
 commitment, and in that case name the specific control the user should click
@@ -458,9 +472,11 @@ chat, do not type credentials or card numbers yourself, and do not imply Murph
 stores raw secrets outside the trusted site/browser profile.
 
 A completed handoff proves only that the user finished the private browser step.
-It is not authorization for a purchase, booking, cancellation, submission, or
-other material action unless the user's later message also supplies that
-authorization.
+Resume under the task authority the user already supplied; do not ask them to
+authorize the same purchase, booking, cancellation, submission, or other
+material action again when its exact terms or explicit bounds were already
+approved. A different destination, purpose, or material term still requires the
+missing choice.
 
 ## Verified completion and one adjacent step
 
@@ -573,6 +589,10 @@ outcome genuinely unknown. Completion evidence should match the task:
   and any fee is shown
 - form/request/payment: success state, recipient or account, amount or request
   type, and confirmation or receipt when provided
+
+After the site or tool verifies completion, call `computer_finish_run` with
+`outcome: "completed"` before the final reply. For a terminal site failure or
+cancelation, call `computer_finish_run` with the matching terminal outcome.
 
 Stop when the task is verified complete, a material blocker needs the user, or a
 site failure makes progress impossible. Do not keep searching or clicking once

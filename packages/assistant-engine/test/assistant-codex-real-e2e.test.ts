@@ -10682,7 +10682,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   )
 
   it(
-    'inspects an authenticated portal, reuses saved identity, and recovers an ordinary control',
+    'hands off login, resumes hidden requirement discovery, and completes check-in',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -10696,12 +10696,15 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
         url: string
       }> = []
       let actCount = 0
+      let authenticatedPortalInspected = false
       let checkInCompleted = false
       let dateOfBirthEntered = false
+      let firstOpenSawLoggedOut = false
       let insuranceEntered = false
-      let portalInspected = false
-      let osControlCount = 0
+      let loginCompleted = false
+      let loginPauseCount = 0
       let openCount = 0
+      let osControlCount = 0
       let reopenedAfterOsControl = false
       let safeAlternateAttempted = false
 
@@ -10727,7 +10730,12 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           commandLog,
         })
         const inheritedPath = normalizeEnvString(config.env.PATH)
-        const result = await executeRealCodexAppServerTurn({
+        const commonTurnInput: Omit<
+          CodexAppServerTurnInput,
+          'dynamicTools' | 'prompt'
+        > & {
+          dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+        } = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -10762,7 +10770,28 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               === 'http://web-control.worker/api/internal/computer/runs'
             ) {
               openCount += 1
-              portalInspected = true
+              if (!loginCompleted) {
+                firstOpenSawLoggedOut = true
+                return new Response(JSON.stringify({
+                  expiresAt: '2026-08-27T20:00:00.000Z',
+                  reused: openCount > 1,
+                  runId: 'run_synthetic_check_in',
+                  status: 'running',
+                  title: 'Clinic portal sign in',
+                  url: 'https://clinic.example.test/check-in/login',
+                  visibleText: [
+                    'Official appointment portal sign-in page.',
+                    'Username and password fields are visible.',
+                    'Specific check-in login form is loaded for this clinic.',
+                    'The private check-in form fields are not visible until sign-in.',
+                  ].join('\n'),
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 200,
+                })
+              }
+
+              authenticatedPortalInspected = true
               if (osControlCount === 1) {
                 reopenedAfterOsControl = true
               }
@@ -10781,7 +10810,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                 visibleText: checkInCompleted
                   ? 'Check-in complete. Your appointment is confirmed.'
                   : [
-                      'Official appointment check-in portal. Already signed in.',
+                      'Official appointment check-in portal. Signed in.',
                       'The public clinic pages did not state which identity fields this private form requires.',
                       'Full name is already populated.',
                       dateOfBirthEntered
@@ -10791,8 +10820,8 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                         ? 'Insurance member ID is populated.'
                         : 'Insurance member ID is required and blank.',
                       controlChecked
-                        ? 'Required review checkbox is checked. Continue is enabled.'
-                        : 'Required review checkbox is visible, enabled, and unchecked at x=420 y=620.',
+                        ? 'Required ordinary review acknowledgement checkbox is checked. Continue is enabled.'
+                        : 'Required ordinary review acknowledgement checkbox is visible, enabled, and unchecked at x=420 y=620. Its label only says "I reviewed the entered check-in details." It does not add a new consent, payment term, data-sharing choice, or factual attestation.',
                       openCount > 1
                         ? controlChecked
                           ? 'The verified fallback changed the checkbox state; the form has not been submitted.'
@@ -10806,14 +10835,69 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
             }
             if (
               url
+              === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_check_in/pause-for-user'
+            ) {
+              if (loginCompleted) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_PAUSE_NOT_REQUIRED',
+                    message: 'Login handoff has already completed.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
+              if (
+                body.reason !== 'login_needed'
+                || body.handoffPurpose !== 'managed_login'
+              ) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_LOGIN_HANDOFF_INVALID',
+                    message:
+                      'Pause at the exact login form for user-managed login.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
+              loginPauseCount += 1
+              return new Response(JSON.stringify({
+                awaitingReason: 'login_needed',
+                handoffUrl:
+                  'https://web.example.test/computer/handoff/synthetic-login',
+                runId: 'run_synthetic_check_in',
+                status: 'awaiting_user',
+                suggestedReply: 'done',
+              }), {
+                headers: { 'content-type': 'application/json' },
+                status: 200,
+              })
+            }
+            if (
+              url
               === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_check_in/act'
             ) {
-              if (!portalInspected) {
+              if (!loginCompleted) {
+                return new Response(JSON.stringify({
+                  error: {
+                    code: 'HOSTED_COMPUTER_LOGIN_HANDOFF_REQUIRED',
+                    message:
+                      'Pause for user-managed login before entering private check-in data.',
+                  },
+                }), {
+                  headers: { 'content-type': 'application/json' },
+                  status: 409,
+                })
+              }
+              if (!authenticatedPortalInspected) {
                 return new Response(JSON.stringify({
                   error: {
                     code: 'HOSTED_COMPUTER_INSPECTION_REQUIRED',
                     message:
-                      'Inspect the already-authenticated portal before acting or disclosing user data.',
+                      'Inspect the authenticated portal before acting or disclosing user data.',
                   },
                 }), {
                   headers: { 'content-type': 'application/json' },
@@ -10875,7 +10959,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                   url: 'https://clinic.example.test/check-in',
                   visibleText: [
                     'The safe Playwright alternate also had no effect.',
-                    'Required review checkbox remains unchecked.',
+                    'Required ordinary review acknowledgement checkbox remains unchecked.',
                     dateOfBirthEntered
                       ? 'Date of birth remains populated.'
                       : 'Date of birth is still required.',
@@ -10961,17 +11045,21 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
                 })
               }
               const keys = Array.isArray(body.keys) ? body.keys : []
+              const x = typeof body.x === 'number' ? body.x : null
+              const y = typeof body.y === 'number' ? body.y : null
               const targetsCheckboxWithMouse =
                 body.action === 'clickMouse'
                 && body.button === 'left'
                 && body.clickType === 'click'
                 && body.numClicks === 1
-                && body.x === 420
-                && body.y === 620
+                && x !== null
+                && y !== null
+                && Math.abs(x - 420) <= 24
+                && Math.abs(y - 620) <= 24
               const targetsCheckboxWithKeyboard =
                 body.action === 'pressKey'
                 && keys.length === 1
-                && keys[0] === 'space'
+                && (keys[0] === 'space' || keys[0] === 'Return')
               if (!targetsCheckboxWithMouse && !targetsCheckboxWithKeyboard) {
                 return new Response(JSON.stringify({
                   error: {
@@ -11024,70 +11112,177 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           hostedToolContext: createRealCodexComputerHostedToolContext(),
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt: [
-            'Complete online check-in for my confirmed eye-care appointment at https://clinic.example.test/check-in.',
-            'The public clinic pages do not list the private form fields. My persistent browser is already signed in; inspect the official portal to determine the required fields before entering or submitting anything.',
-            'Use my saved private identity information and finish every authorized ordinary step.',
-            'This request authorizes sending my saved date of birth to this clinic for this check-in.',
-            'My insurance member ID is SYNTHETIC-MEMBER-2468. Use it only for this check-in, and remember it for next time only if Murph has a proper canonical owner for it.',
-            'Do not ask me to repeat saved facts. Stop only for a genuinely new consent, choice, or private credential.',
-          ].join(' '),
           reasoningEffort: 'medium',
           sandbox: 'workspace-write',
           workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonTurnInput,
+          prompt: [
+            'Complete online check-in for my confirmed eye-care appointment at https://clinic.example.test/check-in.',
+            'The public clinic pages do not list the private form fields, and the browser may be logged out.',
+            'If sign-in is needed, use the secure handoff at the exact login form and continue after I mark it done.',
+            'After the portal shows the required fields, use my saved private identity information and finish every authorized ordinary step.',
+            'This request authorizes sending my saved date of birth to this clinic only if the portal requires it for this check-in.',
+            'You may use a required ordinary review acknowledgement checkbox if it only confirms the entered check-in details were reviewed and adds no new consent, payment term, data-sharing choice, or factual attestation.',
+            'My insurance member ID is SYNTHETIC-MEMBER-2468. Use it only for this check-in, and remember it for next time only if Murph has a proper canonical owner for it.',
+            'Do not ask me to repeat saved facts. Stop only for a genuinely new consent, choice, or private credential.',
+          ].join(' '),
         })
-        const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const dynamicCalls = actions.filter((action) =>
+        const firstActions = readCapabilityRoutingActions(first.jsonEvents)
+        const firstDynamicCalls = firstActions.filter((action) =>
           action.kind === 'dynamic'
         )
-        const callsFor = (tool: string) => dynamicCalls.filter((action) =>
-          action.kind === 'dynamic' && action.tool === tool
+        const firstCallsFor = (tool: string) =>
+          firstDynamicCalls.filter((action) =>
+            action.kind === 'dynamic' && action.tool === tool
+          )
+        const firstOpenCalls = firstCallsFor(MURPH_COMPUTER_OPEN_TOOL.name)
+        const firstActCalls = firstCallsFor(MURPH_COMPUTER_ACT_TOOL.name)
+        const firstOsCalls = firstCallsFor(MURPH_COMPUTER_OS_CONTROL_TOOL.name)
+        const firstPauseCalls = firstCallsFor(
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
         )
-        const memoryRead = actions.find((action) =>
+        const firstFinishCalls = firstCallsFor(
+          MURPH_COMPUTER_FINISH_RUN_TOOL.name,
+        )
+        const firstReply = first.finalMessage.trim()
+
+        expect(firstOpenSawLoggedOut, 'first open saw logged-out portal')
+          .toBe(true)
+        expect(firstOpenCalls.length).toBeGreaterThanOrEqual(1)
+        expect(firstActCalls).toHaveLength(0)
+        expect(firstOsCalls).toHaveLength(0)
+        expect(firstFinishCalls).toHaveLength(0)
+        expect(firstPauseCalls).toHaveLength(1)
+        expect(firstPauseCalls[0]).toMatchObject({
+          argumentsValue: {
+            handoffPurpose: 'managed_login',
+            reason: 'login_needed',
+            runId: 'run_synthetic_check_in',
+          },
+        })
+        expect(loginPauseCount).toBe(1)
+        expect(firstPauseCalls[0]?.eventIndex).toBeGreaterThan(
+          firstOpenCalls[0]?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        expect(firstReply).toContain(
+          'https://web.example.test/computer/handoff/synthetic-login',
+        )
+        expect(firstReply).toMatch(/sign[ -]?in|log[ -]?in|login/iu)
+        expect(firstReply).not.toMatch(
+          /what(?:'s| is) your (?:date of birth|birthday)|SYNTHETIC-MEMBER-2468|check(?:ed)?[ -]?in.{0,40}complete|check-in (?:is )?complete/iu,
+        )
+
+        loginCompleted = true
+        const second = await executeRealCodexAppServerTurn({
+          ...commonTurnInput,
+          prompt: [
+            'I completed the secure login handoff and marked it done.',
+            'Continue the same authorized check-in.',
+            'Discover the hidden required fields from the official portal before entering data.',
+          ].join(' '),
+          resumeSessionId: first.sessionId,
+        })
+        const secondActions = readCapabilityRoutingActions(second.jsonEvents)
+        const secondDynamicCalls = secondActions.filter((action) =>
+          action.kind === 'dynamic'
+        )
+        const secondCallsFor = (tool: string) =>
+          secondDynamicCalls.filter((action) =>
+            action.kind === 'dynamic' && action.tool === tool
+          )
+        const secondMemoryRead = secondActions.find((action) =>
           action.kind === 'command'
           && /vault-cli\s+memory\s+show/iu.test(action.command)
         )
-        const memoryWrites = actions.filter((action) =>
+        const memoryRead = secondMemoryRead ?? firstActions.find((action) =>
+          action.kind === 'command'
+          && /vault-cli\s+memory\s+show/iu.test(action.command)
+        )
+        const memoryWrites = [...firstActions, ...secondActions].filter((action) =>
           action.kind === 'command'
           && /vault-cli\s+memory\s+(?:forget|set-name|update|upsert)\b/iu.test(
             action.command,
           )
         )
-        const openCalls = callsFor(MURPH_COMPUTER_OPEN_TOOL.name)
-        const actCalls = callsFor(MURPH_COMPUTER_ACT_TOOL.name)
-        const osCalls = callsFor(MURPH_COMPUTER_OS_CONTROL_TOOL.name)
-        const pauseCalls = callsFor(MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name)
-        const finishCalls = callsFor(MURPH_COMPUTER_FINISH_RUN_TOOL.name)
+        const openCalls = secondCallsFor(MURPH_COMPUTER_OPEN_TOOL.name)
+        const actCalls = secondCallsFor(MURPH_COMPUTER_ACT_TOOL.name)
+        const osCalls = secondCallsFor(MURPH_COMPUTER_OS_CONTROL_TOOL.name)
+        const pauseCalls = secondCallsFor(
+          MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name,
+        )
+        const finishCalls = secondCallsFor(MURPH_COMPUTER_FINISH_RUN_TOOL.name)
         const submittedCodes = requests
           .filter((request) => request.url.endsWith('/act'))
           .map((request) => String(request.body.code ?? ''))
+        const osRequestBodies = requests
+          .filter((request) => request.url.endsWith('/os-control'))
+          .map((request) => request.body)
         const reopenAfterFailure = openCalls.find((call) =>
           call.eventIndex > (actCalls[0]?.eventIndex ?? Number.POSITIVE_INFINITY)
         )
-        const appointmentSkillRead = actions.find((action) =>
+        const allActions = [...firstActions, ...secondActions]
+        const commandDiagnostics = allActions
+          .flatMap((action) =>
+            action.kind === 'command'
+              ? [redactRealCodexDiagnosticText(action.command)]
+              : []
+          )
+          .join('\n')
+        const appointmentSkillRead = allActions.find((action) =>
           action.kind === 'command'
-          && action.command.includes('appointment-scheduling/SKILL.md')
-          && action.output.includes('# Appointment scheduling')
+          && `${action.command}\n${action.output}`.includes(
+            'appointment-scheduling/SKILL.md',
+          )
+          && (
+            action.ok
+            || /# Appointment scheduling|Ready-to-act gate|required review or acknowledgement checkbox|login handoff/iu.test(
+              action.output,
+            )
+          )
         )
-        const computerSkillRead = actions.find((action) =>
+        const computerSkillRead = allActions.find((action) =>
           action.kind === 'command'
-          && action.command.includes('computer-use/SKILL.md')
-          && action.output.includes('# Computer Use')
+          && `${action.command}\n${action.output}`.includes('computer-use/SKILL.md')
+          && (
+            action.ok
+            || /# Computer Use|Build a compact task brief|managed_login|computer_pause_for_user/iu.test(
+              action.output,
+            )
+          )
         )
-        const reply = result.finalMessage.trim()
+        const reply = second.finalMessage.trim()
 
-        expect(memoryRead, 'canonical memory read').toBeDefined()
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(memoryRead, 'canonical memory read before disclosure')
+          .toBeDefined()
         expect(memoryWrites).toHaveLength(0)
-        expect(appointmentSkillRead, 'appointment skill read').toBeDefined()
-        expect(computerSkillRead, 'computer-use skill read').toBeDefined()
-        expect(openCalls.length, `final reply: ${reply}`).toBeGreaterThanOrEqual(2)
+        expect(
+          appointmentSkillRead,
+          `appointment skill read; commands:\n${commandDiagnostics}`,
+        ).toBeDefined()
+        expect(
+          computerSkillRead,
+          `computer-use skill read; commands:\n${commandDiagnostics}`,
+        ).toBeDefined()
+        expect(
+          authenticatedPortalInspected,
+          'resumed authenticated portal inspection',
+        ).toBe(true)
+        expect(openCalls.length, `final reply: ${reply}`).toBeGreaterThanOrEqual(3)
         expect(actCalls.length).toBeGreaterThanOrEqual(3)
-        expect(osCalls, `final reply: ${reply}`).toHaveLength(1)
+        expect(
+          osCalls,
+          `final reply: ${reply}; os requests: ${JSON.stringify(osRequestBodies)}`,
+        ).toHaveLength(1)
         expect(pauseCalls).toHaveLength(0)
         expect(finishCalls).toHaveLength(1)
-        expect(memoryRead?.eventIndex).toBeLessThan(
-          actCalls[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
-        )
+        if (secondMemoryRead !== undefined) {
+          expect(secondMemoryRead.eventIndex).toBeLessThan(
+            actCalls[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
+          )
+        }
         expect(openCalls[0]?.eventIndex).toBeLessThan(
           actCalls[0]?.eventIndex ?? Number.NEGATIVE_INFINITY,
         )
@@ -11122,15 +11317,20 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           /insurance(?: member)? (?:ID|identifier).{0,100}(?:not (?:saved|stored|retained)|wasn['’]t (?:saved|stored|retained)|didn['’]t (?:save|store|retain)|couldn['’]t (?:save|store|retain)|only (?:used )?for (?:this|the) check-in)/iu,
         )
         expect(reply).not.toMatch(
-          /what(?:'s| is) your (?:date of birth|birthday)|enter it|click (?:it|the)|take over|open the (?:browser|link)/iu,
+          /what(?:'s| is) your (?:date of birth|birthday)|enter it|click (?:it|the)|take over|open the (?:browser|link)|should continue|can share/iu,
         )
         process.stdout.write(
           `[appointment-check-in-recovery-e2e] ${JSON.stringify({
             actCalls: actCalls.length,
+            finishCalls: finishCalls.length,
+            loginPauseCalls: loginPauseCount,
+            memoryReadTurn: secondMemoryRead === undefined
+              ? 'pre-login'
+              : 'resumed',
             openCalls: openCalls.length,
             osControlCalls: osCalls.length,
             reply,
-            scenario: 'saved-identity-ordinary-control-recovery',
+            scenario: 'logged-out-login-handoff-hidden-requirements',
           })}\n`,
         )
       } finally {
