@@ -131,19 +131,20 @@ Updated: 2026-08-27
   unlabeled figures are not retroactively mapped; current-speaker effects still
   require host-derived sender authority; ordinary no-tool group turns omit
   unavailable tools; no-tool group email retains transport restrictions.
-- The focused real-Codex journey used a separate authenticated Codex home and
-  stopped in the cache probe with `ASSISTANT_CODEX_USAGE_LIMIT` before any
-  provider action. Per the live-test contract, the journey is on hold rather
-  than retried through additional profiles; deterministic boundary proof is
-  authoritative for this candidate.
+- The focused real-Codex journey stopped in the cache probe with
+  `ASSISTANT_CODEX_USAGE_LIMIT` before any provider action on both the normal
+  subscription home and the one permitted alternate authenticated home. Per
+  the live-test contract, the journey is on hold rather than retried through
+  additional profiles; deterministic boundary proof is authoritative for this
+  candidate.
 - Preliminary ReviewGPT completed on the exact pushed candidate with four
   findings. Accepted remediation narrowed the participant-record sentence so
   visible messages remain ordinary conversation context, added exact no-tool
   group-email proof, and restored a separate missing-name real-model journey.
   The request to mark the live reply Ready was rejected as a code finding: the
-  repository contract requires `Hold` after the one allowed alternate profile
-  is usage-limited and forbids cycling more profiles. The limitation remains
-  explicit in PR evidence.
+  repository contract requires `Hold` after the default and one allowed
+  alternate profile are usage-limited and forbids cycling more profiles. The
+  limitation remains explicit in PR evidence.
 - Complete first-provider-request impact, measured with identical base/head
   fixtures and `o200k_harmony`: ordinary direct decreases by 181 tokens and 927
   serialized bytes (0.62% and 0.69%); group decreases by 560 tokens and 3,014
