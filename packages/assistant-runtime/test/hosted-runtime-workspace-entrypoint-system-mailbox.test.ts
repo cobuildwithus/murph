@@ -4402,7 +4402,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("drains a conversation wake before starting the exact durable-head ask", async () => {
+  test("retires an unstarted exact ask across a foreground causal rerun", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -4411,8 +4411,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const preAssistantSystemFetchStarted = createDeferred<void>();
     const preAssistantSystemFetchRelease = createDeferred<void>();
     const assistantAskPrepareStarted = createDeferred<void>();
-    const assistantPhaseStarted = createDeferred<void>();
-    const assistantPhaseRelease = createDeferred<void>();
+    const firstAssistantPhaseStarted = createDeferred<void>();
+    const firstAssistantPhaseRelease = createDeferred<void>();
+    const secondAssistantPhaseStarted = createDeferred<void>();
+    const secondAssistantPhaseRelease = createDeferred<void>();
     const runtimeAbortController = new AbortController();
     const deviceSyncPort = createEmptyDeviceSyncPort();
     const firstAsk = createMailboxItem({
@@ -4436,9 +4438,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
+    const followUpConversationItem = createMailboxItem({
+      id: "mailbox_item_pre_watcher_conversation_follow_up",
+      lane: "conversation",
+      laneSeq: "2",
+      occurredAt: "2026-04-27T00:00:02.000Z",
+    });
     let assistantAskPrepareCalls = 0;
-    let importedAssistantInputId: string | null = null;
-    let assistantPhaseInputIds: readonly string[] = [];
+    const importedAssistantInputIds = new Map<string, string>();
+    const assistantPhaseInputIds: (readonly string[])[] = [];
     let heldPreAssistantSystemFetch = false;
     let runtimePromise:
       | ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess>
@@ -4509,13 +4517,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             };
           },
           async importItem(item, context) {
-            assert.equal(item.item.id, conversationItem.id);
+            assert.ok(
+              item.item.id === conversationItem.id
+              || item.item.id === followUpConversationItem.id,
+            );
             context?.onConversationInputStaged?.("linq");
-            importedAssistantInputId = await stageAssistantInputEventForMailboxItem({
+            const importedAssistantInputId = await stageAssistantInputEventForMailboxItem({
               item: item.item,
               vaultRoot,
             });
-            events.push("conversation.imported");
+            importedAssistantInputIds.set(item.item.id, importedAssistantInputId);
+            events.push(`conversation.imported:${item.item.laneSeq}`);
             return {
               assistantInputId: importedAssistantInputId,
               status: "imported",
@@ -4552,11 +4564,18 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           }),
           runtimeWakeSignal,
           async runAssistantPhase(input) {
-            assistantPhaseInputIds =
-              input.latestAssistantInputBatch?.()?.assistantInputIds ?? [];
-            events.push("assistant.phase");
-            assistantPhaseStarted.resolve();
-            await assistantPhaseRelease.promise;
+            assistantPhaseInputIds.push(
+              input.latestAssistantInputBatch?.()?.assistantInputIds ?? [],
+            );
+            const assistantPhaseOrdinal = assistantPhaseInputIds.length;
+            events.push(`assistant.phase:${assistantPhaseOrdinal}`);
+            if (assistantPhaseOrdinal === 1) {
+              firstAssistantPhaseStarted.resolve();
+              await firstAssistantPhaseRelease.promise;
+            } else if (assistantPhaseOrdinal === 2) {
+              secondAssistantPhaseStarted.resolve();
+              await secondAssistantPhaseRelease.promise;
+            }
             return { progressed: false };
           },
           signal: runtimeAbortController.signal,
@@ -4582,13 +4601,32 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       runtimeWakeSignal.notify();
       preAssistantSystemFetchRelease.resolve();
       await withRealTimeout(
-        assistantPhaseStarted.promise,
+        firstAssistantPhaseStarted.promise,
         30_000,
         () => events.join(","),
       );
 
+      remoteItems.push(followUpConversationItem);
+      runtimeWakeSignal.notify();
+      firstAssistantPhaseRelease.resolve();
+      await withRealTimeout(
+        secondAssistantPhaseStarted.promise,
+        30_000,
+        () => events.join(","),
+      );
+
+      const importedAssistantInputId = importedAssistantInputIds.get(
+        conversationItem.id,
+      );
+      const importedFollowUpAssistantInputId = importedAssistantInputIds.get(
+        followUpConversationItem.id,
+      );
       assert.ok(importedAssistantInputId);
-      assert.deepEqual(assistantPhaseInputIds, [importedAssistantInputId]);
+      assert.ok(importedFollowUpAssistantInputId);
+      assert.deepEqual(assistantPhaseInputIds, [
+        [importedAssistantInputId],
+        [importedFollowUpAssistantInputId],
+      ]);
       assert.equal(assistantAskPrepareCalls, 0);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
       assert.deepEqual(
@@ -4606,7 +4644,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         new DOMException("Synthetic startup-window proof complete.", "AbortError"),
       );
       preAssistantSystemFetchRelease.resolve();
-      assistantPhaseRelease.resolve();
+      firstAssistantPhaseRelease.resolve();
+      secondAssistantPhaseRelease.resolve();
       if (runtimePromise) {
         await withRealTimeout(
           runtimePromise.catch(() => undefined),

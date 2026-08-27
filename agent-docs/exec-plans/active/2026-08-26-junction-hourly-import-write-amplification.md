@@ -76,7 +76,10 @@ Updated: 2026-08-26
 8. [x] Prove a conversation accepted while the fresh pre-assistant system fetch
    is in flight cannot sit behind exact Ask preparation; install and drain the
    existing watcher before starting that Ask, while preserving post-start abort.
-9. [ ] Commit, push, run final review with required CI, deploy, and prove live
+9. [x] Prove foreground work that wins before exact admission permanently
+   consumes that invocation's starter, including carried-input causal reruns,
+   without pausing an idle controller or changing approved continuations.
+10. [ ] Commit, push, run final review with required CI, deploy, and prove live
    mailbox and device-sync convergence.
 
 ## Decisions
@@ -115,6 +118,12 @@ Updated: 2026-08-26
   foreground work, leave the Ask and later device item pending for the ordinary
   assistant owner. Arrivals after exact admission retain the existing synchronous
   abort-and-requeue path.
+- Accepted final-review finding: foreground preemption before exact admission
+  paused an idle controller, and a same-invocation rerun could reconsider the
+  starter because carried input was not included in the barrier predicate. When
+  foreground wins before the exact promise exists, consume the invocation-local
+  starter instead of pausing; include supplied initial input in the existing
+  foreground-work derivation so later causal passes cannot reconsider the Ask.
 - Rejected: increasing hosted timeouts, changing resource admission, deleting
   queued work, or locally expiring the Ask without its Web-owned terminal result.
 
@@ -141,6 +150,9 @@ Updated: 2026-08-26
 - A message accepted during foreground-runner startup is drained before the
   exact Ask can prepare, so the startup system fetch cannot put detached provider
   work ahead of the reply.
+- A rapid follow-up imported during the first foreground provider turn runs in
+  the same invocation without retrying the retired Ask or touching the later
+  device item.
 - A reply already present at restore schedules and runs through the ordinary
   assistant owner before the durable-head Ask or later device maintenance;
   the immediate owner edge avoids waiting for periodic recovery, and the next

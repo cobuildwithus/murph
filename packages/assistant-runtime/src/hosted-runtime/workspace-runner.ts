@@ -1017,7 +1017,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   await input.awaitBackgroundMaintenanceBarrier?.({
     drainPendingForegroundWake: async () =>
       await foregroundMailboxImportLoopAtBarrier.drainPendingWake(),
-    foregroundConversationWorkObserved: () => foregroundConversationWorkObserved,
+    foregroundConversationWorkObserved: () =>
+      initialAssistantInputBatchHasWork
+      || initialMailboxImportHasForegroundConversationWork
+      || foregroundConversationWorkObserved,
   });
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;

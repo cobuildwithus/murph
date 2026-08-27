@@ -1948,6 +1948,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         await barrier.drainPendingForegroundWake();
         if (barrier.foregroundConversationWorkObserved()) {
+          startExactDetachedAssistantAsk = null;
           return;
         }
         await startExactDetachedAssistantAsk();
@@ -1960,6 +1961,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       onForegroundConversationWorkObserved: () => {
+        if (
+          ordinaryConsentedAssistantAskSelected
+          && exactDetachedAssistantAskCompletion === null
+        ) {
+          startExactDetachedAssistantAsk = null;
+          return;
+        }
         detachedAssistantAskController?.requestPauseAndRequeue();
       },
       trackDeferredUsageCapture,

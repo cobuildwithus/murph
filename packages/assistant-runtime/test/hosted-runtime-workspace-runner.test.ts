@@ -172,6 +172,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     ]);
     const inputIdsByItemId = new Map<string, string>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const foregroundWorkObservedAtBarrier: boolean[] = [];
     const selectedInputIdsByPass: string[][] = [];
     const selectedContextsByPass: unknown[] = [];
     const { mailboxPort } = createMailboxPort({ items: [olderItem, newerItem] });
@@ -183,6 +184,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch;
         initialMailboxImport?: HostedMailboxImportCheckpointResult;
       }) => await runHostedWorkspaceUntilIdleOrBudget({
+        async awaitBackgroundMaintenanceBarrier(barrier) {
+          foregroundWorkObservedAtBarrier.push(
+            barrier.foregroundConversationWorkObserved(),
+          );
+        },
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: options.attemptId,
           expectedWorkspaceVersion: "0",
@@ -269,6 +275,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(selectedInputIdsByPass, [[olderInputId], [newerInputId]]);
       assert.deepEqual(selectedContextsByPass, [olderContext, newerContext]);
+      assert.deepEqual(foregroundWorkObservedAtBarrier, [false, true]);
       assert.equal(secondPass.latestAssistantInputBatch, null);
       assert.deepEqual(checkpointRequests, []);
     } finally {
