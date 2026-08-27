@@ -70,6 +70,7 @@ import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
+  prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   type HostedPrivyPhoneTransferProof,
   type HostedPrivyPhoneTransferSourceRetirementProof,
@@ -1086,6 +1087,12 @@ async function deleteHostedAccountDataInternal(input: {
     ? await readHostedPrivyPhoneTransferTargetSession(phoneTransfer)
     : null;
   if (phoneTransfer && phoneTransferSessionBeforeBillingCleanup) {
+    const preparedRetirement =
+      await prepareHostedPrivyPhoneTransferSourceRetirement({
+        prisma: input.prisma,
+        sourceMemberId: phoneTransfer.transfer.sourceMemberId,
+        targetMemberId: phoneTransfer.targetMember.id,
+      });
     // Reclassify immediately before billing cleanup. Stripe can promptly write
     // the cancellation webhook back to this already-fenced source, so the
     // final deletion transaction verifies only the immutable transfer fence.
@@ -1095,6 +1102,7 @@ async function deleteHostedAccountDataInternal(input: {
           identity: phoneTransferSessionBeforeBillingCleanup.identity,
           member: phoneTransfer.targetMember,
           now: deletionStartedAt,
+          prepared: preparedRetirement,
           prisma: tx,
           targetPhoneNumberBeforeTransfer:
             phoneTransfer.targetPhoneNumberBeforeTransfer,

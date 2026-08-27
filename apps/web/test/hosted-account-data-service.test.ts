@@ -55,6 +55,7 @@ const serviceMocks = vi.hoisted(() => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
+  prepareHostedPrivyPhoneTransferSourceRetirement: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
   resolveDeviceProviderApplicationForConnection: vi.fn(),
   revokeStravaDeviceSyncAccess: vi.fn(),
@@ -157,6 +158,8 @@ vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
     serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx:
     serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
+  prepareHostedPrivyPhoneTransferSourceRetirement:
+    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx:
     serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
 }));
@@ -589,6 +592,15 @@ beforeEach(() => {
   });
   serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockReset();
   serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
+  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockReset();
+  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockResolvedValue({
+    rawFingerprint: "prepared-fingerprint",
+    sourceBillingRef: null,
+    sourceIdentity: null,
+    sourceMemberId: "member_123",
+    targetIdentity: null,
+    targetMemberId: "member_target",
+  });
   serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockReset();
   serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
     autoTrialBilling: null,
@@ -959,6 +971,20 @@ describe("deleteHostedAccountData", () => {
       order.push("privy:read");
       return { id: "did:privy:target" };
     });
+    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockImplementation(
+      async () => {
+        expect(billingCleanupCompleted).toBe(false);
+        order.push("transfer:prepare");
+        return {
+          rawFingerprint: "prepared-fingerprint",
+          sourceBillingRef: null,
+          sourceIdentity: null,
+          sourceMemberId: "member_123",
+          targetIdentity: null,
+          targetMemberId: "member_target",
+        };
+      },
+    );
     serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockImplementation(
       async () => {
         expect(billingCleanupCompleted).toBe(false);
@@ -1079,6 +1105,38 @@ describe("deleteHostedAccountData", () => {
     const finalTransactionOrder = order.slice(finalTransactionStart + 1);
     expect(order.indexOf("privy:read")).toBeGreaterThan(order.indexOf("prisma"));
     expect(order.lastIndexOf("privy:read")).toBeLessThan(finalTransactionStart);
+    expect(order.indexOf("transfer:prepare")).toBeLessThan(
+      order.indexOf("transfer:recheck"),
+    );
+    expect(
+      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement,
+    ).toHaveBeenCalledWith({
+      prisma,
+      sourceMemberId: "member_123",
+      targetMemberId: "member_target",
+    });
+    const recheckTransactionStart = order.indexOf(
+      "prisma",
+      order.indexOf("transfer:prepare") + 1,
+    );
+    expect(order.indexOf("transfer:prepare")).toBeLessThan(
+      recheckTransactionStart,
+    );
+    expect(order.indexOf("transfer:recheck")).toBeGreaterThan(
+      recheckTransactionStart,
+    );
+    expect(
+      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      prepared: {
+        rawFingerprint: "prepared-fingerprint",
+        sourceBillingRef: null,
+        sourceIdentity: null,
+        sourceMemberId: "member_123",
+        targetIdentity: null,
+        targetMemberId: "member_target",
+      },
+    }));
     expect(order.indexOf("transfer:recheck")).toBeLessThan(
       order.indexOf("stripe:subscription-cancel"),
     );
