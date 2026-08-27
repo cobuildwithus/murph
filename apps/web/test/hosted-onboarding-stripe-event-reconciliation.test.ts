@@ -1880,6 +1880,11 @@ describe("hosted Stripe event reconciliation", () => {
       mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
         status: "active",
       }));
+      if (eventKind === "invoice") {
+        mocks.sendHostedStripePaymentNotificationEmail
+          .mockRejectedValueOnce(new Error("payment notification unavailable"))
+          .mockResolvedValueOnce("sent");
+      }
       mocks.signalHostedRuntimeRecheckRuntime
         .mockRejectedValueOnce(new Error("runtime unavailable"))
         .mockResolvedValueOnce({
@@ -1893,6 +1898,12 @@ describe("hosted Stripe event reconciliation", () => {
         eventId: event.id,
         prisma: prisma.client,
       })).resolves.toMatchObject({ status: "failed" });
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        lastErrorCode: "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING",
+        paymentNotificationEmailSentAt: null,
+        processedAt: null,
+        status: HostedStripeEventStatus.failed,
+      }));
 
       prisma.rows[0]!.nextAttemptAt = new Date(0);
       await expect(reconcileHostedStripeEventById({
@@ -1904,8 +1915,13 @@ describe("hosted Stripe event reconciliation", () => {
         .toHaveBeenCalledOnce();
       expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
       expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
+      expect(mocks.sendHostedStripePaymentNotificationEmail).toHaveBeenCalledTimes(
+        eventKind === "invoice" ? 2 : 0,
+      );
       expect(prisma.rows[0]).toEqual(expect.objectContaining({
         lastErrorCode: null,
+        paymentNotificationEmailSentAt:
+          eventKind === "invoice" ? expect.any(Date) : null,
         processedAt: expect.any(Date),
         status: HostedStripeEventStatus.completed,
       }));

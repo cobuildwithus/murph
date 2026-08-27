@@ -1240,6 +1240,12 @@ async function processClaimedHostedStripeEvent(
         paymentNotificationAttempt,
         postCanonicalAttempt,
       ]);
+    if (
+      postCanonicalResult.status === "rejected" &&
+      postCanonicalResult.reason instanceof HostedStripeRuntimeRecheckPendingError
+    ) {
+      throw postCanonicalResult.reason;
+    }
     if (paymentNotificationResult.status === "rejected") {
       throw new HostedStripePaymentNotificationPendingError(
         paymentNotificationResult.reason,

@@ -62,7 +62,9 @@ provider idempotency preventing duplicate email. Payment notification and the
 existing runtime-recheck and sponsorship effects are each attempted even when
 the other fails. Both attempts start before either is awaited, so operator-email
 latency cannot delay the runtime recheck that reopens pending accepted work; an
-unmarked notification keeps the receipt retryable.
+unmarked notification keeps the receipt retryable. If both attempts fail, the
+existing runtime-recheck retry code remains authoritative so replay reconstructs
+the member wake while the absent email marker independently retries delivery.
 
 An active Family owner may fund one exact active member through Family
 Settings. The owner is the payer, the selected member is the beneficiary, and

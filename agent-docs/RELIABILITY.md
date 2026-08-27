@@ -860,10 +860,14 @@ Last verified: 2026-08-23
   before either is awaited, with concurrency bounded to one payment-email
   request plus the existing single post-canonical effect chain. Neither side's
   failure or provider latency suppresses or delays starting the other. While
-  the marker is absent, a notification failure keeps the receipt retryable even
-  if another effect would otherwise poison it; once marked, the other effect
-  keeps its existing retry and poison behavior. When canonical billing commits
-  activation mailbox items, their
+  the marker is absent, a direct-paid runtime-recheck failure retains its
+  existing persisted retry code even when notification also fails, because
+  replay consumes that code to reconstruct the wake; the absent marker retries
+  notification on the same receipt. For other simultaneous failures,
+  notification keeps the receipt retryable even if the other effect would
+  otherwise poison it. Once marked, the other effect keeps its existing retry
+  and poison behavior. When canonical billing commits activation mailbox items,
+  their
   exact pointers are retained on the receipt in that same transaction. Every
   positive-payment attempt restores
   retained pointers and best-effort signals them through the existing

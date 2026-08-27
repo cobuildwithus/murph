@@ -168,5 +168,15 @@ and no visual surface or screenshot proof applies.
   recheck proves the payment email starts immediately. Peak concurrency remains
   one notification request plus the existing single post-canonical effect
   chain; no state, queue, lifecycle, or owner was added.
+- [x] Resolve ReviewGPT round 6's dual-failure replay finding with one narrow
+  result-precedence guard. When notification and a direct-paid runtime recheck
+  both reject, the existing runtime-pending error remains the receipt's stored
+  replay signal while the absent notification marker independently retries the
+  email. The real invoice-first handler test proves the first attempt records
+  runtime pending, replay re-signals the already-paid member and retries email,
+  billing transition work remains single-shot, and the receipt completes with
+  one sent marker. Other simultaneous failures retain notification priority,
+  preserving the existing terminal-cleanup protection without new state or an
+  error-aggregation abstraction.
 - [ ] Push the exact candidate, run CI and ReviewGPT, resolve findings, and
   close the plan.
