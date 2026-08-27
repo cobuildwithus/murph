@@ -2830,8 +2830,8 @@ describe("deleteHostedAccountData", () => {
       );
     };
 
-    expect(await countLockQueriesByTransaction(1)).toEqual([1, 1, 4]);
-    expect(await countLockQueriesByTransaction(128)).toEqual([1, 1, 4]);
+    expect(await countLockQueriesByTransaction(1)).toEqual([1, 1, 5]);
+    expect(await countLockQueriesByTransaction(128)).toEqual([1, 1, 5]);
   });
 
   it("aborts before the receipt when provider ownership changes after preparation", async () => {
@@ -6033,6 +6033,16 @@ function createHostedAccountDeletionPrismaForTest(input: {
         input.deviceAuthorityLockQueries?.push(sql);
         return [];
       }
+      if (sql.includes("hosted-account-deletion-target-group-lock")) {
+        recordTerminalStatement("queryRaw");
+        input.operationOrder?.push("queryRaw");
+        return (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }));
+      }
+      if (sql.includes("hosted-account-deletion-target-groups")) {
+        recordTerminalStatement("queryRaw");
+        input.operationOrder?.push("queryRaw");
+        return (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }));
+      }
       const owner = readHostedAccountDeletionRawOwner(sql);
       if (owner) {
         if (owner === "dependents") {
@@ -6376,6 +6386,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
         input.operationOrder?.push("find:hostedComputerRun");
         return input.hostedComputerRunRows ?? [];
       },
+    },
+    $queryRaw: async (...args: unknown[]) => {
+      const sql = readHostedAccountDeletionRawQueryText(args);
+      if (!sql.includes("hosted-account-deletion-target-groups")) {
+        throw new Error("Unexpected account-deletion root raw query.");
+      }
+      return (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }));
     },
     $transaction: async (
       callback: (prisma: typeof transactionPrisma) => Promise<unknown>,
