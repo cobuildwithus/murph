@@ -1,7 +1,7 @@
 # Hosted cold-start non-workspace latency
 
 Status: active
-Updated: 2026-08-20
+Updated: 2026-08-27
 
 ## Goal
 
@@ -121,13 +121,25 @@ Success means:
 
 ## Verification
 
-- Focused provider timing, runtime-control parser, maintenance, and workspace
-  entrypoint tests pass: 4 files and 462 tests.
-- The assistant engine, hosted execution, and assistant runtime owner
-  typechecks pass.
-- Clean builds for those owners pass, followed by the production runner-bundle
-  build across the full dependency graph. The runner entrypoint and static boot
-  closure remain inside their size budgets.
+- On the original candidate head, focused provider timing, runtime-control
+  parser, maintenance, and workspace entrypoint tests passed: 4 files and 462
+  tests. The three owner typechecks, clean owner builds, and production runner
+  bundle also passed.
+- The draft branch was reconciled with current `main` on 2026-08-27. The only
+  manual conflict was the deletion of the former monolithic workspace-entrypoint
+  test; its three timing-stamp assertions now live in the current startup split
+  test. Production source merged without a manual conflict.
+- On the reconciled candidate, the focused provider timing tests pass 5/5 and
+  the hosted runtime-control tests pass 33/33. The assistant engine, hosted
+  execution, and assistant runtime owner typechecks all pass.
+- The current assistant-runtime startup and maintenance harness entered Vitest
+  but did not complete within the bounded local run; the exact owned commands
+  were stopped without a test failure. A clean owner build likewise emitted no
+  error but did not finish within the bounded local window. Exact-head PR CI is
+  therefore required to supply those broader checks before merge readiness.
+- `git diff --check` passes on the reconciled base-to-head patch. Parent diff
+  review confirms the three new stamps remain synchronous in-memory work and
+  add no request, await, state owner, or execution-order change.
 - The production amd64 Docker image builds successfully on this ARM host. The
   repository's networkless Docker smoke reaches the Codex App Server probe but
   its `vault-cli --llms` command exceeds the fixed timeout under emulation. The
