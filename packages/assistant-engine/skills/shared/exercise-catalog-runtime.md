@@ -5,6 +5,12 @@ and safety boundaries fit. This reference owns catalog lookup and first-show
 presentation; it does not decide whether an exercise is clinically or
 programmatically appropriate.
 
+For a setup-only workout activation or logging turn, member-supplied exercise
+names are authoritative log input, not catalog selections. Preserve every
+distinct supplied name and follow the canonical workout owner without running
+`exercise list` or `exercise show`. A missing catalog match must never block,
+rename, merge, omit, or substitute a member-supplied exercise in the workout.
+
 1. Search with the smallest useful `vault-cli exercise list ... --format json`
    query. For each final movement, run `vault-cli exercise show <id-or-slug>
    --format json` so instructions reflect the reviewed steps, equipment, level,
