@@ -1460,6 +1460,197 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 45_000);
 
+  test("lets an approved joined-group detached ask settle beside live foreground input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const firstAskStarted = createDeferred<void>();
+    const firstAskRelease = createDeferred<void>();
+    const foregroundStarted = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        dedupeKey: "ask_event_entrypoint_approved_foreground_first",
+        id: "mailbox_item_entrypoint_approved_foreground_first",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "1",
+      }),
+      createMailboxItem({
+        dedupeKey: "ask_event_entrypoint_approved_foreground_second",
+        id: "mailbox_item_entrypoint_approved_foreground_second",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "2",
+      }),
+    ];
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_approved_foreground_conversation",
+      lane: "conversation",
+      laneSeq: "1",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+    let firstAskAbortObserved = false;
+    let conversationAssistantInputId: string | null = null;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    mocks.executeReadOnlyAssistantAsk
+      .mockImplementationOnce(async (askInput) => {
+        events.push("ask.first.started");
+        firstAskStarted.resolve();
+        askInput.abortSignal?.addEventListener("abort", () => {
+          firstAskAbortObserved = true;
+          events.push("ask.first.aborted");
+        }, { once: true });
+        await firstAskRelease.promise;
+        assert.equal(firstAskAbortObserved, false);
+        events.push("ask.first.settled");
+        return { answer: "Synthetic first answer.", outcome: "answered" };
+      })
+      .mockImplementationOnce(async () => {
+        events.push("ask.second.started");
+        return { answer: "Synthetic second answer.", outcome: "answered" };
+      });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_approved_ask_foreground",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot.started");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: "users/bundles/member-synthetic/approved-ask-foreground.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            if (item.route.action === "run-assistant-ask") {
+              return await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot,
+                wake: createAssistantAskRequestedWake({
+                  eventId: item.item.dedupeKey,
+                }),
+              });
+            }
+            assert.equal(item.item.id, conversationItem.id);
+            context?.onConversationInputStaged?.("linq");
+            conversationAssistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            events.push("conversation.imported");
+            return {
+              assistantInputId: conversationAssistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            assistantAskPort: {
+              async request(request) {
+                if (request.action === "complete") {
+                  events.push(`ask.complete:${request.requestId}`);
+                  if (
+                    request.requestId
+                      === "ask_event_entrypoint_approved_foreground_second"
+                  ) {
+                    shutdownController.abort(
+                      new Error("Stop after approved foreground ask proof."),
+                    );
+                  }
+                  return { action: "complete", status: "completed" };
+                }
+                events.push(`ask.prepare:${request.requestId}`);
+                return {
+                  action: "prepare",
+                  question: "What is today's group workout?",
+                  status: "ready",
+                  targetLabel: "100 Club",
+                };
+              },
+            },
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            if (!conversationAssistantInputId) {
+              events.push("foreground.empty");
+              return { progressed: false };
+            }
+            events.push("foreground.started");
+            input.latestAssistantInputBatch?.();
+            foregroundStarted.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        firstAskStarted.promise,
+        30_000,
+        () => events.join(","),
+      );
+      mailboxItems.push(conversationItem);
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        foregroundStarted.promise,
+        30_000,
+        () => events.join(","),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(firstAskAbortObserved, false);
+
+      firstAskRelease.resolve();
+      const result = await withRealTimeout(
+        resultPromise,
+        30_000,
+        () => events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, "foreground.started")
+          < requireEventIndex(events, "ask.first.settled"),
+      );
+      assert.ok(
+        requireEventIndex(events, "ask.complete:ask_event_entrypoint_approved_foreground_first")
+          < requireEventIndex(events, "ask.prepare:ask_event_entrypoint_approved_foreground_second"),
+      );
+      assert.equal(firstAskAbortObserved, false);
+      assert.ok(result.status === "idle" || result.status === "scheduled");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending,
+        [],
+      );
+    } finally {
+      firstAskRelease.resolve();
+      shutdownController.abort(new Error("Test cleanup."));
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
   test("starts a detached model before lazily reading the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref(

@@ -1379,6 +1379,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
   let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
   let startExactDetachedAssistantAsk: (() => Promise<void>) | null = null;
+  let ordinaryConsentedAssistantAskSelected = false;
   let imageGenerationController: HostedImageGenerationController | null = null;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
@@ -1610,6 +1611,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (
         item.route.action === "run-assistant-ask"
         && (outcome.status === "imported" || outcome.status === "skipped")
+        && !ordinaryConsentedAssistantAskSelected
       ) {
         detachedAssistantAskController?.kick();
       }
@@ -1961,10 +1963,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       onForegroundConversationWorkObserved: () => {
-        if (
-          ordinaryConsentedAssistantAskSelected
-          && exactDetachedAssistantAskCompletion === null
-        ) {
+        if (!ordinaryConsentedAssistantAskSelected) {
+          return;
+        }
+        if (exactDetachedAssistantAskCompletion === null) {
           startExactDetachedAssistantAsk = null;
           return;
         }
@@ -3384,7 +3386,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           state: await readHostedSystemMailboxState(restored.vaultRoot),
         })
       : null;
-    const ordinaryConsentedAssistantAskSelected =
+    ordinaryConsentedAssistantAskSelected =
       selectedSystemMailboxOwnerItem?.routeAction === "run-assistant-ask"
       && selectedSystemMailboxOwnerItem.wake.kind === "assistant.ask.requested"
       && !isHostedApprovedContinuationSystemMailboxItem(

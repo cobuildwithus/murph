@@ -4432,6 +4432,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       lane: "system",
       laneSeq: "2",
     });
+    const lateAsk = createMailboxItem({
+      dedupeKey: "assistant.ask.requested:pre-watcher-late",
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      id: "mailbox_item_pre_watcher_late_ask",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "3",
+    });
     const conversationItem = createMailboxItem({
       id: "mailbox_item_pre_watcher_conversation",
       lane: "conversation",
@@ -4517,6 +4525,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             };
           },
           async importItem(item, context) {
+            if (item.item.id === lateAsk.id) {
+              events.push("ask.late.imported");
+              return await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot,
+                wake: createConsentedMemberAssistantAskRequestedWake({
+                  eventId: lateAsk.dedupeKey,
+                }),
+              });
+            }
             assert.ok(
               item.item.id === conversationItem.id
               || item.item.id === followUpConversationItem.id,
@@ -4597,7 +4615,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(preWatcherAskOwner, "blocked");
       assert.equal(assistantAskPrepareCalls, 0);
 
-      remoteItems.push(conversationItem);
+      remoteItems.push(conversationItem, lateAsk);
       runtimeWakeSignal.notify();
       preAssistantSystemFetchRelease.resolve();
       await withRealTimeout(
@@ -4637,6 +4655,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         [
           [firstAsk.id, "pending"],
           [deviceItem.id, "pending"],
+          [lateAsk.id, "pending"],
         ],
       );
     } finally {
@@ -4711,15 +4730,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         item: deviceItem,
         vaultRoot,
       });
-      await enqueueHostedSystemMailboxItem({
-        item: createResolvedAssistantAskSystemMailboxItem(laterAsk),
-        vaultRoot,
-        wake: createConsentedMemberAssistantAskRequestedWake({
-          eventId: laterAsk.dedupeKey,
-        }),
-      });
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "3";
+      importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/exact-owner-before.bundle.json",
@@ -4747,8 +4759,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               }),
             };
           },
-          async importItem() {
-            throw new Error("Exact-owner work was already imported.");
+          async importItem(item) {
+            assert.equal(item.item.id, laterAsk.id);
+            events.push("ask.later.imported");
+            return await enqueueHostedSystemMailboxItem({
+              item,
+              vaultRoot,
+              wake: createConsentedMemberAssistantAskRequestedWake({
+                eventId: laterAsk.dedupeKey,
+              }),
+            });
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
@@ -4774,7 +4794,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             },
             deviceSyncPort,
             events,
-            mailboxPort: createMailboxPort({ events, items: [] }),
+            mailboxPort: createMailboxPort({ events, items: [laterAsk] }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
