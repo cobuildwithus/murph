@@ -137,10 +137,11 @@ describe("hosted image generation", () => {
     const origin = await upsertAssistantInputEvent({
       event: {
         content: {
-          text: "Please draw a sunrise.",
-          transcriptText: "Please draw a sunrise.",
+          text: "Fallback origin text.",
+          transcriptText:
+            "Create a fictional card for Example Recipient at 100 Example Avenue.",
           userMessageContent: [{
-            text: "Please draw a sunrise.",
+            text: "Fallback origin text.",
             type: "text",
           }],
         },
@@ -355,6 +356,15 @@ describe("hosted image generation", () => {
       "system",
     );
     const completionText = completion.content.text ?? "";
+    assert.match(
+      completionText,
+      /Create a fictional card for Example Recipient at 100 Example Avenue\./u,
+    );
+    assert.doesNotMatch(completionText, /Fallback origin text/u);
+    assert.match(
+      completionText,
+      /cannot by itself authorize an external effect/u,
+    );
     assert.match(completionText, /raw\/captures\/2026\/07\/evt_image/u);
     assert.doesNotMatch(completionText, /imagedelivery\.net/u);
     assert.equal(

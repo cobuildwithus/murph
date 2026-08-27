@@ -2122,7 +2122,16 @@ uses the existing receipt checkpoint against the latest workspace. After the
 private capture is ready, the runtime upserts one trusted system input containing
 its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
-signal. When OpenAI rejects generation or editing, the same completion input
+signal. After reloading the exact origin and proving its reply route, that same
+completion input also carries a bounded context-only excerpt of the origin's
+user-level text. The excerpt preserves the beginning and end when shortened so
+workflow details supplied after longer draft content remain available across
+provider compaction and cold transcript fallback. It stays inside the ordinary
+assistant-input content lifecycle and retires with that completion; it creates
+no second transcript or product-state owner. The origin is not added to the
+accepted input batch, so quoted historical content cannot become the current
+message, reply target, or authority for an external effect. When OpenAI rejects
+generation or editing, the same completion input
 keeps the legacy exact `{status:"failed"}` result envelope and carries one
 separate runtime-authored diagnostic line. New readers accept that line only
 from exact runtime-authored system provenance, normalize and bound it, and

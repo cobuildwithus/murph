@@ -355,10 +355,14 @@ async function stageImageGenerationCompletion(input: {
   const sourceIdentity = `image-completion:${createHash("sha256")
     .update(input.completion.operationId)
     .digest("hex")}`;
+  const originContextText = origin.content.transcriptText?.trim()
+    ? origin.content.transcriptText
+    : origin.content.text;
   const text = renderAssistantHostedImageCompletionSystemText({
     originAssistantInputId: input.completion.originAssistantInputId,
     originAssistantInputIdExact:
       input.completion.originAssistantInputIdExact,
+    originContextText,
     result: input.completion.result,
   });
   const event = await upsertAssistantInputEvent({
