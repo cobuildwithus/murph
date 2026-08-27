@@ -1172,6 +1172,91 @@ printf 'interlock-covered\n'
     expect(result.stdout).toBe("interlock-covered\n");
   });
 
+  it("does not overlap the assistant and hosted-local child runtimes", () => {
+    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+      "run_all_package_coverage",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${runAllPackageCoverage}
+
+node() {
+  printf '%s\n' \
+    packages/assistant-engine \
+    packages/core \
+    packages/hosted-local-harness \
+    packages/setup-cli
+}
+register_background_pid() { return 0; }
+unregister_background_pid() { return 0; }
+mark_acceptance_cli_coverage_complete() { return 0; }
+verify_log() { return 0; }
+
+run_workspace_package_coverage() {
+  local package_dir="$1"
+  local package_name="\${package_dir#packages/}"
+
+  : >"$sandbox/\${package_name}-started"
+  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
+    while [[ ! -f "$sandbox/release-assistant" ]]; do
+      command sleep 0.01
+    done
+    return
+  fi
+
+  while [[ ! -f "$sandbox/release-remaining" ]]; do
+    command sleep 0.01
+  done
+}
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf -- "$sandbox"' EXIT
+package_coverage_shard=all
+package_coverage_concurrency_limit=3
+package_coverage_cli_active_concurrency_limit=3
+
+run_all_package_coverage 1 &
+scheduler_pid="$!"
+
+for _ in {1..400}; do
+  if [[
+    -f "$sandbox/assistant-engine-started"
+    && -f "$sandbox/core-started"
+  ]]; then
+    break
+  fi
+  command sleep 0.01
+done
+
+[[ -f "$sandbox/assistant-engine-started" ]]
+[[ -f "$sandbox/core-started" ]]
+command sleep 0.05
+[[ ! -f "$sandbox/hosted-local-harness-started" ]]
+[[ ! -f "$sandbox/setup-cli-started" ]]
+
+: >"$sandbox/release-assistant"
+for _ in {1..400}; do
+  if [[
+    -f "$sandbox/hosted-local-harness-started"
+    && -f "$sandbox/setup-cli-started"
+  ]]; then
+    break
+  fi
+  command sleep 0.01
+done
+
+[[ -f "$sandbox/hosted-local-harness-started" ]]
+[[ -f "$sandbox/setup-cli-started" ]]
+: >"$sandbox/release-remaining"
+wait "$scheduler_pid"
+printf 'pairwise-interlock-covered\n'
+`, 30_000);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("pairwise-interlock-covered\n");
+  });
+
   it("keeps hosted-web parallel cleanup safe after every child is reaped", () => {
     const webVerify = readFileSync(
       path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),

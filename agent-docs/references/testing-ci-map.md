@@ -86,7 +86,10 @@ The required host-support release gate keeps parity with local acceptance by
 assigning every package coverage owner, including Exercise Library and Health
 Metrics, and by running the prepared Messaging Ingress, Inboxd, and Hosted
 Local Harness package-boundary checks. The workflow guard locks those owners
-and commands against drift.
+and commands against drift. Composed acceptance keeps package coverage refill
+parallel but does not overlap Assistant Engine with Hosted Local Harness because
+both owners start real child runtimes whose wall-clock assertions need isolated
+capacity.
 
 When either canonical root command is selected, `pnpm test:diff` and
 `pnpm verify:acceptance` stay local by default. An explicitly forced remote run
