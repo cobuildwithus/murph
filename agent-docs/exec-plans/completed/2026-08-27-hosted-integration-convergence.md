@@ -1,6 +1,6 @@
 # Stabilize hosted integration convergence
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -76,13 +76,21 @@ Updated: 2026-08-27
 
 ## Verification
 
-- Passed: usage-limit claim Vitest (9/9), Hosted Web prepared typecheck, scoped
-  Web lint, Cloudflare typecheck, and diff whitespace validation.
+- Passed: usage-limit claim Vitest (10/10), changelog archive Vitest (9/9),
+  Hosted Web prepared typecheck, scoped Web lint, Cloudflare typecheck, and
+  diff whitespace validation.
 - The selected hosted-local scenarios build successfully but cannot start on
   macOS because the unchanged runner bundle exceeds the platform's ratcheted
   byte budget. Exact-head Linux CI owns the full-stack proof.
-- Remaining: repository-required specialist/final review, exact-head CI, and
-  the private integration rerun after the public package is available.
+- The preliminary specialist review accepted one isolated coverage gap: prove
+  the ordinary Prisma serialization shape and the two-attempt ceiling. The
+  inspected test-only patch now proves both, with no production change.
+- Final ReviewGPT round 1 reviewed the exact pushed production candidate and
+  returned `ROUND_OUTCOME: PASS` with no correctness findings. The requested
+  model was verified through its compatible response metadata.
+- Pull-request evidence is green. Remaining external gates are exact-head CI,
+  merge, and the separately owned private integration and rollout.
 - Expected outcomes: every focused regression passes repeatedly, no unrelated
   path changes, and the public/private integration gates are green on the exact
   heads merged and deployed.
+Completed: 2026-08-27

@@ -152,6 +152,42 @@ describe("hosted usage-limit notice claim authority", () => {
     expect(claimMocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledTimes(2);
   });
 
+  it("stops after one retry when a serializable claim conflict repeats", async () => {
+    claimMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "linq_chat_current",
+    });
+    const serializationConflict = { code: "P2034" };
+    prisma.$transaction
+      .mockImplementationOnce(async (operation) => {
+        await operation(transaction);
+        throw serializationConflict;
+      })
+      .mockImplementationOnce(async (operation) => {
+        await operation(transaction);
+        throw serializationConflict;
+      });
+
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
+      memberId: "member_usage_notice_1",
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_1",
+        routeAuthority: null,
+        target: "linq_chat_current",
+      },
+      periodStart,
+      prisma: prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "usage_event_1",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
+    })).rejects.toBe(serializationConflict);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(claimMocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry a non-serialization claim failure", async () => {
     const terminalError = new Error("Synthetic terminal claim failure.");
     transaction.$queryRaw.mockRejectedValueOnce(terminalError);
