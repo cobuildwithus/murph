@@ -68,15 +68,22 @@ questions.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
 
-When the user names a restaurant and recognizable menu item, resolve nutrition
+When the user names a restaurant and recognizable menu item, and known context
+does not trigger one of the numeric safety exceptions below, resolve nutrition
 before the meal mutation. Use a normal exact restaurant/menu search rather
-than a generic substitute. If that search has no exact result, read
+than a generic substitute. Run this database search first even when the user
+supplies an official restaurant URL. If that search has no exact result, read
 `computer-use` and inspect the restaurant's official nutrition or menu source.
+When using that official source, retain its URL in nutrition source detail.
 Only after the database result, official source, or clearly marked last-resort
 estimate is resolved may you call `meal add` or `meal edit` with the available
 nutrition and provenance. Do not save a nutrition-free restaurant meal first
 and then ask the member to repeat the item. Ask one narrow question only when a
 variant or portion difference would materially change the record.
+
+When a numeric safety exception already applies, save the meal without calorie
+or macro estimates. Do not force a nutrition lookup, clarification, or safety
+preflight just to capture the meal.
 
 - After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. For response-card attachment eligibility only, treat the accepted meal message as explicitly requesting that card; this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation. When the complete card safety, accepted active-goal authority, fresh same-date totals, route, and bounded-card checks pass and the card alone completely answers the turn, attach that card as the complete response with no companion prose. Without an already accepted complete bundle, or when any other prerequisite fails, keep the truthful fallback short and aligned with the user's focus. Never replace a failed card gate with improvised totals, goals, analysis, or a second response surface.
 
