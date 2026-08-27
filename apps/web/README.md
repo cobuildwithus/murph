@@ -1759,16 +1759,17 @@ or a newer compatible commit and restart the full drain.
 Before the final alias proof and prior-function drain, only count-only dry runs
 are safe; do not use `--apply` because it scrubs plaintext that a warm previous
 function may still need. Only after that final alias proof, run
-`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` through
-the production environment wrapper shown by the script's `--help`. Review the
-count-only dry run, add `--apply`, and repeat bounded batches while `hasMore` is
-true or `selectedRows` is nonzero. Rerun the dry run and record the zero-row
-result as the authoritative scrub proof. Apply encrypts and round-trips missing
-ciphertext, proves any existing ciphertext equals the legacy value, and scrubs
-plaintext in one compare-and-set write; conflicts are safe to rerun. Output
-never contains row ids, member ids, plaintext, or ciphertext. Record the
-replacement commit, both alias proofs, elapsed drain, batch summaries, and
-final zero-row dry run before ending the deploy freeze.
+`pnpm --dir apps/web privacy:backfill-phone-calls -- --batch-size 50` in a
+reviewed, task-specific step in the protected `Hosted Web Contract Migrations`
+workflow described under [Production database maintenance](#production-database-maintenance).
+Review the count-only dry run, add `--apply`, and repeat bounded batches while
+`hasMore` is true or `selectedRows` is nonzero. Rerun the dry run and record the
+zero-row result as the authoritative scrub proof. Apply encrypts and round-trips
+missing ciphertext, proves any existing ciphertext equals the legacy value,
+and scrubs plaintext in one compare-and-set write; conflicts are safe to rerun.
+Output never contains row ids, member ids, plaintext, or ciphertext. Record the
+replacement commit, both alias proofs, elapsed drain, batch summaries, and final
+zero-row dry run before ending the deploy freeze.
 
 Live Retell consultation decrypts under one 10-second deadline spanning token
 exchange and KMS, while honoring an earlier caller abort. This path does not

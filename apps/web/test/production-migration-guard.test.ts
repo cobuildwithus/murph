@@ -89,6 +89,19 @@ describe("hosted web production migration guard", () => {
     assert.match(webReadme, /Vercel\s+Sensitive values/u);
     assert.match(webReadme, /secrets\.HOSTED_WEB_DIRECT_DATABASE_URL/u);
     assert.match(webReadme, /Do not add a\ngeneric command input/u);
+    assert.doesNotMatch(
+      webReadme,
+      /production\s+environment\s+wrapper\s+shown\s+by\s+the\s+script's\s+`--help`/u,
+    );
+
+    const phoneCallMigration = webReadme.match(
+      /### Hosted phone-call private-content migration\n(?<section>[\s\S]*?)(?=\n#{1,3} )/u,
+    )?.groups?.section;
+    assert.ok(phoneCallMigration, "the phone-call migration guide must remain present");
+    assert.match(
+      phoneCallMigration,
+      /reviewed,\s+task-specific step in the protected\s+`Hosted Web Contract Migrations`\s+workflow/u,
+    );
   });
 
   test("renders the intended maintenance owner in changed script help", () => {
