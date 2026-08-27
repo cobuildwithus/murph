@@ -1222,6 +1222,9 @@ implementation or execution. Explain the exact blocked operation, the class of
 secret or protected identity it requires, and why a secret-free path is
 insufficient, then discuss the decision with the user. The user may abandon the
 operation or authorize a separate repository-owned hosted or protected path.
+This decision gate precedes every task-specific production migration,
+deployment, rollout freeze, dry run, protected-identity proof, or write; reaching
+the unavailable credential is not the point at which to ask.
 That authorization is not implicit: do not prebuild a workflow, endpoint,
 credential mirror, or alternate execution path while waiting for the decision.
 Any approved path is a new trust-boundary change and follows normal security,

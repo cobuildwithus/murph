@@ -1725,33 +1725,35 @@ the skew window.
 ### Hosted phone-call private-content migration
 
 The phone-call private-content rollout is an expand-and-scrub hard cut with no
-plaintext dual-write. Deploy the additive migration first: it adds nullable
-`brief_encrypted` and `result_encrypted` columns and makes the legacy brief JSON
-nullable, so the previously deployed web remains compatible. The replacement
-web encrypts every new brief/result before the guarded database write, reads
-ciphertext first, and falls back to legacy JSON only when ciphertext is null;
-this keeps both old calls and new calls usable while the scrub runs.
+plaintext dual-write. It requires both production database access and hosted
+crypto authority, so it has no approved local execution path. Stop before any
+production migration, deployment, deploy freeze, dry run, or protected alias
+proof, and discuss the required operation and execution owner with the user. Do
+not run the script locally against production or invent a workflow, endpoint,
+or credential path.
 
-Freeze production deploys and rollbacks before promoting the replacement web,
-then record its exact commit. Preliminary count-only dry runs may start once
-that deployment is live, but no applying backfill is safe yet: an invocation
-of the previous web can still finish later and require or write plaintext.
-Prove the production alias points at the replacement commit with
+Any later user-authorized path must deploy the additive migration first. It
+adds nullable `brief_encrypted` and `result_encrypted` columns and makes the
+legacy brief JSON nullable, so the previously deployed web remains compatible.
+The path must then freeze production deploys and rollbacks before promoting the
+replacement web and record its exact commit. The replacement web encrypts every
+new brief/result before the guarded database write, reads ciphertext first, and
+falls back to legacy JSON only when ciphertext is null; this keeps both old
+calls and new calls usable while the scrub runs.
+
+After that deployment is live, the authorized path may begin preliminary
+count-only dry runs, but no applying backfill is safe yet: an invocation of the
+previous web can still finish later and require or write plaintext. It must
+prove the production alias points at the replacement commit with
 `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the secure
-`HOSTED_WEB_VERCEL_*` operator environment, then wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval.
-Resolve the alias again after the drain. If it changed, select the replacement
-or a newer compatible commit and restart the full drain.
+`HOSTED_WEB_VERCEL_*` operator environment, wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and
+resolve the alias again. If the alias changed, it must select the replacement or
+a newer compatible commit and restart the full drain.
 
-The phone-call backfill requires both production database access and hosted
-crypto authority, so it has no approved local execution path. Stop before
-starting its production rollout or deploy freeze and discuss the required
-operation and execution owner with the user. Do not run the script locally
-against production or invent a workflow, endpoint, or credential path.
-
-Any later user-authorized path must preserve count-only dry-run before apply,
-the final alias proof and prior-function drain, bounded apply batches until
-`hasMore` is false and `selectedRows` is zero, and a final zero-row dry run.
+The authorized path must preserve count-only dry-run before apply, the final
+alias proof and prior-function drain, bounded apply batches until `hasMore` is
+false and `selectedRows` is zero, and a final zero-row dry run.
 Apply encrypts and round-trips missing ciphertext, proves any existing
 ciphertext equals the legacy value, and scrubs plaintext in one compare-and-set
 write; conflicts are safe to rerun. Output never contains row ids, member ids,

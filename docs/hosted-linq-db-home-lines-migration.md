@@ -22,7 +22,16 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
 ## Deploy Order
 
-1. Deploy through the normal production web build path.
+1. Stop before any production migration, deployment, rollback freeze, dry run,
+   or protected-identity use. The route-projection backfill requires both
+   production database access and hosted crypto authority, and it has no
+   approved local execution path. Explain the required operation, authorities,
+   alias proofs, drain, and convergence gates to the user before implementation
+   or execution. Do not retrieve or inject a production secret locally or
+   invent a workflow or endpoint while waiting for the decision.
+
+2. Any later user-authorized hosted or protected path may deploy through the
+   normal production web build path.
 
    ```bash
    pnpm release:production:migrate && pnpm build
@@ -32,18 +41,11 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
    The guarded line sync backfills current env-configured lines and verifies at least one configured assignable DB line exists before DB-backed assignment code serves traffic. Provider inventory sync stays on the explicit operator/contact-card path so production deploys do not depend on the Linq inventory API.
 
-2. Wait until the new application build is live, then stop before route
-   projection. The backfill requires both production database access and hosted
-   crypto authority, and it has no approved local execution path. Explain the
-   required operation, authorities, alias proofs, drain, and convergence gates
-   to the user before implementation or execution. Do not retrieve or inject a
-   production secret locally, start a rollback freeze, or invent a workflow or
-   endpoint while waiting for the decision.
-
 3. Any later user-authorized hosted or protected path must first run an
-   aggregate-only dry run. A nonzero `invalidRows` count means encrypted route
-   material or its blinded lookup authority needs operator investigation; the
-   backfill leaves those rows null and readiness incomplete.
+   aggregate-only dry run after the new application build is live. A nonzero
+   `invalidRows` count means encrypted route material or its blinded lookup
+   authority needs operator investigation; the backfill leaves those rows null
+   and readiness incomplete.
 
 4. Before apply, the authorized path must freeze rollbacks, prove the
    production alias points at the replacement build, wait

@@ -130,6 +130,47 @@ describe("hosted web production migration guard", () => {
       phoneCallMigration,
       /discuss the required\s+operation and execution owner with the user/u,
     );
+    const phoneCallStopIndex = phoneCallMigration.search(
+      /Stop before any\s+production migration/u,
+    );
+    assert.ok(phoneCallStopIndex >= 0, "the phone-call guide must contain its stop gate");
+    for (const productionAction of [
+      /Any later user-authorized path must deploy the additive migration/u,
+      /freeze production deploys and rollbacks/u,
+      /count-only dry runs/u,
+      /`HOSTED_WEB_VERCEL_\*` operator environment/u,
+    ]) {
+      const productionActionIndex = phoneCallMigration.search(productionAction);
+      assert.ok(
+        productionActionIndex > phoneCallStopIndex,
+        `the phone-call stop gate must precede ${productionAction}`,
+      );
+    }
+
+    const linqGuide = await readFile(
+      path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
+      "utf8",
+    );
+    const linqDeployOrder = linqGuide.match(
+      /## Deploy Order\n(?<section>[\s\S]*?)(?=\n## )/u,
+    )?.groups?.section;
+    assert.ok(linqDeployOrder, "the Linq deploy-order guide must remain present");
+    assert.match(linqDeployOrder, /no\s+approved local execution path/u);
+    assert.match(linqDeployOrder, /to the user before implementation\s+or execution/u);
+    const linqStopIndex = linqDeployOrder.search(/Stop before any production migration/u);
+    assert.ok(linqStopIndex >= 0, "the Linq guide must contain its stop gate");
+    for (const productionAction of [
+      /may deploy through the\s+normal production web build path/u,
+      /aggregate-only dry run/u,
+      /freeze rollbacks/u,
+      /production alias/u,
+    ]) {
+      const productionActionIndex = linqDeployOrder.search(productionAction);
+      assert.ok(
+        productionActionIndex > linqStopIndex,
+        `the Linq stop gate must precede ${productionAction}`,
+      );
+    }
   });
 
   test("renders the production-secret boundary in changed script help", () => {
