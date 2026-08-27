@@ -34,6 +34,7 @@ const dependencies = vi.hoisted(() => {
     freshCacheSequence: 0,
     generateHostedMemberId: vi.fn(),
     getPrisma: vi.fn(),
+    identityPreloadCacheScopes: [] as Array<string | null>,
     lookupCacheScopes: [] as Array<string | null>,
     lookupHostedMemberForPrivyAuthAttempt: vi.fn(),
     lookupHostedMemberIdentityByPrivyUserId: vi.fn(),
@@ -49,6 +50,7 @@ const dependencies = vi.hoisted(() => {
     providerCallsDisabled: false,
     providerCallsDuringTransaction: [] as string[],
     readHostedConsentStatus: vi.fn(),
+    readHostedMemberIdentity: vi.fn(),
     recordHostedLaunchRequiredConsent: vi.fn(),
     resolutionCacheScopes: [] as Array<string | null>,
     resolutionProviderDisabledStates: [] as boolean[],
@@ -109,6 +111,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPrivyUserId:
     dependencies.lookupHostedMemberIdentityByPrivyUserId,
+  readHostedMemberIdentity: dependencies.readHostedMemberIdentity,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
@@ -273,6 +276,11 @@ function recordRootPreparation(): void {
   dependencies.rootPreparationCacheScopes.push(dependencies.cacheScope);
 }
 
+function recordIdentityPreload(): void {
+  recordProviderCall("member-identity-preload");
+  dependencies.identityPreloadCacheScopes.push(dependencies.cacheScope);
+}
+
 function recordResolutionProviderState(): void {
   dependencies.resolutionCacheScopes.push(dependencies.cacheScope);
   dependencies.resolutionProviderDisabledStates.push(
@@ -343,6 +351,7 @@ describe("prepareHostedOpsAppReviewMember", () => {
 
     dependencies.cacheScope = null;
     dependencies.freshCacheSequence = 0;
+    dependencies.identityPreloadCacheScopes.length = 0;
     dependencies.lookupCacheScopes.length = 0;
     dependencies.providerCallsDisabled = false;
     dependencies.providerCallsDuringTransaction.length = 0;
@@ -406,6 +415,10 @@ describe("prepareHostedOpsAppReviewMember", () => {
     });
 
     dependencies.lookupHostedMemberIdentityByPrivyUserId.mockResolvedValue(null);
+    dependencies.readHostedMemberIdentity.mockImplementation(async () => {
+      recordIdentityPreload();
+      return null;
+    });
     mockPreparedMemberLookupSequence(null);
     dependencies.generateHostedMemberId.mockReturnValue(NEW_MEMBER_ID);
     dependencies.prepareHostedDomainRootForWeb.mockImplementation(
@@ -466,12 +479,16 @@ describe("prepareHostedOpsAppReviewMember", () => {
 
     const summary = await applyReviewerMember();
 
-    expect(dependencies.privyClientConstructor).toHaveBeenCalledOnce();
+    expect(dependencies.privyClientConstructor).toHaveBeenCalledTimes(2);
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledOnce();
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledWith({
       address: REVIEW_EMAIL,
     });
-    expect(dependencies.privyGetById).not.toHaveBeenCalled();
+    expect(dependencies.privyGetById).toHaveBeenCalledOnce();
+    expect(dependencies.privyGetById).toHaveBeenCalledWith(PRIVY_USER_ID, {
+      maxRetries: 0,
+      timeout: 5_000,
+    });
     expect(dependencies.privyGetByPhoneNumber).not.toHaveBeenCalled();
     expect(dependencies.privyCreate).not.toHaveBeenCalled();
     expect(dependencies.privySetCustomMetadata).not.toHaveBeenCalled();
@@ -498,7 +515,10 @@ describe("prepareHostedOpsAppReviewMember", () => {
     expect(resolutionInput).toEqual(expect.not.objectContaining({
       allowVerifiedEmailRebinding: true,
     }));
-    expect(resolutionInput?.preparedLiveIdentity).toBe(resolutionInput?.identity);
+    expect(resolutionInput?.preparedLiveIdentity).toEqual(expect.objectContaining({
+      userId: PRIVY_USER_ID,
+    }));
+    expect(resolutionInput?.preparedLiveIdentity).not.toBe(resolutionInput?.identity);
     expect(resolutionInput?.prisma).toEqual({
       index: 1,
       transaction: "app-review",
@@ -508,9 +528,15 @@ describe("prepareHostedOpsAppReviewMember", () => {
     );
     expect(dependencies.lookupCacheScopes).toEqual(["attempt-default"]);
     expect(dependencies.rootPreparationCacheScopes).toEqual(["attempt-default"]);
+    expect(dependencies.identityPreloadCacheScopes).toEqual([]);
     expect(dependencies.resolutionCacheScopes).toEqual(["attempt-default"]);
     expect(dependencies.resolutionProviderDisabledStates).toEqual([true]);
     expect(dependencies.providerCallsDuringTransaction).toEqual([]);
+    expect(
+      dependencies.prepareHostedDomainRootForWeb.mock.invocationCallOrder[0],
+    ).toBeLessThan(dependencies.privyGetById.mock.invocationCallOrder[0] ?? 0);
+    expect(dependencies.privyGetById.mock.invocationCallOrder[0])
+      .toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
 
     expect(dependencies.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
       prisma,
@@ -572,7 +598,16 @@ describe("prepareHostedOpsAppReviewMember", () => {
         preparedControlRoot,
         preparedNewMemberId: EXISTING_MEMBER_ID,
       }));
+    expect(dependencies.readHostedMemberIdentity).toHaveBeenCalledWith({
+      memberId: EXISTING_MEMBER_ID,
+      prisma,
+    });
+    expect(dependencies.identityPreloadCacheScopes).toEqual(["attempt-default"]);
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledOnce();
+    expect(dependencies.privyGetById).toHaveBeenCalledOnce();
+    expect(dependencies.readHostedMemberIdentity).toHaveBeenCalledOnce();
+    expect(dependencies.readHostedMemberIdentity.mock.invocationCallOrder[0])
+      .toBeLessThan(dependencies.privyGetById.mock.invocationCallOrder[0] ?? 0);
     expect(dependencies.providerCallsDuringTransaction).toEqual([]);
     expect(dependencies.resolutionProviderDisabledStates).toEqual([true]);
     expect(summary.member).toBe("memb...view");
@@ -672,7 +707,12 @@ describe("prepareHostedOpsAppReviewMember", () => {
     const secondResolution = dependencies.ensureHostedMemberForPrivyIdentityResolutionTx
       .mock.calls[1]?.[0];
     expect(secondResolution?.identity).toBe(firstResolution?.identity);
-    expect(secondResolution?.preparedLiveIdentity).toBe(firstResolution?.identity);
+    expect(firstResolution?.preparedLiveIdentity).toEqual(expect.objectContaining({
+      userId: PRIVY_USER_ID,
+    }));
+    expect(secondResolution?.preparedLiveIdentity).toEqual(expect.objectContaining({
+      userId: PRIVY_USER_ID,
+    }));
     expect(dependencies.providerCallsDuringTransaction).toEqual([]);
   });
 
@@ -704,6 +744,8 @@ describe("prepareHostedOpsAppReviewMember", () => {
     )).toEqual([EXISTING_MEMBER_ID, EXISTING_MEMBER_ID]);
     expect(dependencies.runWithFreshHostedDomainRootUnwrapCache).toHaveBeenCalledOnce();
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledOnce();
+    expect(dependencies.privyGetById).toHaveBeenCalledTimes(2);
+    expect(dependencies.readHostedMemberIdentity).toHaveBeenCalledTimes(2);
     expect(dependencies.resolutionProviderDisabledStates).toEqual([true, true]);
     expect(dependencies.providerCallsDuringTransaction).toEqual([]);
   });
@@ -726,6 +768,8 @@ describe("prepareHostedOpsAppReviewMember", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(dependencies.runWithFreshHostedDomainRootUnwrapCache).toHaveBeenCalledOnce();
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledOnce();
+    expect(dependencies.privyGetById).toHaveBeenCalledTimes(2);
+    expect(dependencies.readHostedMemberIdentity).toHaveBeenCalledTimes(2);
     expect(dependencies.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(
       dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -822,7 +866,7 @@ describe("prepareHostedOpsAppReviewMember", () => {
 
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledOnce();
     expect(dependencies.privyCreate).toHaveBeenCalledOnce();
-    expect(dependencies.privyGetById).not.toHaveBeenCalled();
+    expect(dependencies.privyGetById).toHaveBeenCalledOnce();
     expect(dependencies.ensureHostedMemberForPrivyIdentityResolutionTx).toHaveBeenCalledOnce();
     expect(dependencies.providerCallsDuringTransaction).toEqual([]);
   });
@@ -850,10 +894,12 @@ describe("prepareHostedOpsAppReviewMember", () => {
 
     expect(dependencies.privyGetByEmailAddress).toHaveBeenCalledTimes(2);
     expect(dependencies.privyCreate).toHaveBeenCalledOnce();
-    expect(dependencies.privyGetById).not.toHaveBeenCalled();
+    expect(dependencies.privyGetById).toHaveBeenCalledOnce();
     const resolutionInput = dependencies.ensureHostedMemberForPrivyIdentityResolutionTx
       .mock.calls[0]?.[0];
-    expect(resolutionInput?.preparedLiveIdentity).toBe(resolutionInput?.identity);
+    expect(resolutionInput?.preparedLiveIdentity).toEqual(expect.objectContaining({
+      userId: PRIVY_USER_ID,
+    }));
     expect(dependencies.providerCallsDuringTransaction).toEqual([]);
   });
 });

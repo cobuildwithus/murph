@@ -18,7 +18,10 @@ import {
   prepareHostedCryptoDomainRootCandidates,
   prepareHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
-import { lookupHostedMemberIdentityByPrivyUserId } from "../hosted-onboarding/hosted-member-identity-store";
+import {
+  lookupHostedMemberIdentityByPrivyUserId,
+  readHostedMemberIdentity,
+} from "../hosted-onboarding/hosted-member-identity-store";
 import { activateHostedMemberForPositiveSourceTx } from "../hosted-onboarding/member-activation";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -31,6 +34,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOnboardingEnvironment } from "../hosted-onboarding/env";
 import type { HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import {
+  readHostedPrivyUserById,
   resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
   type HostedPrivyUser,
@@ -63,6 +67,7 @@ export interface HostedOpsAppReviewMemberSummary {
 
 const REQUIRED_CONSENT_SCOPES = ["launch.legal", "launch.health-data"] as const;
 const OPS_SOURCE = "app-store-review-ops";
+const HOSTED_OPS_APP_REVIEW_PRIVY_AUTHORITY_TIMEOUT_MS = 5_000;
 
 export async function prepareHostedOpsAppReviewMember(input: {
   createPrivyUser?: boolean;
@@ -207,6 +212,18 @@ async function resolvePreparedHostedOpsAppReviewMember(input: {
         reason: "hosted-ops.app-review-member",
         userId: preparedMemberId,
       });
+      if (existing) {
+        await readHostedMemberIdentity({
+          memberId: existing.core.id,
+          prisma: input.prisma,
+        });
+      }
+      const preparedLiveIdentity = resolveHostedPrivyIdentityFromVerifiedUser(
+        await readHostedPrivyUserById(input.identity.userId, {
+          maxRetries: 0,
+          timeout: HOSTED_OPS_APP_REVIEW_PRIVY_AUTHORITY_TIMEOUT_MS,
+        }),
+      );
 
       return input.prisma.$transaction(
         (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
@@ -216,7 +233,7 @@ async function resolvePreparedHostedOpsAppReviewMember(input: {
               identity: input.identity,
               now: input.now,
               preparedControlRoot,
-              preparedLiveIdentity: input.identity,
+              preparedLiveIdentity,
               preparedNewMemberId: preparedMemberId,
               prisma: tx,
             })
