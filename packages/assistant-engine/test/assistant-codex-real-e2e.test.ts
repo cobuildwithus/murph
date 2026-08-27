@@ -4275,7 +4275,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'attributes a scheduled group comparison from labeled shared rows',
+    'attributes a scheduled weekly group comparison from fresh labeled rows',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -4331,7 +4331,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           modelProvider: config.modelProvider,
           prompt: [
             'Scheduled group automation recipe:',
-            'Create one concise current-chat activity update. State each participant\'s latest completed-day shared steps as a participant-specific observation, then compare them using the exact returned totals.',
+            'Create one concise weekly group activity update from the completed-day records returned by the fresh shared read. State each participant\'s shared steps as a participant-specific observation, then compare them using the exact returned totals.',
             'The group did not request anonymization.',
           ].join('\n'),
           reasoningEffort: 'low',
@@ -4447,7 +4447,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         fixture: {
           averyValue: 12_345,
           date: '2026-08-04',
-          displayNames: [null, null],
+          displayNames: ['Casey', 'Casey'],
           jordanValue: 4_321,
         },
         prompt: [
@@ -4463,7 +4463,36 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       )
       expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
       expect(journey.finalMessage).toMatch(
-        /(?:(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:absent|ambiguous|missing|unavailable|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
+        /(?:(?:duplicate|same)[^.!?\n]{0,100}(?:label|name)|(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:ambiguous|duplicate|same|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
+      )
+    },
+    360_000,
+  )
+
+  it(
+    'does not guess when shared-row labels are missing',
+    async () => {
+      const journey = await runGroupSharedStepsReadJourney({
+        fixture: {
+          averyValue: 12_345,
+          date: '2026-08-04',
+          displayNames: [null, null],
+          jordanValue: 4_321,
+        },
+        prompt: [
+          'Current group message:',
+          '"Who has which shared step total now?"',
+        ],
+        temporaryLabel: 'missing-labels',
+      })
+
+      expectOneSharedStepsRead(journey)
+      expect(journey.finalMessage).not.toMatch(
+        /(?:member|participant)_(?:avery|jordan)/iu,
+      )
+      expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
+      expect(journey.finalMessage).toMatch(
+        /(?:(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:absent|missing|unavailable|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
       )
     },
     360_000,
@@ -5350,7 +5379,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           prompt: [
             `Message ref: ${messageRef}`,
             'Sender: participant-a',
-            'Profile name (display only): "Sam"',
+            'Profile name: "Sam"',
             'Place exactly one public restaurant call now for this room.',
             'Reserve an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time by calling +12025550123.',
             'A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
