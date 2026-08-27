@@ -17,6 +17,12 @@ const runtimeRecheckBoundary = vi.hoisted(() => ({
     workflowId: "hosted-user-runtime:fixture",
   })),
 }));
+const activationWakeBoundary = vi.hoisted(() => ({
+  signal: vi.fn(async () => ({
+    signalAccepted: true,
+    workflowId: "hosted-user-runtime:fixture",
+  })),
+}));
 const familyPreparationBoundary = vi.hoisted(() => ({
   prepare: vi.fn(async () => new Map()),
 }));
@@ -49,6 +55,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async () => {
 
   return {
     ...actual,
+    signalHostedMailboxAppendRuntime: activationWakeBoundary.signal,
     signalHostedRuntimeRecheckRuntime: runtimeRecheckBoundary.signal,
   };
 });
@@ -1181,6 +1188,7 @@ describe.skipIf(!runPostgresProof)(
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
       workflowBoundary.start.mockClear();
+      activationWakeBoundary.signal.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1510,7 +1518,7 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
           timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toEqual({ accepted: true, required: true });
 
         await expect(readUsageResetProof({ memberId, periodStart, prisma }))
           .resolves.toEqual({
@@ -1528,9 +1536,16 @@ describe.skipIf(!runPostgresProof)(
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(3);
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
         expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
-          expect.objectContaining({ userId: ownerMemberId }),
+          expect.objectContaining({ userId: memberId }),
+        );
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(2);
+        expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ expectedUserId: memberId }),
+        );
+        expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ expectedUserId: ownerMemberId }),
         );
       } finally {
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
@@ -1598,6 +1613,10 @@ describe.skipIf(!runPostgresProof)(
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
       workflowBoundary.start.mockClear();
+      activationWakeBoundary.signal.mockReset();
+      activationWakeBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1677,7 +1696,7 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
           timeoutMs: 5_000,
-        })).rejects.toBeDefined();
+        })).resolves.toEqual({ accepted: false, required: true });
 
         await expect(readHostedMemberBillingSnapshot({
           memberId: ownerMemberId,
@@ -1733,12 +1752,13 @@ describe.skipIf(!runPostgresProof)(
           prisma,
         })).resolves.toMatchObject({
           attemptCount: 1,
-          processedAt: null,
-          status: HostedStripeEventStatus.failed,
+          processedAt: expect.any(Date),
+          status: HostedStripeEventStatus.completed,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledWith(
-          expect.objectContaining({ userId: ownerMemberId }),
+        expect(runtimeRecheckBoundary.signal).not.toHaveBeenCalled();
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(1);
+        expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ expectedUserId: ownerMemberId }),
         );
 
         await postSignedHostedStripeEvent({
@@ -1765,21 +1785,18 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({
           lastStripeEventCreatedAt: newerEventCreatedAt,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
+        expect(runtimeRecheckBoundary.signal).not.toHaveBeenCalled();
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(1);
 
-        runtimeRecheckBoundary.signal.mockResolvedValue({
+        activationWakeBoundary.signal.mockResolvedValue({
           signalAccepted: true,
           workflowId: `hosted-user-runtime:${ownerMemberId}`,
-        });
-        await makeStripeReceiptImmediatelyRetryable({
-          eventId: stripeEventId,
-          prisma,
         });
         await expect(processRecordedHostedStripeWebhookEvent({
           eventId: stripeEventId,
           prisma,
           timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toEqual({ accepted: true, required: true });
 
         await expect(readUsageResetProof({
           memberId: ownerMemberId,
@@ -1796,13 +1813,13 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
         })).resolves.toMatchObject({
-          attemptCount: 2,
+          attemptCount: 1,
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
-        expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
-          expect.objectContaining({ userId: ownerMemberId }),
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(2);
+        expect(activationWakeBoundary.signal).toHaveBeenLastCalledWith(
+          expect.objectContaining({ expectedUserId: ownerMemberId }),
         );
       } finally {
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
@@ -2189,6 +2206,12 @@ async function seedUsageBlockedPendingWork(input: {
       userId: input.memberId,
     },
   });
+  await input.prisma.hostedMailboxLaneCounter.createMany({
+    data: [
+      { lane: "causal", nextSeq: 2n, userId: input.memberId },
+      { lane: "conversation", nextSeq: 2n, userId: input.memberId },
+    ],
+  });
   await input.prisma.hostedAiUsagePeriod.create({
     data: {
       billingPlanCode: input.billingPlanCode,
@@ -2224,6 +2247,13 @@ async function seedHostedMemberActivationProof(input: {
       laneSeq: input.sequence,
       occurredAt: new Date(),
       payloadSchema: "murph.hosted-execution.member-activated.v1",
+      userId: input.memberId,
+    },
+  });
+  await input.prisma.hostedMailboxLaneCounter.create({
+    data: {
+      lane: "system",
+      nextSeq: input.sequence + 1n,
       userId: input.memberId,
     },
   });
