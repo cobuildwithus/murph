@@ -1,8 +1,8 @@
 # PR 2211 device response mismatch
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -113,3 +113,11 @@ caller cancellation cannot be mistaken for a retryable timeout.
 - Product UX walkthrough passes for the affected private-member failure paths;
   existing list, connect, reconcile, and successful preference behavior is
   unchanged. Diff whitespace and added-line privacy scans pass.
+- Integrated merged knowledge-recovery foundation `d3d01885c2` into candidate
+  `0431a0c97a`. The only conflicts were the obsolete absolute bundle budget and
+  its unit test; both now reuse `main`'s relative first-parent budget unchanged.
+- Merged-tree proof passes: 176 focused device, route, wearable, health-metric,
+  and bundle-guard tests; assistant-engine, assistant-runtime, CLI,
+  health-metrics, query, and Cloudflare typechecks; prepared runtime build;
+  generated CLI schema/hash currentness; CLI package shape; and diff whitespace.
+Completed: 2026-08-27
