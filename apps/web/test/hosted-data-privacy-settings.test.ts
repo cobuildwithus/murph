@@ -815,6 +815,10 @@ describe("HostedDataPrivacySettings", () => {
       message: "Billing is already changing. Try again shortly.",
     },
     {
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      message: "Stripe billing recovery is still finishing. Retry account deletion.",
+    },
+    {
       code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
       message: "Connected-app setup is still finishing. Try account deletion again after it finishes or times out.",
     },

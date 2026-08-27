@@ -542,7 +542,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: deletion,
           request: new Request("https://app.example.test/settings"),
         })).rejects.toMatchObject({
-          code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_RECOVERY_PENDING",
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
           retryable: true,
         });
         await expect(observer.hostedMember.findUnique({

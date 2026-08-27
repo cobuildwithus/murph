@@ -1007,7 +1007,7 @@ async function deleteHostedAccountDataInternal(input: {
       throw error;
     }
     throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_RECOVERY_PENDING",
+      code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
       details: { cause: safeErrorCode(error) },
       httpStatus: 503,
       message: "Stripe billing recovery is still finishing. Retry account deletion.",

@@ -1764,7 +1764,7 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_RECOVERY_PENDING",
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
       details: { cause: "Error" },
       httpStatus: 503,
       retryable: true,
