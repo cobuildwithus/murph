@@ -1,8 +1,9 @@
 # Preserve group shared-data attribution
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
+Completed: 2026-08-27
 
 ## Goal
 
@@ -64,14 +65,14 @@ Updated: 2026-08-27
 
 ## Tasks
 
-1. Send ReviewGPT the de-identified production/code evidence and request one
+1. [x] Send ReviewGPT the de-identified production/code evidence and request one
    scoped patch attachment.
-2. Inspect the returned patch against the current prompt and tool owners;
+2. [x] Inspect the returned patch against the current prompt and tool owners;
    simplify or reject any new machinery.
-3. Apply the smallest accepted production and deterministic-test changes.
-4. Add and run focused scheduled-summary and attribution-follow-up real-Codex
+3. [x] Apply the smallest accepted production and deterministic-test changes.
+4. [x] Add and run focused scheduled-summary and attribution-follow-up real-Codex
    journeys, reviewing the actual replies.
-5. Complete the Product UX walkthrough, changelog, scoped verification, commit,
+5. [x] Complete the Product UX walkthrough, changelog, scoped verification, commit,
    draft PR, specialist review, CI, and merge/deploy handoff.
 
 ## Decisions
@@ -84,10 +85,27 @@ Updated: 2026-08-27
 
 ## Verification
 
-- Commands to run: focused prompt/unit tests; assistant-engine typecheck;
-  `pnpm test:assistant:live -- --test <focused-pattern>` for each new journey;
-  `git diff --check`; required exact-head GitHub checks.
-- Expected outcomes: scheduled prose preserves available labels, follow-up
-  performs exactly one fresh shared read and answers from same-row facts,
-  missing labels are handled honestly, and no sender-identity/authority rule is
-  weakened.
+- Focused prompt proof passed 2/2; assistant-engine and Web typechecks passed;
+  the changelog test passed 9/9; the opt-in real-Codex file compiled with all
+  paid journeys skipped outside the live gate; `git diff --check` passed.
+- Before specialist remediation, the scheduled and explicit-current synthetic
+  journeys each passed on the target model with one exact-scope shared read and
+  correct same-row labels. On the corrected head, both the default subscription
+  and the one permitted alternate home returned
+  `ASSISTANT_CODEX_USAGE_LIMIT` before provider entry, so corrected-head live
+  UX remains a truthful Hold rather than failed product evidence.
+- Preliminary ReviewGPT identified a historical/current snapshot ambiguity and
+  missing negative live branches. Both findings were accepted: the prompt now
+  forbids retroactive remapping, and focused journeys cover historical figures,
+  ambiguous labels, and requested anonymity. The repository workflow does not
+  rerun a substantive preliminary pass; the parent inspected and verified the
+  remediation.
+- Complete first provider input remains unchanged for individual Murph at
+  29,166 tokens / 133,774 bytes. Group Murph changes from 25,762 tokens /
+  118,441 bytes to 26,035 / 119,884: +273 tokens (+1.0597%) and +1,443 bytes
+  (+1.2183%), all in assembled developer instructions.
+- Required GitHub merge gates passed on the reviewed candidate, including the
+  production runner-bundle budget. The current `main` and candidate produced a
+  clean `git merge-tree --write-tree` result; the final plan-only commit retains
+  the unchanged reviewed product patch and receives its own exact-head checks.
+Completed: 2026-08-27
