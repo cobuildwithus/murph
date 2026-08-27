@@ -22,8 +22,8 @@ import {
   normalizeRepeatableFlagOption,
   type VaultServices,
 } from "@murphai/vault-usecases";
+import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { Cli, z } from "incur";
-import type { ZodIssue } from "zod";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
