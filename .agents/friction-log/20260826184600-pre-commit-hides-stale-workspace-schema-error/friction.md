@@ -1,6 +1,7 @@
 ---
 title: 'Pre-commit hides stale workspace schema error'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2428'
 ---
 
 A scoped CLI commit widened an existing workspace API and updated its only production callers. The pre-commit hook ran `packages/cli gen:config-schema` before the changed workspace dependency had been rebuilt, suppressed the generator output, and reported only that schema generation failed. A visible rerun showed the CLI build reading the dependency's stale declaration.

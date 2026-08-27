@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local runner bundle manifest generation can hang past its fixed timeout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2421'
 ---
 
 ## Expected Behavior

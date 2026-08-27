@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local Linq E2E can reset an inherited caller database'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2420'
 ---
 
 ## Expected Behavior
