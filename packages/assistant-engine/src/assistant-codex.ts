@@ -260,6 +260,11 @@ const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
 const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
   'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
+const ANALYZE_VIDEO_FALSE_UNAVAILABLE_REPLY_PATTERNS = [
+  /\b(?:could(?: not|n't)|can(?: not|'t)|failed to|unable to)\s+(?:access|complete|retrieve|use)\b[\s\S]{0,100}\b(?:analysis|observation|result|video)\b/iu,
+  /\b(?:analysis|observation|result)\b[\s\S]{0,100}\b(?:did(?: not|n't)|never|was(?: not|n't))\s+(?:arrive|return|come through)\b/iu,
+  /\b(?:no usable|without a usable)\s+(?:analysis|observation|result)\b/iu,
+] as const
 type CodexAppServerProcessState =
   | 'idle'
   | 'reserved'
@@ -4886,7 +4891,7 @@ async function runCodexAppServerTurnOnProcess(
           if (result.rpcResult.success) {
             requiredFinalResponseFallback = analyzeVideoFallback
             requiredFinalResponseFallbackOutcome = 'analyze-video-success'
-          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
+          } else if (requiredFinalResponseFallbackOutcome === null) {
             requiredFinalResponseFallback = analyzeVideoFallback
             requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
           }
@@ -6099,10 +6104,24 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const normalizedSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage)
+  const useAnalyzeVideoFallback =
+    requiredFinalResponseFallback !== null && (
+      requiredFinalResponseFallbackOutcome === 'analyze-video-failure' || (
+        requiredFinalResponseFallbackOutcome === 'analyze-video-success' &&
+        normalizedSemanticFinalMessage !== null &&
+        ANALYZE_VIDEO_FALSE_UNAVAILABLE_REPLY_PATTERNS.some((pattern) =>
+          pattern.test(normalizedSemanticFinalMessage)
+        )
+      )
+    )
   const requiredSemanticFinalMessage =
-    normalizeNullableString(semanticFinalMessage) ??
-    requiredFinalResponseFallback ??
-    semanticFinalMessage
+    useAnalyzeVideoFallback
+      ? requiredFinalResponseFallback
+      : normalizedSemanticFinalMessage ??
+        requiredFinalResponseFallback ??
+        semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -6127,9 +6146,11 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    normalizeNullableString(semanticTranscriptMessage) ??
-      requiredFinalResponseFallback ??
-      semanticTranscriptMessage,
+    useAnalyzeVideoFallback
+      ? requiredFinalResponseFallback
+      : normalizeNullableString(semanticTranscriptMessage) ??
+        requiredFinalResponseFallback ??
+        semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (

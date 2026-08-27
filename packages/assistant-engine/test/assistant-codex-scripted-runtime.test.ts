@@ -8440,11 +8440,17 @@ text(JSON.stringify(result));
   it.each([
     {
       allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model returns empty text',
       providerResponses: [{ text: '' }],
     },
     {
       allowFinishWithoutReply: true,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model explicitly selects no reply',
       providerResponses: [
         {
@@ -8457,25 +8463,49 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedProviderMessage:
+        'I could not complete the video analysis because no result returned.',
+      geminiStatus: 200,
+      name: 'Gemini returns no usable observation and the model claims no result returned',
+      providerResponses: [{
+        text: 'I could not complete the video analysis because no result returned.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFallback: string
+    expectedProviderMessage?: string
+    geminiStatus: 200 | 429
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis failure fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFallback,
+      expectedProviderMessage,
+      geminiStatus,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
       )
-      const expectedFallback =
-        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
       const geminiFetch = vi.fn<typeof fetch>(async () =>
-        new Response(JSON.stringify({ error: 'rate limited' }), {
-          headers: { 'content-type': 'application/json' },
-          status: 429,
-        }),
+        geminiStatus === 200
+          ? Response.json({
+              candidates: [],
+              usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+            })
+          : new Response(JSON.stringify({ error: 'rate limited' }), {
+              headers: { 'content-type': 'application/json' },
+              status: geminiStatus,
+            }),
       )
       scenario.stub.queue(
         {
@@ -8513,7 +8543,9 @@ text(JSON.stringify(result));
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
       expect(result.finalMessage).toBe(expectedFallback)
-      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
       expect(result.transcriptMessage).toBe(expectedFallback)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
@@ -8541,14 +8573,28 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedProviderMessage:
+        'I could not retrieve a usable analysis of the video.',
+      name: 'the model falsely claims the successful result was unavailable',
+      providerResponses: [{
+        text: 'I could not retrieve a usable analysis of the video.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedProviderMessage?: string
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis success fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedProviderMessage,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
@@ -8603,8 +8649,10 @@ text(JSON.stringify(result));
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
       expect(result.finalMessage).toContain('Eight visible push-ups')
-      expect(result.finalMessage).toContain('Gemini video analysis below')
-      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.finalMessage).not.toContain('Gemini video observation below')
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
       expect(result.transcriptMessage).toContain('Eight visible push-ups')
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
@@ -8612,15 +8660,10 @@ text(JSON.stringify(result));
     },
   )
 
-  it('preserves the first successful video-analysis fallback after a later limit failure', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const fixture = await prepareScriptedAnalyzeVideoFixture(
-      scenario.turnInput.workingDirectory,
-    )
-    const geminiFetch = vi.fn<typeof fetch>(async () =>
-      Response.json({
+  it.each([
+    {
+      expectedFallback: 'Eight visible push-ups',
+      geminiPayload: {
         candidates: [{
           content: {
             parts: [{
@@ -8631,7 +8674,26 @@ text(JSON.stringify(result));
           },
           finishReason: 'STOP',
         }],
-      }),
+      },
+      name: 'successful observation',
+    },
+    {
+      expectedFallback: 'Video analysis returned no usable answer',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status',
+    },
+  ])('preserves the first video-analysis $name after a later limit failure', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ expectedFallback, geminiPayload }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(geminiPayload),
     )
     const analyzeCall = {
       functionCall: {
@@ -8668,14 +8730,14 @@ text(JSON.stringify(result));
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.functionCallOutputs ?? [])
     expect(toolOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('Eight visible push-ups'),
-      expect.stringContaining('Video analysis limit reached for this turn'),
+      expect.stringContaining(expectedFallback),
+      expect.stringContaining('use the prior video-analysis result'),
     ]))
     expect(geminiFetch).toHaveBeenCalledOnce()
-    expect(result.finalMessage).toContain('Eight visible push-ups')
-    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.finalMessage).toContain(expectedFallback)
+    expect(result.finalMessage).not.toContain('No additional video analysis ran')
     expect(result.providerAuthoredFinalMessage).toBe('')
-    expect(result.transcriptMessage).toContain('Eight visible push-ups')
+    expect(result.transcriptMessage).toContain(expectedFallback)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 

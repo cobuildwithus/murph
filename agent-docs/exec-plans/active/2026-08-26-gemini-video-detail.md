@@ -31,8 +31,9 @@ Updated: 2026-08-26
 - Reply: answer naturally from visible or audible evidence. Mention camera,
   sampling, or health limits only when they materially affect the requested
   answer. Five FPS is denser sampling, not every source frame.
-- Recovery: unavailable, unsupported, oversized, changed, or provider-failed
-  videos say that no analysis ran. The runtime does not retry at another rate.
+- Recovery: unavailable, unsupported, oversized, changed, and provider-failed
+  videos report the exact tool status without guessing whether Gemini processed
+  the clip. The runtime does not retry at another rate.
 - Proof: exact request-shape tests, allowlist and compatibility tests, one-call
   regression proof, focused real-Codex mode-selection journeys, and a
   production-shaped hosted-local round trip where the harness supports it.
@@ -92,7 +93,9 @@ Updated: 2026-08-26
   question. Each made exactly one successful tool call and one Gemini call,
   preserved the complete question, and returned a direct observational answer
   without diagnosis, policy recital, false frame-by-frame certainty, or an
-  unnecessary apology.
+  unnecessary apology. A focused no-usable-result journey also made one tool
+  call and one Gemini call, then said plainly that the result could not be
+  retrieved and the requested visible detail could not be confirmed.
 
 ## Verification
 
@@ -140,11 +143,15 @@ Updated: 2026-08-26
   review.
 - The live lane first exposed two result-boundary ambiguities: Murph could treat
   a successful observation as unavailable or attempt a second tool call. The
-  tool contract now makes successful versus failed completion explicit, tells
-  Murph to answer immediately after the first success, and explains that
-  untrusted observational content is evidence rather than instructions. Focused
-  deterministic tests cover the successful result, failed result, duplicate
-  call guard, and first-success preservation before the final live passes.
+  tool contract now makes successful versus failed completion explicit, keeps
+  the instruction to one call, and explains that untrusted observational
+  content is evidence rather than instructions. Focused deterministic tests
+  cover success, exact failure status, the duplicate-call guard, and preserving
+  the first truthful result. The final runtime fallback also returns the exact
+  failure status and replaces a narrow false-unavailable reply after a
+  successful observation. The detailed-motion, standard-speech, and focused
+  no-usable-result live journeys each passed with one tool call, one Gemini
+  call, and a direct truthful reply.
 - The assistant verification workflow now has standing authorization to try
   every available authenticated local Codex home once, in stable order, when a
   run fails before provider action. It stops rotating as soon as one run reaches
@@ -163,6 +170,13 @@ Updated: 2026-08-26
   journeys. Final ReviewGPT rounds 1 and 2 both passed without findings. Round
   2 reviewed exact product head `4c35fac0eed535a365792157e59b1254562db25c`
   after its single current-main merge and focused post-merge typecheck/tests.
+- Final ReviewGPT round 3 accepted one result-truth finding: a failed tool result
+  cannot always prove that Gemini never processed the video. The correction
+  now preserves and reports the exact first failure status instead of inferring
+  more or letting a later blocked duplicate replace it. The separate request to
+  remove all-subscription verification fallback was rejected because the user
+  explicitly authorized that durable workflow in this task. Exact-head round 4
+  remains required for the behavior-bearing correction.
 - Draft PR #2373 is mergeable. Product UX is `Ready`; the PR remains draft while
-  the new candidate head completes exact-head final ReviewGPT. Broad exact-head
+  the corrected candidate completes exact-head final ReviewGPT. Broad exact-head
   CI, merge, deployment proof, and guarded retirement have not started.

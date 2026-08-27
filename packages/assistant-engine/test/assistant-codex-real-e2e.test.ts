@@ -1253,7 +1253,7 @@ const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
 describeRealCodex('real Codex video-analysis detail e2e', () => {
   it.each([
     {
-      expectedAnswerPattern: /\b(?:yes|more|farther outward)\b/iu,
+      expectedAnswerPattern: /\byes\b|moves farther outward|does flare more/iu,
       expectedFinalPattern: /left elbow|elbow/iu,
       expectedFps: 5,
       expectedSamplingMode: 'detailed_motion' as const,
@@ -1289,6 +1289,23 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       scenarioLabel: 'private member asks about a timed spoken phrase',
       testName:
         'keeps a speech question on standard sampling and calibrates an audible negative',
+    },
+    {
+      expectedAnswerPattern: /(?:could not|couldn't|couldn’t|did not|didn't|didn’t).*(?:usable|analyz|return|result)|no usable/iu,
+      expectedFinalPattern: /video|analysis|Gemini|usable|return/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern:
+        /no analysis ran|never analyzed|wasn't analyzed|wasn’t analyzed|frames per second|sampled frames|untrusted|policy|sorry/iu,
+      memberText: [
+        'Murph, please analyze this video.',
+        'Video question: What color is the exercise mat?',
+      ].join(' '),
+      providerObservation: null,
+      providerQuestion: 'What color is the exercise mat?',
+      scenarioLabel: 'Gemini returns no usable video observation',
+      testName:
+        'reports plainly when Gemini returns no usable video observation',
     },
   ] as const)(
     '$testName',
@@ -1411,18 +1428,23 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
             apiKey: 'synthetic-gemini-key',
             fetchImpl: async (_request, init) => {
               providerBodies.push(JSON.parse(String(init?.body)))
-              return Response.json({
-                candidates: [{
-                  content: {
-                    parts: [{
-                      text:
-                        scenario.providerObservation,
+              return scenario.providerObservation === null
+                ? Response.json({
+                    candidates: [],
+                    usageMetadata: {
+                      promptTokenCount: 100,
+                      totalTokenCount: 100,
+                    },
+                  })
+                : Response.json({
+                    candidates: [{
+                      content: {
+                        parts: [{ text: scenario.providerObservation }],
+                        role: 'model',
+                      },
+                      finishReason: 'STOP',
                     }],
-                    role: 'model',
-                  },
-                  finishReason: 'STOP',
-                }],
-              })
+                  })
             },
           },
           approvalPolicy: 'never',
@@ -1483,8 +1505,11 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         if (videoCall?.kind !== 'dynamic') {
           throw new Error('Expected one dynamic video-analysis call.')
         }
-        expect(videoCall.success).toBe(true)
-        expect(videoCall.output).toContain(scenario.providerObservation)
+        expect(videoCall.success).toBe(scenario.providerObservation !== null)
+        expect(videoCall.output).toContain(
+          scenario.providerObservation
+          ?? 'Video analysis returned no usable answer',
+        )
         expect(videoCall).toMatchObject({
           argumentsValue: {
             message_ref: messageRef,

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-26
+Last verified: 2026-08-27
 
 ## Non-Negotiable Rules
 
@@ -384,11 +384,13 @@ Last verified: 2026-08-26
   usable idempotency key. Treat this as a bounded v1 at-least-once residual,
   not permission to retry within a turn. Do not add durable video/result state
   without a separate retention and recovery design.
-  Completed turns use trusted failure text when the model returns blank or
-  selects no reply, while non-empty model/card wording wins. A terminal primary
-  provider failure after the tool result remains under ordinary outer-turn
-  retry ownership; the failed attempt does not independently deliver that
-  fallback.
+  Completed turns use the exact trusted failure status instead of model
+  wording, so a failed result does not become a guess about provider
+  processing. A successful observation fills blank output and replaces only a
+  narrow false-unavailable reply; other non-empty model/card wording wins. A
+  terminal primary provider failure after the tool result remains under
+  ordinary outer-turn retry ownership; the failed attempt does not
+  independently deliver that fallback.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no

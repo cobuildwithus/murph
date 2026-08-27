@@ -3690,11 +3690,14 @@ Murph-usable idempotency key. V1 accepts that bounded at-least-once residual
 instead of persisting provider prose or adding an analysis-effect state
 machine; exact-once recovery would require a durable pre-egress receipt plus
 cached-result or explicit recovery semantics and a separate retention review.
-For completed turns, a trusted tool-failure fallback defeats explicit no-reply
-and fills blank model output without replacing non-empty model/card wording. If
-the primary provider transport itself fails after the tool result but before
-final assembly, the ordinary outer turn retry remains the owner; v1 does not
-promote the fallback through failed-attempt delivery state.
+For completed turns, the exact trusted tool-failure status replaces model
+wording so Murph cannot infer whether Gemini processed the clip. A successful
+observation fills blank output and also replaces a narrow false-unavailable
+reply when the model says the returned result was missing; other non-empty
+model/card wording still wins. If the primary provider transport itself fails
+after the tool result but before final assembly, the ordinary outer turn retry
+remains the owner; v1 does not promote the fallback through failed-attempt
+delivery state.
 
 Hosted execution carries only the Gemini sentinel in the runner. The exact
 Google host, model path, method, JSON shape, MIME set, sampling profile,
