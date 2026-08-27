@@ -2446,60 +2446,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         laneSeq: String(index + 2),
       })
     );
-    let assistantPhaseCalls = 0;
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
-      mocks.collectHostedAssistantDeliverySideEffects.mockClear();
-      mocks.drainHostedPreparedAssistantDeliveries.mockClear();
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockClear();
       mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
-      mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
-        async (input) => {
-          const effectId = input.preferredEffectIds?.[0] ?? null;
-          if (!effectId || !approvalEffectIds.includes(effectId)) {
-            return [];
-          }
-          return [{
-            deliveryPhase: "foreground_current_turn",
-            effectId,
-            fingerprint: `fingerprint_${effectId}`,
-            kind: "assistant.delivery",
-            payload: {
-              actorId: null,
-              answeredMailboxItemIds: [],
-              bindingDeliveryKind: null,
-              bindingDeliveryTarget: null,
-              channel: "linq",
-              deliverySourceKey: null,
-              explicitTarget: null,
-              identityId: null,
-              idempotencyKey: `assistant-outbox:${effectId}`,
-              media: [],
-              message: `Synthetic approved delivery ${effectId}`,
-              replyToMessageId: null,
-              sessionId: "session_system_mailbox_approval_owner",
-              subject: null,
-              threadId: null,
-              threadIsDirect: true,
-              transportIdempotent: true,
-              turnId: "turn_system_mailbox_approval_owner",
-            },
-          }];
-        },
-      );
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
-        preparedDispatches: [],
-      });
-      mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async (input) => {
-        assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
-        for (const effect of input.assistantDeliveryEffects) {
-          events.push(`approval.delivery:${effect.effectId}`);
-        }
-        return [];
-      });
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
@@ -2520,16 +2472,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         vaultRoot,
       });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_approval_owner",
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
+        }), {
           async createCheckpointSnapshot() {
             return {
               snapshotRef: createBundleRef({
@@ -2559,67 +2510,32 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               }),
             }),
           }),
-          async runAssistantPhase(input) {
-            assistantPhaseCalls += 1;
-            events.push("approval.foreground-owner");
-            return await runHostedWorkspaceAssistantPhase({
-              ...input,
-              now: () => TEST_NOW,
-            });
+          async runAssistantPhase() {
+            throw new Error(
+              "System mailbox mode must hand approval work to the default owner.",
+            );
           },
           vaultRoot,
-        },
+        }),
+        15_000,
+        () => `System mailbox did not hand off approval work: ${events.join(",")}`,
       );
 
-      assert.ok(assistantPhaseCalls >= 2);
-      assert.deepEqual(
-        mocks.collectHostedAssistantDeliverySideEffects.mock.calls.map(
-          ([input]) => input.preferredEffectIds ?? [],
-        ),
-        approvalEffectIds.map((effectId) => [effectId]),
-        events.join(","),
-      );
-      assert.equal(
-        mocks.drainHostedPreparedAssistantDeliveries.mock.calls.length,
-        2,
-        events.join(","),
-      );
-      assert.deepEqual(
-        events.filter((event) => event.startsWith("approval.delivery:")),
-        approvalEffectIds.map((effectId) => `approval.delivery:${effectId}`),
-        events.join(","),
-      );
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
       assert.ok(events.includes("workspace.checkpoint"), events.join(","));
-      assert.ok(deviceSyncPort.fetchSnapshotCalls <= 1);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
       const remainingWakeKinds = (await readHostedSystemMailboxState(vaultRoot))
         .pending.map((item) => item.wake.kind);
-      assert.equal(
-        remainingWakeKinds.includes("runtime.pending-effects-reconcile-requested"),
-        false,
-      );
-      if (deviceSyncPort.fetchSnapshotCalls === 0) {
-        assert.ok(remainingWakeKinds.includes("device-sync.wake"));
-        assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      }
+      assert.deepEqual(remainingWakeKinds, [
+        "device-sync.wake",
+        "runtime.pending-effects-reconcile-requested",
+        "runtime.pending-effects-reconcile-requested",
+      ]);
     } finally {
-      if (mocks.actualCollectHostedAssistantDeliverySideEffects) {
-        mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
-          mocks.actualCollectHostedAssistantDeliverySideEffects,
-        );
-      }
-      if (mocks.actualDrainHostedPreparedAssistantDeliveries) {
-        mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(
-          mocks.actualDrainHostedPreparedAssistantDeliveries,
-        );
-      }
-      if (mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch) {
-        mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockImplementation(
-          mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch,
-        );
-      }
-      mocks.collectHostedAssistantDeliverySideEffects.mockClear();
-      mocks.drainHostedPreparedAssistantDeliveries.mockClear();
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

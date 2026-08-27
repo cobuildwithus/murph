@@ -476,9 +476,8 @@ function findNextHostedSystemMailboxQueueItemByOrder(input: {
 export function isHostedApprovedContinuationSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
-  // The system-mailbox runner uses this predicate to decide whether its
-  // model-free invocation must upgrade to the ordinary assistant path. Keep
-  // that decision derived from the exact local wake instead of adding another
+  // Approved continuations belong to the ordinary assistant owner. Keep that
+  // handoff derived from the exact local wake instead of adding another
   // orchestration or persisted-state owner.
   return isHostedPendingEffectsContinuationSystemMailboxItem(item)
     || isHostedUserInvokedDelegatedSystemMailboxItem(item);

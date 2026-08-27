@@ -225,7 +225,6 @@ import type {
 } from "./hosted-runtime/image-generation.ts";
 import {
   findNextHostedSystemMailboxQueueItem,
-  isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
@@ -1016,8 +1015,6 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
   const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-    allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
     vaultRoot: input.vaultRoot,
   });
   const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
@@ -2287,10 +2284,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
-      const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
-        initialMailboxImport.importResult,
-        restored.vaultRoot,
-      );
+      const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+        vaultRoot: restored.vaultRoot,
+      });
       const assistantCronWake =
         input.request.processingMode === "system_mailbox"
           ? await resolveHostedAssistantCronWakeAfterInitialImport({
@@ -2790,6 +2786,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
         const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
+        const defaultOwnerDueNow =
+          hostedRuntimeWakeReasonIsAssistant(projectedWake.nextWakeReason)
+          && hostedRuntimeWakeIsDue(projectedWake.nextWakeAt);
         const returnedWake = selectEarliestHostedRuntimeWake([
           {
             at: projectedWake.nextWakeAt,
@@ -2804,7 +2803,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ]);
         const invocationResult = {
           ...(foregroundWakeObserved
-              || (!assistantExecutionBlocked && projectedWake.assistantCronDueNow)
+              || (!assistantExecutionBlocked && (
+                projectedWake.assistantCronDueNow
+                || defaultOwnerDueNow
+              ))
             ? { immediateRecheckRequested: true as const }
             : {}),
           nextWakeAt: returnedWake.nextWakeAt,
@@ -3256,6 +3258,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
 
       const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
+      const defaultOwnerDueNow =
+        hostedRuntimeWakeReasonIsAssistant(initialProjectedWake.nextWakeReason)
+        && hostedRuntimeWakeIsDue(initialProjectedWake.nextWakeAt);
       const projectedAssistantCronDeadlineMs = Date.parse(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
@@ -3265,7 +3270,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         : null;
       if (
         !assistantExecutionBlocked
-        && initialProjectedWake.assistantCronDueNow
+        && (
+          initialProjectedWake.assistantCronDueNow
+          || defaultOwnerDueNow
+        )
       ) {
         if (
           importOrStartupCheckpointPending
@@ -3315,23 +3323,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    const selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
-      && !assistantExecutionBlocked
-      ? findNextHostedSystemMailboxQueueItem({
-          allowedRouteActions: null,
-          now: new Date().toISOString(),
-          state: await readHostedSystemMailboxState(restored.vaultRoot),
-        })
-      : null;
-    const systemMailboxForegroundOwnerSelected =
-      selectedSystemMailboxOwnerItem !== null
-      && isHostedApprovedContinuationSystemMailboxItem(
-        selectedSystemMailboxOwnerItem,
-      );
-    if (
-      input.request.processingMode === "system_mailbox"
-      && !systemMailboxForegroundOwnerSelected
-    ) {
+    if (input.request.processingMode === "system_mailbox") {
       const systemMailboxResult =
         await returnSystemMailboxProcessingModeAfterInitialImport();
       emitPhaseLog({
@@ -3347,9 +3339,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         status: "done",
       });
       return systemMailboxResult;
-    }
-    if (systemMailboxForegroundOwnerSelected) {
-      hostedCodexRuntime = await prepareInvocationCodexRuntime();
     }
     if (
       shouldCheckpointHostedReplayBudgetProgressBeforeForeground({
@@ -5120,10 +5109,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               reason: "assistant",
             });
           }
-          const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
-            mailboxImport.importResult,
-            restored.vaultRoot,
-          );
+          const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+            vaultRoot: restored.vaultRoot,
+          });
           wakeCandidates.push({
             at: systemMailboxWake.at,
             reason: systemMailboxWake.reason,
@@ -8137,23 +8125,6 @@ function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
     && consumedConversationSeq !== null
     && nextConversationSeq > previousConversationSeq
     && nextConversationSeq <= consumedConversationSeq;
-}
-
-async function resolveDeferredMailboxImportSystemMailboxWake(
-  importResult: HostedMailboxImportLoopResult,
-  vaultRoot: string,
-): Promise<{
-  at: string | null;
-  reason: string | null;
-}> {
-  if ((importResult.importedSystemMailboxItemIds?.length ?? 0) === 0) {
-    return {
-      at: null,
-      reason: null,
-    };
-  }
-
-  return await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot });
 }
 
 function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint | null {

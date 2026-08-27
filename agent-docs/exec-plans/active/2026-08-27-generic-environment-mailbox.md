@@ -135,6 +135,11 @@ Updated: 2026-08-27
   - Focused system-to-default cooperative release and in-flight projection
     interruption tests passed; assistant-runtime and Cloudflare typechecks
     passed.
+  - The focused ownership regression now proves that a system-mailbox
+    invocation with already-local default-owned work checkpoints and returns
+    an immediate assistant wake without starting device work, entering the
+    assistant phase, or preparing Codex.
+  - The corrected assistant-runtime typecheck passes.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
     runner's fixed macOS total-byte ceiling stopped bundle assembly before the
@@ -146,9 +151,10 @@ Updated: 2026-08-27
     journey and a same-member ordered-predecessor case; both are accepted.
   - The first exact private Linux run disproved default-owner in-place draining:
     Environment stayed imported but pending, and system-owned foreground
-    processing retained the wrong fence. The current correction restores one
-    cooperative checkpoint-and-retry rule in both directions and still needs a
-    fresh exact-head Linux run.
+    processing retained the wrong fence. The current correction derives the
+    next owner from all already-local mailbox work, removes system-owner
+    assistant execution, and restores one cooperative checkpoint-and-retry
+    rule in both directions. It still needs a fresh exact-head Linux run.
 - Required outcomes:
   - Exact first-frontier classification, no leapfrogging, no model call for
     Environment completion, safe cooperative owner yield in both directions,
