@@ -120,7 +120,11 @@ import {
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
 import { addCaptureRecord } from "./capture.js"
-import { toVaultCliError } from "./vault-usecase-helpers.js"
+import {
+  toVaultCliError,
+  toVaultInitializationCliError,
+  toVaultMetadataCliError,
+} from "./vault-usecase-helpers.js"
 
 const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
   "candidateId",
@@ -456,10 +460,14 @@ function createIntegratedCoreServices(): CoreWriteServices {
     }) {
       const { vault } = input
       const core = await loadCoreRuntime()
-      await core.initializeVault({
-        vaultRoot: vault,
-        timezone: input.timezone ?? resolveSystemTimeZone(),
-      })
+      try {
+        await core.initializeVault({
+          vaultRoot: vault,
+          timezone: input.timezone ?? resolveSystemTimeZone(),
+        })
+      } catch (error) {
+        throw toVaultInitializationCliError(error)
+      }
       return {
         vault,
         created: true,
@@ -480,7 +488,12 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async repairVault(input: CommandContext) {
       const { vault } = input
       const core = await loadCoreRuntime()
-      const result = await core.repairVault({ vaultRoot: vault })
+      let result: Awaited<ReturnType<typeof core.repairVault>>
+      try {
+        result = await core.repairVault({ vaultRoot: vault })
+      } catch (error) {
+        throw toVaultMetadataCliError(error)
+      }
       return {
         vault,
         metadataFile: result.metadataFile,

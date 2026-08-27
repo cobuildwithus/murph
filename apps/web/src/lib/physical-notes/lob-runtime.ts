@@ -60,6 +60,19 @@ export type LobPhysicalNoteLookupResult =
       kind: "indeterminate";
     };
 
+type LobPhysicalNoteLookupDiagnostic =
+  | {
+      category:
+        | "aborted"
+        | "malformed_response"
+        | "multiple_matches"
+        | "transport_error";
+    }
+  | {
+      category: "http_error";
+      status: number;
+    };
+
 export interface LobPhysicalNoteRuntime {
   create(input: {
     artworkUrl: string;
@@ -152,8 +165,16 @@ export function createLobPhysicalNoteRuntime(input: {
           undefined,
           undefined,
         );
-        return readLobLetterLookup(response) ?? { kind: "indeterminate" };
-      } catch {
+        const result = readLobLetterLookup(response);
+        if (result !== null) {
+          return result;
+        }
+        logLobLookupIndeterminate(readLobLetterLookupDiagnostic(response));
+        return { kind: "indeterminate" };
+      } catch (error) {
+        logLobLookupIndeterminate(
+          readLobLookupErrorDiagnostic(error, signal),
+        );
         return { kind: "indeterminate" };
       }
     },
@@ -296,6 +317,7 @@ function createLobFetchAdapter(
 function readLobRequestUrl(config: LobAxiosRequestConfig): URL {
   const url = new URL(requireValue(config.url ?? "", "Lob request URL"));
   appendLobRequestParams(url, config.params);
+  rewriteLobPhysicalNoteMetadataFilter(url);
   return url;
 }
 
@@ -312,6 +334,38 @@ function appendLobRequestParams(url: URL, value: unknown): void {
     }
     url.searchParams.append(key, entry);
   }
+}
+
+function rewriteLobPhysicalNoteMetadataFilter(url: URL): void {
+  const values = url.searchParams.getAll("metadata");
+  if (values.length === 0) {
+    return;
+  }
+  if (values.length !== 1) {
+    throw new TypeError("Lob metadata filter must be unique.");
+  }
+  let metadata: unknown;
+  try {
+    metadata = JSON.parse(values[0] ?? "");
+  } catch {
+    throw new TypeError("Lob metadata filter must be serialized JSON.");
+  }
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new TypeError("Lob metadata filter must be an object.");
+  }
+  const entries = Object.entries(metadata);
+  if (
+    entries.length !== 1
+    || entries[0]?.[0] !== PHYSICAL_NOTE_METADATA_KEY
+    || typeof entries[0][1] !== "string"
+  ) {
+    throw new TypeError("Lob metadata filter must select one physical note.");
+  }
+  url.searchParams.delete("metadata");
+  url.searchParams.append(
+    `metadata[${PHYSICAL_NOTE_METADATA_KEY}]`,
+    requireValue(entries[0][1], "Lob physical-note metadata value"),
+  );
 }
 
 function readLobRequestHeaders(config: LobAxiosRequestConfig): Headers {
@@ -502,6 +556,40 @@ function readLobLetterLookup(value: unknown): LobPhysicalNoteLookupResult | null
   return providerLetterId
     ? { kind: "accepted", providerLetterId }
     : null;
+}
+
+function readLobLetterLookupDiagnostic(
+  value: unknown,
+): LobPhysicalNoteLookupDiagnostic {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const data = Reflect.get(value, "data");
+    if (Array.isArray(data) && data.length > 1) {
+      return { category: "multiple_matches" };
+    }
+  }
+  return { category: "malformed_response" };
+}
+
+function readLobLookupErrorDiagnostic(
+  error: unknown,
+  signal: AbortSignal,
+): LobPhysicalNoteLookupDiagnostic {
+  const status = readLobHttpStatus(error);
+  if (status !== null) {
+    return { category: "http_error", status };
+  }
+  return signal.aborted
+    ? { category: "aborted" }
+    : { category: "transport_error" };
+}
+
+function logLobLookupIndeterminate(
+  diagnostic: LobPhysicalNoteLookupDiagnostic,
+): void {
+  console.warn(
+    "Lob physical-note metadata lookup was indeterminate.",
+    diagnostic,
+  );
 }
 
 function escapeHtmlAttribute(value: string): string {

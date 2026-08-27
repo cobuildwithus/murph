@@ -84,3 +84,18 @@ test('workout result contracts retain exercise-owned live tracking facts', async
   assert.equal(parsed.workout?.exercises[0]?.memberRepsPerSet, 9)
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
 })
+
+test('journal results retain regex-shaped local date key compatibility', async () => {
+  vi.resetModules()
+  const { journalEnsureResultSchema } = await import('../src/vault-cli-contracts.ts')
+
+  const parsed = journalEnsureResultSchema.parse({
+    created: false,
+    date: '2026-02-30',
+    journalPath: 'journal/2026/02/2026-02-30.md',
+    lookupId: 'journal_day:2026-02-30',
+    vault: './vault',
+  })
+
+  assert.equal(parsed.date, '2026-02-30')
+})

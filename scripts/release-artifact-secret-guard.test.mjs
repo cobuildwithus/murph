@@ -160,6 +160,7 @@ test('detects quoted and unquoted generic secret assignments', () => {
     'CLOUDFLARE_API_TOKEN=placeholder',
     'client_secret: ${CLIENT_SECRET}',
     'token=$TOKEN',
+    'authorization: "authorization"',
     'const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";',
   ]) {
     assert.equal(

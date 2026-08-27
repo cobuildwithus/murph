@@ -1,4 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import type {
   AssistantHostedDeviceTool,
@@ -11,6 +12,8 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const DEVICE_TOOL_RESULT_MAX_BYTES = 60_000
+const NO_DATA_OUTREACH_EFFECT_ONCE_HINT =
+  'Do not retry this request. Wait for a fresh private member instruction before another no-data outreach change.'
 const deviceProviderSchema = z
   .string()
   .trim()
@@ -122,16 +125,318 @@ export async function executeDeviceDynamicTool(input: {
       signal: input.abortSignal ?? null,
     })
     if (response.action !== input.request.request.action) {
-      return deviceTextResult(false, 'device operation returned an unexpected result')
+      return deviceTextResult(
+        false,
+        serializeDeviceToolError(
+          projectDeviceResponseMismatch(input.request.request.action),
+        ),
+      )
     }
 
     const text = serializeDeviceToolResponse(response)
     return text
       ? deviceTextResult(true, text)
-      : deviceTextResult(false, 'device result is too large')
-  } catch {
-    return deviceTextResult(false, 'device operation is unavailable')
+      : deviceTextResult(
+          false,
+          serializeDeviceToolError(
+            input.request.request.action === 'configure_no_data_outreach'
+              ? projectUnclassifiedDeviceToolFailure(
+                  input.request.request.action,
+                  false,
+                )
+              : {
+                  code: 'device_result_too_large',
+                  message: 'The device result is too large.',
+                  retryable: false,
+                  stage: deviceToolStage(input.request.request.action),
+                  hint: input.request.request.action === 'list_accounts'
+                    ? 'Retry list_accounts with a provider or sourceProvider filter.'
+                    : 'Narrow the device request before retrying.',
+                },
+          ),
+        )
+  } catch (error) {
+    return deviceTextResult(
+      false,
+      serializeDeviceToolError(
+        projectDeviceToolError(
+          error,
+          input.request.request.action,
+          input.abortSignal?.aborted === true,
+        ),
+      ),
+    )
   }
+}
+
+interface DeviceToolErrorProjection {
+  code: string
+  hint: string
+  message: string
+  retryable: boolean
+  stage: string
+}
+
+function projectDeviceResponseMismatch(
+  action: AssistantHostedDeviceToolRequest['action'],
+): DeviceToolErrorProjection {
+  if (action === 'configure_no_data_outreach') {
+    return {
+      code: 'device_response_mismatch',
+      message: 'The no-data outreach response was invalid, so completion could not be confirmed.',
+      retryable: false,
+      stage: deviceToolStage(action),
+      hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+    }
+  }
+
+  return {
+    code: 'device_response_mismatch',
+    message: 'The device response action did not match the requested action.',
+    retryable: action === 'list_accounts',
+    stage: deviceToolStage(action),
+    hint: action === 'list_accounts'
+      ? 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.'
+      : `Run list_accounts and inspect the current account state before deciding whether to retry ${action}.`,
+  }
+}
+
+function projectDeviceToolError(
+  error: unknown,
+  action: AssistantHostedDeviceToolRequest['action'],
+  callerSignalAborted: boolean,
+): DeviceToolErrorProjection {
+  if (callerSignalAborted) {
+    return projectUnclassifiedDeviceToolFailure(action, true)
+  }
+
+  const stage = deviceToolStage(action)
+
+  if (error instanceof VaultCliError) {
+    switch (error.code) {
+      case 'device_connect_provider_unavailable':
+        return {
+          code: error.code,
+          message: 'That device provider is not available to connect.',
+          retryable: false,
+          stage,
+          hint: 'Retry connect with a provider exposed in the current device context.',
+        }
+      case 'device_reconcile_unavailable':
+        return {
+          code: error.code,
+          message: 'Device account reconciliation is not available right now.',
+          retryable: true,
+          stage,
+          hint: 'Retry reconcile later for the same account.',
+        }
+    }
+  }
+
+  const hostedError = readHostedWebControlPlaneResponseError(error)
+  if (hostedError) {
+    if (action === 'reconcile') {
+      switch (hostedError.code) {
+        case 'ACCOUNT_DISCONNECTED':
+        case 'ACCOUNT_REAUTHORIZATION_REQUIRED':
+          return {
+            code: hostedError.code,
+            message: 'This device account must be reconnected before reconciliation.',
+            retryable: false,
+            stage,
+            hint: 'Run list_accounts again, then connect its provider before retrying reconcile.',
+          }
+        case 'CONNECTION_NOT_FOUND':
+          return {
+            code: hostedError.code,
+            message: 'That device account is no longer available.',
+            retryable: false,
+            stage,
+            hint: 'Run list_accounts and retry reconcile with a current accountId.',
+          }
+        case 'RECONCILE_WAKE_NOT_ACCEPTED':
+          return projectKnownHostedRetryableDeviceError({
+            action,
+            code: hostedError.code,
+            message: 'Device reconciliation could not be queued right now.',
+            retryable: hostedError.retryable,
+            retryHint: 'Retry reconcile later for the same account.',
+            stage,
+          })
+      }
+    }
+
+    if (action === 'connect') {
+      switch (hostedError.code) {
+        case 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE':
+          return projectKnownHostedRetryableDeviceError({
+            action,
+            code: hostedError.code,
+            message: 'Device connection links are temporarily unavailable.',
+            retryable: hostedError.retryable,
+            retryHint: 'Retry connect later for the same provider.',
+            stage,
+          })
+        case 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED':
+          return {
+            code: hostedError.code,
+            message: 'Device connections require a private member conversation.',
+            retryable: false,
+            stage,
+            hint: 'Continue in the member\'s private Murph conversation before retrying connect.',
+          }
+        case 'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED':
+          return {
+            code: hostedError.code,
+            message: 'That device provider is not configured for connection.',
+            retryable: false,
+            stage,
+            hint: 'Retry connect with a provider exposed in the current device context.',
+          }
+        case 'INVALID_REQUEST':
+          return {
+            code: hostedError.code,
+            message: 'The device connection request was invalid.',
+            retryable: false,
+            stage,
+            hint: 'Retry connect with one provider from the current device context and no extra fields.',
+          }
+        case 'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET':
+          return {
+            code: hostedError.code,
+            message: 'The device connection return target is invalid.',
+            retryable: false,
+            stage,
+            hint: 'Continue in a supported private iMessage or Telegram conversation before retrying connect.',
+          }
+      }
+    }
+  }
+
+  return projectUnclassifiedDeviceToolFailure(action, false)
+}
+
+function projectKnownHostedRetryableDeviceError(input: {
+  action: AssistantHostedDeviceToolRequest['action']
+  code: string
+  message: string
+  retryable: boolean
+  retryHint: string
+  stage: string
+}): DeviceToolErrorProjection {
+  if (!input.retryable) {
+    return projectUnclassifiedDeviceToolFailure(input.action, false)
+  }
+
+  return {
+    code: input.code,
+    message: input.message,
+    retryable: true,
+    stage: input.stage,
+    hint: input.retryHint,
+  }
+}
+
+function projectUnclassifiedDeviceToolFailure(
+  action: AssistantHostedDeviceToolRequest['action'],
+  callerSignalAborted: boolean,
+): DeviceToolErrorProjection {
+  const stage = deviceToolStage(action)
+  if (action === 'configure_no_data_outreach') {
+    return {
+      code: 'device_operation_outcome_unknown',
+      message: 'The no-data outreach change completion could not be confirmed.',
+      retryable: false,
+      stage,
+      hint: NO_DATA_OUTREACH_EFFECT_ONCE_HINT,
+    }
+  }
+  if (callerSignalAborted) {
+    return {
+      code: 'device_operation_cancelled',
+      message: 'The device operation was cancelled.',
+      retryable: false,
+      stage,
+      hint: 'Do not retry unless the member asks to continue.',
+    }
+  }
+  if (action === 'list_accounts') {
+    return {
+      code: 'device_operation_unavailable',
+      message: 'The device operation could not be completed.',
+      retryable: true,
+      stage,
+      hint: 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.',
+    }
+  }
+  return {
+    code: 'device_operation_outcome_unknown',
+    message: 'The device operation completion could not be confirmed.',
+    retryable: false,
+    stage,
+    hint: `Run list_accounts and inspect the current account state before deciding whether to retry ${action}.`,
+  }
+}
+
+function readHostedWebControlPlaneResponseError(error: unknown): {
+  code: string | null
+  retryable: boolean
+} | null {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return null
+  }
+
+  const record = error as Record<string, unknown>
+  const context = record.context
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return null
+  }
+
+  const contextRecord = context as Record<string, unknown>
+  const status = record.status
+  const retryable = record.retryable
+  const code = record.code
+  if (
+    record.name !== 'HostedWebControlPlaneResponseError' ||
+    typeof status !== 'number' ||
+    !Number.isSafeInteger(status) ||
+    status < 400 ||
+    status > 599 ||
+    record.statusCode !== status ||
+    contextRecord.status !== status ||
+    contextRecord.statusCode !== status ||
+    typeof record.forwardedFromWeb !== 'boolean' ||
+    (retryable !== undefined && typeof retryable !== 'boolean') ||
+    contextRecord.retryable !== retryable ||
+    (code !== undefined && typeof code !== 'string')
+  ) {
+    return null
+  }
+
+  return {
+    code: typeof code === 'string' ? code : null,
+    retryable: retryable === true,
+  }
+}
+
+function deviceToolStage(
+  action: AssistantHostedDeviceToolRequest['action'],
+): string {
+  return `device-${action.replace(/_/gu, '-')}`
+}
+
+function serializeDeviceToolError(
+  projection: DeviceToolErrorProjection,
+): string {
+  return JSON.stringify({
+    error: {
+      code: projection.code,
+      hint: projection.hint,
+      message: projection.message,
+      retryable: projection.retryable,
+      stage: projection.stage,
+    },
+  })
 }
 
 function serializeDeviceToolResponse(

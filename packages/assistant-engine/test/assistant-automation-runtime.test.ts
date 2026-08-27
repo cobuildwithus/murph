@@ -15246,7 +15246,72 @@ describe('assistant automation run loop', () => {
     expect(events).toContainEqual({
       type: 'daemon.failed',
       details: 'daemon down',
+      errorCode: 'daemon_failed',
+      failureContext: {
+        retryable: false,
+      },
+      safeErrorMessage: 'daemon down',
     })
+    expect(result.lastFailure).toEqual({
+      phase: 'daemon',
+      code: 'daemon_failed',
+      retryable: false,
+      message: 'daemon down',
+    })
+  })
+
+  it('returns a bounded safe partial-failure summary for one-shot scans', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(
+      async (input: {
+        onEvent?: (event: Record<string, unknown>) => void
+      }) => {
+        input.onEvent?.({
+          type: 'input.reply-failed',
+          details: 'private provider response must not escape',
+          errorCode: 'PROVIDER_TEMPORARY_FAILURE',
+          failureContext: {
+            retryable: true,
+          },
+          safeErrorMessage: 'The provider was temporarily unavailable.',
+        })
+        return {
+          routing: {
+            considered: 0,
+            failed: 0,
+            nextWakeAt: null,
+            noAction: 0,
+            routed: 0,
+            skipped: 0,
+          },
+          replies: {
+            considered: 1,
+            failed: 1,
+            nextWakeAt: null,
+            replied: 0,
+            skipped: 0,
+          },
+        }
+      },
+    )
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomation({
+      once: true,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.reason).toBe('completed')
+    expect(result.replyFailed).toBe(1)
+    expect(result.lastFailure).toEqual({
+      phase: 'reply',
+      code: 'PROVIDER_TEMPORARY_FAILURE',
+      retryable: true,
+      message: 'The provider was temporarily unavailable.',
+    })
+    expect(JSON.stringify(result)).not.toContain('private provider response')
   })
 
   it('rethrows scan failures after recording the last error and releasing the lock', async () => {

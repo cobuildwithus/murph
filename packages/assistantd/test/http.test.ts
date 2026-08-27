@@ -372,6 +372,7 @@ function createAssistantOpenConversationResult(
 
 function createAssistantRunAutomationResult(
   scans: number,
+  lastFailure: AssistantRunAutomationResult['lastFailure'] = null,
 ): AssistantRunAutomationResult {
   return {
     vault: '/tmp/vault',
@@ -390,6 +391,7 @@ function createAssistantRunAutomationResult(
     replySkipped: 0,
     replyFailed: 0,
     lastError: null,
+    lastFailure,
   }
 }
 
@@ -777,7 +779,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     openConversation: async () => createAssistantOpenConversationResult(true),
     processDueCron,
     setCronTarget,
-    runAutomationOnce: async () => createAssistantRunAutomationResult(1),
+    runAutomationOnce: async () => createAssistantRunAutomationResult(1, {
+      code: 'PROVIDER_TEMPORARY_FAILURE',
+      message: 'The provider was temporarily unavailable.',
+      phase: 'reply',
+      retryable: true,
+    }),
     sendMessage,
     updateSessionOptions,
     vault: '/tmp/vault',
@@ -1099,8 +1106,17 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(automation.status, 200)
-    const automationPayload = await automation.json() as { scans: number }
+    const automationPayload = await automation.json() as {
+      lastFailure: AssistantRunAutomationResult['lastFailure']
+      scans: number
+    }
     assert.equal(automationPayload.scans, 1)
+    assert.deepEqual(automationPayload.lastFailure, {
+      code: 'PROVIDER_TEMPORARY_FAILURE',
+      message: 'The provider was temporarily unavailable.',
+      phase: 'reply',
+      retryable: true,
+    })
 
     const processCron = await fetch(`${handle.address.baseUrl}/cron/process-due`, {
       method: 'POST',
