@@ -116,3 +116,19 @@ Updated: 2026-08-27
 - Focused local proof passed: the food library and route suites passed 61 tests,
   changed executable files passed ESLint, Web typecheck passed, and
   `git diff --check` is clean.
+- Preliminary ReviewGPT found three coverage gaps, all accepted: exact-ID and
+  bare-GTIN `q` dispatch bypassed attribution; the privacy assertion was not an
+  exact payload check; and schema-missing passthrough lacked composed proof.
+  Product UX, prompt, and frontend lenses were not applicable. Its test-only
+  artifact was inspected but left unapplied because the complete remediation
+  needed production-code ownership.
+- ReviewGPT returned one self-contained remediation patch on the original
+  implementation thread. It extends the same closed stage boundary to private
+  food ID/UPC lookup, replaces the payload assertion with an exact one, and adds
+  composed `42P01` passthrough proof. The patch was applied unchanged after
+  parent inspection.
+- Corrected-head proof passed: 66 focused tests, changed executable-file ESLint,
+  Web typecheck, and `git diff --check`.
+- Final ReviewGPT round one on the immutable first candidate returned
+  `ROUND_OUTCOME: PASS` with no finding. Because preliminary remediation changes
+  executable behavior, the corrected head still requires final round two.

@@ -777,11 +777,12 @@ preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
 ranking. Exact IDs and UPCs continue to use direct lookup
-paths. On `foods_api_failed` search failures, the existing safe structured log
-adds only the closed `failureStage` value `search_rows` or
-`contaminant_summary`; PostgreSQL error codes remain in the existing safe error
-fields, and SQL/query text, search values, product data, rows, identifiers, raw
-error messages, and stacks remain excluded. No success event is added.
+paths. On `foods_api_failed` failures from private food lookup, including exact
+ID/UPC dispatch and ranked search, the existing safe structured log adds only
+the closed `failureStage` value `search_rows` or `contaminant_summary`;
+PostgreSQL error codes remain in the existing safe error fields, and SQL/query
+text, search values, product data, rows, identifiers, raw error messages, and
+stacks remain excluded. No success event is added.
 
 For an existing labels database, run
 `psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to

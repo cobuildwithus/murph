@@ -416,6 +416,23 @@ export function createProductLabelsQueries(
     }
   }
 
+  function throwProductLabelsSearchFailure(
+    failureStage: ProductLabelsSearchFailureStage,
+    error: unknown,
+  ): never {
+    if (
+      table === "foods"
+      && (
+        failureStage !== "contaminant_summary"
+        || !isProductContaminantSchemaMissingError(error)
+      )
+    ) {
+      throw new ProductLabelsSearchFailureError(failureStage, error);
+    }
+
+    throw error;
+  }
+
   async function searchRows(input: {
     genericOnly?: boolean;
     includeOffMarket: boolean;
@@ -477,8 +494,10 @@ export function createProductLabelsQueries(
         return null;
       }
 
-      const { rows } = await client.query<ProductLabelSearchRow>(
-        `
+      let rows: ProductLabelSearchRow[];
+      try {
+        ({ rows } = await client.query<ProductLabelSearchRow>(
+          `
         SELECT
           id,
           canonical_key AS "canonicalKey",
@@ -496,16 +515,23 @@ export function createProductLabelsQueries(
           AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
         LIMIT 1
         `,
-        [id, input.includeOffMarket],
-      );
+          [id, input.includeOffMarket],
+        ));
+      } catch (error) {
+        throwProductLabelsSearchFailure("search_rows", error);
+      }
 
-      const [item] = await attachProductContaminantSummaries(
-        client,
-        tableSql,
-        rows,
-      );
+      try {
+        const [item] = await attachProductContaminantSummaries(
+          client,
+          tableSql,
+          rows,
+        );
 
-      return item ?? null;
+        return item ?? null;
+      } catch (error) {
+        throwProductLabelsSearchFailure("contaminant_summary", error);
+      }
     },
 
     async getByUpc(input) {
@@ -516,8 +542,10 @@ export function createProductLabelsQueries(
         return null;
       }
 
-      const { rows } = await client.query<ProductLabelSearchRow>(
-        `
+      let rows: ProductLabelSearchRow[];
+      try {
+        ({ rows } = await client.query<ProductLabelSearchRow>(
+          `
         SELECT
           id,
           canonical_key AS "canonicalKey",
@@ -541,16 +569,23 @@ export function createProductLabelsQueries(
           id ASC
         LIMIT 1
         `,
-        [upcVariants, input.includeOffMarket],
-      );
+          [upcVariants, input.includeOffMarket],
+        ));
+      } catch (error) {
+        throwProductLabelsSearchFailure("search_rows", error);
+      }
 
-      const [item] = await attachProductContaminantSummaries(
-        client,
-        tableSql,
-        rows,
-      );
+      try {
+        const [item] = await attachProductContaminantSummaries(
+          client,
+          tableSql,
+          rows,
+        );
 
-      return item ?? null;
+        return item ?? null;
+      } catch (error) {
+        throwProductLabelsSearchFailure("contaminant_summary", error);
+      }
     },
 
     async search(input) {
@@ -558,10 +593,7 @@ export function createProductLabelsQueries(
       try {
         rows = await searchRows(input);
       } catch (error) {
-        if (table === "foods") {
-          throw new ProductLabelsSearchFailureError("search_rows", error);
-        }
-        throw error;
+        throwProductLabelsSearchFailure("search_rows", error);
       }
 
       try {
@@ -571,16 +603,7 @@ export function createProductLabelsQueries(
           rows,
         );
       } catch (error) {
-        if (
-          table === "foods"
-          && !isProductContaminantSchemaMissingError(error)
-        ) {
-          throw new ProductLabelsSearchFailureError(
-            "contaminant_summary",
-            error,
-          );
-        }
-        throw error;
+        throwProductLabelsSearchFailure("contaminant_summary", error);
       }
     },
   };
