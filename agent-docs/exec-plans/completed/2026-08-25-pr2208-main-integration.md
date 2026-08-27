@@ -1,8 +1,8 @@
 # PR 2208 current-main integration
 
-Status: active
+Status: completed
 Created: 2026-08-25
-Updated: 2026-08-25
+Updated: 2026-08-27
 
 ## Goal
 
@@ -54,6 +54,17 @@ fields, terminal read semantics, and no failed-read writes.
   the CLI context had no recovery consumer, so the corrected head deletes it.
   All four writers now use one fixed persistence-uncertainty error with no
   operation-specific constructor or projection branch.
+- Round six returned `ROUND_OUTCOME: PASS` for the exact production patch and
+  confirmed that the prior memory persistence finding is resolved at the Core
+  owner with no additional qualifying issue.
+- The final current-main reconciliation deleted the branch's obsolete absolute
+  bundle cap and retained main's relative first-parent guard as the single
+  owner. Current main also owns stored scheduled-log registry recovery, so the
+  overlapping test now asserts that terminal owner-specific result instead of
+  the older generic Query-source projection.
+- Post-reconciliation proof passes 55 focused Core/CLI knowledge tests, the
+  14-test runner bundle suite, and typechecks for Core, CLI, Query, Health
+  Commons, Vault Usecases, and the Cloudflare runner.
 
 ## Design
 
@@ -85,6 +96,8 @@ fields, terminal read semantics, and no failed-read writes.
    plan history, and measured bundle allowance.
 3. [done] Run focused domain and shared-boundary tests, affected typechecks, prepared
    runtime/package-shape checks, docs gates, and canonical runner parity proof.
-4. Push the exact candidate, update the PR contract, and run a sensitive full
-   ReviewGPT round with the immutable prior-finding ledger.
-5. Resolve accepted findings, close the plan, admit the PR to CI, and merge.
+4. [done] Push the exact candidate, update the PR contract, and run a sensitive
+   full ReviewGPT round with the immutable prior-finding ledger.
+5. [done] Resolve accepted findings, complete current-main reconciliation, and
+   hand the exact candidate to the required-CI and merge lifecycle.
+Completed: 2026-08-27
