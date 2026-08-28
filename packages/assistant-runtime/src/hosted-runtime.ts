@@ -1663,21 +1663,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (!ordinaryConsentedAssistantAskSelected) {
             controller.kick();
           } else if (!startExactDetachedAssistantAsk) {
-            const exactCompletion = exactDetachedAssistantAskCompletion;
             controller.kick();
-            if (exactCompletion) {
-              void exactCompletion.then(
-                () => {
-                  if (
-                    !runtimeAbortController.signal.aborted
-                    && options.shutdownSignal?.aborted !== true
-                  ) {
-                    controller.resume();
-                  }
-                },
-                () => undefined,
-              );
-            }
           }
         }
       }
@@ -2030,7 +2016,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return;
         }
         await startExactDetachedAssistantAsk();
-        detachedAssistantAskController?.kick();
+        if (
+          !runtimeAbortController.signal.aborted
+          && options.shutdownSignal?.aborted !== true
+        ) {
+          detachedAssistantAskController?.resume();
+          detachedAssistantAskController?.kick();
+        }
       },
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
