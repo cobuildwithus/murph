@@ -1196,6 +1196,7 @@ export interface HostedRuntimeUsageReferralSourceContext {
 export const HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX = 64;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS = 512;
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX = 8;
 
 export interface HostedRuntimeGroupMembershipSummary {
   displayName: string | null;
@@ -1461,6 +1462,22 @@ export interface HostedRuntimeGroupParticipantDisplayName {
   senderHandle: string;
 }
 
+export interface HostedRuntimeGroupParticipantPhoneHint {
+  areaCode?: string;
+  lastFour?: string;
+}
+
+export interface HostedRuntimeGroupParticipantTargetCue {
+  displayName?: string;
+  emailParticipant?: true;
+  phoneHint?: HostedRuntimeGroupParticipantPhoneHint;
+}
+
+export interface HostedRuntimeGroupParticipantTarget {
+  participantCount?: number;
+  participants?: readonly HostedRuntimeGroupParticipantTargetCue[];
+}
+
 export type HostedRuntimeGroupParticipantDisplayNamesResult =
   | {
       /**
@@ -1484,6 +1501,7 @@ export type HostedRuntimeGroupToolRequest =
       groupLabel?: string | null;
       originAssistantInputId: string;
       originSessionId: string;
+      participantTarget?: HostedRuntimeGroupParticipantTarget | null;
       question: string;
     }
   | {
@@ -1491,6 +1509,7 @@ export type HostedRuntimeGroupToolRequest =
       context: string;
       groupLabel?: string | null;
       originAssistantInputId: string;
+      participantTarget?: HostedRuntimeGroupParticipantTarget | null;
     }
   | {
       action: "ask_current_sender";

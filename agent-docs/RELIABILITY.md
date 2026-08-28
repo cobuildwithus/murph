@@ -1948,6 +1948,17 @@ Last verified: 2026-08-26
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
+- Participant-described Linq group selection is live, bounded read work inside
+  the existing Ask or handoff admission. It uses one set-based membership and
+  route read, at most four concurrent provider summaries, one absolute
+  deadline, and drains every started provider call. The complete-scan budget is
+  independent of the smaller membership-list response budget; exceeding it,
+  any incomplete/malformed eligible roster, route or provider failure, or
+  duplicate/ambiguous safe description fails closed without choosing or
+  queueing. Provider and KMS work remains outside transactions. The final
+  transaction rechecks the selected membership and exact route, while exact
+  replay compares a versioned normalized participant-target digest binding in
+  the existing encrypted request fields. No new mailbox shape is required.
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
   `5xx`. This applies only to group `ask`, `ask_member`, the canonical

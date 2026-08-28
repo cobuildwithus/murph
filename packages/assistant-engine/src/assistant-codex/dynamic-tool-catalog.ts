@@ -23,6 +23,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
@@ -30,6 +31,8 @@ import {
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -1051,7 +1054,50 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
         description:
-          'Optional only for action="ask" or action="handoff". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
+          'Optional only for action="ask" or action="handoff". An exact visible group title the member supplied, used only to disambiguate among joined groups; never an internal identifier. A phrase such as "my group with Jordan and Casey" is a participant description, not a groupLabel: omit groupLabel and use participantTarget.',
+      },
+      participantTarget: {
+        type: 'object',
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          participantCount: {
+            type: 'integer',
+            minimum: 1,
+            maximum: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+            description:
+              'Other people in the chat, excluding the requesting member. Convert a stated total chat size only when clear.',
+          },
+          participants: {
+            type: 'array',
+            maxItems: HOSTED_RUNTIME_GROUP_PARTICIPANT_TARGET_CUES_MAX,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              minProperties: 1,
+              properties: {
+                displayName: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength:
+                    HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+                },
+                emailParticipant: { type: 'boolean', const: true },
+                phoneHint: {
+                  type: 'object',
+                  additionalProperties: false,
+                  minProperties: 1,
+                  properties: {
+                    areaCode: { type: 'string', pattern: '^\\d{3}$' },
+                    lastFour: { type: 'string', pattern: '^\\d{4}$' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        description:
+          'Optional for ask/handoff when a joined iMessage/SMS group is described by people. Include each non-requester once, using only user-supplied display names, area code/last four, or emailParticipant. Never include full handles, IDs, or guesses.',
       },
       displayName: {
         type: 'string',
@@ -1214,7 +1260,8 @@ type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
 
 const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_consult: [
-    'context', 'grantId', 'groupLabel', 'message_ref', 'question',
+    'context', 'grantId', 'groupLabel', 'message_ref', 'participantTarget',
+    'question',
   ],
   group_data: [
     'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
