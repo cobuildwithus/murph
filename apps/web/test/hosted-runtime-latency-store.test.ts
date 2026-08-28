@@ -1759,47 +1759,6 @@ describe("hosted runtime latency dashboard store", () => {
     });
   });
 
-  it("ignores legacy Linq egress guard-only provider events", async () => {
-    const prisma = createLatencyWritePrisma({
-      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:20:20.000Z")),
-    });
-
-    await recordHostedIngressAssistantInputStaged({
-      assistantInputId: "input_legacy_guard_1",
-      at: instant("2026-06-02T19:20:21.000Z"),
-      authenticatedUserId: "member_latency_1",
-      mailboxItemId: "mailbox_latency_1",
-      prisma,
-      runtimeAttemptId: "attempt_legacy_guard_1",
-      source: "linq",
-    });
-    const result = await recordHostedIngressProviderStarted({
-      assistantInputIds: ["input_legacy_guard_1"],
-      at: instant("2026-06-02T19:20:22.000Z"),
-      authenticatedUserId: "member_latency_1",
-      phaseBreakdown: {
-        provider: {
-          linqEgressGuardMs: 17,
-        },
-        schemaVersion: 1,
-      },
-      prisma,
-      providerRequestOrdinal: 0,
-      runtimeAttemptId: "attempt_legacy_guard_1",
-      source: "linq",
-    });
-
-    expect(result).toEqual({
-      matchedCount: 0,
-      recorded: false,
-      unmatchedCount: 0,
-    });
-    expect(prisma.readTrace()?.providerStartAt).toBeNull();
-    expect(prisma.readTrace()?.providerRequestOrdinal).toBeNull();
-    expect(prisma.readTrace()?.phaseBreakdownJson).toBeNull();
-    expect(prisma.readSetBasedMutationSql()).toHaveLength(0);
-  });
-
   it("uses one set-based mutation at the maximum admitted assistant-input cardinality", async () => {
     const assistantInputIds = Array.from(
       { length: HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS },

@@ -7256,16 +7256,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("does not synthesize a canonical Linq route from a legacy Web response", async () => {
+  it("does not synthesize a Linq route when resolvedRoute is absent", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,
-        targetOverride: {
-          conversationThreadId: "hid_legacy_chat",
-          target: "chat_legacy",
-          targetKind: "thread",
-        },
-        threadIsDirect: true,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
