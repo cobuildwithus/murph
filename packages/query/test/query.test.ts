@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import type { DatabaseSync } from "node:sqlite";
 import { test, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
@@ -32,12 +33,15 @@ import {
   getQueryProjectionStatus,
   hashCanonicalQuerySources,
   listFamilyMembers,
+  listCanonicalEntities,
+  listCanonicalSourceManifest,
   listEntities,
   listGeneticVariants,
   listExperiments,
   listJournalEntries,
   listCanonicalObservationMetricEntries,
   lookupEntityById,
+  readCanonicalEntityFamilySource,
   readVault,
   readVaultRawTolerant,
   rebuildQueryProjection,
@@ -1390,7 +1394,14 @@ test(
       assert.equal(vault.journalEntries.length, 2);
       assert.equal(vault.events.length, 3);
       assert.equal(vault.samples.length, 0);
-      assert.equal(vault.audits.length, 1);
+      assert.equal(vault.audits.length, 0);
+      const sourceAudits = await readCanonicalEntityFamilySource(
+        vaultRoot,
+        "audit",
+      );
+      assert.deepEqual(sourceAudits.map((record) => record.entityId), [
+        "aud_01JNV4AUD000000000000001",
+      ]);
       assert.deepEqual(vault.byFamily.core?.map((record) => record.entityId), [
         vault.coreDocument?.entityId,
       ]);
@@ -1410,10 +1421,7 @@ test(
         (vault.byFamily.sample ?? []).map((record) => record.entityId),
         vault.samples.map((record) => record.entityId),
       );
-      assert.deepEqual(
-        vault.byFamily.audit?.map((record) => record.entityId),
-        vault.audits.map((record) => record.entityId),
-      );
+      assert.equal(vault.byFamily.audit, undefined);
       assert.deepEqual(
         vault.byFamily.family?.map((record) => record.entityId),
         vault.entities
@@ -3729,7 +3737,7 @@ Light walk and early bedtime.
         occurredAt: "2026-03-12T07:00:00Z",
         actor: "query",
         commandName: "vault-cli validate",
-        summary: "Validated fixture vault.",
+        summary: "Validated fixture vault auditprojectiononlytoken.",
         changes: [],
       }),
       "",
@@ -3824,6 +3832,40 @@ async function createEventLedgerVault(events: readonly Record<string, unknown>[]
 
   return vaultRoot;
 }
+
+test("query projection reads gzip event ledger shards through their logical paths", async () => {
+  const vaultRoot = await createEventLedgerVault([{
+    id: "evt_gzip_query_projection",
+    kind: "note",
+    occurredAt: "2026-07-12T09:00:00.000Z",
+    recordedAt: "2026-07-12T09:01:00.000Z",
+    dayKey: "2026-07-12",
+    source: "manual",
+    title: "Compressed ledger event",
+    note: "This record remains queryable after lossless compression.",
+  }]);
+  const logicalPath = path.join(vaultRoot, "ledger/events/2026/2026-07.jsonl");
+  await writeFile(`${logicalPath}.gz`, gzipSync(await readFile(logicalPath)));
+  await rm(logicalPath);
+
+  const model = await readVault(vaultRoot);
+  assert.equal(
+    model.events.some((event) => event.entityId === "evt_gzip_query_projection"),
+    true,
+  );
+  assert.equal(
+    searchVault(model, "Compressed ledger event").hits.some(
+      (result) => result.recordId === "evt_gzip_query_projection",
+    ),
+    true,
+  );
+  assert.equal(
+    (await listCanonicalSourceManifest(vaultRoot)).some(
+      (entry) => entry.relativePath === "ledger/events/2026/2026-07.jsonl.gz",
+    ),
+    true,
+  );
+});
 
 interface MetricSampleInput {
   id: string;
@@ -4085,6 +4127,7 @@ test("rebuildQueryProjection materializes the shared query projection and status
     assert.equal(existsSync(runtimeDatabasePath), false);
 
     const vault = await readVault(vaultRoot);
+    assert.equal(vault.audits.length, 0);
     const rebuilt = await rebuildQueryProjection(vaultRoot);
 
     assert.equal(rebuilt.exists, true);
@@ -4097,6 +4140,53 @@ test("rebuildQueryProjection materializes the shared query projection and status
     );
     assert.equal(rebuilt.fresh, true);
     assert.equal(existsSync(runtimeDatabasePath), true);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+    try {
+      const auditEntityCount = database
+        .prepare("SELECT COUNT(*) AS count FROM query_entities WHERE family = 'audit'")
+        .get() as { count: number };
+      const auditSearchDocumentCount = database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM query_search_document WHERE record_type = 'audit'",
+        )
+        .get() as { count: number };
+      const auditFtsCount = database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM query_search_fts WHERE query_search_fts MATCH ?",
+        )
+        .get("auditprojectiononlytoken") as { count: number };
+
+      assert.equal(auditEntityCount.count, 0);
+      assert.equal(auditSearchDocumentCount.count, 0);
+      assert.equal(auditFtsCount.count, 0);
+    } finally {
+      database.close();
+    }
+
+    const projectedAudits = await listCanonicalEntities(vaultRoot, {
+      family: "audit",
+      limit: null,
+    });
+    assert.equal(projectedAudits.length, 0);
+    const auditSearch = await searchVaultRuntime(
+      vaultRoot,
+      "auditprojectiononlytoken",
+      {
+        recordTypes: ["audit"],
+      },
+    );
+    assert.equal(auditSearch.total, 0);
+    const sourceAudits = await readCanonicalEntityFamilySource(
+      vaultRoot,
+      "audit",
+    );
+    assert.deepEqual(sourceAudits.map((record) => record.entityId), [
+      "aud_01JNV4AUD000000000000001",
+    ]);
 
     const statusAfter = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusAfter.exists, true);
@@ -4750,11 +4840,26 @@ test("rebuildQueryProjection indexes compact structured terms without raw attrib
   }
 });
 
-test("rebuildQueryProjection creates the compact metric point schema", async () => {
+test("rebuildQueryProjection recreates v24 stores without unused indexes", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
 
   try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const legacyDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      legacyDatabase.exec(`
+        CREATE INDEX query_entities_record_class_idx ON query_entities(record_class);
+        CREATE INDEX query_entities_stream_idx ON query_entities(stream);
+        CREATE INDEX query_entities_experiment_idx ON query_entities(experiment_slug);
+        CREATE INDEX query_metric_points_source_idx ON query_metric_points(source_record_id);
+        PRAGMA user_version = 24;
+      `);
+    } finally {
+      legacyDatabase.close();
+    }
+
     await rebuildQueryProjection(vaultRoot);
 
     const database = openSqliteRuntimeDatabase(runtimeDatabasePath, {
@@ -4763,20 +4868,49 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the latest bump would keep every
-      // constant-relative assertion green while legacy stores still carried old
-      // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 24);
+      // Pin the literal version: visibility and schema changes must invalidate
+      // carried stores before ordinary reads can serve stale projection rows.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 25);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
         .prepare("PRAGMA table_info(query_metric_points)")
         .all() as Array<{ name: string }>;
       const columnNames = columnRows.map((row) => row.name);
+      const indexRows = database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+        .all() as Array<{ name: string }>;
+      const indexNames = new Set(indexRows.map((row) => row.name));
 
       assert.ok(columnNames.includes("metric_point_json"));
       assert.equal(columnNames.includes("provenance_json"), false);
       assert.equal(columnNames.includes("context_json"), false);
+
+      for (const indexName of [
+        "query_entities_experiment_idx",
+        "query_entities_record_class_idx",
+        "query_entities_stream_idx",
+        "query_metric_points_source_idx",
+      ]) {
+        assert.equal(indexNames.has(indexName), false, indexName);
+      }
+
+      for (const indexName of [
+        "query_entities_date_idx",
+        "query_entities_family_idx",
+        "query_entities_kind_idx",
+        "query_entities_occurred_at_idx",
+        "query_metric_points_biomarker_latest_idx",
+        "query_metric_points_metric_latest_idx",
+        "query_search_document_date_idx",
+        "query_search_document_experiment_idx",
+        "query_search_document_kind_idx",
+        "query_search_document_occurred_at_idx",
+        "query_search_document_record_type_idx",
+        "query_search_document_stream_idx",
+      ]) {
+        assert.equal(indexNames.has(indexName), true, indexName);
+      }
     } finally {
       database.close();
     }

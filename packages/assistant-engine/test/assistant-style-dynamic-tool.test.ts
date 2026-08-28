@@ -82,16 +82,6 @@ describe('assistant style dynamic tool', () => {
     })?.kind).toBe('invalid-assistant-style-arguments')
   })
 
-  it('fails closed without exact-turn authority before reading preferences', async () => {
-    const result = await executeStyleRequest({ action: 'show' }, false)
-
-    expect(result.rpcResult.success).toBe(false)
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      'unavailable for this conversation',
-    )
-    expect(preferenceMocks.showAssistantPersonality).not.toHaveBeenCalled()
-  })
-
   it('describes direct-member and synthetic-room ownership without a target selector', () => {
     expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
       'current conversation runtime',
@@ -139,18 +129,17 @@ describe('assistant style dynamic tool', () => {
 
     const show = await executeStyleRequest(
       { action: 'show' },
-      true,
       { hosted: true },
     )
     const set = await executeStyleRequest({
       action: 'set',
       setting: 'humor',
       value: 8,
-    }, true, { hosted: true })
+    }, { hosted: true })
     const reset = await executeStyleRequest({
       action: 'reset',
       setting: 'all',
-    }, true, { hosted: true })
+    }, { hosted: true })
 
     expect(show.rpcResult.success).toBe(true)
     expect(hostedMocks.requestPersonalization).toHaveBeenNthCalledWith(1, {
@@ -194,7 +183,6 @@ describe('assistant style dynamic tool', () => {
 
     const result = await executeStyleRequest(
       { action: 'reset', setting: 'push' },
-      true,
       { hosted: true },
     )
 
@@ -223,7 +211,6 @@ describe('assistant style dynamic tool', () => {
 
     const result = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       { hosted: true, toolCallId: 'call_style_one' },
     )
 
@@ -248,7 +235,6 @@ describe('assistant style dynamic tool', () => {
 
     const set = await executeStyleRequest(
       { action: 'set', setting: 'unhinged', value: 8 },
-      true,
       { hosted: true },
     )
 
@@ -282,15 +268,13 @@ describe('assistant style dynamic tool', () => {
 
   it('fails hosted mutations closed without provider-accepted input authority', async () => {
     const hostedWithoutInput = { assistantInputId: null, hosted: true }
-    const show = await executeStyleRequest({ action: 'show' }, true, hostedWithoutInput)
+    const show = await executeStyleRequest({ action: 'show' }, hostedWithoutInput)
     const set = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       hostedWithoutInput,
     )
     const reset = await executeStyleRequest(
       { action: 'reset', setting: 'all' },
-      true,
       hostedWithoutInput,
     )
 
@@ -308,7 +292,6 @@ describe('assistant style dynamic tool', () => {
 
     const result = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       { hosted: true },
     )
 
@@ -319,29 +302,15 @@ describe('assistant style dynamic tool', () => {
   it('keeps canonical show available when the Web mutation port is missing', async () => {
     const missingShow = await executeStyleRequest(
       { action: 'show' },
-      true,
       { hosted: true, personalizationAvailable: false },
     )
     const missingSet = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       { hosted: true, personalizationAvailable: false },
     )
 
     expect(missingShow.rpcResult.success).toBe(true)
     expect(missingSet.rpcResult.success).toBe(false)
-    expect(hostedMocks.requestPersonalization).not.toHaveBeenCalled()
-    expect(preferenceMocks.setAssistantPersonalitySetting).not.toHaveBeenCalled()
-  })
-
-  it('does not call the hosted owner before the availability guard', async () => {
-    const unavailable = await executeStyleRequest(
-      { action: 'set', setting: 'humor', value: 8 },
-      false,
-      { hosted: true },
-    )
-
-    expect(unavailable.rpcResult.success).toBe(false)
     expect(hostedMocks.requestPersonalization).not.toHaveBeenCalled()
     expect(preferenceMocks.setAssistantPersonalitySetting).not.toHaveBeenCalled()
   })
@@ -366,7 +335,6 @@ describe('assistant style dynamic tool', () => {
 
     const result = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       { hosted: true },
     )
 
@@ -397,12 +365,10 @@ describe('assistant style dynamic tool', () => {
 
     const set = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       { hosted: true, settingsOverlay },
     )
     const show = await executeStyleRequest(
       { action: 'show' },
-      true,
       { hosted: true, settingsOverlay },
     )
 
@@ -434,7 +400,6 @@ describe('assistant style dynamic tool', () => {
 
     const result = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
       { hosted: true, settingsOverlay },
     )
 
@@ -467,7 +432,6 @@ describe('assistant style dynamic tool', () => {
 
       const response = await executeStyleRequest(
         { action: 'set', setting: 'humor', value: 8 },
-        true,
         { hosted: true },
       )
 
@@ -489,14 +453,12 @@ describe('assistant style dynamic tool', () => {
       updated: true,
     })
 
-    const show = await executeStyleRequest({ action: 'show' }, true)
+    const show = await executeStyleRequest({ action: 'show' })
     const set = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
-      true,
     )
     const reset = await executeStyleRequest(
       { action: 'reset', setting: 'all' },
-      true,
     )
 
     expect(show.rpcResult.success).toBe(true)
@@ -517,12 +479,10 @@ describe('assistant style dynamic tool', () => {
   it('requires a vault for hosted and local style actions', async () => {
     const hosted = await executeStyleRequest(
       { action: 'show' },
-      true,
       { hosted: true, vaultRoot: null },
     )
     const local = await executeStyleRequest(
       { action: 'show' },
-      true,
       { vaultRoot: null },
     )
 
@@ -563,7 +523,6 @@ function readStyleRequest(argumentsValue: unknown, toolCallId?: string) {
 
 async function executeStyleRequest(
   argumentsValue: unknown,
-  assistantStyleSettingsAvailable: boolean,
   options: {
     assistantInputId?: string | null
     hosted?: boolean
@@ -582,7 +541,6 @@ async function executeStyleRequest(
 
   return await executeMurphDynamicToolRequest({
     assistantStyleSettingsOverlay: options.settingsOverlay,
-    assistantStyleSettingsAvailable,
     env: {},
     fetchImpl: fetch,
     hostedToolContext: options.hosted !== true

@@ -63,7 +63,6 @@ import {
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
-  mapCodexAppServerApprovalPolicy,
   mapCodexAppServerSandboxMode,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
@@ -81,9 +80,6 @@ import type {
   MurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
-  MURPH_ASSISTANT_STYLE_TOOL,
-  MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_MEMBER_MEMORY_TOOL,
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
@@ -306,7 +302,11 @@ type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
   coldStartReason: CodexAppServerColdStartReason
 }
 
-type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
+type CodexAppServerPreparedTurnInput = Omit<
+  CodexAppServerTurnInput,
+  'approvalPolicy'
+> & {
+  approvalPolicy: 'never'
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
@@ -494,7 +494,7 @@ export interface CodexAppServerTurnInput {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  approvalPolicy?: string
+  approvalPolicy?: string | null
   configOverrides?: readonly string[]
   codexCommand?: string
   codexHome?: string | null
@@ -3378,10 +3378,6 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
-  let requiredFinalResponseFallbackOutcome:
-    | 'analyze-video-failure'
-    | 'analyze-video-success'
-    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -4107,10 +4103,7 @@ async function runCodexAppServerTurnOnProcess(
     card: AssistantResponseCard,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'A response card cannot attach after accepted input advances the response context.',
@@ -4153,10 +4146,7 @@ async function runCodexAppServerTurnOnProcess(
     card: CompactTableWorkoutResponseCardV1,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'Response card text recovery cannot attach after accepted input advances the response context.',
@@ -4785,23 +4775,8 @@ async function runCodexAppServerTurnOnProcess(
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
-          assistantStyleSettingsAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-          ),
-          groupRoomModelAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_GROUP_ROOM_MODEL_TOOL.namespace &&
-              tool.name === MURPH_GROUP_ROOM_MODEL_TOOL.name,
-          ),
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
-          memberMemoryAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_MEMBER_MEMORY_TOOL.namespace &&
-              tool.name === MURPH_MEMBER_MEMORY_TOOL.name,
-          ),
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -4886,13 +4861,7 @@ async function runCodexAppServerTurnOnProcess(
           result.requiredFinalResponseFallback,
         )
         if (analyzeVideoFallback !== null) {
-          if (result.rpcResult.success) {
-            requiredFinalResponseFallback = analyzeVideoFallback
-            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
-          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
-            requiredFinalResponseFallback = analyzeVideoFallback
-            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
-          }
+          requiredFinalResponseFallback = analyzeVideoFallback
         }
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
@@ -6102,8 +6071,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const normalizedSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage)
   const requiredSemanticFinalMessage =
-    normalizeNullableString(semanticFinalMessage) ??
+    normalizedSemanticFinalMessage ??
     requiredFinalResponseFallback ??
     semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
@@ -6352,6 +6323,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
+    request.kind === 'analyze-video' ||
     (request.kind === 'group' &&
       request.request.action === 'ask_current_sender' &&
       request.request.mode !== 'new') ||
@@ -6503,7 +6475,7 @@ function assertCodexResumeContextMatches(input: {
     ],
     [
       'approvalPolicy',
-      mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+      input.input.approvalPolicy,
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],

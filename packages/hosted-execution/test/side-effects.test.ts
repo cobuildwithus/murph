@@ -358,7 +358,7 @@ describe("hosted assistant delivery contracts", () => {
     });
   });
 
-  it("rejects malformed hosted response cards and card-media coexistence", () => {
+  it("keeps serialized hosted effects as the card-media invariant owner", () => {
     const canonical = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-card-validation",
       effectId: "intent-card-validation",

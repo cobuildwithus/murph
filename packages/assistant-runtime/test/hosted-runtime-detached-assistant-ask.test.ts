@@ -172,6 +172,369 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
+  test("runs one exact ask without automatically draining across intervening work", async () => {
+    const vaultRoot = await createVaultRoot();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_exact", itemId: "item_exact" }),
+        createPendingCompletion({
+          eventId: "ask_event_intervening",
+          itemId: "item_intervening",
+        }),
+        createPendingAsk({ eventId: "ask_event_later", itemId: "item_later" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      await controller.kickExact("item_exact");
+      await Promise.resolve();
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact"]);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+        ]),
+        [
+          ["item_intervening", "pending"],
+          ["item_later", "pending"],
+        ],
+      );
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("serially exact-claims selected continuations without reopening ordinary work", async () => {
+    const vaultRoot = await createVaultRoot();
+    const firstPrepareStarted = createDeferred<void>();
+    const firstPrepareRelease = createDeferred<void>();
+    const preparedRequestIds: string[] = [];
+    const selectedContinuationItemIds = new Set([
+      "item_approved_later",
+      "item_approved_last",
+    ]);
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_exact_active",
+          itemId: "item_exact_active",
+        }),
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_ordinary_later",
+          itemId: "item_ordinary_later",
+        }),
+        createPendingAsk({ eventId: "ask_event_approved_later", itemId: "item_approved_later" }),
+        createPendingAsk({ eventId: "ask_event_approved_last", itemId: "item_approved_last" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            if (request.requestId === "ask_event_exact_active") {
+              firstPrepareStarted.resolve();
+              await firstPrepareRelease.promise;
+            }
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        async selectNextExactItemId() {
+          return (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+            (item) => selectedContinuationItemIds.has(item.itemId),
+          )?.itemId ?? null;
+        },
+        vaultRoot,
+      });
+
+      const exactCompletion = controller.kickExact("item_exact_active");
+      await firstPrepareStarted.promise;
+      controller.kick();
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact_active"]);
+
+      firstPrepareRelease.resolve();
+      await exactCompletion;
+      await waitUntil(async () => {
+        assert.deepEqual(preparedRequestIds, [
+          "ask_event_exact_active",
+          "ask_event_approved_later",
+          "ask_event_approved_last",
+        ]);
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+            item.itemId,
+            item.status,
+          ]),
+          [["item_ordinary_later", "pending"]],
+        );
+      });
+      await controller.closeAndRequeue();
+    } finally {
+      firstPrepareRelease.resolve();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("coalesces competing continuation kicks behind an unstarted ordinary owner", async () => {
+    const vaultRoot = await createVaultRoot();
+    const preparedRequestIds: string[] = [];
+    const selectedContinuationItemIds = new Set([
+      "item_prestart_approved_first",
+      "item_prestart_approved_second",
+    ]);
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_prestart_ordinary",
+          itemId: "item_prestart_ordinary",
+        }),
+        createPendingAsk({
+          eventId: "ask_event_prestart_approved_first",
+          itemId: "item_prestart_approved_first",
+        }),
+        createPendingAsk({
+          eventId: "ask_event_prestart_approved_second",
+          itemId: "item_prestart_approved_second",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        async selectNextExactItemId() {
+          return (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+            (item) => selectedContinuationItemIds.has(item.itemId),
+          )?.itemId ?? null;
+        },
+        vaultRoot,
+      });
+
+      controller.kick();
+      controller.kick();
+      await waitUntil(async () => {
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+            item.itemId,
+            item.status,
+          ]),
+          [["item_prestart_ordinary", "pending"]],
+        );
+      });
+      assert.deepEqual(preparedRequestIds, [
+        "ask_event_prestart_approved_first",
+        "ask_event_prestart_approved_second",
+      ]);
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("requeues a failed exact ask without immediately claiming the next ask", async () => {
+    const vaultRoot = await createVaultRoot();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_retry_exact", itemId: "item_retry_exact" }),
+        createPendingAsk({ eventId: "ask_event_retry_later", itemId: "item_retry_later" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              throw new Error("A failed exact ask must not complete.");
+            }
+            preparedRequestIds.push(request.requestId);
+            return {
+              action: "prepare",
+              question: "retry question",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(async () => {
+          throw new Error("provider unavailable");
+        }),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      await controller.kickExact("item_retry_exact");
+      assert.deepEqual(preparedRequestIds, ["ask_event_retry_exact"]);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+          item.nextAttemptAt,
+        ]),
+        [
+          ["item_retry_exact", "pending", "2026-07-15T12:01:00.000Z"],
+          ["item_retry_later", "pending", null],
+        ],
+      );
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("requeues the exact ask before resuming a selected continuation", async () => {
+    const vaultRoot = await createVaultRoot();
+    const executionStarted = createDeferred<void>();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          eventId: "ask_event_exact_preempt",
+          itemId: "item_exact_preempt",
+        }),
+        createPendingAsk({
+          eventId: "ask_event_approved_after_preempt",
+          itemId: "item_approved_after_preempt",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              throw new Error("A preempted exact ask must not complete.");
+            }
+            preparedRequestIds.push(request.requestId);
+            if (request.requestId === "ask_event_approved_after_preempt") {
+              return {
+                action: "prepare",
+                status: "terminal",
+                terminalReason: "unavailable",
+              };
+            }
+            return {
+              action: "prepare",
+              question: "preemptible question",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        async executeAsk(input) {
+          executionStarted.resolve();
+          return await new Promise((_resolve, reject) => {
+            input.abortSignal?.addEventListener(
+              "abort",
+              () => reject(input.abortSignal?.reason),
+              { once: true },
+            );
+          });
+        },
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        async selectNextExactItemId() {
+          return (await readHostedSystemMailboxState(vaultRoot)).pending.some(
+            (item) => item.itemId === "item_approved_after_preempt",
+          )
+            ? "item_approved_after_preempt"
+            : null;
+        },
+        vaultRoot,
+      });
+
+      const completion = controller.kickExact("item_exact_preempt");
+      await executionStarted.promise;
+      controller.requestPauseAndRequeue();
+      controller.kick();
+      await completion;
+
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+          item.nextAttemptAt,
+        ]),
+        [
+          ["item_exact_preempt", "pending", null],
+          ["item_approved_after_preempt", "pending", null],
+        ],
+      );
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact_preempt"]);
+
+      controller.resume();
+      await waitUntil(async () => {
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) =>
+            item.itemId
+          ),
+          ["item_exact_preempt"],
+        );
+      });
+      assert.deepEqual(preparedRequestIds, [
+        "ask_event_exact_preempt",
+        "ask_event_approved_after_preempt",
+      ]);
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
   test("preserves a legacy joined-group cannot-answer explanation on completion", async () => {
     const vaultRoot = await createVaultRoot();
     let completedResult: unknown;

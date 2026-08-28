@@ -31,8 +31,7 @@ Mode:
 - Review only. Do not edit files.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
-- Follow the invoking review's evidence, finding, output, and stop contract. Do
-  not request or create a patch artifact for frontend findings.
+- Follow the invoking review's evidence, finding, output, and stop contract.
 
 Preflight (required):
 - Read `agent-docs/FRONTEND.md` before reviewing the diff.
@@ -66,7 +65,7 @@ Output requirements:
 - If no evidence-backed findings remain, state that explicitly and note only material rendered-verification gaps.
 
 Response format:
-- Return a normal text review, not patch attachments and not follow-on prompts for more agents.
+- Return a normal text review, not follow-on prompts for more agents.
 - Keep the focus on concrete rendered-fidelity, design-system, accessibility, and maintainability failures rather than subjective preference.
 
 Stop rule:

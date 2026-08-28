@@ -4966,6 +4966,7 @@ describe("runHostedAssistantAutomationLane", () => {
       codexAppServerThreadResumeMs: 9,
       codexAppServerWarmReuseMs: 0,
       providerStartCriticalPath: {
+        assistantPhaseCallbackToAssistantPhaseMs: 6,
         assistantServicePreLockMs: 5,
         automationCandidateScanMs: 1,
         automationCrossSessionContextMs: 0,
@@ -4980,10 +4981,13 @@ describe("runHostedAssistantAutomationLane", () => {
         automationTerminalEvidenceMs: 1,
         codexAppServerPreProviderMs: 19,
         codexProcessPreparationMs: 3,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
         mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
         preProviderSetupMs: 11,
         providerPlanAndGateMs: 13,
         turnLockWaitMs: 2,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
         workspaceAssistantPreAutomationMs: 17,
       },
       providerRequestOrdinal: 0,
@@ -4997,6 +5001,7 @@ describe("runHostedAssistantAutomationLane", () => {
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
           preProvider: {
+            assistantPhaseCallbackToAssistantPhaseMs: 6,
             automationCandidateScanMs: 1,
             automationCrossSessionContextMs: 0,
             automationGroupAndOperationScopeMs: 1,
@@ -5017,7 +5022,10 @@ describe("runHostedAssistantAutomationLane", () => {
             automationServiceHandoffMs: 0,
             automationSessionPreflightMs: 1,
             automationTerminalEvidenceMs: 1,
+            foregroundPassToWorkspaceForegroundPassMs: 7,
             mailboxImportDoneToAssistantPhaseMs: 29,
+            mailboxImportDoneToForegroundPassMs: 5,
+            workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
             workspaceAssistantPreAutomationMs: 17,
           },
           provider: {
@@ -5160,6 +5168,29 @@ describe("runHostedAssistantAutomationLane", () => {
     });
     await Promise.resolve();
     expect(latencyTraceRecord).toHaveBeenCalledTimes(6);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        phaseBreakdown: expect.objectContaining({
+          preProvider: {
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
+          },
+        }),
+      }),
+    });
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_partial_mailbox_subdivision"],
+      providerRequestOrdinal: 3,
+      providerStartCriticalPath: {
+        ...canonicalCriticalPath,
+        mailboxImportDoneToForegroundPassMs: 29,
+      },
+      source: "linq",
+      startedAt: "2026-04-08T00:00:05.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(7);
     expect(latencyTraceRecord).toHaveBeenLastCalledWith({
       event: expect.objectContaining({
         phaseBreakdown: expect.objectContaining({
@@ -5843,14 +5874,26 @@ describe("runHostedAssistantAutomationLane", () => {
 
     try {
       vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      const selectedInputIds = Array.from(
+        { length: 50 },
+        (_, index) => `ain_normal_backlog_${String(index).padStart(2, "0")}`,
+      );
+      mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+        inputIds: selectedInputIds,
+        mode: "background",
+        pendingInputIds: [
+          ...selectedInputIds,
+          "ain_normal_backlog_unselected",
+        ],
+      });
       mocks.runAssistantAutomationPass.mockResolvedValueOnce({
         nextWakeAt: null,
         progressed: true,
         replies: {
-          considered: 50,
+          considered: selectedInputIds.length,
           failed: 0,
           nextWakeAt: null,
-          replied: 50,
+          replied: selectedInputIds.length,
           skipped: 0,
         },
         routing: {
@@ -6096,14 +6139,26 @@ describe("runHostedAssistantAutomationLane", () => {
 
     try {
       vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      const selectedInputIds = Array.from(
+        { length: 50 },
+        (_, index) => `ain_capped_backlog_${String(index).padStart(2, "0")}`,
+      );
+      mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+        inputIds: selectedInputIds,
+        mode: "background",
+        pendingInputIds: [
+          ...selectedInputIds,
+          "ain_capped_backlog_unselected",
+        ],
+      });
       mocks.runAssistantAutomationPass.mockResolvedValueOnce({
         nextWakeAt: null,
         progressed: true,
         replies: {
-          considered: 1,
+          considered: selectedInputIds.length,
           failed: 0,
           nextWakeAt: null,
-          replied: 1,
+          replied: selectedInputIds.length,
           skipped: 0,
         },
         routing: {
@@ -6140,6 +6195,70 @@ describe("runHostedAssistantAutomationLane", () => {
           maxPerScan: 50,
         }),
       );
+      expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a saturated background continuation ahead of an unrelated aggregate reminder", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      const selectedInputIds = Array.from(
+        { length: 50 },
+        (_, index) => `ain_saturated_background_${String(index).padStart(2, "0")}`,
+      );
+      const pendingInputIds = [
+        ...selectedInputIds,
+        "ain_saturated_background_50",
+      ];
+      mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+        inputIds: selectedInputIds,
+        mode: "background",
+        pendingInputIds,
+      });
+      mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+        cronProcessed: 0,
+        nextWakeAt: "2026-04-08T06:00:00.000Z",
+        progressed: false,
+        replies: {
+          considered: selectedInputIds.length,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: selectedInputIds.length,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      });
+
+      const result = await runHostedAssistantAutomationLane({
+        wake: {
+          eventId: "evt_saturated_background_with_reminder",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        executionContext: {
+          hosted: {
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        requestId: "req_saturated_background_with_reminder",
+        runtime: createHostedAutomationRuntime(),
+        vaultRoot: "/tmp/vault-root",
+      });
+
       expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
     } finally {
       vi.useRealTimers();

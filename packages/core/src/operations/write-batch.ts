@@ -12,6 +12,13 @@ import {
   writeTextFileAtomic,
 } from "../atomic-write.ts";
 import { VaultError } from "../errors.ts";
+import {
+  appendArchivedEventLedgerShard,
+  createArchivedEventLedgerShardContentReceipt,
+  inspectArchivedEventLedgerShardAppend,
+  isEventLedgerLogicalPath,
+  truncateArchivedEventLedgerShard,
+} from "../event-ledger-storage.ts";
 import { ensureDirectory, pathExists } from "../fs.ts";
 import { VAULT_LAYOUT } from "../constants.ts";
 import {
@@ -744,6 +751,22 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
+  if (isEventLedgerLogicalPath(input.targetRelativePath)) {
+    const archivedReceipt = await createArchivedEventLedgerShardContentReceipt(
+      input.vaultRoot,
+      input.targetRelativePath,
+    );
+    if (archivedReceipt) {
+      await appendArchivedEventLedgerShard({
+        expectedBaseByteLength: input.baseByteLength,
+        expectedBaseSha256: input.baseSha256,
+        payload: Buffer.from(input.bytes).toString("utf8"),
+        targetRelativePath: input.targetRelativePath,
+        vaultRoot: input.vaultRoot,
+      });
+      return;
+    }
+  }
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "jsonl_append",
   });
@@ -3187,6 +3210,7 @@ export class WriteBatch {
     const comparisonOptions: VaultPathComparisonOptions = {
       caseInsensitive: await isVaultFilesystemCaseInsensitive(this.vaultRoot),
     };
+    let appendToArchivedEventLedger = false;
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyJsonlAppendTarget>>) => {
@@ -3202,6 +3226,25 @@ export class WriteBatch {
         }
 
         const baseContentReceipt = this.getPreparedJsonlBaseReceipt(action);
+        if (isEventLedgerLogicalPath(action.targetRelativePath)) {
+          const archivedState = await inspectArchivedEventLedgerShardAppend({
+            expectedBaseByteLength: action.originalSize,
+            expectedBaseSha256: baseContentReceipt.sha256,
+            payload: payloadBytes,
+            targetRelativePath: action.targetRelativePath,
+            vaultRoot: this.vaultRoot,
+          });
+          if (archivedState === "base") {
+            return undefined;
+          }
+          if (archivedState === "applied") {
+            return {
+              effect: "append",
+              existedBefore: true,
+              originalSize: action.originalSize,
+            } as const;
+          }
+        }
         if (action.allowArchivedIntegrationIngestAmendment) {
           const archivedState = await inspectArchivedIntegrationIngestShardAppend({
             expectedBaseByteLength: action.originalSize,
@@ -3276,6 +3319,27 @@ export class WriteBatch {
         } as const;
       },
       mutateTarget: async (target) => {
+        if (appendToArchivedEventLedger) {
+          const baseContentReceipt = action.baseContentReceipt;
+          if (!baseContentReceipt) {
+            throw this.buildResumeConflictError(
+              action,
+              `Archived append target "${action.targetRelativePath}" is missing its prepared base receipt.`,
+            );
+          }
+          const result = await appendArchivedEventLedgerShard({
+            expectedBaseByteLength: baseContentReceipt.byteLength,
+            expectedBaseSha256: baseContentReceipt.sha256,
+            payload,
+            targetRelativePath: action.targetRelativePath,
+            vaultRoot: this.vaultRoot,
+          });
+          return {
+            effect: "append",
+            existedBefore: true,
+            originalSize: result.originalSize,
+          } as const;
+        }
         try {
           return await applyJsonlAppendTarget({
             appendPayload: (payloadChunk) => fs.appendFile(target.absolutePath, payloadChunk, "utf8"),
@@ -3311,6 +3375,44 @@ export class WriteBatch {
         }
       },
       prepareMutation: async (target) => {
+        if (isEventLedgerLogicalPath(action.targetRelativePath)) {
+          const archivedReceipt = await createArchivedEventLedgerShardContentReceipt(
+            this.vaultRoot,
+            action.targetRelativePath,
+          );
+          if (archivedReceipt) {
+            appendToArchivedEventLedger = true;
+            const originalSize = action.originalSize ?? archivedReceipt.byteLength;
+            const baseContentReceipt = action.baseContentReceipt ?? archivedReceipt;
+            if (baseContentReceipt.byteLength !== originalSize) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" base size changed while preparing the write batch.`,
+              );
+            }
+            await this.persistPreparedAction(() => {
+              let changed = false;
+              if (action.baseContentReceipt === undefined) {
+                action.baseContentReceipt = baseContentReceipt;
+                changed = true;
+              }
+              if (action.committedPayloadReceipt === undefined) {
+                action.committedPayloadReceipt = payloadReceipt;
+                changed = true;
+              }
+              if (action.existedBefore === undefined) {
+                action.existedBefore = true;
+                changed = true;
+              }
+              if (action.originalSize === undefined) {
+                action.originalSize = originalSize;
+                changed = true;
+              }
+              return changed;
+            });
+            return;
+          }
+        }
         if (action.allowArchivedIntegrationIngestAmendment) {
           const archivedReceipt = await createArchivedIntegrationIngestShardContentReceipt(
             this.vaultRoot,
@@ -3535,6 +3637,21 @@ export class WriteBatch {
       } else if (action.kind === "jsonl_append") {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
         if (
+          isEventLedgerLogicalPath(action.targetRelativePath) &&
+          action.baseContentReceipt &&
+          action.originalSize !== undefined &&
+          await createArchivedEventLedgerShardContentReceipt(
+            this.vaultRoot,
+            action.targetRelativePath,
+          )
+        ) {
+          await truncateArchivedEventLedgerShard({
+            expectedBaseByteLength: action.originalSize,
+            expectedBaseSha256: action.baseContentReceipt.sha256,
+            targetRelativePath: action.targetRelativePath,
+            vaultRoot: this.vaultRoot,
+          });
+        } else if (
           action.allowArchivedIntegrationIngestAmendment &&
           action.baseContentReceipt &&
           action.originalSize !== undefined &&

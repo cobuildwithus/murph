@@ -31,14 +31,18 @@ const deviceActivityMocks = vi.hoisted(() => ({
   useRealVaultReader: false,
 }))
 
-vi.mock('@murphai/core', () => ({
-  advanceAutomationDeviceActivityCursor: deviceActivityMocks.advanceAutomationDeviceActivityCursor,
-  loadVault: vi.fn(async () => ({
-    metadata: {
-      timezone: 'UTC',
-    },
-  })),
-}))
+vi.mock('@murphai/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@murphai/core')>()
+  return {
+    ...actual,
+    advanceAutomationDeviceActivityCursor: deviceActivityMocks.advanceAutomationDeviceActivityCursor,
+    loadVault: vi.fn(async () => ({
+      metadata: {
+        timezone: 'UTC',
+      },
+    })),
+  }
+})
 
 vi.mock('@murphai/query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@murphai/query')>()

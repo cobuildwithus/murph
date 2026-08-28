@@ -17,10 +17,19 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   reconcileHostedStripeEventById: mocks.reconcileHostedStripeEventById,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
-  signalHostedMemberActivationRuntimeWakeBestEffortResult:
-    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
-}));
+vi.mock(
+  "@/src/lib/hosted-onboarding/member-activation-runtime-wake",
+  async () => {
+    const actual = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/member-activation-runtime-wake")
+    >("@/src/lib/hosted-onboarding/member-activation-runtime-wake");
+    return {
+      ...actual,
+      signalHostedMemberActivationRuntimeWakeBestEffortResult:
+        mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    };
+  },
+);
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: () => ({

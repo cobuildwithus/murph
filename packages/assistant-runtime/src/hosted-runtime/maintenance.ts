@@ -37,7 +37,9 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS,
+  HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   readHostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -642,14 +644,14 @@ export async function runHostedAssistantAutomation(
       ? normalizeHostedFutureWakeAt(replies.nextWakeAt ?? null, wakeNowMs)
       : null;
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-      inferBacklogFromSaturation: selectedInputIds.mode === "background",
+      requiresImmediateInputRecheck:
+        selectedInputIds.mode === "background"
+        && (
+          baseInputSource.readSelectedInputIds().length > selectedInputIds.inputIds.length
+          || selectedInputIds.pendingInputIds.length > selectedInputIds.inputIds.length
+        ),
       nowMs: wakeNowMs,
       resultNextWakeAt: result.nextWakeAt,
-      scanLimit: Math.max(1, baseInputSource.readSelectedInputIds().length),
-      scanResult: {
-        replies,
-        routing,
-      },
     });
     redactedLogEntries.push(emitHostedRuntimeRedactedLog({
       component: "runtime",
@@ -849,6 +851,11 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         input.providerStartCriticalPath,
       )
     : { kind: "absent" } as const;
+  const mailboxToAssistantSubdivision = input.providerStartCriticalPath
+    ? inspectHostedRuntimeMailboxToAssistantTimingSubdivision(
+        input.providerStartCriticalPath,
+      )
+    : { kind: "absent" } as const;
   const preProvider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["preProvider"]
   > = {
@@ -863,11 +870,22 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
             : {}),
           mailboxImportDoneToAssistantPhaseMs:
             input.providerStartCriticalPath.mailboxImportDoneToAssistantPhaseMs,
+          ...(mailboxToAssistantSubdivision.kind === "complete"
+            ? mailboxToAssistantSubdivision.subdivision
+            : {}),
           workspaceAssistantPreAutomationMs:
             input.providerStartCriticalPath.workspaceAssistantPreAutomationMs,
         }
       : {}),
   };
+  if (
+    inspectHostedRuntimeMailboxToAssistantTimingSubdivision(preProvider).kind
+      === "invalid"
+  ) {
+    for (const key of HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS) {
+      delete preProvider[key];
+    }
+  }
   if (
     inspectHostedRuntimeAutomationLaneTimingSubdivision(preProvider).kind
       === "invalid"
@@ -970,61 +988,24 @@ async function sleep(delayMs: number): Promise<void> {
 }
 
 function resolveHostedAssistantAutomationNextWakeAt(input: {
-  inferBacklogFromSaturation: boolean;
+  requiresImmediateInputRecheck: boolean;
   nowMs: number;
   resultNextWakeAt: string | null;
-  scanLimit: number;
-  scanResult: {
-    replies: {
-      considered: number;
-      nextWakeAt?: string | null;
-    };
-    routing: {
-      considered: number;
-      nextWakeAt?: string | null;
-    };
-  };
 }): string | null {
-  const resultNextWakeAt = normalizeHostedFutureWakeAt(
-    input.resultNextWakeAt,
-    input.nowMs,
+  return earliestHostedMaintenanceWakeAt(
+    normalizeHostedFutureWakeAt(
+      input.resultNextWakeAt,
+      input.nowMs,
+    ),
+    input.requiresImmediateInputRecheck
+      ? new Date(input.nowMs).toISOString()
+      : null,
   );
-  return resultNextWakeAt
-    ?? (input.inferBacklogFromSaturation
-      ? resolveHostedAssistantBacklogWakeAt(input)
-      : null);
 }
 
 function resolveHostedMaintenanceWakeNowMs(wake: HostedRuntimeEvent): number {
   const occurredAtMs = Date.parse(wake.occurredAt);
   return Number.isFinite(occurredAtMs) ? occurredAtMs : Date.now();
-}
-
-function resolveHostedAssistantBacklogWakeAt(input: {
-  nowMs: number;
-  scanLimit: number;
-  scanResult: {
-    replies: {
-      considered: number;
-      nextWakeAt?: string | null;
-    };
-    routing: {
-      considered: number;
-      nextWakeAt?: string | null;
-    };
-  };
-}): string | null {
-  const repliesMayHaveBacklog =
-    input.scanResult.replies.considered >= input.scanLimit
-    && !input.scanResult.replies.nextWakeAt;
-  const routingMayHaveBacklog =
-    input.scanResult.routing.considered >= input.scanLimit
-    && !input.scanResult.routing.nextWakeAt;
-  if (!repliesMayHaveBacklog && !routingMayHaveBacklog) {
-    return null;
-  }
-
-  return new Date(input.nowMs).toISOString();
 }
 
 function buildHostedAssistantAutomationEventCountLogDetails(
@@ -1219,4 +1200,15 @@ export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
     parserProcessed: 0,
     postCheckpointRecord: null,
   };
+}
+
+function earliestHostedMaintenanceWakeAt(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) <= Date.parse(right) ? left : right;
 }

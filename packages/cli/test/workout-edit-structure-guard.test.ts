@@ -327,7 +327,7 @@ test('workout edit preserves an exact planned load and rejects an incompatible u
     'start',
     'Press session',
     '--exercise',
-    'name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb',
+    'name=Bench press;sets=3;reps=8;targetWeight=135;targetWeightUnit=lb;mode=weight_reps',
     '--vault',
     vaultRoot,
   ])

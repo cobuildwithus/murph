@@ -577,7 +577,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(scheduledCardSend)).toBeNull();
     expect(requireLinqStub().readObservedMessageAppCard(scheduledCardSend)).toMatchObject({
-      fallback_text: "Your daily nutrition. Ask Murph for this card in text",
+      fallback_text: "Your daily nutrition.",
       interactive: true,
       layout: {
         caption: "Jul 28 · 3 meals",

@@ -7271,16 +7271,9 @@ function normalizeHostedAssistantDeliveryMirrorFailure(input: {
 function assertSupportedHostedAssistantDeliveryPayload(
   payload: Pick<
     HostedAssistantDeliveryPayload,
-    "bindingDeliveryKind" | "card" | "channel" | "explicitTarget" | "media"
+    "bindingDeliveryKind" | "channel" | "explicitTarget"
   >,
 ): void {
-  if (payload.card != null && payload.media.length > 0) {
-    throw new VaultCliError(
-      "ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT",
-      "Assistant delivery cannot combine a response card with media.",
-    );
-  }
-
   if (payload.channel !== "email") {
     return;
   }

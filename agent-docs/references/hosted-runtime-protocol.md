@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 ## Decision
 
@@ -1028,8 +1028,10 @@ follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools. Once Temporal accepts the completion's
 pointer-only signal, Web starts the same payloadless direct ensure so an active
 private runtime can import it immediately. A typed `cannot_answer` bypasses the
-private provider continuation and queues the fixed unavailable-evidence response
-exactly; it cannot be paraphrased into an expiry or execution-failure claim.
+private provider continuation and queues one fixed, self-contained
+earlier-question failure response exactly; it cannot be paraphrased into an
+expiry or execution-failure claim. The completion mailbox outcome carries that
+new intent id into the same foreground-causal collection pass.
 
 If that joined-group completion and private input are both pending, the
 completion uses the existing foreground-causal mailbox lane only when its
@@ -1755,6 +1757,22 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
+
+The UserRunner Durable Object records optional constructor-start,
+constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
+facts in the existing in-memory orchestration phase. Production runner
+construction occurs between the two constructor stamps; recording and
+propagation add no request, storage write, provider call, awaited logging step,
+or second logging system. These are facts about the Durable Object instance
+activation, not about every request, so a warm request can carry stamps older
+than its Cloudflare route timestamp. The identifier-free cold-start report emits
+the route-to-constructor, constructor-initialization, and
+constructor-to-first-ensure slices only when
+`route <= constructor start <= constructor finish <= first ensure` and the
+instance's first-ensure stamp equals the current RPC-entry stamp. Warm or
+otherwise ambiguous chronology remains eligible for the existing route-to-RPC
+aggregate but emits none of the three activation-only slices.
+
 Because Web strictly parses phase-breakdown leaves, roll this telemetry out
 Web-first so its reader accepts the additive fields before a runner emits them;
 during rollback, remove the runner/Cloudflare emitter before rolling Web back.
