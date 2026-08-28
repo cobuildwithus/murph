@@ -1,6 +1,7 @@
 ---
 title: 'Assistant CLI manifest generation exceeds fixed startup timeout during runner assembly'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2464'
 ---
 
 ## Expected Behavior
