@@ -1,6 +1,6 @@
 # Keep exercise catalog IDs private and deliver reviewed media
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -16,8 +16,8 @@ Updated: 2026-08-27
   useful returned catalog-media set on Linq/iMessage.
 - A later request to see that exercise reuses returned catalog media instead of
   invoking image generation when useful media exists.
-- Member-visible text names the exercise naturally and contains no catalog id,
-  source token, path, or other routing identifier.
+- Member-visible model-authored text, when present, names the exercise naturally
+  and contains no catalog id, source token, path, or other routing identifier.
 - Deterministic prompt/skill tests and one focused real-Codex journey prove the
   required and forbidden effects.
 
@@ -55,12 +55,12 @@ Updated: 2026-08-27
 
 ## Tasks
 
-1. Encode the member-visible identifier and reviewed-media precedence rules in
+1. [x] Encode the member-visible identifier and reviewed-media precedence rules in
    the shared exercise-catalog contract.
-2. Add deterministic contract coverage.
-3. Add and run one synthetic production-derived Linq/iMessage real-Codex
+2. [x] Add deterministic contract coverage.
+3. [x] Add and run one synthetic production-derived Linq/iMessage real-Codex
    journey covering both the scheduled cue and missing-image follow-up.
-4. Run focused checks, inspect replies/diff, complete required ReviewGPT gates,
+4. [x] Run focused checks, inspect replies/diff, complete required ReviewGPT gates,
    commit, push, open the PR, and require exact-head CI.
 
 ## Decisions
@@ -73,11 +73,25 @@ Updated: 2026-08-27
 
 ## Verification
 
-- Commands to run:
-  - focused assistant skill/prompt Vitest for the shared contract
-  - focused real-Codex journey with `pnpm test:assistant:live -- --test <name>`
-  - `pnpm typecheck`
-  - `git diff --check`
-- Expected outcomes: every deterministic check passes; live tool assertions
-  show exact catalog lookups and response-media attachment, zero image
-  generation, and concise identifier-free member-visible replies.
+- Production evidence: the scheduled Luna turn read catalog data but made no
+  media attachment call; the later Terra repair invoked GPT Image 2 despite
+  reviewed catalog media being available. Delivery and image providers did not
+  fail, so the root cause was omitted tool selection plus missing visibility
+  guidance.
+- Corrected `gpt-5.6-luna` journey: an ordinary scheduled cue with no picture
+  hint and a missing-picture repair each performed catalog detail lookup before
+  exactly one response-media attachment, delivered the expected reviewed image,
+  made zero image-generation calls, and kept model-authored text natural and
+  identifier-free. Passed 1 test with 132 skipped.
+- Deterministic Assistant Engine guidance suites passed 26 tests with 7 skipped;
+  Assistant Engine package typecheck and `git diff --check` passed.
+- Full `pnpm typecheck` passed the repository guards and all 27 package/app
+  typechecks. The content-only changelog passed its focused 9-test archive suite
+  and Web typecheck.
+- Preliminary specialist review returned one accepted coverage finding: the
+  first scheduled fixture independently requested a picture. The exact-thread
+  test-only patch was inspected, passed `git apply --check`, and removed that
+  sentence. The corrected unhinted Luna journey passed, and parent Product UX
+  revalidation is Ready. No independent prompt-contract, Product UX, frontend,
+  or remaining coverage defect was found.
+Completed: 2026-08-27
