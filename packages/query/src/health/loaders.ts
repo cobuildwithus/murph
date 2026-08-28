@@ -6,7 +6,7 @@ import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   listEventLedgerShardSources,
   readEventLedgerShardText,
-} from "@murphai/core/event-ledger-storage";
+} from "@murphai/core";
 
 import {
   parseFrontmatterDocument,

@@ -9,7 +9,7 @@ import {
   CURRENT_VAULT_FORMAT_VERSION,
   HEALTH_HISTORY_EVENT_KINDS,
 } from "@murphai/contracts";
-import { archiveClosedEventLedgerShards } from "@murphai/core/event-ledger-storage";
+import { archiveClosedEventLedgerShards } from "@murphai/core";
 
 import { readVault } from "../src/index.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";

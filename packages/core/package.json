@@ -14,10 +14,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./event-ledger-storage": {
-      "types": "./dist/event-ledger-storage.d.ts",
-      "default": "./dist/event-ledger-storage.js"
     }
   },
   "files": [

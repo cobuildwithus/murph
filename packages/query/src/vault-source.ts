@@ -14,7 +14,7 @@ import {
 import {
   listEventLedgerShardSources,
   readEventLedgerShardRows,
-} from "@murphai/core/event-ledger-storage";
+} from "@murphai/core";
 
 import {
   compareCanonicalEntities,
