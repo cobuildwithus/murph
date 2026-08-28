@@ -1915,7 +1915,6 @@ export async function seedHostedComputerRunForTest(input: {
     const kernelLiveViewUrlEncrypted = await encryptComputerRunSecret({
       field: "kernel-live-view-url",
       memberId: input.memberId,
-      prisma: deps.prisma,
       runId: input.runId,
       value: input.kernelLiveViewUrl,
     });
