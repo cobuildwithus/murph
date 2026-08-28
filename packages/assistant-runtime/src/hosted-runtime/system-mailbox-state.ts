@@ -404,7 +404,8 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
         resolveSystemMailboxItemNextWakeAt(readyItem, now),
         resolveHostedSystemMailboxItemWakeReason(readyItem),
       ),
-      executionClass: isHostedSystemMailboxModelFreeFrontierItem(readyItem)
+      executionClass: readyItem.mailboxLaneSeq !== null
+        && isHostedSystemMailboxModelFreeFrontierItem(readyItem)
         ? "model_free"
         : "default_owned",
     };

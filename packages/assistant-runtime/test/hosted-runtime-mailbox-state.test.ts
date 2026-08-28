@@ -652,6 +652,31 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it("keeps due sequence-less dense raw retention on the default owner", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const dueAt = "2026-04-08T00:00:00.000Z";
+
+    try {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: dueAt,
+        now: () => "2026-04-07T23:59:30.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => dueAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: dueAt,
+        executionClass: "default_owned",
+        reason: "device-sync.reconcile",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("clears only pending dense raw retention successors when retention finishes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 

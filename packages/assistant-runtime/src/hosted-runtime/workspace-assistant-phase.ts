@@ -4858,17 +4858,32 @@ function shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(
     && wakeTimeMs <= resolveHostedAssistantPhaseNowMs(phaseInput);
 }
 
-async function resolveDueModelFreeSystemMailboxWake(
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+async function resolveDueModelFreeSystemMailboxOwnerSelection(
+  input: {
+    pendingAssistantInputWakeAt: string | null;
+    phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  },
 ): Promise<HostedRuntimeWakeCandidate | null> {
-  const nowMs = resolveHostedAssistantPhaseNowMs(phaseInput);
-  const wake = await resolveHostedSystemMailboxNextWakeCandidate({
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
     now: () => new Date(nowMs).toISOString(),
-    vaultRoot: phaseInput.restored.vaultRoot,
+    vaultRoot: input.phaseInput.restored.vaultRoot,
   });
-  return hostedSystemMailboxWakeIsDueForModelFreeOwner(wake, nowMs)
-    ? wake
-    : null;
+  if (!hostedSystemMailboxWakeIsDueForModelFreeOwner(systemMailboxWake, nowMs)) {
+    return null;
+  }
+
+  const selectedWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+    input: input.phaseInput,
+    pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
+    systemMailboxWake,
+  });
+  const systemMailboxOwnerSelected = selectedWake.at === systemMailboxWake.at
+    && selectedWake.reason === systemMailboxWake.reason;
+  if (systemMailboxOwnerSelected) {
+    return systemMailboxWake;
+  }
+  return hostedRuntimeWakeCandidateIsDue(selectedWake, nowMs) ? selectedWake : null;
 }
 
 function systemMailboxPreparationRanDeviceSync(
@@ -5873,11 +5888,20 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
 
-  const initialSystemMailboxOwnerWake = !foregroundCausalAttempted
+  let deferSystemMailboxPreparationForDelivery = false;
+  const initialOwnerWake = !foregroundCausalAttempted
     && !hasBackgroundSelection
-    ? await resolveDueModelFreeSystemMailboxWake(phaseInput)
+    ? await resolveDueModelFreeSystemMailboxOwnerSelection({
+        pendingAssistantInputWakeAt,
+        phaseInput,
+      })
     : null;
-  if (initialSystemMailboxOwnerWake) {
+  if (
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      initialOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
+  ) {
     return {
       backgroundMaintenanceYielded: false,
       continueAssistantLane: false,
@@ -5886,10 +5910,12 @@ async function runSystemMailboxMaintenancePhase(input: {
       pendingAssistantInputWakeAt,
       result: withHostedRuntimeWakeCandidate({
         result: { progressed: false },
-        wake: initialSystemMailboxOwnerWake,
+        wake: initialOwnerWake,
       }),
     };
   }
+  deferSystemMailboxPreparationForDelivery =
+    initialOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 
   if (
     pendingAssistantInputBlocksMaintenance
@@ -5942,11 +5968,20 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
 
-  const refreshedSystemMailboxOwnerWake = !foregroundCausalAttempted
+  const refreshedOwnerWake = !deferSystemMailboxPreparationForDelivery
+    && !foregroundCausalAttempted
     && !hasBackgroundSelection
-    ? await resolveDueModelFreeSystemMailboxWake(phaseInput)
+    ? await resolveDueModelFreeSystemMailboxOwnerSelection({
+        pendingAssistantInputWakeAt,
+        phaseInput,
+      })
     : null;
-  if (refreshedSystemMailboxOwnerWake) {
+  if (
+    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      refreshedOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
+  ) {
     return {
       backgroundMaintenanceYielded: false,
       continueAssistantLane: false,
@@ -5956,34 +5991,39 @@ async function runSystemMailboxMaintenancePhase(input: {
       result: mergeMemberPreferencesPrePlanningResult(
         withHostedRuntimeWakeCandidate({
           result: { progressed: false },
-          wake: refreshedSystemMailboxOwnerWake,
+          wake: refreshedOwnerWake,
         }),
       ),
     };
   }
+  deferSystemMailboxPreparationForDelivery =
+    deferSystemMailboxPreparationForDelivery
+    || refreshedOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 
   const systemMailboxPreparation = foregroundCausalPreparation
-    ?? await prepareHostedSystemMailboxItemForCheckpoint({
-      ...(input.backgroundRouteActions
-        ? { allowedRouteActions: input.backgroundRouteActions }
-        : {}),
-      ...(input.backgroundWakeKinds
-        ? { allowedWakeKinds: input.backgroundWakeKinds }
-        : {}),
-      executionContext: input.executionContext,
-      operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-      runtimeLogContext: {
-        attemptId: phaseInput.request.attemptId,
-        leaseGeneration: phaseInput.request.leaseGeneration,
-        workspaceVersion: phaseInput.request.workspaceVersion,
-      },
-      runtime: phaseInput.runtime,
-      runtimeEnv: phaseInput.runtimeEnv,
-      signal: phaseInput.signal ?? null,
-      shouldYieldBackgroundMaintenance:
-        phaseInput.shouldYieldBackgroundMaintenance ?? null,
-      vaultRoot: phaseInput.restored.vaultRoot,
-    });
+    ?? (deferSystemMailboxPreparationForDelivery
+      ? null
+      : await prepareHostedSystemMailboxItemForCheckpoint({
+          ...(input.backgroundRouteActions
+            ? { allowedRouteActions: input.backgroundRouteActions }
+            : {}),
+          ...(input.backgroundWakeKinds
+            ? { allowedWakeKinds: input.backgroundWakeKinds }
+            : {}),
+          executionContext: input.executionContext,
+          operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+          runtimeLogContext: {
+            attemptId: phaseInput.request.attemptId,
+            leaseGeneration: phaseInput.request.leaseGeneration,
+            workspaceVersion: phaseInput.request.workspaceVersion,
+          },
+          runtime: phaseInput.runtime,
+          runtimeEnv: phaseInput.runtimeEnv,
+          signal: phaseInput.signal ?? null,
+          shouldYieldBackgroundMaintenance:
+            phaseInput.shouldYieldBackgroundMaintenance ?? null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        }));
   const shouldYieldAfterSystemMailboxPreparation = !hasExclusiveSelection
     && phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const foregroundCausalPreparationSelected =
