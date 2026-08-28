@@ -57,6 +57,7 @@ test("closed event months archive losslessly while the current month stays plain
   });
   assert.equal(result.archivedShardCount, 1);
   assert.equal(result.repairedShardCount, 0);
+  assert.ok(result.archivedByteCount < result.sourceByteCount);
   await assert.rejects(fs.access(path.join(vaultRoot, historical.ledgerFile)));
   await fs.access(path.join(vaultRoot, `${historical.ledgerFile}.gz`));
   await fs.access(path.join(vaultRoot, current.ledgerFile));
@@ -69,6 +70,70 @@ test("closed event months archive losslessly while the current month stays plain
     (await readJsonlRecords({ vaultRoot, relativePath: historical.ledgerFile })).length,
     1,
   );
+});
+
+test("event archiving is abortable before publication and leaves the raw shard intact", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-abort");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const event = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      note: "Preserve this raw event when maintenance is interrupted.",
+      title: "Interrupted archive",
+    },
+  });
+  const abortController = new AbortController();
+  const abortReason = new Error("synthetic foreground wake");
+  queueMicrotask(() => abortController.abort(abortReason));
+
+  await assert.rejects(
+    archiveClosedEventLedgerShards({
+      now: new Date("2026-02-15T12:00:00.000Z"),
+      signal: abortController.signal,
+      vaultRoot,
+    }),
+    (error: unknown) => error === abortReason,
+  );
+  await fs.access(path.join(vaultRoot, event.ledgerFile));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${event.ledgerFile}.gz`)));
+});
+
+test("a malformed closed event shard does not starve later valid months", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-ledger-archive-blocked");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+  const malformed = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-01-12T09:00:00.000Z",
+      note: "This shard will be made invalid.",
+      title: "Malformed month",
+    },
+  });
+  const valid = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-02-12T09:00:00.000Z",
+      note: "This later month should still archive.",
+      title: "Valid month",
+    },
+  });
+  await fs.appendFile(path.join(vaultRoot, malformed.ledgerFile), "{invalid json}\n");
+
+  const result = await archiveClosedEventLedgerShards({
+    now: new Date("2026-03-15T12:00:00.000Z"),
+    vaultRoot,
+  });
+
+  assert.equal(result.archivedShardCount, 1);
+  assert.equal(result.blockedShardCount, 1);
+  await fs.access(path.join(vaultRoot, malformed.ledgerFile));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${malformed.ledgerFile}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, valid.ledgerFile)));
+  await fs.access(path.join(vaultRoot, `${valid.ledgerFile}.gz`));
 });
 
 test("backdated writes and hosted replay amend archived event shards exactly once", async () => {
