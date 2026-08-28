@@ -1,8 +1,8 @@
 # Identify Browser Vault refresh timeout stage
 
-Status: active
+Status: completed
 Created: 2026-08-27
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 ## Goal
 
@@ -86,6 +86,12 @@ Updated: 2026-08-27
   ReviewGPT's complete v4 replacement captures the already-proven ref and
   publish method before the thunks, removes the assertion, and is the only
   accepted production implementation.
+- The preliminary coverage specialist found that the v4 cancellation owner
+  also returned the captured source summary for post-hash runtime-wake and
+  external-abort deferrals. That widened non-timeout telemetry beyond this
+  plan's timeout-only contract. The finding was accepted and ReviewGPT's exact
+  correction now attaches captured source only to `deferred_timeout`; focused
+  exact-result tests preserve zero source summaries for both non-timeout paths.
 
 ## Verification
 
@@ -102,10 +108,14 @@ Updated: 2026-08-27
 - Accepted ReviewGPT artifact:
   `browser-vault-timeout-stage-telemetry-v4.patch`, exact SHA-256
   `692972685f2fe00e2b9ad5bb3d86a0aaf18d02cc15a18602b3bd98fbec4e7ff0`.
-- Passed: 76 focused Vitest cases across the Browser Vault replica owner and
+- Passed: 77 focused Vitest cases across the Browser Vault replica owner and
   assembled workspace scheduling/preemption paths.
 - Passed: `@murphai/assistant-runtime` TypeScript typecheck.
 - Passed: repository raw-log privacy guard and `git diff --check`.
+- Passed: final ReviewGPT round 2 on corrected head
+  `c3348500d9d67c5fe204d6f9c52329ac67dcb1d1`, with no qualifying findings.
+- Opened: PR #2486, ready for human merge after exact-final-head CI.
 - Product UX result: not applicable; this patch changes only failure metadata
   and leaves timing, control flow, replies, recovery, and user-visible state
   unchanged.
+Completed: 2026-08-28
