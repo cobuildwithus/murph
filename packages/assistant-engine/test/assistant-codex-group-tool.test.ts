@@ -318,6 +318,30 @@ describe("murph.group dynamic tool", () => {
 
     for (const tool of MURPH_GROUP_FAMILY_TOOLS) {
       expect(tool.deferLoading).toBe(true);
+      if (tool.name === "group_consult") {
+        expect(tool.inputSchema.oneOf).toHaveLength(
+          MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult.length,
+        );
+        expect(tool.inputSchema.oneOf.map(
+          (branch) => branch.properties.action.enum[0],
+        )).toEqual([...MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult]);
+        expect([
+          ...new Set(tool.inputSchema.oneOf.flatMap(
+            (branch) => Object.keys(branch.properties),
+          )),
+        ].sort()).toEqual([...expectedRootKeys.group_consult].sort());
+        for (const branch of tool.inputSchema.oneOf) {
+          expect(branch.additionalProperties).toBe(false);
+          expect(branch.required).toContain("action");
+          for (const forbiddenField of [
+            "groupId", "memberId", "providerMessageId", "route", "sender",
+          ]) {
+            expect(branch.properties).not.toHaveProperty(forbiddenField);
+          }
+        }
+        continue;
+      }
+
       expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(tool.inputSchema.required).toEqual(["action"]);
       expect(tool.inputSchema.properties.action).toMatchObject({
@@ -572,7 +596,7 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("keeps ask_current_sender limited to one exact Message ref", () => {
+  it("keeps fresh current-sender actions limited to one exact Message ref", () => {
     expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("messageRef");
     expect(GROUP_TOOL_INPUT_PROPERTIES.message_ref)
@@ -580,28 +604,33 @@ describe("murph.group dynamic tool", () => {
     expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("response_destination");
 
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "ask_current_sender",
-      message_ref: FRESH_ASSISTANT_INPUT_ID,
-    }))).toMatchObject({
-      kind: "group",
-      request: {
-        action: "ask_current_sender",
-        messageRef: FRESH_ASSISTANT_INPUT_ID,
-      },
-    });
-    for (const invalid of [
-      {
-        action: "ask_current_sender",
-      },
-      {
-        action: "ask_current_sender",
+    for (const [action, audience] of [
+      ["ask_current_sender", "group"],
+      ["ask_current_sender_privately", "current_sender"],
+    ] as const) {
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
         message_ref: FRESH_ASSISTANT_INPUT_ID,
-        response_destination: "group",
-      },
-    ]) {
-      expect(readMurphDynamicToolRequest(groupToolCall(invalid)))
-        .toMatchObject({ kind: "invalid-group-arguments" });
+      }))).toMatchObject({
+        kind: "group",
+        request: {
+          action: "ask_current_sender",
+          audience,
+          messageRef: FRESH_ASSISTANT_INPUT_ID,
+          mode: "new",
+        },
+      });
+      for (const invalid of [
+        { action },
+        {
+          action,
+          message_ref: FRESH_ASSISTANT_INPUT_ID,
+          response_destination: audience,
+        },
+      ]) {
+        expect(readMurphDynamicToolRequest(groupToolCall(invalid)))
+          .toMatchObject({ kind: "invalid-group-arguments" });
+      }
     }
 
     for (const action of [

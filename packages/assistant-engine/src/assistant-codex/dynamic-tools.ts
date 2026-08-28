@@ -611,6 +611,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.enum([
+        'ask_current_sender_privately',
         'clarify_current_sender',
         'continue_current_sender_in_group',
         'continue_current_sender_privately',
@@ -7261,6 +7262,7 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'ask_current_sender_privately'
     || parsed.data.action === 'clarify_current_sender'
     || parsed.data.action === 'continue_current_sender_in_group'
     || parsed.data.action === 'continue_current_sender_privately'
@@ -7535,6 +7537,7 @@ function parseGroupArguments(
 
 function readCurrentSenderToolDecision(action:
   | 'ask_current_sender'
+  | 'ask_current_sender_privately'
   | 'clarify_current_sender'
   | 'continue_current_sender_in_group'
   | 'continue_current_sender_privately'
@@ -7546,6 +7549,7 @@ function readCurrentSenderToolDecision(action:
   switch (action) {
     case 'ask_current_sender':
       return { audience: 'group', mode: 'new' }
+    case 'ask_current_sender_privately':
     case 'message_current_sender':
       return { audience: 'current_sender', mode: 'new' }
     case 'clarify_current_sender':

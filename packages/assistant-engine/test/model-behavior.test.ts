@@ -2942,6 +2942,88 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
+  it('discovers explicit current-sender personal Murph consultation without broadening group authority', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'families',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupEmailPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'families',
+        channel: 'email',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    const restrictedGroupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'shared_read',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+    const noToolGroupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'none',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    expect(groupPrompt).toContain(
+      'search/load deferred `murph.group_consult` via `tool_search` or `ALL_TOOLS` before redirecting or denying',
+    )
+    expect(groupPrompt).toContain(
+      "Current-sender actions are the authorized host-mediated bridge to that sender's personal Murph",
+    )
+    expect(groupPrompt).toContain(
+      'they do not grant direct room-vault access or private-state inspection',
+    )
+    expect(groupPrompt).toContain(
+      "Use only the exact accepted `message_ref` printed beside that sender's request or clarification answer.",
+    )
+    expect(groupPrompt).toContain(
+      'Infer only the requested answer audience from ordinary conversation',
+    )
+    expect(groupPrompt).toContain(
+      '`ask_current_sender` for an explicit answer in the group',
+    )
+    expect(groupPrompt).toContain(
+      '`ask_current_sender_privately` for an explicit private answer',
+    )
+    expect(groupPrompt).toContain(
+      '`clarify_current_sender` only when the destination is genuinely ambiguous',
+    )
+    expect(groupPrompt).toContain(
+      'After `clarify_current_sender` returns `clarification_required`, ask one concise natural question in that same turn about whether the answer should be shared in this group or sent privately, without prescribing a reply format. Do not finish that turn silently.',
+    )
+    expect(groupPrompt).toContain(
+      "After the same sender answers naturally, use the matching continuation action with that answer's exact ref",
+    )
+    expect(groupPrompt).toContain(
+      'the host reloads the Message and remains authoritative for identity, route existence, authorization, required notice, replay safety, and the fixed destination',
+    )
+    expect(groupPrompt).toContain(
+      'only for that explicit current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
+    )
+    expect(directPrompt).not.toContain('search/load deferred `murph.group_consult`')
+    expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
+    expect(restrictedGroupPrompt).not.toContain(
+      'search/load deferred `murph.group_consult`',
+    )
+    expect(noToolGroupPrompt).not.toContain(
+      'search/load deferred `murph.group_consult`',
+    )
+  })
+
   it('takes explicitly delegated initiative across direct and group scopes without expanding authority', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
