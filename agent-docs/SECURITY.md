@@ -1087,13 +1087,15 @@ Last verified: 2026-08-27
   authorize a send. Conversely, expired detached-control replay re-hands a
   still-valid private effect instead of appending another group terminal; only
   its provider-entry authority may convert that effect to the fixed fallback.
-  An unconsumed `assistant.ask.requested` keeps its encrypted wake after the
-  ten-minute request expiry so Web can still persist that terminal result, but
-  never beyond the mailbox content's 14-day privacy deadline. If that deadline
+  A current-sender `assistant.ask.requested` keeps its encrypted wake after the
+  ten-minute request expiry only while its system sequence remains ahead of the
+  durable consumed watermark, so Web can still persist that terminal result.
+  The mailbox's 14-day privacy deadline remains absolute. If that deadline
   retires the wake first, Web returns the explicit `content_expired` terminal
   reason and the runtime may retire only that unrecoverable request; ordinary
   `expired` or `unavailable` responses still cannot substitute for the required
-  current-sender completion.
+  current-sender completion. Other Assistant Ask targets retain their ordinary
+  expiry behavior.
 - Rolling compatibility is legacy-facing only. New callers use one strict body
   marker. New Web rejects deployed unmarked old `ask_current_sender` requests:
   the old runtime cannot prove the required exact-room notice happened before

@@ -85,6 +85,9 @@ export {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 };
 
+export const HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION =
+  "assistant_ask.current_sender_pending";
+
 export type HostedMailboxStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedMailboxMutationTx = Prisma.TransactionClient;
 

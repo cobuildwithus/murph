@@ -4,7 +4,10 @@ import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/co
 import { getPrisma } from "../prisma";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
-import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
+import {
+  HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
+  HOSTED_MAILBOX_RETENTION_MS,
+} from "../hosted-mailbox/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
@@ -411,7 +414,18 @@ export async function retireExpiredMailboxContent(input: {
               "expires_at" <= ${input.now}
               AND NOT (
                 "kind" = 'assistant.ask.requested'
-                AND "consumed_at" IS NULL
+                AND "lane" = 'system'
+                AND "retention_disposition" IS NOT DISTINCT FROM
+                  ${HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION}
+                AND "lane_seq" > COALESCE(
+                  (
+                    SELECT counter."consumed_seq"
+                    FROM "hosted_mailbox_lane_counter" AS counter
+                    WHERE counter."user_id" = "hosted_mailbox_item"."user_id"
+                      AND counter."lane" = 'system'
+                  ),
+                  0
+                )
               )
             )
             OR "created_at" <= ${cutoff}

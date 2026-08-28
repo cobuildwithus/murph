@@ -107,7 +107,7 @@ describe.skipIf(!runPostgresProof)(
         prisma: client,
         signalRuntimeRecheck: async () => undefined,
       });
-      expect(cleanup.expiredMailboxContentRetired).toBeGreaterThanOrEqual(1);
+      expect(cleanup.expiredMailboxContentRetired).toBeGreaterThanOrEqual(2);
       const retiredItems = await client.hostedMailboxItem.findMany({
         select: {
           contentRetiredAt: true,
@@ -120,9 +120,10 @@ describe.skipIf(!runPostgresProof)(
       expect(retiredItems).toHaveLength(2);
       expect(retiredItems).toEqual(expect.arrayContaining([
         expect.objectContaining({
-          contentRetiredAt: null,
+          contentRetiredAt: cleanupAt,
           id: requestId,
-          payloadRef: `hosted-mailbox-payload:${requestId}`,
+          payloadInlineCiphertext: null,
+          payloadRef: null,
         }),
         expect.objectContaining({
           contentRetiredAt: cleanupAt,
@@ -133,7 +134,7 @@ describe.skipIf(!runPostgresProof)(
       ]));
       await expect(client.hostedMailboxPayload.count({
         where: { mailboxItemId: requestId },
-      })).resolves.toBe(1);
+      })).resolves.toBe(0);
 
       const delivery = {
         answeredMailboxItemIds: [completionId],
@@ -160,24 +161,6 @@ describe.skipIf(!runPostgresProof)(
         })
       )).resolves.toBeUndefined();
 
-      const privacyDeadline = new Date(
-        createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000,
-      );
-      await runHostedRetentionCleanup({
-        now: privacyDeadline,
-        prisma: client,
-        signalRuntimeRecheck: async () => undefined,
-      });
-      await expect(client.hostedMailboxItem.findUniqueOrThrow({
-        select: { contentRetiredAt: true, payloadRef: true },
-        where: { id: requestId },
-      })).resolves.toEqual({
-        contentRetiredAt: privacyDeadline,
-        payloadRef: null,
-      });
-      await expect(client.hostedMailboxPayload.count({
-        where: { mailboxItemId: requestId },
-      })).resolves.toBe(0);
     });
 
     it("records policy non-replies without advancing across a younger conversation gap", async () => {

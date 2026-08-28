@@ -12,8 +12,10 @@ Updated: 2026-08-28
 
 ## Success criteria
 
-- New unconsumed requests retain recoverable content only until the existing
-  14-day privacy deadline, allowing the ordinary expired fallback to persist.
+- New current-sender requests retain recoverable content only while their
+  system sequence remains ahead of the durable consumed watermark and never
+  beyond the existing 14-day privacy deadline, allowing the ordinary expired
+  fallback to persist without extending other Assistant Ask retention.
 - Already-retired legacy requests reach one explicit terminal state and leave
   the runtime queue without starting Codex.
 - Ordinary `expired` and `unavailable` current-sender responses still retry
@@ -31,8 +33,9 @@ Updated: 2026-08-28
 
 ## Constraints
 
-- Technical constraints: preserve one canonical mailbox state owner; preserve
-  the 14-day maximum content-retention deadline; remain safe under rolling Web,
+- Technical constraints: preserve one canonical mailbox state owner; derive
+  settlement from the existing system-lane consumed watermark; preserve the
+  14-day maximum content-retention deadline; remain safe under rolling Web,
   Worker, and container version skew.
 - Product/process constraints: avoid sending a misleading very-late fallback
   when its encrypted source content is already irrecoverable; keep normal
@@ -43,9 +46,10 @@ Updated: 2026-08-28
 1. Risk: a broad terminal exception could silently drop recoverable requests.
    Mitigation: permit retirement only for the exact `content_expired` reason
    and keep regression tests for ordinary terminal reasons.
-2. Risk: retaining expired requests could exceed the privacy boundary.
-   Mitigation: exempt only unconsumed request content from the business TTL;
-   the existing created-at privacy cutoff remains authoritative.
+2. Risk: retaining expired requests could broaden private-data retention.
+   Mitigation: mark only current-sender admission at the mailbox owner, require
+   its sequence to remain ahead of the existing durable consumed watermark,
+   and keep the created-at privacy cutoff authoritative.
 
 ## Tasks
 
