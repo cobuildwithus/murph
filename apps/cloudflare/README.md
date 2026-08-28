@@ -477,12 +477,16 @@ activities that begin after runner acceptance are active wakes, not startup
 candidates, and are removed before ambiguity is assessed. Conflicting
 launch-owner evidence also fails closed. Warm direct
 wakes are omitted because they create no new runner job. The final table splits
-the same causal direct samples across Durable Object dispatch,
-consent locking, the existing health-data admission callback, runner-state
-operations, the parallel container-readiness and invocation-preparation
-branches, invocation launch, and runner-job acceptance. Per-phase chronology
-guards omit unavailable or reversed cross-runtime clock samples. It returns no
-member, mailbox, trace, or attempt identifiers.
+the same causal direct samples across Durable Object dispatch, UserRunner
+constructor initialization, consent locking, the existing health-data admission
+callback, runner-state operations, the parallel container-readiness and
+invocation-preparation branches, invocation launch, and runner-job acceptance.
+The three activation-only slices require route-through-first-ensure chronology
+and require the instance's first-ensure timestamp to equal the current RPC-entry
+timestamp; a warm instance therefore remains eligible only for the existing
+route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
+reversed cross-runtime clock samples. The report returns no member, mailbox,
+trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 

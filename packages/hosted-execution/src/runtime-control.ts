@@ -2304,8 +2304,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
   // Control-plane orchestration diagnostics before the runner-container DO
   // starts dispatch. Timestamps come from different hosts and are for coarse
-  // span splitting only. The two bounded ids correlate one Web direct ensure
-  // with the runtime invocation it launched.
+  // span splitting only. UserRunner constructor and first-ensure timestamps are
+  // facts about one Durable Object activation, so they can predate a warm
+  // request's route timestamp. The two bounded ids correlate one Web direct
+  // ensure with the runtime invocation it launched.
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
@@ -2325,6 +2327,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     cloudflareRouteReceivedAtEpochMs?: number;
     runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
+    userRunnerConstructorStartedAtEpochMs?: number;
+    userRunnerConstructorFinishedAtEpochMs?: number;
+    userRunnerFirstEnsureRuntimeProcessingAtEpochMs?: number;
     userRunnerRpcStartedAtEpochMs?: number;
     runtimeConsentLockAcquiredAtEpochMs?: number;
     healthDataAdmissionReadStartedAtEpochMs?: number;
@@ -2630,6 +2635,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "cloudflareRouteReceivedAtEpochMs",
     "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
+    "userRunnerConstructorStartedAtEpochMs",
+    "userRunnerConstructorFinishedAtEpochMs",
+    "userRunnerFirstEnsureRuntimeProcessingAtEpochMs",
     "userRunnerRpcStartedAtEpochMs",
     "runtimeConsentLockAcquiredAtEpochMs",
     "healthDataAdmissionReadStartedAtEpochMs",
