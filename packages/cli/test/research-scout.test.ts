@@ -516,6 +516,7 @@ describe('research scout', () => {
         abortedByCaller: true,
         failureStage: 'request',
         retryable: false,
+        stage: 'transport',
         timedOut: false,
       },
       message: 'Exa research scout request was aborted.',
@@ -597,7 +598,11 @@ describe('research scout', () => {
     })
     await expect(timeoutRequest).rejects.toMatchObject({
       code: 'research_exa_timeout',
-      context: expect.objectContaining({ retryable: true, timedOut: true }),
+      context: expect.objectContaining({
+        retryable: true,
+        stage: 'transport',
+        timedOut: true,
+      }),
     })
 
     const malformedJsonRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {

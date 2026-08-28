@@ -1522,22 +1522,28 @@ test('measurement import-json preserves nested links and import metadata', async
   assert.equal(shown.entity.data.timeZone, 'America/Los_Angeles')
 })
 
-test('measurement import-json rejects malformed nested values instead of saving a partial record', async () => {
+test('measurement import-json localizes malformed nested values without saving a partial record', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-strict-input-')
   cleanupPaths.push(parentRoot)
   const cli = createMeasurementCli()
   await initVault(cli, vaultRoot)
   const payloadPath = path.join(parentRoot, 'measurement-invalid.json')
-  const privateInvalidValue = 'private-invalid-measurement-tag'
+  const privateInvalidValue = 'private-invalid-measurement-value'
   await writeFile(payloadPath, JSON.stringify({
     occurredAt: '2026-03-16T08:00:00.000Z',
-    measurements: [{
-      metric: 'body-fat-pct',
-      value: 18.4,
-      unit: 'percent',
-      qualifiers: { device: '' },
-    }],
-    tags: ['valid-tag', { value: privateInvalidValue }],
+    measurements: [
+      {
+        metric: 'resting-hr',
+        value: 54,
+        unit: 'bpm',
+      },
+      {
+        metric: 'body-fat-pct',
+        value: 18.4,
+        unit: 'percent',
+        qualifiers: { device: { value: privateInvalidValue } },
+      },
+    ],
   }), 'utf8')
 
   const invalid = await runInProcessJsonCli(cli, [
@@ -1554,7 +1560,43 @@ test('measurement import-json rejects malformed nested values instead of saving 
     assert.equal(invalid.envelope.error.code, 'invalid_payload')
     assert.equal(invalid.envelope.error.stage, 'validation')
     assert.equal(invalid.envelope.error.retryable, false)
+    assert.deepEqual(
+      invalid.envelope.error.fieldErrors?.map((field) => field.path),
+      ['measurements.1.qualifiers'],
+    )
     assert.equal(JSON.stringify(invalid.envelope).includes(privateInvalidValue), false)
+  }
+
+  const invalidTagsPayloadPath = path.join(parentRoot, 'measurement-invalid-tags.json')
+  await writeFile(invalidTagsPayloadPath, JSON.stringify({
+    occurredAt: '2026-03-16T08:00:00.000Z',
+    measurements: [{
+      metric: 'body-fat-pct',
+      value: 18.4,
+      unit: 'percent',
+    }],
+    tags: ['valid-tag', { value: privateInvalidValue }],
+  }), 'utf8')
+
+  const invalidTags = await runInProcessJsonCli(cli, [
+    'measurement',
+    'import-json',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${invalidTagsPayloadPath}`,
+  ])
+
+  assert.equal(invalidTags.envelope.ok, false)
+  if (!invalidTags.envelope.ok) {
+    assert.equal(invalidTags.envelope.error.code, 'invalid_payload')
+    assert.equal(invalidTags.envelope.error.stage, 'validation')
+    assert.equal(invalidTags.envelope.error.retryable, false)
+    assert.deepEqual(
+      invalidTags.envelope.error.fieldErrors?.map((field) => field.path),
+      ['tags.1'],
+    )
+    assert.equal(JSON.stringify(invalidTags.envelope).includes(privateInvalidValue), false)
   }
 
   const listed = await runInProcessJsonCli<MeasurementListResult>(cli, [

@@ -286,19 +286,15 @@ async function resolveSavedProgressCard(input: {
   } finally {
     try {
       await rm(tempRoot, { force: true, recursive: true });
-    } catch (error) {
+    } catch {
       if (persisted) {
         const message =
-          "The experiment progress card was saved, but temporary files could not be cleaned up.";
-        const mapped = toVaultCliFilesystemError(error, { message });
-        if (mapped !== error) {
-          throw mapped;
-        }
+          "The experiment progress card was saved, but temporary files could not be cleaned up. Run the same command again to retrieve the saved card.";
         throw progressCardFailure(
           "progress_card_cleanup_failed",
           message,
           "filesystem",
-          false,
+          true,
         );
       }
     }

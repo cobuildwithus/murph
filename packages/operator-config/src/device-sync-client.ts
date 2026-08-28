@@ -74,37 +74,51 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
     fetchImpl,
     controlToken,
     timeoutMs: input.timeoutMs ?? DEFAULT_DEVICE_SYNC_REQUEST_TIMEOUT_MS,
-    createUnavailableError: ({ failureStage, method, timedOut }) =>
-      new VaultCliError(
+    createUnavailableError: ({ failureStage, method, timedOut }) => {
+      const safeToRetry = isSafeDeviceSyncMethod(method)
+      return new VaultCliError(
         timedOut
           ? 'device_sync_timeout'
           : failureStage === 'response'
             ? 'device_sync_response_unavailable'
             : 'device_sync_unavailable',
-        timedOut
-          ? 'Device sync service did not respond before the request deadline.'
-          : failureStage === 'response'
-            ? 'Device sync service response could not be read.'
-            : 'Device sync service is unavailable. Start it with `murph device daemon start --vault <path>` or start `murph-device-syncd` manually, then retry.',
+        safeToRetry
+          ? timedOut
+            ? 'Device sync service did not respond before the request deadline. Check connectivity, then retry.'
+            : failureStage === 'response'
+              ? 'Device sync service response could not be read. Retry the read.'
+              : 'Device sync service is unavailable. Start it with `murph device daemon start --vault <path>` or start `murph-device-syncd` manually, then retry.'
+          : ambiguousDeviceSyncWriteMessage(),
         {
-          retryable: isSafeDeviceSyncMethod(method),
+          retryable: safeToRetry,
           stage: failureStage,
         },
-      ),
-    createHttpError: ({ method, status, errorPayload }) =>
-      new VaultCliError(
+      )
+    },
+    createHttpError: ({ method, status, errorPayload }) => {
+      const safeToRetry = isSafeDeviceSyncMethod(method)
+        && (errorPayload.retryable ?? isRetryableDeviceSyncStatus(status))
+      const ambiguousWrite = !isSafeDeviceSyncMethod(method)
+        && (
+          errorPayload.retryable === true
+          || isRetryableDeviceSyncStatus(status)
+          || hasRetryDirective(errorPayload.message)
+        )
+      return new VaultCliError(
         errorPayload.code ?? 'device_sync_request_failed',
         status === 401 && !controlToken
           ? 'Device sync control plane requires DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
-          : errorPayload.message ??
-              `Device sync request failed with HTTP ${status}.`,
+          : ambiguousWrite
+            ? ambiguousDeviceSyncWriteMessage()
+            : errorPayload.message ??
+                `Device sync request failed with HTTP ${status}.`,
         {
           status,
-          retryable: isSafeDeviceSyncMethod(method)
-            && (errorPayload.retryable ?? isRetryableDeviceSyncStatus(status)),
+          retryable: safeToRetry,
           stage: 'response',
         },
-      ),
+      )
+    },
     createInvalidResponseError: () =>
       new VaultCliError(
         'device_sync_invalid_response',
@@ -222,6 +236,14 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
 
 function isSafeDeviceSyncMethod(method: string): boolean {
   return method === 'GET' || method === 'HEAD' || method === 'OPTIONS'
+}
+
+function ambiguousDeviceSyncWriteMessage(): string {
+  return 'The device sync operation may have been received. Inspect current device sync state before attempting it again.'
+}
+
+function hasRetryDirective(message: string | undefined): boolean {
+  return typeof message === 'string' && /\b(?:retry|try again)\b/iu.test(message)
 }
 
 function isRetryableDeviceSyncStatus(status: number): boolean {

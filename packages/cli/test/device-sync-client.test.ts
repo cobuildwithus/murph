@@ -160,6 +160,32 @@ test("createDeviceSyncClient bounds unavailable requests without leaking transpo
       assert.equal(projection.code, "device_sync_timeout");
       assert.equal(projection.retryable, true);
       assert.equal(projection.stage, "transport");
+      assert.match(projection.message, /retry/u);
+      assert.equal(JSON.stringify(projection).includes(privateTransportDetail), false);
+      return true;
+    },
+  );
+});
+
+test("createDeviceSyncClient makes ambiguous POST transport recovery explicit", async () => {
+  const privateTransportDetail = "private-device-write-transport-detail";
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () => {
+      throw new TypeError(privateTransportDetail);
+    },
+  });
+
+  await assert.rejects(
+    () => client.beginConnection({ provider: "oura" }),
+    (error) => {
+      if (!(error instanceof VaultCliError)) return false;
+      const projection = projectVaultCliError(error);
+      assert.equal(projection.retryable, false);
+      assert.equal(projection.stage, "transport");
+      assert.match(projection.message, /may have been received/u);
+      assert.match(projection.message, /Inspect current device sync state/u);
+      assert.doesNotMatch(projection.message, /retry|try again/iu);
       assert.equal(JSON.stringify(projection).includes(privateTransportDetail), false);
       return true;
     },
@@ -186,6 +212,9 @@ test("createDeviceSyncClient keeps ambiguous POST failures non-retryable", async
       assert.equal(projection.code, "DEVICE_SYNC_BUSY");
       assert.equal(projection.retryable, false);
       assert.equal(projection.stage, "response");
+      assert.match(projection.message, /may have been received/u);
+      assert.match(projection.message, /Inspect current device sync state/u);
+      assert.doesNotMatch(projection.message, /retry|try again/iu);
       return true;
     },
   );

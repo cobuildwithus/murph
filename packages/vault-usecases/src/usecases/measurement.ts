@@ -87,23 +87,31 @@ export function normalizeMetricSlug(value: string, fieldName = 'metric'): string
   return normalized
 }
 
-function normalizeQualifierMap(value: unknown): Record<string, string | number | boolean> | undefined {
+function normalizeQualifierMap(
+  value: unknown,
+  publicPath: readonly (string | number)[],
+): Record<string, string | number | boolean> | undefined {
   if (value === undefined) {
     return undefined
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw invalidStructuredMeasurementField('measurement qualifiers')
+    throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
   }
 
   const qualifierEntries: Array<[string, string | number | boolean]> = []
   for (const [rawKey, rawValue] of Object.entries(value)) {
-    const key = normalizeMetricSlug(rawKey, 'qualifier key')
+    let key: string
+    try {
+      key = normalizeMetricSlug(rawKey, 'qualifier key')
+    } catch {
+      throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
+    }
     if (typeof rawValue === 'string') {
       const normalizedValue = normalizeOptionalText(rawValue)
       if (normalizedValue) {
         qualifierEntries.push([key, normalizedValue])
       } else {
-        throw invalidStructuredMeasurementField('measurement qualifiers')
+        throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
       }
       continue
     }
@@ -113,7 +121,7 @@ function normalizeQualifierMap(value: unknown): Record<string, string | number |
       continue
     }
 
-    throw invalidStructuredMeasurementField('measurement qualifiers')
+    throw invalidStructuredMeasurementField('measurement qualifiers', publicPath)
   }
 
   const qualifiers = Object.fromEntries(qualifierEntries)
@@ -123,6 +131,7 @@ function normalizeQualifierMap(value: unknown): Record<string, string | number |
 
 export function normalizeMeasurementEntry(value: unknown, fieldName = 'measurement'): MeasurementEntry {
   const candidate = asJsonObject(value)
+  const publicPath = measurementEntryPublicPath(fieldName)
 
   const parsed = measurementEntrySchema.safeParse(
     candidate
@@ -133,7 +142,7 @@ export function normalizeMeasurementEntry(value: unknown, fieldName = 'measureme
               ? resolveMetricDefinition(candidate.metric)?.key
                 ?? normalizeMetricSlug(candidate.metric, `${fieldName}.metric`)
               : candidate.metric,
-          qualifiers: normalizeQualifierMap(candidate.qualifiers),
+          qualifiers: normalizeQualifierMap(candidate.qualifiers, [...publicPath, 'qualifiers']),
           note:
             typeof candidate.note === 'string'
               ? normalizeOptionalText(candidate.note) ?? undefined
@@ -210,7 +219,13 @@ function parseOptionalStoredMedia(value: unknown): StoredMedia[] | undefined {
   }
   const parsed = storedMediaSchema.array().max(10).safeParse(value)
   if (!parsed.success) {
-    throw invalidStructuredMeasurementField('media')
+    const invalidIndex = parsed.error.issues
+      .map((issue) => issue.path[0])
+      .find((segment): segment is number => typeof segment === 'number')
+    throw invalidStructuredMeasurementField(
+      'media',
+      invalidIndex === undefined ? ['media'] : ['media', invalidIndex],
+    )
   }
   return parsed.data
 }
@@ -221,7 +236,7 @@ function parseOptionalEventSource(value: unknown): EventSource | undefined {
   }
   const parsed = eventSourceSchema.safeParse(value)
   if (!parsed.success) {
-    throw invalidStructuredMeasurementField('source')
+    throw invalidStructuredMeasurementField('source', ['source'])
   }
   return parsed.data
 }
@@ -234,21 +249,33 @@ function parseOptionalNonEmptyStringArray(
     return undefined
   }
   if (!Array.isArray(value)) {
-    throw invalidStructuredMeasurementField(fieldName)
+    throw invalidStructuredMeasurementField(fieldName, [fieldName])
   }
-  return value.map((entry) => {
+  return value.map((entry, index) => {
     if (typeof entry !== 'string' || entry.trim().length === 0) {
-      throw invalidStructuredMeasurementField(fieldName)
+      throw invalidStructuredMeasurementField(fieldName, [fieldName, index])
     }
     return entry.trim()
   })
 }
 
-function invalidStructuredMeasurementField(fieldName: string): VaultCliError {
+function measurementEntryPublicPath(fieldName: string): readonly (string | number)[] {
+  const match = /^measurements\[(\d+)\]$/u.exec(fieldName)
+  return match ? ['measurements', Number(match[1])] : ['measurement']
+}
+
+function invalidStructuredMeasurementField(
+  fieldName: string,
+  publicPath: readonly (string | number)[],
+): VaultCliError {
   return new VaultCliError(
     'invalid_payload',
     `Structured measurement ${fieldName} must contain only valid values.`,
-    { retryable: false, stage: 'validation' },
+    {
+      issues: [{ code: 'custom', publicPath }],
+      retryable: false,
+      stage: 'validation',
+    },
   )
 }
 
