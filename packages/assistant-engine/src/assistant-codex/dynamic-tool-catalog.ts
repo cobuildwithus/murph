@@ -1287,11 +1287,11 @@ type MurphGroupConsultAction =
 
 const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
   ask: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['question'],
   },
   handoff: {
-    optional: ['groupLabel'],
+    optional: ['groupLabel', 'participantTarget'],
     required: ['context'],
   },
   ask_current_sender: {
