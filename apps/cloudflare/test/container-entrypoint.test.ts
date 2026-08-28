@@ -1062,6 +1062,7 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        requestedProcessingMode: "default",
         userId: "u1",
       }),
       headers: {
@@ -1109,6 +1110,7 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        requestedProcessingMode: "default",
       },
       { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },

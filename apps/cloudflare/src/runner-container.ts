@@ -504,6 +504,7 @@ export interface RunnerRuntimeWakeInput {
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   processingMode?: RunnerRuntimeProcessingMode | null;
+  requestedProcessingMode?: RunnerRuntimeProcessingMode | null;
   userId: string;
 }
 
@@ -4339,8 +4340,7 @@ function assertRunnerContainerEnsureProcessingUserIds(
 function normalizeRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "environment_interview"
-      || value === "inbox_media_retention"
+  return value === "inbox_media_retention"
       || value === "system_mailbox"
     ? value
     : "default";

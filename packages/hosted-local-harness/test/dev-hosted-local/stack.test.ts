@@ -2497,7 +2497,12 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
       scope: "current-build",
     }));
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      force: false,
+      preserveCurrentBuild: true,
+      scope: "current-build",
+    }));
   });
 
   it("skips repeated aggregate E2E runner container smoke only for the proved build id", async () => {
@@ -2555,7 +2560,12 @@ describe("hosted local dev stack", () => {
     expect(stderrTarget.text()).toContain(
       "Skipping runner container deploy-smoke; already proved for this hosted-local E2E run.",
     );
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      force: false,
+      preserveCurrentBuild: true,
+      scope: "current-build",
+    }));
   });
 
   it("keeps interactive dev running when the runner container smoke proof fails", async () => {
@@ -2622,7 +2632,12 @@ describe("hosted local dev stack", () => {
 
     await expect(stack.ready).rejects.toThrow("fetch failed");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
-    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(expect.objectContaining({
+      force: false,
+      preserveCurrentBuild: true,
+      scope: "current-build",
+    }));
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {

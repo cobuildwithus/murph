@@ -566,6 +566,11 @@ gate unset and makes no paid request.
   accepted outbound Linq request within 30 seconds while any staged background
   checkpoint remains held. The same scenario command then starts a clean Vitest
   process with a 10-second idle floor and typed, bounded ordering observation.
+  It also queues one same-member default-owned system row immediately before an
+  Environment completion, holds the default owner's canonical checkpoint, and
+  proves the report does not publish early before the ordered Environment row
+  advances through the subsequent model-free owner without another provider
+  request.
   That process proves a later durable conversation reaches mailbox import and
   provider start before an interrupted idle snapshot can retry, and proves the
   same foreground continuation after a committed canonical publication. The
@@ -683,6 +688,14 @@ gate unset and makes no paid request.
   `EXISTS` query shape without a private usage-row join. The separate
   `hosted-ai-usage-overshoot-alert-monitor-postgres.test.ts` proof executes that
   query against zero-cap and positive-cap current blocked periods.
+- `apps/web/test/vercel-anomaly-alert-webhook{,-route}.test.ts` proves the
+  independent event-driven Vercel platform anomaly path: a 64-KiB raw-body cap,
+  exact HMAC-SHA1 verification before parsing, documented aggregate-field
+  normalization, account/member/raw-payload exclusion, an allowlisted
+  observability link, stable hashed event idempotency, ignored unsupported
+  signed events, visible incomplete configuration, and retryable Resend
+  failure. It also proves the route waits for Resend admission before returning
+  2xx and adds no cron registration.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
   opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
   latency monitor. It runs the production query against 50,000 stale rows per

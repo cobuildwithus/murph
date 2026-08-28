@@ -1668,6 +1668,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   active latency incident cannot suppress a later error-code-independent
   progress stall. The progress read is observability only: it neither advances
   mailbox state nor signals Temporal or Cloudflare.
+  Vercel remains the sole owner of Web-platform usage and function-error
+  anomaly classification and grouping. Its account webhook sends only the
+  published `alerts.triggered` aggregate envelope to one Web route. Web bounds
+  the exact raw body, verifies Vercel's HMAC signature with a dedicated
+  environment secret before parsing, drops account/project ids and arbitrary
+  formatted values, and forwards bounded project, timing, count, baseline,
+  metric, unit, and z-score fields through the existing operational Resend
+  sender and recipients. A digest of the Vercel event id is the Resend retry
+  identity; neither the provider id nor raw payload enters email or logs. This
+  event-driven path adds no cron, database row, alert lifecycle, queue, or
+  anomaly model in Murph.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:
