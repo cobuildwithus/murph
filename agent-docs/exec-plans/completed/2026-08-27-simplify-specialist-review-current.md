@@ -1,6 +1,6 @@
 # Simplify specialist ReviewGPT proof review
 
-Status: active
+Status: completed
 Created: 2026-08-27
 Updated: 2026-08-27
 
@@ -66,12 +66,24 @@ Updated: 2026-08-27
 - Rebuild from current main rather than reconciling the stale branch again.
 - Leave the stale PR open and unchanged until the replacement is merged.
 - Do not restore Frog automation files deleted since the stale PR was authored.
+- Reject the preliminary specialist finding that requests a second
+  model-boundary packet. This PR necessarily makes proof infrastructure a
+  primary outcome, so its exact-head packet cannot represent the requested
+  negative case; one synthetic nondeterministic classification would not prove
+  an invariant, and a dedicated fixture would add the machinery this change
+  removes. The residual risk is limited to unnecessary internal review work.
 
 ## Verification
 
-- Commands to run: focused CLI contract tests for review packaging and release
-  audit context; repository prompt/workflow consistency searches; scoped
-  formatting or type checks if changed executable code requires them.
-- Expected outcomes: no remaining specialist coverage patch or legacy
-  coverage-write references in current owners; focused tests green; required
-  ReviewGPT result and GitHub checks green on the merge candidate.
+- Passed: `pnpm exec vitest run --config packages/cli/vitest.workspace.ts
+  --no-coverage packages/cli/test/release-script-coverage-audit.test.ts
+  packages/cli/test/review-gpt-package-concurrency.test.ts` (52 passed, 1
+  intentionally skipped).
+- Passed: `pnpm --dir packages/cli typecheck`.
+- Passed: shell syntax checks for the changed packaging and repo-tool scripts,
+  `git diff --check`, current-owner consistency search, and privacy scan.
+- Preliminary ReviewGPT: `FINDINGS` with one rejected medium finding; prompt and
+  coverage lenses applied, Product UX and frontend did not, and the response
+  returned no artifact.
+- Required GitHub checks and current-base merge proof remain before merge.
+Completed: 2026-08-27
