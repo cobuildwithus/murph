@@ -38,7 +38,7 @@ afterEach(() => {
 
 describe('Codex thread instructions', () => {
   it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_400)
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_600)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Complete the user's in-scope request end to end",
     )
@@ -61,7 +61,7 @@ describe('Codex thread instructions', () => {
       'one-time codes, CAPTCHA, new consent',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Recover ordinary tool friction: inspect state and exhaust bounded safe recovery',
+      "Treat ordinary tool friction as recoverable: inspect state and exhaust the owner's bounded safe recovery",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
@@ -76,13 +76,13 @@ describe('Codex thread instructions', () => {
       'eager absence or a failed probe is not proof',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'A bare `Can you...?` is capability-only',
+      'A bare `Can you...?` asks only about capability',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Answer from tool descriptions; never call it or invent a demo',
+      'Answer from tool descriptions; never call the capability or invent a demo',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Act only when the request includes the concrete task or content',
+      'Act only when the request includes a concrete task or content',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',
@@ -94,16 +94,19 @@ describe('Codex thread instructions', () => {
       'Use commentary for brief progress',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Answers, explanations, reviews, diagnoses, plans, and content do not authorize execution or saved/external changes',
+      'An answer, explanation, review, diagnosis, plan—including "build me a plan"—or content request does not authorize implementation or external or saved-state changes',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Murph instructions/skills may define a narrow canonical write',
+      'Murph instructions or a selected skill may define a narrow internal canonical write',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'subject to opt-out and owner rules',
+      'subject to user opt-out or a narrower owner rule',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Otherwise mutate only on explicit request',
+      'Otherwise mutate state only when explicitly asked',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Outside the explicit task authority above',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       'not unrelated mutations',

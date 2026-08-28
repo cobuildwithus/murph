@@ -1254,20 +1254,20 @@ describe('assistant execution prompt contract', () => {
     const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${developerPrompt}`
 
     expect(composedPrompt).toContain(
-      'A bare `Can you...?` is capability-only',
+      'A bare `Can you...?` asks only about capability',
     )
     expect(composedPrompt).toContain(
-      'Answer from tool descriptions; never call it or invent a demo',
+      'Answer from tool descriptions; never call the capability or invent a demo',
     )
     expect(composedPrompt).toContain(
       'search deferred tools via `tool_search` or code-mode `ALL_TOOLS`',
     )
     expect(
       composedPrompt.split(
-        'A bare `Can you...?` is capability-only',
+        'A bare `Can you...?` asks only about capability',
       ),
     ).toHaveLength(2)
-    expect(developerPrompt).not.toContain('call it or invent a demo')
+    expect(developerPrompt).not.toContain('call the capability or invent a demo')
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {
@@ -1829,7 +1829,7 @@ describe('assistant consumption lookup guidance', () => {
       'Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.',
     )
     expect(instructionStack).toContain(
-      'may define a narrow canonical write',
+      'may define a narrow internal canonical write',
     )
     expect(instructionStack).toContain(
       'treat that as consent to save the recoverable health data and source provenance in the vault unless they clearly ask not to retain it or ask for explicitly ephemeral analysis only',
