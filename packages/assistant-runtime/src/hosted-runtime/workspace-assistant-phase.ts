@@ -6587,11 +6587,14 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       statusCallback.nextWakeAt,
       statusCallback.nextWakeReason ?? "assistant",
     );
+    const refreshedSystemMailboxWake =
+      await resolveHostedSystemMailboxNextWakeCandidate({
+        vaultRoot: input.input.restored.vaultRoot,
+      });
     const ownerAwareStatusSystemMailboxWake =
-      isHostedSystemMailboxWakeCandidate(input.systemMailboxWake)
-      && input.systemMailboxWake.at === statusSystemMailboxWake.at
-      && input.systemMailboxWake.reason === statusSystemMailboxWake.reason
-        ? input.systemMailboxWake
+      refreshedSystemMailboxWake.at === statusSystemMailboxWake.at
+      && refreshedSystemMailboxWake.reason === statusSystemMailboxWake.reason
+        ? refreshedSystemMailboxWake
         : statusSystemMailboxWake;
     const backgroundWake = foregroundCausalOnly
       ? createHostedRuntimeWakeCandidate(null, null)

@@ -8,7 +8,7 @@ Updated: 2026-08-28
 
 - Make a completed Environment interview leave the page's saving state even
   when a foreground Murph reply is already running, without adding an
-  Environment-specific scheduler or changing Temporal workflow behavior.
+  Environment-specific scheduler or new Temporal workflow state.
 - Express the behavior through the existing ordered mailbox, one generic
   execution classifier, and the existing safe checkpoint between its two
   generic runtime owners.
@@ -26,7 +26,9 @@ Updated: 2026-08-28
   owner.
 - Environment status remains a UI projection only and is not a scheduling
   fact supplied to Temporal.
-- Temporal and the private worker repository require no functional change.
+- Temporal selects between the existing owners from the generic frontier and
+  wake reason only: a model-free `mailbox` wake uses `system_mailbox`, while a
+  real `assistant` wake keeps default/foreground priority.
 - Focused unit/integration tests, the relevant hosted-local composed journey,
   typecheck, exact-head review, and required CI pass.
 
@@ -38,13 +40,15 @@ Updated: 2026-08-28
   - Assistant-runtime model-free route/action admission through the existing
     default-owner checkpoint path.
   - Cloudflare runner wake semantics between default and system-mailbox work.
+  - Generic Temporal owner selection for model-free mailbox wakes.
   - Removal of Environment-specific reconciliation scheduling facts and
     documentation that describes them as orchestration inputs.
   - Focused regression coverage and a public changelog entry.
 - Out of scope:
   - New queues, schedulers, databases, feature flags, lifecycle managers, or
     mailbox schemas.
-  - Temporal workflow/patch changes or deployment machinery.
+  - Environment-specific Temporal modes, patches, migrations, or deployment
+    machinery.
   - Changes to the Environment questionnaire, generated review text, Browser
     Vault schema, or UI design.
   - Unrelated overlapping draft PR or inactive local worktree cleanup.
@@ -98,18 +102,17 @@ Updated: 2026-08-28
    made obsolete by the classifier.
 5. Add focused deterministic and composed hosted-local proof for all three
    affected journeys; run typecheck and applicable assistant verification.
-6. Commit, open the draft PR, run preliminary and final exact-head ReviewGPT
+6. Commit both exact candidates, run preliminary and final exact-head ReviewGPT
    concurrently with CI, resolve accepted findings, merge, verify deployment,
-   then close the obsolete private PR and retire owned worktrees safely.
+   and retire owned worktrees safely.
 
 ## Decisions
 
-- The private Temporal candidate was never deployable from its pull-request
-  head: the production worker workflow accepts only the exact verified `main`
-  tip, and that SHA has neither a deployment record nor a worker-deploy run.
-  Temporal therefore remains unchanged.
-- Public replacement PR #2448 owns the exact candidate, review, CI, deployment,
-  and closure of the superseded private PR.
+- Private PR #58 is retained but redesigned: its Environment mode, migration
+  patch, dependency bump, and blue-green rollout additions are deleted. Its
+  net change is one generic owner-selection predicate with focused tests.
+- Public PR #2448 and private PR #58 jointly own the exact candidate, review,
+  CI, composed proof, and deployment.
 - Keep one durable mailbox and one existing system-mailbox execution lane. An
   Environment completion is model-free work, not a new Temporal workflow mode.
 - Require no special deploy order or rollout mode. Mixed versions leave the row

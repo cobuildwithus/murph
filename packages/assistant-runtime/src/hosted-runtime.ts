@@ -2225,6 +2225,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             ? { orchestration: notification.orchestration }
             : {}),
           notifiedAtEpochMs: notification.notifiedAtEpochMs,
+          ...(notification.requestedProcessingMode
+            ? { requestedProcessingMode: notification.requestedProcessingMode }
+            : {}),
         });
         if (
           notification.latestNotifiedAtEpochMs !== undefined
@@ -2545,21 +2548,27 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let foregroundWakeObserved = false;
       let defaultOwnerWakeObserved = false;
       let assistantCronDeadlineMs: number | null = null;
-      const consumeForegroundWake = (): boolean => {
-        if (foregroundWakeObserved) {
-          return true;
-        }
-        const notification = consumePendingRuntimeWakeUnlessShuttingDown({
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-          shutdownSignal: options.shutdownSignal ?? null,
-        });
+      const observeForegroundWake = (
+        notification: RuntimeWakeNotification | null,
+      ): boolean => {
         if (!notification) {
           return false;
         }
         foregroundWakeObserved = true;
-        defaultOwnerWakeObserved =
+        defaultOwnerWakeObserved ||=
           notification.requestedProcessingMode === "default";
         return true;
+      };
+      const consumeForegroundWake = (): boolean => {
+        if (foregroundWakeObserved) {
+          return true;
+        }
+        return observeForegroundWake(
+          consumePendingRuntimeWakeUnlessShuttingDown({
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            shutdownSignal: options.shutdownSignal ?? null,
+          }),
+        );
       };
       const shouldYieldSystemMailboxWork = (): boolean =>
         consumeForegroundWake()
@@ -3106,16 +3115,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               );
             } catch (error) {
               await recordWakeInterruption.dispose();
-              if (recordWakeInterruption.takeNotification()) {
-                foregroundWakeObserved = true;
+              if (
+                observeForegroundWake(recordWakeInterruption.takeNotification())
+              ) {
                 return { preempted: true, prepared: true };
               }
               throw error;
             }
             await recordWakeInterruption.dispose();
-            if (recordWakeInterruption.takeNotification()) {
-              foregroundWakeObserved = true;
-            }
+            observeForegroundWake(recordWakeInterruption.takeNotification());
             return {
               preempted: shouldYieldSystemMailboxWork(),
               prepared: true,

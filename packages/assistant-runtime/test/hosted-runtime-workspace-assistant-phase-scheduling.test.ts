@@ -1601,13 +1601,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("yields to a model-free mailbox row after its default-owned predecessor", async () => {
-    const dueAt = "2026-04-27T00:00:00.000Z";
-    let unrestrictedWakeReadCount = 0;
+  it("preserves model-free ownership after recording a default-owned predecessor", async () => {
+    const predecessorAt = "2026-04-27T00:00:00.000Z";
+    const dueAt = "2026-04-27T00:00:01.000Z";
+    const nowAt = "2026-04-27T00:00:02.000Z";
+    let predecessorRecorded = false;
     mocks.getAssistantCronStatus.mockResolvedValue({
       dueJobs: 1,
       enabledJobs: 1,
-      nextRunAt: dueAt,
+      nextRunAt: predecessorAt,
       runningJobs: 0,
       totalJobs: 1,
     });
@@ -1619,10 +1621,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         ) {
           return { at: null, executionClass: null, reason: null };
         }
-        unrestrictedWakeReadCount += 1;
-        return unrestrictedWakeReadCount < 3
+        return !predecessorRecorded
           ? {
-              at: dueAt,
+              at: predecessorAt,
               executionClass: "default_owned",
               reason: "assistant",
             }
@@ -1644,28 +1645,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed",
     });
-    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
-      failed: 0,
-      nextWakeAt: dueAt,
-      nextWakeReason: "mailbox",
-      recorded: 1,
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementationOnce(async () => {
+      predecessorRecorded = true;
+      return {
+        failed: 0,
+        nextWakeAt: dueAt,
+        nextWakeReason: "mailbox",
+        recorded: 1,
+      };
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
-      now: () => dueAt,
+      now: () => nowAt,
       workspace: createDueAssistantWorkspace({
-        nextWakeAt: dueAt,
+        nextWakeAt: predecessorAt,
         nextWakeReason: "mailbox",
       }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: dueAt,
-      nextWakeReason: "mailbox",
+      nextWakeAt: predecessorAt,
       progressed: true,
     }));
     await expect(result.afterCheckpoint?.()).resolves.toEqual(expect.objectContaining({
