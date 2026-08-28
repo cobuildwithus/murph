@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-26
+Last verified: 2026-08-28
 
 ## Current Guardrails
 
@@ -21,6 +21,19 @@ Last verified: 2026-08-26
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
+- Protected native iOS and Android hosted E2E controllers run staggered every
+  six hours and admit paid work only when the current `main` SHA differs from
+  the latest completed successful scheduled outcome. A latest failure retries
+  at the next slot even when an older run passed the same SHA, and an explicit
+  rerun of the same trusted schedule bypasses the skip. Native source pins are
+  committed with protected `main`, so source rotation advances that checkpoint.
+  Fixed,
+  non-canceling per-platform concurrency prevents overlap without admitting a
+  waiter for every pull request or deployment event. The workflows are
+  production-only, non-destructive, and have no pull-request,
+  deployment-status, or manual trigger. They dispatch the current production
+  alias SHA; alias lag is accepted only when the existing Vercel classifier
+  proves the intervening `main` diff contains eligible dated release notes.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
   response, malformed successful response, or missing run id after the request
@@ -35,8 +48,8 @@ Last verified: 2026-08-26
   or status cannot be attested, the controller keeps the destructive native
   live lock and all cleanup authority fenced until the dispatch lease, private
   job timeout, and terminal grace window prove no admitted run can remain
-  executable. PR and production jobs are separately non-canceling; production
-  uses a non-destructive identity lifecycle. See
+  executable. The current production canary uses a non-destructive identity
+  lifecycle. See
   `agent-docs/operations/native-android-hosted-e2e.md`.
 - Required Temporal compatibility is one public commit status backed by a
   trusted default-branch controller and the private owner's immutable
