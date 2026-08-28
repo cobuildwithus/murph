@@ -306,13 +306,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // macOS production assembly measured an 8,683,649B static closure and
 // 11,409,047B total on 2026-08-26. Ratchet those integrated baselines and
 // retain the fixed 96KB static and 32KB total cross-platform allowances.
-// Event-ledger gzip compatibility extends existing Core/query read and canonical
-// write paths without adding a forbidden boot input. Exact Linux production
-// assembly measured 11,457,689B total on 2026-08-28. Ratchet that baseline and
-// retain the fixed 32KB total cross-platform allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_457_689 + 32_768;
+// Event-ledger gzip compatibility and the merged mailbox-owner graph extend the
+// existing Core/query/runtime paths without adding a forbidden boot input.
+// Exact Linux production assembly with the private managed-runtime overlay
+// measured 11,490,500B total on 2026-08-28; exact macOS public assembly measured
+// 11,531,130B total and an 8,787,302B static closure. Ratchet the higher measured
+// value for each dimension and retain the fixed cross-platform allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_531_130 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_739_005;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_683_649;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_787_302;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
