@@ -1204,7 +1204,7 @@ export class RuntimeInvocationService {
           component: "runner",
           errorCode: deriveHostedExecutionErrorCode(input.error),
           eventCode: "runner.accepted_attempt_failed",
-          leaseGeneration: input.token.leaseGeneration,
+          leaseGeneration: input.token.generation,
           level: "warn",
           phase: "error",
           redactedJson: {

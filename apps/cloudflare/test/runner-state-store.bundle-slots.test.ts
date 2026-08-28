@@ -511,15 +511,16 @@ describe("RunnerStateStore schema guard", () => {
         workspaceVersion: "42",
       },
     });
-    await expect(store.readWriteFenceToken()).resolves.toMatchObject({
+    const migratedToken = await store.readWriteFenceToken();
+    expect(migratedToken).toMatchObject({
       attemptId: "workspace-invocation-1",
-      expiresAt: null,
       generation: "3",
-      leaseGeneration: "3",
       processingMode: "default",
       startedAt: "2030-04-27T00:00:00.000Z",
       workspaceVersion: "42",
     });
+    expect(migratedToken).not.toHaveProperty("expiresAt");
+    expect(migratedToken).not.toHaveProperty("leaseGeneration");
   });
 
   it("blocks duplicate write fences and keeps the bound workspace version in the write-fence record", async () => {
@@ -595,7 +596,7 @@ describe("RunnerStateStore schema guard", () => {
       userId: "user-write",
     })).resolves.toMatchObject({
       attemptId: boundLease.attemptId,
-      leaseGeneration: boundLease.leaseGeneration,
+      leaseGeneration: boundLease.generation,
       owns: true,
       userId: "user-write",
       workspaceVersion: "6",
@@ -626,7 +627,7 @@ describe("RunnerStateStore schema guard", () => {
       userId: "user-write",
     })).resolves.toMatchObject({
       attemptId: boundLease.attemptId,
-      leaseGeneration: boundLease.leaseGeneration,
+      leaseGeneration: boundLease.generation,
       owns: true,
       record: {
         writeFence: {
@@ -775,7 +776,6 @@ describe("RunnerStateStore schema guard", () => {
     });
     await expect(store.readWriteFenceToken()).resolves.toMatchObject({
       attemptId: "attempt-current",
-      expiresAt: null,
       generation: "7",
       workspaceVersion: "9",
     });
