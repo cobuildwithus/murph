@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 100,
+  "item": {
+    "id": "food-label-searches-return-faster",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Food label searches return faster",
+    "summary": "Food label searches now respond faster for broad terms and misspellings, especially when Murph needs only a few matches.",
+    "details": "Result ranking, filters, public food search, supplement search, and exact barcode or record lookup keep their existing behavior.",
+    "relevanceTags": ["nutrition", "performance", "reliability"],
+    "sourcePullRequests": [2484]
+  }
+}
