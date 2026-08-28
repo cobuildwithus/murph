@@ -1,6 +1,6 @@
 # Select joined groups by membership inventory
 
-Status: active
+Status: completed
 Created: 2026-08-28
 Updated: 2026-08-28
 
@@ -165,12 +165,20 @@ rest.
 - Cloudflare: three focused files passed (230 tests); package typecheck passed.
 - Assistant Engine: group-tool, prompt, tool-description, and model-behavior
   coverage passed (217 tests), and the focused scripted exact-ID journey passed;
-  package typecheck passed. The two-page focused real-Codex journey passed on
-  `gpt-5.6-terra`; its reviewed member-facing behavior is Ready.
+  the parser compatibility matrix passed (8 tests); package typecheck passed.
+  The two-page focused real-Codex journey passed on `gpt-5.6-terra`; its
+  reviewed member-facing behavior is Ready.
+- Assistant Runtime: the two affected context and automation files passed (70
+  tests); package typecheck passed.
 - Provider input, measured from the same normalized complete request with the
   deferred group schema absent initially: direct scope changed from 22,317
   tokens / 105,380 bytes to 22,360 tokens / 105,751 bytes (+43 / +371); group
   scope remained 18,770 tokens / 89,508 bytes (no change).
 - `git diff --check` and private-identifier inspection passed. The preliminary
-  ReviewGPT findings were accepted and resolved; exact-head CI and final
-  ReviewGPT round 2 remain pending on the corrected candidate.
+  specialist and final round-1 findings were accepted and resolved. Round 2
+  required the repository's authored-source retrospective; it was recorded with
+  an explicit continuation decision because the inventory, membership-ID
+  transport, and final Web effect boundary are one indivisible outcome with net
+  source deletion and no new durable state owner. Final ReviewGPT round 3 then
+  passed the full patch with no remaining production findings.
+Completed: 2026-08-28
