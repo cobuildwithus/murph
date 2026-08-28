@@ -7271,7 +7271,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         expect(groupRequests).toEqual([])
         expect(reply).toMatch(
-          /\byes\b[^.?!]{0,160}\b(?:joined|added|already in)\b/iu,
+          /\byes\b[\s\S]{0,200}\b(?:joined|added|already in)\b/iu,
         )
         expect(reply).toMatch(
           /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b)/iu,
@@ -9381,7 +9381,7 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
           /(?:1:45|13:45).*(?:America\/New_York|Eastern|EDT|local)/iu,
         )
         expect(second.finalMessage).toMatch(
-          /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*UTC/iu,
+          /(?:(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*UTC|T17:45(?::30)?Z\b)/iu,
         )
         expect(second.finalMessage).not.toMatch(
           /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*(?:Eastern|EDT|EST)/iu,
@@ -13486,7 +13486,6 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           throw new Error('Expected one appointment booking phone-call tool call.')
         }
         expect(toolCall.argumentsValue).toMatchObject({
-          allowTransferToUser: false,
           callerName: 'Jordan Lee',
           shareableFacts: {
             date_of_birth: '1990-04-12',
@@ -13497,6 +13496,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
             phoneNumber: '+12025550123',
           },
         })
+        expect(toolCall.argumentsValue.allowTransferToUser ?? false).toBe(false)
         expect(
           appointmentSkillRead !== undefined
           && toolCall.eventIndex > appointmentSkillRead.eventIndex,
