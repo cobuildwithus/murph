@@ -159,6 +159,9 @@ import {
   type AssistantAutoReplyPromptInput,
 } from '../src/assistant/automation/prompt-builder.ts'
 import {
+  buildTrustedHostedImageCompletionTurnContext,
+} from '../src/assistant/automation/reply.ts'
+import {
   type AssistantNotificationInput,
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
@@ -11805,6 +11808,7 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
         path.join(tmpdir(), 'murph-physical-note-image-continuity-e2e-'),
       )
       const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
       const imageBytes = Buffer.from(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
         'base64',
@@ -11832,6 +11836,10 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
 
       try {
         await materializePhysicalNoteSkill({ skillsRoot })
+        await materializePhysicalNoteAddressVaultCli({
+          binDirectory,
+          result: buildPhysicalNoteAddressResult({ recommended: true }),
+        })
         const imagePath = path.join(workingDirectory, media.ref)
         await mkdir(path.dirname(imagePath), { recursive: true })
         await writeFile(imagePath, imageBytes)
@@ -11843,10 +11851,15 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions: buildDirectConversationDeveloperInstructions(),
-          dynamicTools: [],
+          dynamicTools: resolveMurphDynamicTools({
+            physicalNotesAvailable: true,
+          }),
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
           },
           excludeResumeTurns: true,
           model: config.model,
@@ -11858,7 +11871,6 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
         }
         const generation = await executeRealCodexAppServerTurn({
           ...commonInput,
-          dynamicTools: [MURPH_GENERATE_IMAGE_TOOL],
           hostedToolContext: {
             computerToolsAvailable: false,
             currentAssistantInputId: () => originInputId,
@@ -11910,10 +11922,10 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
         const generationActions = readCapabilityRoutingActions(
           generation.jsonEvents,
         )
-        expect(generationActions.some((action) =>
+        expect(generationActions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
-        )).toBe(true)
+        )).toHaveLength(1)
         expect(generationActions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
@@ -11923,31 +11935,22 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
           throw new Error('Expected the generation turn to return a session.')
         }
 
+        const completionTurnContext =
+          buildTrustedHostedImageCompletionTurnContext([{
+            inputId: completionInputId,
+            trustedHostedImageCompletion: {
+              media: [media],
+              originAssistantInputId: originInputId,
+              originAssistantInputIdExact: true,
+              savedImageRef: media.ref,
+              status: 'ready',
+            },
+          }])
+        if (!completionTurnContext) {
+          throw new Error('Expected trusted image completion turn context.')
+        }
         const completion = await executeRealCodexAppServerTurn({
           ...commonInput,
-          developerInstructions: buildDirectConversationDeveloperInstructions(
-            false,
-            null,
-            [
-              [
-                'Trusted hosted image completion (runtime-authored; authoritative):',
-                'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
-                JSON.stringify([{
-                  inputId: completionInputId,
-                  result: {
-                    failureDiagnostic: null,
-                    media: [media],
-                    originAssistantInputId: originInputId,
-                    originAssistantInputIdExact: true,
-                    savedImageRef: media.ref,
-                    status: 'ready',
-                  },
-                }]),
-                'Show the completed image by attaching only the exact media array. Retain savedImageRef for a later explicit request. This preview carries no authority to mail the note.',
-              ].join('\n'),
-            ],
-          ),
-          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -11969,8 +11972,16 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
             }),
             vaultFileSendAvailable: false,
           },
-          prompt:
-            'The trusted runtime completion is the current input. Continue the pending preview delivery.',
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools: commonInput.dynamicTools,
+            prompt:
+              'The trusted runtime completion is the current input. Continue the pending preview delivery.',
+            providerConfig: normalizeAssistantProviderConfig({
+              provider: 'codex-cli',
+            }),
+            turnContextPrompt: completionTurnContext,
+            workingDirectory,
+          }),
           resumeSessionId: generation.sessionId,
         })
         const completionActions = readCapabilityRoutingActions(
@@ -11978,8 +11989,13 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
         )
         expect(completionActions.filter((action) =>
           action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toHaveLength(1)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
         )).toHaveLength(0)
+        expect(completion.responseMedia).toEqual([media])
         if (!completion.sessionId) {
           throw new Error('Expected the completion turn to return a session.')
         }
@@ -11991,7 +12007,6 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
             messageRef === approvalInputId
               ? { targetInputId: approvalInputId }
               : null,
-          dynamicTools: [MURPH_SEND_PHYSICAL_NOTE_TOOL],
           hostedToolContext: {
             computerToolsAvailable: false,
             currentAssistantInputId: () => approvalInputId,
