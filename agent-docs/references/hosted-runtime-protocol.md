@@ -782,7 +782,13 @@ Web-direct foreground work may instead preempt that exact system child through
 the existing abort seam. A `system_mailbox` request behind an active default
 owner only retries; it does not wake or interrupt the foreground child. This
 adds no queue, scheduler, feature-specific mode, persisted handoff state, or
-same-invocation owner upgrade.
+Environment-specific promotion rule. An already-default-owned assistant queue
+head may reuse the runtime's existing foreground phase inside a
+`system_mailbox` invocation, preserving the generic assistant anti-starvation
+behavior without changing the controller fence or persisting a mode switch.
+`assistantExecutionBlocked` remains a hard boundary: that invocation retains
+the assistant wake for a later allowed foreground owner instead of promoting
+it.
 
 Web derives the generic `systemMailboxFrontier` from the exact first live row
 after `hostedMailboxSystemHandledThroughSeq` by using the same shared

@@ -431,7 +431,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(baseDeviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(fetchRequests.length, 1);
+      assert.equal(fetchRequests.length, 2);
       assert.deepEqual(checkpointRequests, []);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
       assert.equal(mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length, 0);

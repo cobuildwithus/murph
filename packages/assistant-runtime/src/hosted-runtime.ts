@@ -2930,10 +2930,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             : null;
         const defaultOwnerDueNow =
           requestedDefaultOwnerWakeAt !== null
-          || (
-            hostedRuntimeWakeReasonIsAssistant(projectedWake.nextWakeReason)
-            && hostedRuntimeWakeIsDue(projectedWake.nextWakeAt)
-          );
+          || projectedWake.assistantCronDueNow;
         const returnedWake = requestedDefaultOwnerWakeAt
           ? {
               nextWakeAt: requestedDefaultOwnerWakeAt,
@@ -3529,6 +3526,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       if (
         systemMailboxResult.immediateRecheckRequested !== true
+        || assistantExecutionBlocked
         || runtimeAbortController.signal.aborted
         || options.shutdownSignal?.aborted === true
       ) {
