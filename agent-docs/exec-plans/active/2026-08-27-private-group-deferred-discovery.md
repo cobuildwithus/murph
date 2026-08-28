@@ -118,3 +118,12 @@ Updated: 2026-08-27
   prompt suite passes; Assistant Engine typecheck passes; the focused Terra
   journey returned a truthful joined-only answer with zero group effects and
   was reviewed `Ready`; `git diff --check` passes.
+- Preliminary specialist review returned one accepted coverage finding: the
+  live assertion checked disconnected words and could admit contradictory
+  joined/unjoined claims. Its returned patch was test-only and applied cleanly
+  in check mode, but the parent rejected its oversized regex shape and made the
+  same correction with two smaller bounded semantic assertions.
+- The corrected focused Terra journey passes with a joined-only affirmative,
+  an explicit unjoined-chat denial, and zero group effects. The deterministic
+  18-test suite and Assistant Engine typecheck pass after remediation. Product
+  UX revalidation is not required because only test proof changed.

@@ -6343,10 +6343,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
 
         expect(groupRequests).toEqual([])
-        expect(reply).toMatch(/\byes\b|\bcan\b(?!['’]?t\b)/iu)
-        expect(reply).toMatch(/\b(?:joined|added|already in)\b/iu)
         expect(reply).toMatch(
-          /(?:can(?:not|'t)|do(?: not|n't)|unavailable)[^.]*\bunjoined\b|\bunjoined\b[^.]*(?:can(?:not|'t)|do(?: not|n't)|unavailable)/iu,
+          /(?:\b(?:i|murph)\s+can\b(?!['’]?t)[\s\S]{0,200}\b(?:joined|added|already in)\b|\b(?:joined|added|already in)\b[\s\S]{0,200}\b(?:i|murph)\s+can\b(?!['’]?t))/iu,
+        )
+        expect(reply).toMatch(
+          /(?:\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!]{0,120}\b(?:unjoined|not\s+joined)\b|\bunjoined\b[^.?!]{0,120}\b(?:are|remain)\s+(?:unavailable|inaccessible)\b)/iu,
         )
         expect(reply).toMatch(/\b(?:ask|check|consult|message|post|share|tell)\b/iu)
         expect(reply).not.toMatch(
