@@ -1,6 +1,7 @@
 ---
 title: 'Live hosted assistant journey lacks production permission profiles'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2498'
 ---
 
 ## Expected Behavior

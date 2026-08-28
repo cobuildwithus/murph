@@ -1,6 +1,7 @@
 ---
 title: 'CLI config-schema generation assumes prebuilt workspace dependencies'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2491'
 ---
 
 ## Expected Behavior

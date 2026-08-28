@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT wait loses completed responses and wake relaunches into active owners'
 severity: 'major'
+issue: 'cobuildwithus/murph#2493'
 ---
 
 ## Expected Behavior

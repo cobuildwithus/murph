@@ -1,6 +1,7 @@
 ---
 title: 'Focused live CLI fixtures depended on ambient runner state'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2492'
 ---
 
 ## Expected Behavior
