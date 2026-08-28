@@ -113,6 +113,7 @@ export interface AssistantProviderRequestStartedEvent
 export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
   deliveryContextOrdinal: number
   messageReactionPending: boolean
+  precedingReplyDeliveryContextOrdinal: number | null
 }
 
 /**

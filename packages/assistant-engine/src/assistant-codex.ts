@@ -3491,15 +3491,29 @@ async function runCodexAppServerTurnOnProcess(
     }
     noReplySettlementStarted = true
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      const precedingReplyDeliveryContextOrdinal = Math.max(
+        -1,
+        ...precedingAgentMessageSegments
+          .map((segment) => segment.deliveryContextOrdinal)
+          .filter((ordinal) => ordinal < deliveryContextOrdinal),
+        trailingSteerCandidate !== null &&
+            trailingSteerCandidate.deliveryContextOrdinal < deliveryContextOrdinal
+          ? trailingSteerCandidate.deliveryContextOrdinal
+          : -1,
+      )
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
         // The accepted event settles the cumulative accepted-turn prefix
-        // through this ordinal, so a reaction recorded for any covered
-        // earlier context must keep terminal suppression evidence deferred
-        // until reaction delivery settles.
+        // only when no earlier reply owns part of that prefix. A reaction
+        // recorded for any covered earlier context must keep terminal
+        // suppression evidence deferred until reaction delivery settles.
         messageReactionPending: reactionPatches.some(
           (entry) => entry.deliveryContextOrdinal <= deliveryContextOrdinal,
         ),
+        precedingReplyDeliveryContextOrdinal:
+          precedingReplyDeliveryContextOrdinal < 0
+            ? null
+            : precedingReplyDeliveryContextOrdinal,
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
       await input.onFinishWithoutReplyRecorded?.({
@@ -5245,8 +5259,8 @@ async function runCodexAppServerTurnOnProcess(
         completedFinalAgentMessage = null
         assistantStreams.clear()
         assistantStreamOrder.length = 0
-        responseMedia = []
       }
+      responseMedia = []
       responseCard = null
       responseCardTextFallback = null
       completedUserMessageOrdinal += 1

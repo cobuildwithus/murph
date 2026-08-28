@@ -383,6 +383,7 @@ test('sendAssistantMessageLocal delivers the earlier answer once when a pre-cuto
   const releaseAcknowledgementAdmission = createDeferred<void>()
   const acknowledgementSteered = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
+  const noReplyAccepted = vi.fn()
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -404,6 +405,7 @@ test('sendAssistantMessageLocal delivers the earlier answer once when a pre-cuto
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 1,
       messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: 0,
     })
     releaseLiveTurn?.()
     return {
@@ -443,6 +445,7 @@ test('sendAssistantMessageLocal delivers the earlier answer once when a pre-cuto
       await releaseAcknowledgementAdmission.promise
     },
     deliverResponse: true,
+    onFinishWithoutReplyAccepted: noReplyAccepted,
     prompt: 'Initial question',
     vault: '/vaults/test',
   })
@@ -477,6 +480,12 @@ test('sendAssistantMessageLocal delivers the earlier answer once when a pre-cuto
     responseDisposition: 'none',
   })
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(noReplyAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: ['manual-1'],
+    deliveryContextOrdinal: 1,
+    messageReactionPending: false,
+    precedingReplyDeliveryContextOrdinal: 0,
+  })
   expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledOnce()
   expect(
     mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments,
@@ -3837,6 +3846,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         kind: 'succeeded',
@@ -3890,6 +3900,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     acceptedInputIds: ['initial', 'manual-1'],
     deliveryContextOrdinal: 1,
     messageReactionPending: true,
+    precedingReplyDeliveryContextOrdinal: null,
   })
   expect(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
@@ -3917,6 +3928,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       abortedSilenceDraftReady.resolve()
       return {
@@ -3972,6 +3984,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       quietSilenceDraftReady.resolve()
       return {
@@ -4057,6 +4070,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -4116,6 +4130,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -4410,6 +4425,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       return {
         kind: 'succeeded',

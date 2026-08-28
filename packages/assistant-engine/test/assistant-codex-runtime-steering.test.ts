@@ -1418,6 +1418,45 @@ describe('steered final segments', () => {
     )
   })
 
+  it('clears attached media when accepted input advances before a response completes', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-attached-media',
+        type: 'user_message',
+        message: 'Attach the image to this answer',
+      }),
+      {
+        expectedText: '1 response image attached',
+        id: 863,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Old-context image',
+          source: 'old-context',
+          url: 'https://cdn.example.test/assistant/old-context.png',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-after-attached-media',
+        type: 'user_message',
+        message: 'Answer this newer request without that image',
+      }),
+      completedItemEvent({
+        id: 'assistant-after-attached-media',
+        type: 'assistant_message',
+        message: 'Latest-context answer without old media.',
+      }),
+    ])
+
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.finalMessage).toBe('Latest-context answer without old media.')
+    expect(result.providerAuthoredFinalMessage).toBe(
+      'Latest-context answer without old media.',
+    )
+  })
+
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
     const firstReplyRef = `ain_${'1'.repeat(32)}`
     const firstReactionRef = `ain_${'2'.repeat(32)}`
