@@ -7903,7 +7903,8 @@ function parseAttachExerciseRoutineCardArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_exercise_routine_card.input'
   const toolName = 'murph.attach_exercise_routine_card'
-  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(value)
+  const runtimeValue = defaultExerciseRoutineNullableText(value)
+  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(runtimeValue)
   if (!parsed.success) {
     return {
       ok: false,
@@ -7923,6 +7924,23 @@ function parseAttachExerciseRoutineCardArguments(
   return {
     card: parsed.data.card,
     ok: true,
+  }
+}
+
+function defaultExerciseRoutineNullableText(value: unknown): unknown {
+  const input = asRecord(value)
+  const card = asRecord(input?.card)
+  if (card?.kind !== 'exercise_routine') {
+    return value
+  }
+
+  return {
+    ...input,
+    card: {
+      footer: null,
+      subtitle: null,
+      ...card,
+    },
   }
 }
 

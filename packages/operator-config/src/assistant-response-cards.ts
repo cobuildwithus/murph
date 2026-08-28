@@ -1220,7 +1220,18 @@ function createExerciseRoutineResponseCardJsonSchema() {
   return {
     ...portableSchema,
     description:
-      'Exercise routine card V1 with honest timing and catalog-backed images.',
+      'Exercise routine card V1 authoring with honest timing and catalog-backed images.',
+    required: [
+      'exercises',
+      'intensity',
+      'kind',
+      'labels',
+      'safety',
+      'title',
+      'totalSeconds',
+      'transitionSeconds',
+      'version',
+    ],
   }
 }
 
