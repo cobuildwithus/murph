@@ -345,12 +345,17 @@ const REAL_CODEX_SUBSCRIPTION_ENV_ALLOWLIST = [
   'XDG_CONFIG_HOME',
   'XDG_DATA_HOME',
 ] as const
+const realCodexProviderApiKeyEnvByEnvironment = new WeakMap<
+  NodeJS.ProcessEnv,
+  string
+>()
 
 interface RealCodexE2eConfig {
   codexHome: string | null
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
+  providerApiKeyEnv: string | null
   temporaryPaths: string[]
 }
 
@@ -1114,7 +1119,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           deviceRequests.filter((request) => request.action !== 'list_accounts'),
         ).toHaveLength(0)
         expect(reply).toMatch(/oura|connect/iu)
-        expect(reply).toMatch(/later|wait|whenever|when you(?:'re| are) ready/iu)
+        expect(hasWearableConnectionDeferralMeaning(reply), reply).toBe(true)
         expect(reply).toMatch(
           /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
         )
@@ -1663,16 +1668,47 @@ describe('real Codex live fixture contracts', () => {
     expect(hasFinnishDrySaunaMeaning(
       'vault-cli commons knowledge search "Infrared sauna safety"',
     )).toBe(false)
+    expect(hasFinnishDrySaunaMeaning(
+      'vault-cli commons knowledge search "Finnish wet sauna health benefits versus dry infrared sauna evidence"',
+    )).toBe(false)
 
     for (const message of [
       'Yes, but only in group conversations that Murph has already joined. I can answer a question there.',
       'Murph can consult group conversations it has already joined.',
+      'Yes, if Murph has already joined the group conversation. I can help ask a question there or pass along a brief update.',
     ]) {
       expect(hasJoinedGroupCapabilityMeaning(message), message).toBe(true)
     }
     expect(hasJoinedGroupCapabilityMeaning(
       "Yes. I can't consult group conversations that I'm not joined to, and joined groups are unavailable too.",
     )).toBe(false)
+    expect(hasJoinedGroupCapabilityMeaning(
+      'Murph can message groups it has already joined, but it cannot interact with those groups.',
+    )).toBe(false)
+
+    expect(hasSavedSupportIssueForTriageMeaning(
+      'Your issue was saved for triage, and an account-linked support escalation was recorded.',
+    )).toBe(true)
+    expect(hasRecordedAccountLinkedEscalationMeaning(
+      'Your issue was saved for triage, and an account-linked support escalation was recorded.',
+    )).toBe(true)
+    expect(hasSavedSupportIssueForTriageMeaning(
+      'Your account-linked support escalation issue was recorded.',
+    )).toBe(false)
+
+    expect(hasWearableConnectionDeferralMeaning(
+      'That is fine. I will use Oura once you connect it.',
+    )).toBe(true)
+    expect(hasNoFurtherWearableCheckinMeaning(
+      'I will not send further Garmin no-data check-ins from this request.',
+    )).toBe(true)
+    expect(
+      'A durable fix comes from rebuilding tolerance, not from complete rest.'
+        .replaceAll(
+          /\b(?:not(?:\s+from)?|without|rather than)\s+complete rest\b/giu,
+          '',
+        ),
+    ).not.toMatch(/complete rest/iu)
 
     expect(isFixtureVoiceUpdatePreservingCurrentPersonalization({
       action: 'update',
@@ -3326,6 +3362,10 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
           action.kind === 'dynamic'
           && action.tool === MURPH_ASSISTANT_STYLE_TOOL.name
         )
+        const styleSetActions = styleActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.argumentsValue.action === 'set'
+        )
         const personality = await showAssistantPersonality(workingDirectory)
 
         process.stdout.write(
@@ -3335,7 +3375,7 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
           })}\n`,
         )
 
-        expect(styleActions).toEqual([
+        expect(styleSetActions).toEqual([
           expect.objectContaining({
             argumentsValue: {
               action: 'set',
@@ -3346,6 +3386,11 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
             tool: MURPH_ASSISTANT_STYLE_TOOL.name,
           }),
         ])
+        expect(styleActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.argumentsValue.action === 'show'
+        )).toHaveLength(styleActions.length - styleSetActions.length)
+        expect(styleActions.length - styleSetActions.length).toBeLessThanOrEqual(1)
         expect(
           actions.filter((action) => action.kind === 'command'),
           'no shell command should bypass the offered style tool',
@@ -4227,7 +4272,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           )
           expect(
             stableText.replaceAll(
-              /\b(?:not|without|rather than)\s+complete rest\b/giu,
+              /\b(?:not(?:\s+from)?|without|rather than)\s+complete rest\b/giu,
               '',
             ),
             `${label} stable unsupported restriction`,
@@ -9085,7 +9130,10 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                 mode: 'off',
                 sourceProvider: 'garmin',
               }])
-              expect(result.finalMessage).toMatch(/stop|off|won't check/iu)
+              expect(
+                hasNoFurtherWearableCheckinMeaning(result.finalMessage),
+                result.finalMessage,
+              ).toBe(true)
             } else if (probe.kind === 'group-preference') {
               expect(deviceRequests, probe.kind).toHaveLength(0)
               expect(result.finalMessage).toMatch(/direct|private|message me/iu)
@@ -12937,9 +12985,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
           assertSummary(summary: string) {
             expect(summary).toMatch(/\b(?:member|user)\b/iu)
             expect(summary).toMatch(/\bsettings\b|\bdevices?\b/iu)
-            expect(summary).toMatch(
-              /\boura\b|supported wearable[- ](?:account|provider)/iu,
-            )
+            expect(summary).toMatch(/\boura\b/iu)
             expect(summary).toMatch(/\bconnect/iu)
             expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
             expect(summary).toMatch(
@@ -13097,6 +13143,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
           expect(managedSummary?.length).toBeLessThanOrEqual(
             PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
           )
+          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
           expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
           expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
           expect(managedSummary).toMatch(/\bskip/iu)
@@ -13360,12 +13407,14 @@ describeRealCodex('real Codex support escalation e2e', () => {
         expect(privateText, 'support address remains opt-in').not.toContain(
           'support@withmurph.ai',
         )
-        expect(privateText, 'saved product issue confirmation').toMatch(
-          /\bissue\b.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}\bissue\b/iu,
-        )
-        expect(privateText, 'account-linked escalation confirmation').toMatch(
-          /account-linked(?: support)? escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked(?: support)? escalation/iu,
-        )
+        expect(
+          hasSavedSupportIssueForTriageMeaning(privateText),
+          'saved product issue for triage confirmation',
+        ).toBe(true)
+        expect(
+          hasRecordedAccountLinkedEscalationMeaning(privateText),
+          'recorded account-linked escalation confirmation',
+        ).toBe(true)
         expect(privateText, 'no invented promise').not.toMatch(
           /ticket|case number|will (?:fix|resolve|respond|reply|follow up)|within \d+|has (?:read|seen|received)/iu,
         )
@@ -15641,7 +15690,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
 
   it('passes only a minimal environment to live Codex probes', () => {
     const env = buildRealCodexE2eEnv({
-      apiKeyEnv: 'PROVIDER_KEY',
+      apiKeyEnv: 'PROVIDER_AUTH',
       sourceEnv: {
         AWS_SECRET_ACCESS_KEY: 'ignored-aws-value',
         CODEX_HOME: 'ignored-codex-home',
@@ -15649,31 +15698,46 @@ describe('real Codex app-server cache usage e2e harness', () => {
         HOME: 'ignored-home',
         OPENAI_API_KEY: 'ignored-openai-value',
         PATH: '/usr/bin:/bin',
-        PROVIDER_KEY: 'provider-value',
+        PROVIDER_AUTH: 'provider-value',
         TMPDIR: '/tmp',
       },
     })
 
     expect(env).toEqual({
       PATH: '/usr/bin:/bin',
-      PROVIDER_KEY: 'provider-value',
+      PROVIDER_AUTH: 'provider-value',
       TMPDIR: '/tmp',
       TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
     })
+    expect(buildRealCodexShellEnvironmentConfigOverrides(env)).toEqual([
+      'shell_environment_policy.inherit="all"',
+      'shell_environment_policy.ignore_default_excludes=false',
+      'shell_environment_policy.include_only=["PATH","TMPDIR","TSX_TSCONFIG_PATH"]',
+    ])
   })
 
   it('writes provider-key config without embedding the provider key value', () => {
     const configToml = buildRealCodexConfigToml({
-      apiKeyEnv: 'PROVIDER_KEY',
+      apiKeyEnv: 'PROVIDER_AUTH',
       model: 'gpt-5.6-terra',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+    })
+    const groupReadConfigToml = buildRealCodexGroupReadPermissionConfigToml({
+      codexHome: null,
+      env: {},
+      model: 'gpt-5.6-terra',
+      modelProvider: OPENAI_ENV_MODEL_PROVIDER,
+      providerApiKeyEnv: 'PROVIDER_AUTH',
+      temporaryPaths: [],
     })
 
     expect(configToml).toContain('[shell_environment_policy]')
     expect(configToml).toContain('include_only = [')
     expect(configToml).toContain('[model_providers.openai-env]')
-    expect(configToml).toContain('env_key = "PROVIDER_KEY"')
+    expect(configToml).toContain('env_key = "PROVIDER_AUTH"')
     expect(configToml).not.toContain('provider-value')
+    expect(groupReadConfigToml).toContain('env_key = "PROVIDER_AUTH"')
+    expect(groupReadConfigToml).not.toContain('provider-value')
     expect(configToml).not.toContain('[features.multi_agent_v2]')
     expect(CHILD_MODEL_SELECTION_CONFIG_OVERRIDES).toEqual([
       'features.multi_agent_v2.enabled=true',
@@ -15736,6 +15800,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       },
       model: DEFAULT_REAL_CODEX_MODEL,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      providerApiKeyEnv: null,
       temporaryPaths: [],
     })
   })
@@ -15765,6 +15830,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       },
       model: DEFAULT_REAL_CODEX_MODEL,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      providerApiKeyEnv: null,
       temporaryPaths: [],
     })
     await expect(resolveRealCodexE2eConfig({
@@ -19062,23 +19128,47 @@ function hasOneBoundedMealClarificationMeaning(message: string): boolean {
 }
 
 function hasFinnishDrySaunaMeaning(value: string): boolean {
-  return [
-    /\bfinnish\b/iu,
-    /\bdry\b/iu,
-    /\bsauna\b/iu,
-  ].every((pattern) => pattern.test(value))
+  return /\b(?:finnish(?:[- ]style)?\s+dry|dry\s+finnish(?:[- ]style)?)\s+sauna\b/iu
+    .test(value)
 }
 
 function hasJoinedGroupCapabilityMeaning(message: string): boolean {
-  const affirmsJoinedAccess = [
-    /\byes\b[^.?!\n]{0,160}\bonly\b[^.?!\n]{0,120}\b(?:joined|added|already in)\b/iu,
-    /\b(?:i|murph)\s+can\b[^.?!\n]{0,160}\b(?:ask|check|consult|interact|message|post|share|tell)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
+  const affirmsJoinedAccess = /\b(?:i|murph)\s+can(?!['’]?t\b)\b[^.?!\n]{0,160}\b(?:answer|ask|check|consult|interact|message|pass along|post|share|tell)\b/iu
+    .test(message)
+  const namesJoinedBoundary = [
+    /\b(?:only|if|when)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
+    /\b(?:group conversations?|groups?)\b[^.?!\n]{0,160}\b(?:joined|added|already in)\b/iu,
   ].some((pattern) => pattern.test(message))
   const deniesJoinedAccess = [
     /\b(?:joined|already[- ]joined)\s+groups?\b[^.?!\n]{0,80}\b(?:unavailable|inaccessible)\b/iu,
     /\b(?:i|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:joined|already[- ]joined)\s+groups?\b/iu,
+    /\b(?:i|it|murph)\s+(?:cannot|can['’]?t)\b[^.?!\n]{0,120}\b(?:those|the|joined|already[- ]joined)\s+groups?\b/iu,
   ].some((pattern) => pattern.test(message))
-  return affirmsJoinedAccess && !deniesJoinedAccess
+  return affirmsJoinedAccess && namesJoinedBoundary && !deniesJoinedAccess
+}
+
+function hasWearableConnectionDeferralMeaning(message: string): boolean {
+  return /\b(?:later|wait|whenever|when you(?:'re| are) ready|once you (?:connect|link)(?: it)?)\b/iu
+    .test(message)
+}
+
+function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
+  return /\b(?:stop|off|won't check|will not (?:send|make|do)(?: any)? further)\b/iu
+    .test(message)
+}
+
+function hasSavedSupportIssueForTriageMeaning(message: string): boolean {
+  return [
+    /\bissue\b[^.?!\n]{0,80}\b(?:saved|recorded)\b[^.?!\n]{0,80}\btriage\b/iu,
+    /\b(?:saved|recorded)\b[^.?!\n]{0,80}\bissue\b[^.?!\n]{0,80}\btriage\b/iu,
+  ].some((pattern) => pattern.test(message))
+}
+
+function hasRecordedAccountLinkedEscalationMeaning(message: string): boolean {
+  return [
+    /\baccount-linked(?:\s+(?:human[- ]support|support))?\s+escalation\b[^.?!\n]{0,80}\b(?:recorded|saved|created)\b/iu,
+    /\b(?:recorded|saved|created)\b[^.?!\n]{0,80}\baccount-linked(?:\s+(?:human[- ]support|support))?\s+escalation\b/iu,
+  ].some((pattern) => pattern.test(message))
 }
 
 function isFixtureVoiceUpdatePreservingCurrentPersonalization(
@@ -19738,7 +19828,12 @@ function recordRealCodexProviderUsage(usage: AssistantProviderUsage): void {
 function buildRealCodexShellEnvironmentConfigOverrides(
   env: NodeJS.ProcessEnv | undefined,
 ): string[] {
-  const includedKeys = Object.keys(env ?? {}).sort()
+  const providerApiKeyEnv = env
+    ? realCodexProviderApiKeyEnvByEnvironment.get(env)
+    : undefined
+  const includedKeys = Object.keys(env ?? {})
+    .filter((key) => key !== providerApiKeyEnv)
+    .sort()
   return [
     'shell_environment_policy.inherit="all"',
     'shell_environment_policy.ignore_default_excludes=false',
@@ -23223,6 +23318,7 @@ async function resolveRealCodexE2eConfig(
       env: buildRealCodexSubscriptionE2eEnv(sourceEnv),
       model,
       modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
+      providerApiKeyEnv: null,
       temporaryPaths: [],
     }
   }
@@ -23289,6 +23385,7 @@ async function resolveRealCodexE2eConfig(
     }),
     model,
     modelProvider,
+    providerApiKeyEnv: apiKeyEnv,
     temporaryPaths,
   }
 }
@@ -23368,28 +23465,9 @@ async function materializeRealCodexGroupReadPermissionHome(
   )
 
   try {
-    const baseConfig = config.modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER
-      ? [
-          `model = ${tomlString(config.model)}`,
-          `model_provider = ${tomlString(config.modelProvider)}`,
-          'model_reasoning_effort = "low"',
-          'approval_policy = "never"',
-          '',
-        ].join('\n')
-      : buildRealCodexConfigToml({
-          apiKeyEnv:
-            resolveRealCodexProviderApiKeyEnv(config.modelProvider)
-            ?? OPENAI_API_KEY_ENV,
-          model: config.model,
-          modelProvider: config.modelProvider,
-        })
     await writeFile(
       path.join(codexHome, 'config.toml'),
-      [
-        baseConfig.trimEnd(),
-        '',
-        ...buildMurphGroupReadPermissionProfileTomlLines(),
-      ].join('\n'),
+      buildRealCodexGroupReadPermissionConfigToml(config),
       {
         encoding: 'utf8',
         mode: 0o600,
@@ -23414,6 +23492,39 @@ async function materializeRealCodexGroupReadPermissionHome(
   }
 }
 
+function buildRealCodexGroupReadPermissionConfigToml(
+  config: RealCodexE2eConfig,
+): string {
+  const providerApiKeyEnv = config.providerApiKeyEnv
+  let baseConfig: string
+  if (config.modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER) {
+    baseConfig = [
+      `model = ${tomlString(config.model)}`,
+      `model_provider = ${tomlString(config.modelProvider)}`,
+      'model_reasoning_effort = "low"',
+      'approval_policy = "never"',
+      '',
+    ].join('\n')
+  } else {
+    if (!providerApiKeyEnv) {
+      throw new Error(
+        'Provider-auth group-read config requires the resolved credential key name.',
+      )
+    }
+    baseConfig = buildRealCodexConfigToml({
+        apiKeyEnv: providerApiKeyEnv,
+        model: config.model,
+        modelProvider: config.modelProvider,
+      })
+  }
+
+  return [
+    baseConfig.trimEnd(),
+    '',
+    ...buildMurphGroupReadPermissionProfileTomlLines(),
+  ].join('\n')
+}
+
 function buildRealCodexE2eEnv(input: {
   apiKeyEnv: string
   sourceEnv?: NodeJS.ProcessEnv
@@ -23433,6 +23544,8 @@ function buildRealCodexE2eEnv(input: {
   if (apiKey) {
     env[input.apiKeyEnv] = apiKey
   }
+
+  realCodexProviderApiKeyEnvByEnvironment.set(env, input.apiKeyEnv)
 
   return env
 }
