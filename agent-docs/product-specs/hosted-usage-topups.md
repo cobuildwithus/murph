@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-08-20
+Last verified: 2026-08-26
 
 ## Decision
 
@@ -52,6 +52,19 @@ beneficiary, offer, grant, available usage credit, consumption, and refund and
 dispute adjustments. An authenticated member may also fund an active hosted
 group by presenting that group's existing opaque join code; the group's
 synthetic thread-container member is the beneficiary.
+
+After a verified Checkout or saved-card payment fulfills a purchase, the same
+Stripe event receipt sends one privacy-safe operator payment email before it
+completes. That projection contains payment metadata only and is not grant or
+billing authority. Delivery retries on the receipt independently of the
+already-committed purchase and grant, with a receipt-local sent marker and
+provider idempotency preventing duplicate email. Payment notification and the
+existing runtime-recheck and sponsorship effects are each attempted even when
+the other fails. Both attempts start before either is awaited, so operator-email
+latency cannot delay the runtime recheck that reopens pending accepted work; an
+unmarked notification keeps the receipt retryable. If both attempts fail, the
+existing runtime-recheck retry code remains authoritative so replay reconstructs
+the member wake while the absent email marker independently retries delivery.
 
 An active Family owner may fund one exact active member through Family
 Settings. The owner is the payer, the selected member is the beneficiary, and

@@ -2234,6 +2234,33 @@ describe("organic hosted-group materialization", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
+  it("uses a provider title only when creating the group row", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      ownerMemberId: "member_owner",
+    });
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      initialDisplayName: "Weekend Warriors",
+      now: new Date("2026-08-25T12:00:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({ created: true });
+
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ displayName: "Weekend Warriors" }),
+      select: { id: true },
+    });
+
+    await expect(ensureHostedGroupStructureForThreadContainerTx({
+      containerMemberId: "member_group_runtime",
+      initialDisplayName: "Renamed Provider Group",
+      now: new Date("2026-08-25T12:01:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({ created: false });
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
   it("repairs owner membership without rewriting an existing group configuration", async () => {
     const tx = buildGroupLinkTx({
       existingDisplayName: "Existing Group",

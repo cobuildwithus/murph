@@ -50,6 +50,107 @@ export interface HostedAssistantNotificationBoundDestination {
   route: HostedExecutionAssistantNotificationRoute;
 }
 
+export interface HostedThreadContainerLinqRouteAuthorities {
+  authorities: ReadonlyMap<string, HostedExecutionExternalThreadRouteAuthority>;
+  nonLinqContainerMemberIds: ReadonlySet<string>;
+  unavailableContainerMemberIds: ReadonlySet<string>;
+}
+
+/**
+ * Read-only batch projection for bounded member-scoped group discovery. It
+ * opens the current route rows without issuing one database query per group;
+ * the effect owner still revalidates the selected authority before mutation.
+ */
+export async function readHostedThreadContainerLinqRouteAuthorities(input: {
+  containerMemberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+  signal?: AbortSignal;
+}): Promise<HostedThreadContainerLinqRouteAuthorities> {
+  const containerMemberIds = [...new Set(input.containerMemberIds)];
+  const rows = containerMemberIds.length === 0
+    ? []
+    : await input.prisma.hostedThreadRoute.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+          channel: true,
+          containerMemberId: true,
+          deliveryRouteEncrypted: true,
+          threadIdentityLookupKey: true,
+          threadLookupKey: true,
+        },
+        where: { containerMemberId: { in: containerMemberIds } },
+      });
+  const rowsByContainer = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const ownedRows = rowsByContainer.get(row.containerMemberId) ?? [];
+    ownedRows.push(row);
+    rowsByContainer.set(row.containerMemberId, ownedRows);
+  }
+
+  const authorities = new Map<string, HostedExecutionExternalThreadRouteAuthority>();
+  const nonLinqContainerMemberIds = new Set<string>();
+  const unavailableContainerMemberIds = new Set<string>();
+  const candidates = containerMemberIds.flatMap((containerMemberId) => {
+    const ownedRows = rowsByContainer.get(containerMemberId) ?? [];
+    if (ownedRows.length !== 1) {
+      unavailableContainerMemberIds.add(containerMemberId);
+      return [];
+    }
+    const row = ownedRows[0]!;
+    if (row.channel !== "linq") {
+      nonLinqContainerMemberIds.add(containerMemberId);
+      return [];
+    }
+    return [{ containerMemberId, row }];
+  });
+
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(4, candidates.length) },
+    async () => {
+      while (nextIndex < candidates.length) {
+        const candidate = candidates[nextIndex++];
+        if (!candidate) {
+          continue;
+        }
+        try {
+          const deliveryRoute = await openHostedThreadDeliveryRoute({
+            channel: "linq",
+            containerMemberId: candidate.containerMemberId,
+            encrypted: candidate.row.deliveryRouteEncrypted,
+            prisma: input.prisma,
+            signal: input.signal,
+          });
+          assertHostedThreadDeliveryRouteMatchesRow({
+            containerMemberId: candidate.containerMemberId,
+            deliveryRoute,
+            row: candidate.row,
+          });
+          if (deliveryRoute.channel !== "linq") {
+            unavailableContainerMemberIds.add(candidate.containerMemberId);
+            continue;
+          }
+          authorities.set(candidate.containerMemberId, {
+            accountLookupKey: deliveryRoute.accountLookupKey,
+            channel: "linq",
+            containerMemberId: candidate.containerMemberId,
+            threadId: deliveryRoute.threadId,
+          });
+        } catch {
+          unavailableContainerMemberIds.add(candidate.containerMemberId);
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
+
+  return {
+    authorities,
+    nonLinqContainerMemberIds,
+    unavailableContainerMemberIds,
+  };
+}
+
 export async function resolveHostedAssistantNotificationDestination(input: {
   directChannel?: "linq" | "telegram";
   memberId: string;

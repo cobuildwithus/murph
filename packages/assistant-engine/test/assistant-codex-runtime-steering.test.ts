@@ -46,6 +46,10 @@ import {
 describe('steered final segments', () => {
   type ScriptedSteeredFinalStep =
     | {
+        kind: 'callback'
+        run: () => Promise<void> | void
+      }
+    | {
         kind?: 'event'
         event: Record<string, unknown>
       }
@@ -58,6 +62,7 @@ describe('steered final segments', () => {
       }
     | {
         card: AssistantResponseCard
+        deferResponse?: boolean
         expectedSuccess?: boolean
         expectedText: string
         id: number
@@ -120,6 +125,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
     return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isCallbackStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'callback' }> {
+    return 'kind' in step && step.kind === 'callback'
   }
 
   function isAttachResponseCardStep(
@@ -218,6 +229,7 @@ describe('steered final segments', () => {
 
       queueMicrotask(() => {
         void (async () => {
+          const deferredCardResponses: Promise<unknown>[] = []
           const initialize = await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
@@ -250,6 +262,11 @@ describe('steered final segments', () => {
           }))
 
           for (const step of steps) {
+            if (isCallbackStep(step)) {
+              await step.run()
+              continue
+            }
+
             if (isAttachResponseCardStep(step)) {
               child.stdout.write(jsonLine({
                 id: step.id,
@@ -263,7 +280,9 @@ describe('steered final segments', () => {
                   turnId: 'turn-steered-finals',
                 },
               }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+              const responseAssertion = expect(
+                waitForRpcResponse(child, step.id),
+              ).resolves.toEqual({
                 id: step.id,
                 result: {
                   success: step.expectedSuccess ?? true,
@@ -275,6 +294,11 @@ describe('steered final segments', () => {
                   ],
                 },
               })
+              if (step.deferResponse === true) {
+                deferredCardResponses.push(responseAssertion)
+              } else {
+                await responseAssertion
+              }
               continue
             }
 
@@ -516,6 +540,8 @@ describe('steered final segments', () => {
 
             child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
           }
+
+          await Promise.all(deferredCardResponses)
 
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -782,7 +808,7 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
   })
 
-  it('keeps a steered follow-up text-only after an earlier response card', async () => {
+  it('lets the latest steered context replace an earlier response card', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-card-1',
@@ -803,12 +829,11 @@ describe('steered final segments', () => {
       completedItemEvent({
         id: 'user-card-2',
         type: 'user_message',
-        message: 'One more thought',
+        message: 'Send the refreshed nutrition card',
       }),
       {
         card: DAILY_NUTRITION_RESPONSE_CARD,
-        expectedSuccess: false,
-        expectedText: 'response card unavailable for this final response',
+        expectedText: 'response card attached',
         id: 85,
         kind: 'attach-response-card',
       },
@@ -819,10 +844,13 @@ describe('steered final segments', () => {
       }),
     ], { responseCardsAvailable: true })
 
-    expect(result.responseCard).toBeNull()
+    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
     expect(result.responseMedia).toEqual([])
-    expect(result.finalMessage).toBe('Final follow-up answer.')
+    expect(result.finalMessage).toBe(
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
+    )
     expect(result.providerAuthoredFinalMessage).toBe('Final follow-up answer.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.precedingAgentMessageSegments).toEqual([{
       deliveryContextOrdinal: 0,
       media: [],
@@ -1041,8 +1069,23 @@ describe('steered final segments', () => {
     }])
   })
 
-  it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
+  it('renders oversized card recovery for the latest steered context', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-oversized-card-1',
+        type: 'user_message',
+        message: 'Show my workout',
+      }),
+      completedItemEvent({
+        id: 'assistant-oversized-card-1',
+        type: 'assistant_message',
+        message: 'I can show that workout.',
+      }),
+      completedItemEvent({
+        id: 'user-oversized-card-2',
+        type: 'user_message',
+        message: 'Use the full tracked-workout card',
+      }),
       {
         card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
         expectedText:
@@ -1055,6 +1098,7 @@ describe('steered final segments', () => {
     expect(result.responseCard).toBeNull()
     expect(result.responseMedia).toEqual([])
     expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.finalMessage).not.toMatch(/delete|merge|shorten|simplify/iu)
     for (let exerciseIndex = 0; exerciseIndex < 16; exerciseIndex += 1) {
       expect(result.finalMessage).toContain(
@@ -1242,6 +1286,71 @@ describe('steered final segments', () => {
       'Complete combined nutrition answer.',
     )
   })
+
+  it.each([
+    {
+      card: DAILY_NUTRITION_RESPONSE_CARD,
+      label: 'normal card',
+    },
+    {
+      card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+      label: 'oversized card text recovery',
+    },
+  ] satisfies Array<{ card: AssistantResponseCard; label: string }>)(
+    'rejects an in-flight response card after accepted input advances ($label)',
+    async ({ card }) => {
+      const executionStarted = createDeferred<void>()
+      const releaseExecution = createDeferred<void>()
+      const result = await runScriptedSteeredFinalSegmentsTurn([
+        completedItemEvent({
+          id: 'user-before-in-flight-card',
+          type: 'user_message',
+          message: 'Send the response card',
+        }),
+        {
+          card,
+          deferResponse: true,
+          expectedSuccess: false,
+          expectedText: 'response card unavailable for this final response',
+          id: 861,
+          kind: 'attach-response-card',
+        },
+        completedItemEvent({
+          id: 'user-after-in-flight-card',
+          type: 'user_message',
+          message: 'Answer this newer request instead',
+        }),
+        {
+          kind: 'callback',
+          run: async () => {
+            await executionStarted.promise
+            await Promise.resolve()
+            releaseExecution.resolve()
+          },
+        },
+        completedItemEvent({
+          id: 'assistant-after-in-flight-card',
+          type: 'assistant_message',
+          message: 'Latest-context answer.',
+        }),
+      ], {
+        hostedToolContext: createHostedToolContext({
+          beforeToolExecution: async (deliveryContextOrdinal) => {
+            expect(deliveryContextOrdinal).toBe(0)
+            executionStarted.resolve()
+            await releaseExecution.promise
+          },
+        }),
+        responseCardsAvailable: true,
+      })
+
+      expect(result.responseCard).toBeNull()
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseDeliveryContextOrdinal).toBe(1)
+      expect(result.finalMessage).toBe('Latest-context answer.')
+      expect(result.providerAuthoredFinalMessage).toBe('Latest-context answer.')
+    },
+  )
 
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
     const firstReplyRef = `ain_${'1'.repeat(32)}`
