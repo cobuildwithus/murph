@@ -310,9 +310,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // write paths without adding a forbidden boot input. Exact Linux production
 // assembly measured 11,457,689B total on 2026-08-28. Ratchet that baseline and
 // retain the fixed 32KB total cross-platform allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_457_689 + 32_768;
+// Stateless calendar links extend existing Assistant Engine dynamic-tool and
+// @murphai/contracts output without adding a forbidden boot input. Exact Linux
+// production assembly measured 11,491,721B total on 2026-08-28; exact local
+// macOS production assembly measured an 8,783,756B static closure and
+// 11,528,174B total. Ratchet the higher cross-platform measurements and retain
+// the fixed static and total allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_528_174 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_739_005;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_683_649;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_783_756;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
