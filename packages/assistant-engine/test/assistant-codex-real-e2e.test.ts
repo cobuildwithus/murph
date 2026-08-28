@@ -6266,6 +6266,100 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'recognizes private access to joined group chats before denying it',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-capability-e2e-'),
+      )
+      type GroupRequest = Parameters<
+        NonNullable<AssistantHostedToolContext['groupTool']>['request']
+      >[0]
+      const groupRequests: GroupRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_GROUP_CONSULT_TOOL,
+            MURPH_GROUP_MEMBERSHIP_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_capability',
+              recipientKey: 'recipient_private_group_capability',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_capability'],
+              conversationId: 'conversation_private_group_capability',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_capability'],
+              originSessionId: 'session_private_group_capability',
+              recipientKey: 'recipient_private_group_capability',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                throw new Error('No group action is expected for this question.')
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'While we are talking privately, can you interact with my group conversations?',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[private-group-capability-e2e] ${JSON.stringify({
+            groupActions: groupRequests.map((request) => request.action),
+            reply,
+          })}\n`,
+        )
+
+        expect(groupRequests).toEqual([])
+        expect(reply).toMatch(/\b(?:yes|can)\b/iu)
+        expect(reply).toMatch(/\b(?:joined|added|already in)\b/iu)
+        expect(reply).toMatch(/\b(?:ask|check|consult|message|post|share|tell)\b/iu)
+        expect(reply).not.toMatch(
+          /can(?:not|'t) (?:access|message|reach)(?: or (?:access|message|reach))? (?:your )?(?:other )?group chats? from (?:this|here)|add me .* (?:and|then) (?:tag|ask)|tag me there/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'prepares the next group from a private text request',
     async () => {
       const config = await resolveRealCodexE2eConfig()
