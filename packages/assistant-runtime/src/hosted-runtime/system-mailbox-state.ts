@@ -390,15 +390,10 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     now,
     state: selectionState,
   });
-  if (
-    input.allowedRouteActions == null
-    && input.allowedWakeKinds == null
-    && readyItem !== null
-    && isHostedApprovedContinuationSystemMailboxItem(readyItem)
-  ) {
+  if (readyItem !== null) {
     return createHostedRuntimeWakeCandidate(
       resolveSystemMailboxItemNextWakeAt(readyItem, now),
-      "assistant",
+      resolveHostedSystemMailboxItemWakeReason(readyItem),
     );
   }
   return selectHostedRuntimeWakeCandidate(
@@ -1166,8 +1161,12 @@ function resolveSystemMailboxItemNextWakeAt(
 function resolveHostedSystemMailboxItemWakeReason(
   item: HostedSystemMailboxPendingItem,
 ): string {
-  return item.routeAction === "run-device-sync-wake"
-    ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+  if (item.routeAction === "run-device-sync-wake") {
+    return HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
+  }
+
+  return isHostedSystemMailboxModelFreeFrontierItem(item)
+    ? "mailbox"
     : HOSTED_ASSISTANT_WAKE_REASON;
 }
 

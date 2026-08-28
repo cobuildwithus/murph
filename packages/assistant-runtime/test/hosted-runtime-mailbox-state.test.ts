@@ -511,6 +511,38 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it("uses the selected model-free frontier as mailbox wake authority", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_browser_vault_refresh",
+      mailboxDedupeKey: "runtime-control:browser-vault-refresh:frontier",
+      mailboxLaneSeq: "1",
+      wakeKind: "runtime.browser-vault-refresh-requested",
+    });
+    const laterDefaultOwned = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_default_owned",
+      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+      mailboxLaneSeq: "2",
+      wakeKind: "runtime.codex-auth-requested",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [browserVaultRefresh, laterDefaultOwned],
+      }));
+
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "mailbox",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 

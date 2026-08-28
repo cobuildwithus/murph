@@ -140,6 +140,16 @@ Updated: 2026-08-27
     an immediate assistant wake without starting device work, entering the
     assistant phase, or preparing Codex.
   - The corrected assistant-runtime typecheck passes.
+  - The first strict-owner Linux run proved that the local queue selected the
+    Environment frontier correctly but still labelled every non-device row as
+    an assistant wake. That stale label handed model-free work back to the
+    default owner and left the Environment row pending.
+  - The queue's existing selected item is now the single wake authority, and
+    its wake reason comes from the shared execution classifier: model-free
+    work uses the existing generic mailbox wake while default-owned work uses
+    the assistant wake. The focused Environment, approval handoff, and ordered
+    frontier tests pass (3 tests), the complete mailbox-state suite passes (29
+    tests), and assistant-runtime typecheck passes.
 - Composed proof:
   - `pnpm hosted-local e2e foreground-reply-priority` was attempted, but the
     runner's fixed macOS total-byte ceiling stopped bundle assembly before the
@@ -149,12 +159,11 @@ Updated: 2026-08-27
   - Corrected exact-head final ReviewGPT, public CI, private Linux composed E2E,
     and post-deploy smoke. The preliminary specialists requested the composed
     journey and a same-member ordered-predecessor case; both are accepted.
-  - The first exact private Linux run disproved default-owner in-place draining:
-    Environment stayed imported but pending, and system-owned foreground
-    processing retained the wrong fence. The current correction derives the
-    next owner from all already-local mailbox work, removes system-owner
-    assistant execution, and restores one cooperative checkpoint-and-retry
-    rule in both directions. It still needs a fresh exact-head Linux run.
+  - The first exact private Linux run disproved default-owner in-place draining,
+    and the second exposed the stale wake-label mismatch after strict ownership
+    was restored. The current correction keeps the two existing owners and one
+    ordered queue, with no new mode or persisted state. It still needs a fresh
+    exact-head Linux run.
 - Required outcomes:
   - Exact first-frontier classification, no leapfrogging, no model call for
     Environment completion, safe cooperative owner yield in both directions,
