@@ -1,8 +1,8 @@
 # Simplify exercise routine card authoring
 
-Status: active
+Status: completed
 Created: 2026-08-26
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -52,8 +52,8 @@ Updated: 2026-08-26
    normalize omission to canonical nulls.
 2. [x] Add deterministic schema/parser regressions and extend the focused live
    journey.
-3. [ ] Complete the live journey, Product UX walkthrough, required reviews,
-   exact-head CI, and draft PR evidence.
+3. [x] Complete the live journey and Product UX walkthrough, then finalize the
+   exact candidate for routed PR review, CI, and draft PR evidence.
 
 ## Decisions
 
@@ -71,9 +71,13 @@ Updated: 2026-08-26
   invalid explicit values remain rejected, the live journey attaches exactly
   one complete card, and all checks pass.
 - Current result: operator-config tests passed 15/15; assistant response-card
-  and turn-planning tests passed 125/125; both package typechecks and
-  `git diff --check` passed. The focused subscription journey was admitted but
-  stopped before the turn with `ASSISTANT_CODEX_USAGE_LIMIT`, so Product UX and
-  live-model verdict remain Hold pending an available subscription run. The
-  changelog archive test passed 9/9 and the hosted Web typecheck passed for the
-  public reliability note.
+  and turn-planning tests passed 125/125; package typechecks and
+  `git diff --check` passed. The focused subscription journey passed all five
+  attended Telegram, scheduled Telegram, Linq, plain-text, and presentation
+  repair turns after its assertions were aligned with runtime-owned card text,
+  scheduled private decisions, and explicit presentation requests. Product UX
+  verdict is Ready. The changelog archive test passed 9/9 and the hosted Web
+  typecheck passed for the public reliability note. Routed ReviewGPT and exact-
+  head CI remain PR completion gates after this plan is archived into the final
+  candidate.
+Completed: 2026-08-27

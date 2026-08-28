@@ -1869,8 +1869,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             model: config.model,
             modelProvider: config.modelProvider,
             prompt: scenario.scheduledOccurrenceAt
-              ? 'Teach the saved one-movement doorway stretch routine now. It is 8 repetitions over 60 seconds. Stop if pain increases.'
-              : `Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases.${scenario.minimalPresentation ? ' Keep the presentation minimal without a subtitle or footer.' : ''}`,
+              ? 'Teach the saved one-movement doorway stretch routine now with the exercise routine card. It is 8 repetitions over 60 seconds. Stop if pain increases.'
+              : scenario.expected === 'media'
+                ? 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds, include the catalog image as response media, and stop if pain increases.'
+                : 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases. Use the exercise routine card, and keep the presentation minimal without a subtitle or footer.',
             reasoningEffort: 'low',
             sandbox: 'workspace-write',
             workingDirectory,
@@ -1895,10 +1897,19 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                 .toMatchObject({ footer: null, subtitle: null })
             }
             expect(result.responseMedia, `${scenario.label} media`).toEqual([])
-            expect(
-              result.finalMessage.trim(),
-              `${scenario.label} duplicate text`,
-            ).toBe('')
+            if (scenario.scheduledOccurrenceAt) {
+              expect(
+                parseAssistantNotificationDecision(
+                  result.providerAuthoredFinalMessage ?? '',
+                ).kind,
+                `${scenario.label} terminal decision`,
+              ).toBe('skip')
+            } else {
+              expect(
+                result.providerAuthoredFinalMessage,
+                `${scenario.label} model text after card attachment`,
+              ).toBe('')
+            }
           } else {
             expect(
               actions.filter((action) =>
@@ -2007,7 +2018,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           totalSeconds: 60,
         })
         expect(repairedRoutine.responseMedia).toEqual([])
-        expect(repairedRoutine.finalMessage.trim()).toBe('')
+        expect(repairedRoutine.providerAuthoredFinalMessage).toBe('')
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -2015,7 +2026,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         ])
       }
     },
-    360_000,
+    720_000,
   )
 
   it(
