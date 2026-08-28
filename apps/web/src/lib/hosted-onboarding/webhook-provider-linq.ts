@@ -1348,6 +1348,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     summary,
   } = context;
 
+  if (
+    !isHostedLinqGroupChat(messageEvent)
+    && messageEvent.data.message.parts.length > 0
+    && participantContact?.kind === "phone"
+    && !shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+  ) {
+    // Identity and outreach owners take the participant lock before entering
+    // chat work. Preserve participant -> chat -> member everywhere so an
+    // uncommitted signup cannot deadlock an admitted inbound on the same chat.
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: participantContact.value,
+      tx: input.prisma,
+    });
+  }
+
   await acquireHostedLinqChatOwnershipLockTx({
     chatId: summary.chatId,
     tx: input.prisma,
@@ -1442,17 +1460,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "ignored-local-inbound-guard",
       }),
     );
-  }
-
-  if (participantContact.kind === "phone") {
-    // The outreach opener holds this same lock through provider acceptance.
-    // Waiting here before identity and outreach reads makes an immediate reply
-    // observe either the committed opener or none of its state, never a generic
-    // onboarding plan from a half-visible dispatch.
-    await acquireHostedLinqParticipantPhoneLockTx({
-      phoneNumber: participantContact.value,
-      tx: input.prisma,
-    });
   }
 
   const existingMemberLookup = await lookupHostedLinqIdentityCoreCandidate({
@@ -2586,8 +2593,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         : {}),
     });
   if (retryableFallbackRecipientPhone) {
-    const memberPhone = normalizePhoneNumber(participantPhoneNumber);
-    if (!memberPhone || !existingMember) {
+    if (!existingMember) {
       return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
     }
 
@@ -2610,8 +2616,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
         inviteCode: invite.inviteCode,
         inviteId: invite.id,
         memberId: existingMember.id,
-        memberPhone,
         occurredAt,
+        participantContact,
         sourceEventId: input.event.event_id,
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -2691,11 +2697,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     && instantStartAdmissionEventId !== null;
 
   if (assignedPhone && incomingLinePhone && assignedPhone !== incomingLinePhone) {
-    const memberPhone = normalizePhoneNumber(participantPhoneNumber);
-    if (!memberPhone) {
-      return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
-    }
-
     const refreshedRouting = preparedDirectRoutingAuthority
       && preparedDirectRoutingAuthority.memberId === member.id
       ? preparedDirectRoutingAuthority.routingState
@@ -2760,8 +2761,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
         inviteCode: invite.inviteCode,
         inviteId: invite.id,
         memberId: member.id,
-        memberPhone,
         occurredAt,
+        participantContact,
         sourceEventId: input.event.event_id,
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {

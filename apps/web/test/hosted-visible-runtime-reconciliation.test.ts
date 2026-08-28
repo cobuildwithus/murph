@@ -244,11 +244,67 @@ describe("visible runtime access reconciliation", () => {
     expect(mocks.buildInactiveMemberAccessNoticeResponse).toHaveBeenCalledWith({
       assignedPhone: "+15550100001",
       memberId: "member_123",
-      memberPhone: "+15551234567",
       message: "Your billing needs attention.",
       noticeCode: "billing_inactive",
       occurredAt: "2026-07-25T12:00:00.000Z",
+      participantContact: expect.objectContaining({
+        kind: "phone",
+        value: "+15551234567",
+      }),
       sourceEventId: "linq:event:access-notice",
+    });
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
+      prisma,
+      sideEffects: plan.desiredSideEffects,
+    });
+  });
+
+  it("preserves a verified email participant in the private access handoff", async () => {
+    const facts = blockedFacts("user_not_active");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "linq",
+      eventId: "linq:event:email-access-notice",
+      kind: "conversation.message",
+      message: {
+        contactKind: "email",
+        linqMessage: {
+          chatId: "chat_stale",
+          from: "member@example.test",
+          messageId: "message_email_access_notice",
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    const plan = {
+      desiredSideEffects: [{ effectId: "email-access-notice-effect" }],
+      response: { ok: true, reason: "sent-billing-inactive-notice" },
+    };
+    mocks.buildInactiveMemberAccessNoticeResponse.mockReturnValue(plan);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    })).resolves.toBe(facts);
+
+    expect(mocks.buildInactiveMemberAccessNoticeResponse).toHaveBeenCalledWith({
+      assignedPhone: "+15550100001",
+      memberId: "member_123",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      participantContact: expect.objectContaining({
+        kind: "email",
+        value: "member@example.test",
+      }),
+      sourceEventId: "linq:event:email-access-notice",
     });
     expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
       prisma,
@@ -297,8 +353,11 @@ describe("visible runtime access reconciliation", () => {
       inviteCode: "invite_code",
       inviteId: "invite_123",
       memberId: "member_123",
-      memberPhone: "+15551234567",
       occurredAt: "2026-07-25T12:00:00.000Z",
+      participantContact: expect.objectContaining({
+        kind: "phone",
+        value: "+15551234567",
+      }),
       sourceEventId: "linq:event:123",
     });
     expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({

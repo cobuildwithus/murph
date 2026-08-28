@@ -268,8 +268,11 @@ function createMemberParticipantSideEffect(input: {
         assignedRecipientPhone: "+15550100001",
         inviteId: "invite-1",
         memberId: "member-1",
-        memberPhone: "+15551234567",
         occurredAt: "2026-03-26T12:00:00.000Z",
+        participantContact: {
+          kind: "phone",
+          value: "+15551234567",
+        },
         sourceEventId: input.sourceEventId,
         template: input.template,
       })
@@ -277,10 +280,13 @@ function createMemberParticipantSideEffect(input: {
         assignedRecipientPhone: "+15550100001",
         claimToken: null,
         memberId: "member-1",
-        memberPhone: "+15551234567",
         message: "Your billing needs attention.",
         noticeCode: "billing_inactive",
         occurredAt: "2026-03-26T12:00:00.000Z",
+        participantContact: {
+          kind: "phone",
+          value: "+15551234567",
+        },
         sourceEventId: input.sourceEventId,
         template: input.template,
       });
@@ -773,8 +779,11 @@ describe("hosted Linq webhook transport", () => {
             assignedRecipientPhone: "+15550100001",
             inviteId: "invite-1",
             memberId: "member-1",
-            memberPhone: "+15551234567",
             occurredAt: "2026-03-26T12:00:00.000Z",
+            participantContact: {
+              kind: "phone",
+              value: "+15551234567",
+            },
             sourceEventId: "event-partial-replay",
             template,
           });
@@ -1225,8 +1234,11 @@ describe("hosted Linq webhook transport", () => {
       assignedRecipientPhone: "+15550100001",
       inviteId: "invite-1",
       memberId: "member-1",
-      memberPhone: "+15551234567",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
       sourceEventId: "event-contact-card-fallback-replayed-delivery",
       template: "invite_signup_fallback",
     });
@@ -1452,8 +1464,11 @@ describe("hosted Linq webhook transport", () => {
       assignedRecipientPhone: "+15550100001",
       inviteId: "invite-1",
       memberId: "member-1",
-      memberPhone: "+15551234567",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
       sourceEventId: "event-deleted-member-fallback",
       template: "invite_signup_fallback",
     });
@@ -1495,13 +1510,6 @@ describe("hosted Linq webhook transport", () => {
         participantLookupKey: createHostedPhoneLookupKey("+15559990001"),
       },
       label: "the admitted participant no longer matches the member identity",
-      lineState: "assignable" as const,
-    },
-    {
-      fixture: {
-        participantPhoneVerifiedAt: null,
-      },
-      label: "the admitted participant identity is not verified",
       lineState: "assignable" as const,
     },
     {
@@ -2570,7 +2578,7 @@ describe("hosted Linq webhook transport", () => {
     expect(laterEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-27T00:00:00.000Z");
   });
 
-  it("creates fallback signup chats without thread-authority delivery", async () => {
+  it("creates fallback signup chats for an admitted unverified phone", async () => {
     const participantLookupKey = createHostedPhoneLookupKey("+15551234567");
     const assignedLineLookupKey = createHostedPhoneLookupKey("+15550100001");
     if (!participantLookupKey || !assignedLineLookupKey) {
@@ -2587,8 +2595,9 @@ describe("hosted Linq webhook transport", () => {
       },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue({
+          memberId: "member-1",
           phoneLookupKey: participantLookupKey,
-          phoneNumberVerifiedAt: new Date("2026-03-26T11:00:00.000Z"),
+          phoneNumberVerifiedAt: null,
         }),
       },
       hostedMemberRouting: {
@@ -2601,8 +2610,11 @@ describe("hosted Linq webhook transport", () => {
       assignedRecipientPhone: "+15550100001",
       inviteId: "invite-1",
       memberId: "member-1",
-      memberPhone: "+15551234567",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
       sourceEventId: "event-fallback-invite",
       template: "invite_signup_fallback",
     });
@@ -2647,6 +2659,126 @@ describe("hosted Linq webhook transport", () => {
         sentAt: expect.any(Date),
       },
     });
+  });
+
+  it("does not send an access notice to an unverified phone", async () => {
+    arrangeAuthorizedMemberParticipantLine();
+    const effect = createMemberParticipantSideEffect({
+      sourceEventId: "event-unverified-phone-access-notice",
+      template: "ai_usage_quota",
+    });
+    const prisma = createInviteSignupPrismaFixture({
+      participantPhoneVerifiedAt: null,
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "ai_usage_quota",
+      }],
+    });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
+  });
+
+  it.each(["invite_signup_fallback", "ai_usage_quota"] as const)(
+    "creates a private %s chat for the member's verified email",
+    async (template) => {
+      arrangeAuthorizedMemberParticipantLine();
+      const participantEmail = "member@example.test";
+      const effect = template === "invite_signup_fallback"
+        ? createHostedWebhookLinqMessageSideEffect({
+            assignedRecipientPhone: "+15550100001",
+            inviteId: "invite-1",
+            memberId: "member-1",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            participantContact: {
+              kind: "email",
+              value: participantEmail,
+            },
+            sourceEventId: `event-verified-email:${template}`,
+            template,
+          })
+        : createHostedWebhookLinqMessageSideEffect({
+            assignedRecipientPhone: "+15550100001",
+            claimToken: null,
+            memberId: "member-1",
+            message: "Your billing needs attention.",
+            noticeCode: "billing_inactive",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            participantContact: {
+              kind: "email",
+              value: participantEmail,
+            },
+            sourceEventId: `event-verified-email:${template}`,
+            template,
+          });
+      const prisma = createInviteSignupPrismaFixture();
+
+      await expect(drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+      expect(
+        transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress,
+      ).toHaveBeenCalledWith({
+        address: participantEmail,
+        prisma: expect.any(Object),
+        projection: "core",
+      });
+      expect(createHostedLinqChat).toHaveBeenCalledWith(expect.objectContaining({
+        from: "+15550100001",
+        idempotencyKey: effect.effectId,
+        to: [participantEmail],
+      }));
+      expect(
+        transportBoundaryMocks.acquireHostedLinqChatOwnershipLockTx,
+      ).not.toHaveBeenCalled();
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("suppresses a private email notice after identity ownership changes", async () => {
+    arrangeAuthorizedMemberParticipantLine();
+    transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress
+      .mockResolvedValueOnce({ core: { id: "member-2" } });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      assignedRecipientPhone: "+15550100001",
+      claimToken: null,
+      memberId: "member-1",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "email",
+        value: "member@example.test",
+      },
+      sourceEventId: "event-stale-email-owner",
+      template: "ai_usage_quota",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "ai_usage_quota",
+      }],
+    });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
   });
 
   it.each(["invite_signup_fallback", "ai_usage_quota"] as const)(
@@ -4568,6 +4700,7 @@ function createInviteSignupPrismaFixture(
     },
     hostedMemberIdentity: {
       findUnique: vi.fn().mockResolvedValue({
+        memberId: "member-1",
         phoneLookupKey: participantLookupKey,
         phoneNumberVerifiedAt: input.participantPhoneVerifiedAt === undefined
           ? new Date("2026-03-26T11:00:00.000Z")

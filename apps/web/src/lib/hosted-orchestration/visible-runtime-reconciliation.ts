@@ -21,6 +21,9 @@ import {
 import {
   readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots,
 } from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  createHostedLinqParticipantContact,
+} from "../hosted-onboarding/linq-participant-contact";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
   drainHostedLinqSideEffectsDirect,
@@ -113,14 +116,17 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   }
 
   if (isHostedLinqConversationMessageWake(wake)) {
-    const memberPhone = normalizePhoneNumber(wake.message.linqMessage.from);
+    const participantContact = createHostedLinqParticipantContact({
+      kind: wake.message.contactKind ?? "phone",
+      value: wake.message.linqMessage.from,
+    });
     const [homeRoute] =
       await readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots({
         memberIds: [input.userId],
         prisma,
       });
     const assignedPhone = normalizePhoneNumber(homeRoute?.linqRecipientPhone);
-    if (!memberPhone || !assignedPhone) {
+    if (!participantContact || !assignedPhone) {
       return facts;
     }
 
@@ -128,10 +134,10 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
       ? buildInactiveMemberAccessNoticeResponse({
           assignedPhone,
           memberId: input.userId,
-          memberPhone,
           message: access.message,
           noticeCode: access.noticeCode,
           occurredAt: wake.occurredAt,
+          participantContact,
           sourceEventId: wake.eventId,
         })
       : buildFallbackSignupLinkResponse({
@@ -139,8 +145,8 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
           inviteCode: access.inviteCode,
           inviteId: access.inviteId,
           memberId: input.userId,
-          memberPhone,
           occurredAt: wake.occurredAt,
+          participantContact,
           sourceEventId: wake.eventId,
         });
     await drainHostedLinqSideEffectsDirect({

@@ -45,6 +45,9 @@ import { normalizePhoneNumber } from "./phone";
 import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
+import type {
+  HostedLinqParticipantContact,
+} from "./linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
@@ -189,7 +192,7 @@ type HostedLinqThreadMessageTarget = {
 type HostedLinqMemberParticipantTarget = {
   assignedRecipientPhone: string;
   memberId: string;
-  memberPhone: string;
+  participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
 };
 
 type HostedLinqMemberParticipantMessageTarget =
@@ -342,10 +345,10 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       assignedRecipientPhone: string;
       claimToken?: null;
       memberId: string;
-      memberPhone: string;
       message: string;
       noticeCode: HostedRuntimeAiAccessNoticeCode;
       occurredAt: string;
+      participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
       sourceEventId: string;
       template: "ai_usage_quota";
     }
@@ -405,8 +408,8 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       groupJoinOutreachId?: string | null;
       inviteId: string;
       memberId: string;
-      memberPhone: string;
       occurredAt: string;
+      participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
       sourceEventId: string;
       template: "invite_signup_fallback";
     }
@@ -891,10 +894,7 @@ async function sendHostedLinqSideEffect(
           "Hosted Linq participant side-effect dispatch requires a sending line.",
         );
       }
-      const participantContact =
-        isHostedLinqMemberParticipantTargetPayload(deliveryEffect.payload)
-          ? deliveryEffect.payload.memberPhone
-          : deliveryEffect.payload.participantContact.value;
+      const participantContact = deliveryEffect.payload.participantContact.value;
       const message = await buildHostedLinqSideEffectMessage(
         deliveryEffect,
         options.prisma,
@@ -1254,30 +1254,29 @@ function buildHostedLinqContactCardShareLogDetails(
 
 async function isHostedLinqMemberParticipantTargetAuthorizedTx(input: {
   prisma: Prisma.TransactionClient;
-  target: HostedLinqMemberParticipantTarget;
+  target:
+    | HostedLinqAiUsageQuotaParticipantPayload
+    | HostedLinqInviteSignupFallbackMessagePayload;
 }): Promise<boolean> {
-  const participantLookupKeys = createHostedPhoneLookupKeyReadCandidates(
-    input.target.memberPhone,
-  );
   const assignedLineLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     input.target.assignedRecipientPhone,
   );
-  if (participantLookupKeys.length === 0 || assignedLineLookupKeys.length === 0) {
+  if (assignedLineLookupKeys.length === 0) {
     return false;
   }
 
-  const identity = await input.prisma.hostedMemberIdentity.findUnique({
-    select: {
-      phoneLookupKey: true,
-      phoneNumberVerifiedAt: true,
-    },
-    where: { memberId: input.target.memberId },
-  });
-  if (
-    !identity?.phoneLookupKey
-    || !identity.phoneNumberVerifiedAt
-    || !participantLookupKeys.includes(identity.phoneLookupKey)
-  ) {
+  const participantOwnerMemberId = input.target.participantContact.kind === "phone"
+    ? await readHostedLinqPhoneParticipantOwnerMemberId({
+        memberId: input.target.memberId,
+        participantPhone: input.target.participantContact.value,
+        prisma: input.prisma,
+        requireVerified: input.target.template === "ai_usage_quota",
+      })
+    : await readHostedLinqVerifiedEmailParticipantOwnerMemberId({
+        participantEmail: input.target.participantContact.value,
+        prisma: input.prisma,
+      });
+  if (participantOwnerMemberId !== input.target.memberId) {
     return false;
   }
 
@@ -1297,6 +1296,60 @@ async function isHostedLinqMemberParticipantTargetAuthorizedTx(input: {
     prisma: input.prisma,
   });
   return lineState.kind === "assignable" || lineState.kind === "at_risk";
+}
+
+async function readHostedLinqPhoneParticipantOwnerMemberId(input: {
+  memberId: string;
+  participantPhone: string;
+  prisma: Prisma.TransactionClient;
+  requireVerified: boolean;
+}): Promise<string | null> {
+  const participantLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    input.participantPhone,
+  );
+  if (participantLookupKeys.length === 0) {
+    return null;
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    select: {
+      memberId: true,
+      phoneLookupKey: true,
+      phoneNumberVerifiedAt: true,
+    },
+    where: { memberId: input.memberId },
+  });
+  if (
+    !identity?.phoneLookupKey
+    || !participantLookupKeys.includes(identity.phoneLookupKey)
+    || (input.requireVerified && !identity.phoneNumberVerifiedAt)
+  ) {
+    return null;
+  }
+
+  return identity.memberId;
+}
+
+async function readHostedLinqVerifiedEmailParticipantOwnerMemberId(input: {
+  participantEmail: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<string | null> {
+  try {
+    const owner = await lookupHostedMemberByVerifiedEmailAddress({
+      address: input.participantEmail,
+      prisma: input.prisma,
+      projection: "core",
+    });
+    return owner?.core.id ?? null;
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function assertHostedLinqSideEffectRouteAuthority(
@@ -2524,8 +2577,8 @@ function buildHostedWebhookLinqMessagePayload(
           : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
-        memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
+        participantContact: input.participantContact,
         replyToMessageId: null,
         sourceEventId: input.sourceEventId,
         template: input.template,
@@ -2570,8 +2623,8 @@ function buildHostedLinqAiUsageQuotaPayload(
         assignedRecipientPhone: input.assignedRecipientPhone,
         chatId: null,
         claimToken: null,
-        memberPhone: input.memberPhone,
         noticeCode: input.noticeCode,
+        participantContact: input.participantContact,
         replyToMessageId: null,
       };
     }

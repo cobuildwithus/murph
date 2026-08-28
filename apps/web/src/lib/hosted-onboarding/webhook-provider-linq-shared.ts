@@ -260,8 +260,8 @@ export function buildFallbackSignupLinkResponse(input: {
   inviteCode: string;
   inviteId: string;
   memberId: string;
-  memberPhone: string;
   occurredAt: string;
+  participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const joinUrl = buildHostedGroupAwareInviteUrl({
@@ -277,8 +277,8 @@ export function buildFallbackSignupLinkResponse(input: {
         groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
-        memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
+        participantContact: input.participantContact,
         sourceEventId: input.sourceEventId,
         template: "invite_signup_fallback",
       }),
@@ -416,7 +416,7 @@ export function buildInactiveMemberAccessNoticeResponse(input: {
 } & (
   | {
       assignedPhone: string;
-      memberPhone: string;
+      participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
     }
   | {
       chatId: string;
@@ -429,7 +429,7 @@ export function buildInactiveMemberAccessNoticeResponse(input: {
         ...("assignedPhone" in input
           ? {
               assignedRecipientPhone: input.assignedPhone,
-              memberPhone: input.memberPhone,
+              participantContact: input.participantContact,
             }
           : {
               chatId: input.chatId,
