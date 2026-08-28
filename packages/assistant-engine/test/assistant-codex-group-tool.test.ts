@@ -589,7 +589,7 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("keeps ask_current_sender limited to one exact Message ref", () => {
+  it("keeps fresh current-sender actions limited to one exact Message ref", () => {
     expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("messageRef");
     expect(GROUP_TOOL_INPUT_PROPERTIES.message_ref)
@@ -597,28 +597,33 @@ describe("murph.group dynamic tool", () => {
     expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("response_destination");
 
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "ask_current_sender",
-      message_ref: FRESH_ASSISTANT_INPUT_ID,
-    }))).toMatchObject({
-      kind: "group",
-      request: {
-        action: "ask_current_sender",
-        messageRef: FRESH_ASSISTANT_INPUT_ID,
-      },
-    });
-    for (const invalid of [
-      {
-        action: "ask_current_sender",
-      },
-      {
-        action: "ask_current_sender",
+    for (const [action, audience] of [
+      ["ask_current_sender", "group"],
+      ["ask_current_sender_privately", "current_sender"],
+    ] as const) {
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
         message_ref: FRESH_ASSISTANT_INPUT_ID,
-        response_destination: "group",
-      },
-    ]) {
-      expect(readMurphDynamicToolRequest(groupToolCall(invalid)))
-        .toMatchObject({ kind: "invalid-group-arguments" });
+      }))).toMatchObject({
+        kind: "group",
+        request: {
+          action: "ask_current_sender",
+          audience,
+          messageRef: FRESH_ASSISTANT_INPUT_ID,
+          mode: "new",
+        },
+      });
+      for (const invalid of [
+        { action },
+        {
+          action,
+          message_ref: FRESH_ASSISTANT_INPUT_ID,
+          response_destination: audience,
+        },
+      ]) {
+        expect(readMurphDynamicToolRequest(groupToolCall(invalid)))
+          .toMatchObject({ kind: "invalid-group-arguments" });
+      }
     }
 
     for (const action of [

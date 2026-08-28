@@ -28,6 +28,10 @@ const GROUP_ACTION_FIXTURES = {
   ask: { action: "ask", question: "What changed this week?" },
   handoff: { action: "handoff", context: "The member completed the workout." },
   ask_current_sender: { action: "ask_current_sender", message_ref: MESSAGE_REF },
+  ask_current_sender_privately: {
+    action: "ask_current_sender_privately",
+    message_ref: MESSAGE_REF,
+  },
   clarify_current_sender: {
     action: "clarify_current_sender",
     message_ref: MESSAGE_REF,
@@ -144,10 +148,10 @@ function schemaAdvertisesGroupConsultObjectShape(
 }
 
 describe("murph.group parser-first family compatibility", () => {
-  it("partitions all 30 advertised actions exactly once", () => {
+  it("partitions all 31 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
 
-    expect(familyActions).toHaveLength(30);
+    expect(familyActions).toHaveLength(31);
     expect(new Set(familyActions).size).toBe(familyActions.length);
     expect([...familyActions].sort())
       .toEqual(Object.keys(GROUP_ACTION_FIXTURES).sort());
@@ -199,6 +203,7 @@ describe("murph.group parser-first family compatibility", () => {
 
     for (const action of [
       "ask_current_sender",
+      "ask_current_sender_privately",
       "clarify_current_sender",
       "continue_current_sender_in_group",
       "continue_current_sender_privately",

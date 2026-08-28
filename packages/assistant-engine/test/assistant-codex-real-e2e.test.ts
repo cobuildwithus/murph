@@ -5465,12 +5465,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           text: expectedProgressText,
         }])
         expect(
-          actions.some((action) =>
-            action.kind === 'command'
-            && /\bvault-cli\b/u.test(action.command)
-          ),
-          'no current-sender group-turn vault reads or writes',
-        ).toBe(false)
+          actions.filter((action) => action.kind === 'command'),
+          'no current-sender group-turn command calls or writes',
+        ).toEqual([])
         expect(assistantReply).toBe(expectedProgressText)
         expect(assistantReply).not.toMatch(/\b(?:posted|sent|shared|told)\b/iu)
         expect(result.finalAction).toEqual({ kind: 'none' })
@@ -5483,6 +5480,435 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'delivers one explicit current-sender consultation privately without a group notice',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const messageRef = 'ain_77777777777777777777777777777777'
+      const senderHandle = 'synthetic-current-sender-private-handle'
+      const originSessionId = 'session-current-sender-private-ask'
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-current-sender-private-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+      const progressUpdates: Array<{ options: unknown; text: string }> = []
+
+      try {
+        const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+          request: async (request) => {
+            groupRequests.push(request)
+            if (
+              groupRequests.length !== 1
+              || request.action !== 'ask_current_sender'
+            ) {
+              throw new Error(
+                `Unexpected private current-sender provider action: ${JSON.stringify(request)}`,
+              )
+            }
+            if (
+              request.mode !== 'new'
+              || request.audience !== 'current_sender'
+              || request.origin.assistantInputId !== messageRef
+              || request.origin.kind !== 'accepted_input'
+              || request.origin.sessionId !== originSessionId
+              || Object.keys(request).sort().join(',')
+                !== 'action,audience,mode,origin'
+              || Object.keys(request.origin).sort().join(',')
+                !== 'assistantInputId,kind,sessionId'
+            ) {
+              throw new Error(
+                `Unexpected private current-sender provider request: ${JSON.stringify(request)}`,
+              )
+            }
+            return {
+              action: 'ask_current_sender',
+              result: { status: 'accepted' },
+            }
+          },
+        }
+        const prompt = buildSyntheticCurrentSenderGroupPrompt({
+          messageRef,
+          occurredAt: '2026-08-27T15:05:00.000Z',
+          senderHandle,
+          text: [
+            'Murph, please consult my Murph with this harmless synthetic question: "Choose either AURORA or SOLSTICE and reply with only that word."',
+            'Send my Murph\'s answer only to me privately, not to this group. I want my Murph\'s answer specifically, so do not choose or answer on its behalf.',
+          ].join(' '),
+          threadKey: 'private-delivery',
+        })
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-current-sender-private-ask',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox-current-sender-private-ask'],
+              originSessionId,
+              recipientKey: 'recipient-current-sender-private-ask',
+            }),
+            groupTool,
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied',
+            }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text, options) {
+              progressUpdates.push({ options: options ?? null, text })
+              return { kind: 'sent', source: 'system' }
+            },
+          },
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const dynamicAttempts = readDynamicToolAttempts(result.jsonEvents).filter(
+          (attempt) => attempt.tool === MURPH_GROUP_CONSULT_TOOL.name,
+        )
+
+        process.stdout.write(
+          `[group-current-sender-private-e2e] ${JSON.stringify({
+            dynamicAttempts,
+            finalAction: result.finalAction,
+            normalizedProviderRequests: groupRequests,
+            progressUpdates,
+          })}\n`,
+        )
+
+        expect(prompt).toContain(`Message ref: ${messageRef}`)
+        expect(prompt).toContain(`Sender: ${senderHandle}`)
+        expect(dynamicAttempts).toHaveLength(1)
+        expect(dynamicAttempts[0]?.argumentsValue).toEqual({
+          action: 'ask_current_sender_privately',
+          message_ref: messageRef,
+        })
+        expect(groupRequests).toEqual([{
+          action: 'ask_current_sender',
+          audience: 'current_sender',
+          mode: 'new',
+          origin: {
+            assistantInputId: messageRef,
+            kind: 'accepted_input',
+            sessionId: originSessionId,
+          },
+        }])
+        expect(progressUpdates).toEqual([])
+        expect(
+          actions.filter((action) => action.kind === 'command'),
+          'no current-sender private-turn command calls or writes',
+        ).toEqual([])
+        expect(result.finalAction).toEqual({ kind: 'none' })
+        expect(result.finalMessage).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'clarifies a genuinely ambiguous current-sender destination and resumes the same sender in-group',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const requestMessageRef = 'ain_88888888888888888888888888888888'
+      const clarificationMessageRef = 'ain_99999999999999999999999999999999'
+      const senderHandle = 'synthetic-current-sender-clarification-handle'
+      const originSessionId = 'session-current-sender-clarification'
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-current-sender-clarify-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+      const progressUpdates: Array<{ options: unknown; text: string }> = []
+      const expectedProgressText = 'I’ll ask your Murph and share the answer here.'
+
+      try {
+        const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+          request: async (request) => {
+            groupRequests.push(request)
+            if (request.action !== 'ask_current_sender') {
+              throw new Error(
+                `Unexpected clarified current-sender provider action: ${JSON.stringify(request)}`,
+              )
+            }
+            if (groupRequests.length === 1) {
+              if (
+                request.mode !== 'clarification'
+                || request.audience !== undefined
+                || request.origin.assistantInputId !== requestMessageRef
+                || request.origin.kind !== 'accepted_input'
+                || request.origin.sessionId !== originSessionId
+                || Object.keys(request).sort().join(',')
+                  !== 'action,mode,origin'
+                || Object.keys(request.origin).sort().join(',')
+                  !== 'assistantInputId,kind,sessionId'
+              ) {
+                throw new Error(
+                  `Unexpected current-sender clarification request: ${JSON.stringify(request)}`,
+                )
+              }
+              return {
+                action: 'ask_current_sender',
+                result: { status: 'clarification_required' },
+              }
+            }
+            if (groupRequests.length === 2) {
+              if (
+                request.mode !== 'continuation'
+                || request.audience !== 'group'
+                || request.origin.assistantInputId !== clarificationMessageRef
+                || request.origin.kind !== 'accepted_input'
+                || request.origin.sessionId !== originSessionId
+                || Object.keys(request).sort().join(',')
+                  !== 'action,audience,mode,origin'
+                || Object.keys(request.origin).sort().join(',')
+                  !== 'assistantInputId,kind,sessionId'
+              ) {
+                throw new Error(
+                  `Unexpected current-sender continuation request: ${JSON.stringify(request)}`,
+                )
+              }
+              return {
+                action: 'ask_current_sender',
+                result: { status: 'accepted' },
+              }
+            }
+            throw new Error(
+              `Unexpected extra current-sender provider request: ${JSON.stringify(request)}`,
+            )
+          },
+        }
+        const buildHostedToolContext = (
+          acceptedInputId: string,
+          mailboxItemId: string,
+        ): AssistantHostedToolContext => ({
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [acceptedInputId],
+            conversationId: 'conversation-current-sender-clarification',
+            conversationScope: 'group',
+            inboundMailboxItemIds: [mailboxItemId],
+            originSessionId,
+            recipientKey: 'recipient-current-sender-clarification',
+          }),
+          groupTool,
+          sendVaultFile: async () => ({
+            filename: 'unused',
+            status: 'denied',
+          }),
+          vaultFileSendAvailable: false,
+        })
+        const requestPrompt = buildSyntheticCurrentSenderGroupPrompt({
+          messageRef: requestMessageRef,
+          occurredAt: '2026-08-27T15:10:00.000Z',
+          senderHandle,
+          text: [
+            'Murph, please consult my Murph with this harmless synthetic question: "Choose either NOVA or PULSE and reply with only that word."',
+            'I have not decided whether its answer should come back here in the group or only to me privately.',
+            'I want my Murph\'s answer specifically, so do not choose or answer on its behalf.',
+          ].join(' '),
+          threadKey: 'clarified-delivery',
+        })
+        const first = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: buildHostedToolContext(
+            requestMessageRef,
+            'mailbox-current-sender-clarification-request',
+          ),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text, options) {
+              progressUpdates.push({ options: options ?? null, text })
+              return { kind: 'sent', source: 'system' }
+            },
+          },
+          prompt: requestPrompt,
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const firstDynamicAttempts = readDynamicToolAttempts(
+          first.jsonEvents,
+        ).filter(
+          (attempt) => attempt.tool === MURPH_GROUP_CONSULT_TOOL.name,
+        )
+        const firstActions = readCapabilityRoutingActions(first.jsonEvents)
+
+        expect(requestPrompt).toContain(`Message ref: ${requestMessageRef}`)
+        expect(requestPrompt).toContain(`Sender: ${senderHandle}`)
+        expect(firstDynamicAttempts).toHaveLength(1)
+        expect(firstDynamicAttempts[0]?.argumentsValue).toEqual({
+          action: 'clarify_current_sender',
+          message_ref: requestMessageRef,
+        })
+        expect(progressUpdates).toEqual([])
+        expect(first.finalMessage).toMatch(/\?/u)
+        expect(first.finalMessage).toMatch(/\b(?:group|here)\b/iu)
+        expect(first.finalMessage).toMatch(/\b(?:private|privately)\b/iu)
+        expect(
+          firstActions.filter((action) => action.kind === 'command'),
+          'no ambiguous current-sender command calls or writes',
+        ).toEqual([])
+
+        const clarificationPrompt = buildSyntheticCurrentSenderGroupPrompt({
+          messageRef: clarificationMessageRef,
+          occurredAt: '2026-08-27T15:11:00.000Z',
+          senderHandle,
+          text: 'Share my Murph\'s answer here in the group.',
+          threadKey: 'clarified-delivery',
+        })
+        const second = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
+          dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: buildHostedToolContext(
+            clarificationMessageRef,
+            'mailbox-current-sender-clarification-answer',
+          ),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          progressDelivery: {
+            async send(text, options) {
+              progressUpdates.push({ options: options ?? null, text })
+              if (
+                text !== expectedProgressText
+                || options?.required !== true
+                || options.source !== 'system'
+                || options.targetInputId !== clarificationMessageRef
+              ) {
+                throw new Error(
+                  `Unexpected clarified current-sender group notice: ${JSON.stringify({ options, text })}`,
+                )
+              }
+              return { kind: 'sent', source: 'system' }
+            },
+          },
+          prompt: clarificationPrompt,
+          reasoningEffort: 'low',
+          resumeSessionId: first.sessionId,
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const secondDynamicAttempts = readDynamicToolAttempts(
+          second.jsonEvents,
+        ).filter(
+          (attempt) => attempt.tool === MURPH_GROUP_CONSULT_TOOL.name,
+        )
+        const secondActions = readCapabilityRoutingActions(second.jsonEvents)
+
+        process.stdout.write(
+          `[group-current-sender-clarification-e2e] ${JSON.stringify({
+            firstDynamicAttempts,
+            firstFinalMessage: first.finalMessage,
+            normalizedProviderRequests: groupRequests,
+            progressUpdates,
+            secondDynamicAttempts,
+            secondFinalAction: second.finalAction,
+          })}\n`,
+        )
+
+        expect(clarificationPrompt).toContain(
+          `Message ref: ${clarificationMessageRef}`,
+        )
+        expect(clarificationPrompt).toContain(`Sender: ${senderHandle}`)
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(secondDynamicAttempts).toHaveLength(1)
+        expect(secondDynamicAttempts[0]?.argumentsValue).toEqual({
+          action: 'continue_current_sender_in_group',
+          message_ref: clarificationMessageRef,
+        })
+        expect(groupRequests).toEqual([
+          {
+            action: 'ask_current_sender',
+            mode: 'clarification',
+            origin: {
+              assistantInputId: requestMessageRef,
+              kind: 'accepted_input',
+              sessionId: originSessionId,
+            },
+          },
+          {
+            action: 'ask_current_sender',
+            audience: 'group',
+            mode: 'continuation',
+            origin: {
+              assistantInputId: clarificationMessageRef,
+              kind: 'accepted_input',
+              sessionId: originSessionId,
+            },
+          },
+        ])
+        expect(progressUpdates).toEqual([{
+          options: {
+            deliveryContextOrdinal: 0,
+            required: true,
+            source: 'system',
+            targetInputId: clarificationMessageRef,
+          },
+          text: expectedProgressText,
+        }])
+        expect(
+          secondActions.filter((action) => action.kind === 'command'),
+          'no clarified current-sender command calls or writes',
+        ).toEqual([])
+        expect(second.finalAction).toEqual({ kind: 'none' })
+        expect(second.finalMessage).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
   )
 
   it(
@@ -17197,6 +17623,62 @@ async function materializeExperimentStartVaultCli(input: {
     },
   )
   await chmod(executablePath, 0o700)
+}
+
+function buildSyntheticCurrentSenderGroupPrompt(input: {
+  messageRef: string
+  occurredAt: string
+  senderHandle: string
+  text: string
+  threadKey: string
+}): string {
+  const threadId = `synthetic-current-sender-${input.threadKey}`
+  const prompt = buildAssistantAutoReplyPrompt([{
+    actorIsSelf: false,
+    attachmentDescriptors: [],
+    attachmentEvidence: {
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    },
+    conversation: {
+      accountId: null,
+      actorId: `synthetic-current-sender-${input.threadKey}`,
+      actorIsSelf: false,
+      source: 'linq',
+      threadId,
+      threadIsDirect: false,
+    },
+    inputId: input.messageRef,
+    occurredAt: input.occurredAt,
+    projection: null,
+    receivedAt: input.occurredAt,
+    replyContext: null,
+    replyTarget: {
+      channel: 'linq',
+      messageId: `${threadId}-message-${input.messageRef.slice(-4)}`,
+      threadId,
+    },
+    source: 'linq',
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: true,
+      kind: 'linq',
+      partCount: 1,
+      reactionEligible: false,
+      replyToMessageId: null,
+      senderHandle: input.senderHandle,
+      service: 'iMessage',
+    },
+    telegramMetadata: null,
+    text: input.text,
+  } satisfies AssistantAutoReplyPromptInput])
+  if (prompt.kind !== 'ready') {
+    throw new Error('Expected a ready synthetic current-sender group prompt.')
+  }
+  return prompt.prompt
 }
 
 function buildGroupPointOfViewDeveloperInstructions(input?: {

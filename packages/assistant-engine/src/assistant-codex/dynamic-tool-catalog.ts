@@ -893,6 +893,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'ask',
     'handoff',
     'ask_current_sender',
+    'ask_current_sender_privately',
     'clarify_current_sender',
     'continue_current_sender_in_group',
     'continue_current_sender_privately',
@@ -1250,6 +1251,10 @@ const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
     optional: [],
     required: ['message_ref'],
   },
+  ask_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
   clarify_current_sender: {
     optional: [],
     required: ['message_ref'],
@@ -1338,7 +1343,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'Ask/hand off; host binds. Pass named group as groupLabel; never list first. Before handoff if no name, vault-cli memory show; fallback "a member". ask_current_sender starts fresh group-bound work. clarify_current_sender asks follow-up; continuations only resume it. Accepted handoff: queued, not sent/told/shared/posted.',
+    'Ask/hand off; host binds. Named group: use groupLabel; never list. Before unnamed handoff, vault-cli memory show; fallback "a member". Sender intent: ask_current_sender=group, ask_current_sender_privately=private, clarify_current_sender=genuine ambiguity; continuations resume. Handoff accepted=queued, not sent/shared.',
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 
