@@ -34,6 +34,8 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 - Undo one set without shifting later set numbers: `vault-cli workout set clear [exercise] --workout-id <evt_id> --set-order <n>`.
 - Finish an early or targetless session: `vault-cli workout finish --workout-id <evt_id>`.
 
+For state-changing workout commands, inspect the full code-mode command result rather than only `r.output`. If it includes a `session_id`, call `write_stdin` until the command is terminal; allow a 30-second initial yield. Never continue, retry, or replace a workout write while its outcome is unknown.
+
 Saved target values remain in the workout format. A newly started session contains unlogged set coordinates, but no planned target value is copied into an actual set field. A target is not a completed set. Read the referenced routine with `vault-cli workout format show <routineId> --format json` when a card needs target labels; never copy those labels into canonical actuals.
 
 Every ad-hoc exercise must have one explicit editor mode. Use `weight_reps` for cable, machine, dumbbell, barbell, kettlebell, or other resistance movements even when the member has not supplied the load yet; the missing load stays an empty weight field. Use `bodyweight` for unloaded repetition work, and use the existing assisted-bodyweight, weighted-bodyweight, duration, or cardio mode only when that result family is actually intended. Never omit mode to represent an unknown actual. If the exercise's result family is genuinely ambiguous, ask one narrow question before writing it.

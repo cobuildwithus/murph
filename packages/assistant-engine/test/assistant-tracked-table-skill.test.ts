@@ -134,6 +134,16 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout set log')
     expect(skill).toContain('vault-cli workout set clear')
     expect(skill).toContain('vault-cli workout finish --workout-id <evt_id>')
+    expect(skill).toContain(
+      'inspect the full code-mode command result rather than only `r.output`',
+    )
+    expect(skill).toContain(
+      'If it includes a `session_id`, call `write_stdin` until the command is terminal',
+    )
+    expect(skill).toContain('allow a 30-second initial yield')
+    expect(skill).toContain(
+      'Never continue, retry, or replace a workout write while its outcome is unknown',
+    )
     expect(skill).not.toContain('vault-cli workout active')
     expect(skill).toContain(
       'keep every terse or repeated set confirmation on this owner',
