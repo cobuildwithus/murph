@@ -185,9 +185,21 @@ function formatZodIssuePath(path: readonly (string | number | symbol)[]): string
 const SUPPORTED_EVENT_KINDS = new Set<string>(EVENT_KINDS);
 
 function normalizeEventId(payload: JsonObject): string | undefined {
-  return normalizeOptionalText(
-    typeof payload.id === "string" ? payload.id : valueAsString(payload.eventId),
-  ) ?? undefined;
+  const value = payload.id !== undefined ? payload.id : payload.eventId;
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    throw new VaultError(
+      "EVENT_CONTRACT_INVALID",
+      "Event payload requires a valid canonical id when identity is supplied.",
+      { errors: ["$.id: Expected a non-empty canonical event id."] },
+    );
+  }
+
+  return normalized;
 }
 
 function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
@@ -345,6 +357,7 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
     record,
     "EVENT_CONTRACT_INVALID",
     "Stored event record is invalid.",
+    { stage: "read" },
   );
 }
 

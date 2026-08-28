@@ -9,17 +9,26 @@ import {
   markAssistantOutboxIntentMirrorTerminalById,
 } from "@murphai/assistant-engine/assistant-outbox";
 import {
+  appendAssistantTranscriptEntries,
   compareAssistantInputCursors,
+  conversationRefFromAssistantInputConversation,
   createStoreBackedAssistantInputSource,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   isAssistantHostedImageCompletionEvent,
+  listAssistantTranscriptEntries,
   listAssistantInputEvents,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItemDetails,
+  resolveAssistantSession,
   retireAssistantInputEventContent,
+  type AssistantInputAttachmentEvidence,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
+  type AssistantInputProjectionStatus,
 } from "@murphai/assistant-engine";
+import type {
+  AssistantModelTarget,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import {
   readAssistantAutomationState,
   withAssistantRuntimeWriteLock,
@@ -129,7 +138,12 @@ const HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES = [
 ] as const;
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
-  "conversation" | "replyTarget" | "sourceRef"
+  | "attachmentEvidence"
+  | "content"
+  | "conversation"
+  | "projection"
+  | "replyTarget"
+  | "sourceRef"
 >;
 
 export function resolveHostedPendingAssistantInputStatePath(
@@ -605,6 +619,126 @@ export async function enqueueHostedPendingAssistantInputId(input: {
     });
     return [...nextState.inputIds];
   });
+}
+
+export async function suppressHostedPendingLinqInputAnsweredByExternalReply(input: {
+  accountId: string | null;
+  assistantReplyEvent: AssistantInputEventRecord;
+  replyToMessageId: string;
+  target: AssistantModelTarget;
+  threadId: string;
+  vaultRoot: string;
+}): Promise<string[]> {
+  const replyToMessageId = input.replyToMessageId.trim();
+  if (!replyToMessageId) {
+    return [];
+  }
+
+  const pendingInputIds = await readHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  });
+  const pendingEvents = await Promise.all(
+    pendingInputIds.map((inputId) =>
+      readAssistantInputEvent({
+        inputId,
+        vault: input.vaultRoot,
+      })
+    ),
+  );
+  const answeredEvents = pendingEvents.filter(
+    (event): event is AssistantInputEventRecord =>
+      event !== null
+      && event.conversation?.source === "linq"
+      && event.conversation.actorIsSelf !== true
+      && event.conversation.accountId === input.accountId
+      && event.conversation.threadId === input.threadId
+      && event.replyTarget?.channel === "linq"
+      && event.replyTarget.messageId === replyToMessageId,
+  );
+  if (answeredEvents.length === 0) {
+    return [];
+  }
+
+  for (const answeredEvent of answeredEvents) {
+    await preserveHostedExternalLinqReplyInAssistantTranscript({
+      answeredEvent,
+      assistantReplyEvent: input.assistantReplyEvent,
+      target: input.target,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  await writeAssistantAutoReplySuppressionEvidence({
+    captureIds: answeredEvents.flatMap((event) =>
+      event.projection.captureId ? [event.projection.captureId] : []
+    ),
+    inputIds: answeredEvents.map((event) => event.inputId),
+    reason: "answered by an imported self-authored Linq reply",
+    vault: input.vaultRoot,
+  });
+  return answeredEvents.map((event) => event.inputId);
+}
+
+async function preserveHostedExternalLinqReplyInAssistantTranscript(input: {
+  answeredEvent: AssistantInputEventRecord;
+  assistantReplyEvent: AssistantInputEventRecord;
+  target: AssistantModelTarget;
+  vaultRoot: string;
+}): Promise<void> {
+  const conversation = input.answeredEvent.conversation;
+  if (!conversation) {
+    return;
+  }
+
+  const userText = input.answeredEvent.content.text?.trim() ?? "";
+  const assistantText = input.assistantReplyEvent.content.text?.trim() ?? "";
+  if (!userText || !assistantText) {
+    return;
+  }
+
+  const resolved = await resolveAssistantSession({
+    conversation: conversationRefFromAssistantInputConversation(conversation),
+    target: input.target,
+    vault: input.vaultRoot,
+  });
+  const existingEntries = await listAssistantTranscriptEntries(
+    input.vaultRoot,
+    resolved.session.sessionId,
+  );
+  const userCreatedAt = input.answeredEvent.occurredAt;
+  const assistantCreatedAt = input.assistantReplyEvent.occurredAt;
+  const exchangeAlreadyPresent = existingEntries.some((entry, index) => {
+    const next = existingEntries[index + 1];
+    return entry.kind === "user"
+      && entry.text === userText
+      && entry.createdAt === userCreatedAt
+      && next?.kind === "assistant"
+      && next.text === assistantText
+      && next.createdAt === assistantCreatedAt;
+  });
+  if (exchangeAlreadyPresent) {
+    return;
+  }
+
+  await appendAssistantTranscriptEntries(
+    input.vaultRoot,
+    resolved.session.sessionId,
+    [
+      {
+        contentReceivedAt:
+          input.answeredEvent.receivedAt ?? input.answeredEvent.occurredAt,
+        createdAt: userCreatedAt,
+        kind: "user",
+        text: userText,
+      },
+      {
+        createdAt: assistantCreatedAt,
+        kind: "assistant",
+        standaloneAssistantContext: true,
+        text: assistantText,
+      },
+    ],
+  );
 }
 
 export async function compactHostedPendingAssistantInputIds(input: {
@@ -1427,8 +1561,43 @@ export function isHostedPendingAssistantInputStillReplyable(input: {
   ) {
     return false;
   }
+  if (
+    requiresHostedAssistantInputAttachmentEvidence({
+      attachmentDescriptorCount:
+        input.event.content.attachmentDescriptors.length,
+      projectionStatus: input.event.projection.status,
+    })
+    && !isHostedAssistantInputAttachmentEvidenceSettled(
+      input.event.attachmentEvidence,
+    )
+  ) {
+    return false;
+  }
 
   return input.enabledAutoReplyChannels.has(replyChannel);
+}
+
+export function requiresHostedAssistantInputAttachmentEvidence(input: {
+  attachmentDescriptorCount: number;
+  projectionStatus: AssistantInputProjectionStatus;
+}): boolean {
+  return input.attachmentDescriptorCount > 0
+    && input.projectionStatus !== "not_attempted";
+}
+
+export function isHostedAssistantInputAttachmentEvidenceSettled(
+  evidence: Pick<AssistantInputAttachmentEvidence, "attachments" | "status">,
+): boolean {
+  if (evidence.status === "failed") {
+    return true;
+  }
+  if (evidence.status !== "available" && evidence.status !== "partial") {
+    return false;
+  }
+  return evidence.attachments.every(
+    (attachment) => attachment.parseState !== "pending"
+      && attachment.parseState !== "running",
+  );
 }
 
 function createEmptyHostedPendingAssistantInputState(input: {

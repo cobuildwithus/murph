@@ -185,6 +185,35 @@ export async function readHostedMemberIdentityPhoneNumber(
   });
 }
 
+export async function readHostedMemberIdentityPhoneNumbers(
+  identity: Pick<
+    HostedMemberIdentity,
+    "memberId" | "phoneNumberEncrypted" | "signupPhoneNumberEncrypted"
+  >,
+  prisma?: HostedWebEncryptionPrismaClient,
+): Promise<{
+  phoneNumber: string | null;
+  signupPhoneNumber: string | null;
+}> {
+  const [phoneNumber, signupPhoneNumber] = await decryptHostedWebNullableFields({
+    entries: [{
+      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+      memberId: identity.memberId,
+      value: identity.phoneNumberEncrypted,
+    }, {
+      field: HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
+      memberId: identity.memberId,
+      value: identity.signupPhoneNumberEncrypted,
+    }],
+    prisma,
+  });
+
+  return {
+    phoneNumber: phoneNumber ?? null,
+    signupPhoneNumber: signupPhoneNumber ?? null,
+  };
+}
+
 export async function buildHostedMemberRoutingPrivateColumns(input: {
   linqChatId: string | null;
   linqRecipientPhone: string | null;

@@ -287,7 +287,7 @@ test('daemon-only helpers decline local-only inputs before hitting fetch', async
   assert.equal(fetchMock.mock.calls.length, 0)
 })
 
-test('daemon client surfaces HTTP error payload codes and statuses', async () => {
+test('daemon client bounds unknown HTTP error payload codes', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(
       JSON.stringify({
@@ -307,18 +307,25 @@ test('daemon client surfaces HTTP error payload codes and statuses', async () =>
     () => maybeListAssistantCronJobsViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.equal(error.message, 'Assistant daemon is unavailable.')
+      assert.equal(
+        error.message,
+        'Assistant daemon request failed with HTTP 503. Retry after checking the local assistant daemon status.',
+      )
       assert.equal(
         'code' in error ? error.code : undefined,
-        'daemon_unavailable',
+        'assistant_daemon_http_failed',
       )
-      assert.equal('status' in error ? error.status : undefined, 503)
+      assert.deepEqual(
+        'context' in error ? error.context : undefined,
+        { retryable: true, stage: 'response' },
+      )
+      assert.equal(JSON.stringify(error).includes('daemon_unavailable'), false)
       return true
     },
   )
 })
 
-test('daemon client rejects invalid JSON success payloads with route-specific context', async () => {
+test('daemon client rejects invalid JSON success payloads with bounded guidance', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response('not-json', {
       status: 200,
@@ -329,7 +336,18 @@ test('daemon client rejects invalid JSON success payloads with route-specific co
     () => maybeListAssistantCronJobsViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.match(error.message, /invalid JSON response for \/cron\/jobs/u)
+      assert.equal(
+        error.message,
+        'Assistant daemon returned an invalid response. Restart or update the local assistant daemon before retrying.',
+      )
+      assert.equal(
+        'code' in error ? error.code : undefined,
+        'assistant_daemon_response_invalid',
+      )
+      assert.deepEqual(
+        'context' in error ? error.context : undefined,
+        { retryable: false, stage: 'response' },
+      )
       assert.doesNotMatch(error.message, /vault|%2Ftmp/u)
       return true
     },
@@ -500,7 +518,7 @@ test('daemon client session and cron status helpers omit null query params and n
   )
 })
 
-test('daemon client converts pre-response fetch failures into route-specific errors', async () => {
+test('daemon client marks replay-safe pre-response failures retryable', async () => {
   fetchMock.mockRejectedValueOnce(new Error('socket closed'))
 
   await assert.rejects(
@@ -513,9 +531,17 @@ test('daemon client converts pre-response fetch failures into route-specific err
       ),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.match(
+      assert.equal(
         error.message,
-        /request failed before receiving a response for \/cron\/status/u,
+        'Assistant daemon request did not complete for /cron/status. Check that the local assistant daemon is running, then retry.',
+      )
+      assert.equal(
+        'code' in error ? error.code : undefined,
+        'assistant_daemon_unavailable',
+      )
+      assert.deepEqual(
+        'context' in error ? error.context : undefined,
+        { retryable: true, stage: 'transport' },
       )
       assert.doesNotMatch(error.message, /vault|%2Ftmp/u)
       return true

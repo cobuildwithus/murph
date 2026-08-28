@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-25
+Last verified: 2026-08-26
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -58,6 +58,16 @@ requires a repository-owned, reviewer-openable representation of the production
 component, consent surface, or composed section plus risk-matched design proof;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the separate final pushed-head ReviewGPT gate.
+
+**Product boundaries before defensive controls.** Do not turn data sensitivity,
+generic least-privilege intuition, or reviewer caution into a new member-facing
+restriction. Every new authorization, consent, identity, or eligibility gate
+must trace to an explicit current requirement, a durable product or security
+invariant, a shipped external contract, or reproduced harm. Enforce the proven
+boundary and no narrower one. If ambiguity would materially change who may use
+a capability or whose content they may act on, resolve that product question
+before encoding a fail-closed rule. Apply the same standard when triaging review
+findings; review must not ratchet the product into an unrequested restriction.
 
 Every PR must also make one explicit changelog decision before the review
 candidate is pushed. A member-visible feature or improvement, including a

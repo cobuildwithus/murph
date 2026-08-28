@@ -39,12 +39,12 @@ import {
   HostedDomainRootEnvelopeUnavailableError,
 } from "@/src/lib/hosted-crypto/domain-root-store";
 import {
-  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-  HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
+  HOSTED_VAULT_SHARE_DELIVER_PAGE_READ_LIMIT,
 } from "@/src/lib/hosted-vault-share/delivery-limits";
 import {
   buildHostedVaultShareGenerationToken,
-  findActiveHostedVaultShares,
+  findActiveHostedVaultSharePage,
   hasUnmaterializedHostedVaultShareProjectionGeneration,
   readDeliverableHostedVaultShareProjectionScopeGenerations,
   replaceHostedVaultShareProjectionSnapshot,
@@ -159,32 +159,39 @@ function buildShareRow(index: number) {
   };
 }
 
-describe("findActiveHostedVaultShares", () => {
-  it("returns the entire legal cohort from one invariant-bounded read", async () => {
+describe("findActiveHostedVaultSharePage", () => {
+  it("returns 25 shares and a stable destination continuation for a 26-row cohort", async () => {
     const rows = Array.from(
-      { length: HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION },
+      { length: HOSTED_VAULT_SHARE_DELIVER_PAGE_READ_LIMIT },
       (_, index) => buildShareRow(index + 1),
     );
-    const findMany = vi.fn().mockResolvedValue(rows);
+    const findMany = vi.fn(async () => rows);
 
-    await expect(findActiveHostedVaultShares({
+    await expect(findActiveHostedVaultSharePage({
       grantorMemberId: SHARE.grantorMemberId,
       prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
       projectionScope: SLEEP_SCOPE,
-    })).resolves.toMatchObject(
-      rows.map((row) => expect.objectContaining({ id: row.id })),
-    );
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).resolves.toEqual({
+      continuation: rows[HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE - 1]
+        ?.destinationMemberId,
+      generationToken: buildHostedVaultShareGenerationToken(
+        rows.map((row) => row.id),
+      ),
+      hasActiveShares: true,
+      shares: rows.slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE)
+        .map(({ projectionScopeJson: _projectionScopeJson, ...row }) => ({
+          ...row,
+          projectionScope: SLEEP_SCOPE,
+        })),
+    });
+    expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith({
       orderBy: { destinationMemberId: "asc" },
-      select: {
-        destinationMemberId: true,
-        grantorMemberId: true,
-        id: true,
-        projectionKind: true,
-        projectionScopeJson: true,
-        projectionScopeKey: true,
-      },
-      take: HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
+      select: expect.objectContaining({
+        projectionSnapshotCiphertext: true,
+        projectionSourceWorkspaceVersion: true,
+      }),
       where: {
         grantorMemberId: SHARE.grantorMemberId,
         projectionScopeKey: SLEEP_SCOPE_KEY,
@@ -193,23 +200,183 @@ describe("findActiveHostedVaultShares", () => {
     });
   });
 
-  it("fails closed instead of truncating a corrupt 26th grant", async () => {
-    const rows = Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT },
-      (_, index) => buildShareRow(index + 1),
-    );
-    const findMany = vi.fn().mockResolvedValue(rows);
+  it("continues after the stable destination even when that tuple was regranted", async () => {
+    const cursor = "member_destination_025";
+    const regranted = {
+      ...buildShareRow(26),
+      id: "share_regranted_generation",
+    };
+    const generationRows = [buildShareRow(1), regranted];
+    const findMany = vi.fn(async () => generationRows);
 
-    await expect(findActiveHostedVaultShares({
+    await expect(findActiveHostedVaultSharePage({
+      continuation: cursor,
       grantorMemberId: SHARE.grantorMemberId,
       prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
       projectionScope: SLEEP_SCOPE,
-    })).rejects.toMatchObject({
-      code: "HOSTED_VAULT_SHARE_GRANT_LIMIT_INVARIANT_VIOLATION",
-      httpStatus: 503,
-      retryable: false,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).resolves.toMatchObject({
+      continuation: null,
+      generationToken: buildHostedVaultShareGenerationToken(
+        generationRows.map((row) => row.id),
+      ),
+      shares: [{ id: "share_regranted_generation" }],
     });
-    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        grantorMemberId: SHARE.grantorMemberId,
+      }),
+    }));
+  });
+
+  it("drains a 64-destination cohort in three bounded pages with one generation token", async () => {
+    const generationRows = Array.from(
+      { length: 64 },
+      (_, index) => buildShareRow(index + 1),
+    );
+    const findMany = vi.fn(async () => generationRows);
+    const prisma = createPrismaClientTestDouble({
+      hostedVaultShare: { findMany },
+    });
+
+    const first = await findActiveHostedVaultSharePage({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    });
+    const second = await findActiveHostedVaultSharePage({
+      continuation: first.continuation,
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    });
+    const third = await findActiveHostedVaultSharePage({
+      continuation: second.continuation,
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    });
+
+    const expectedToken = buildHostedVaultShareGenerationToken(
+      generationRows.map((row) => row.id),
+    );
+    expect([first.generationToken, second.generationToken, third.generationToken])
+      .toEqual([expectedToken, expectedToken, expectedToken]);
+    expect([first.shares.length, second.shares.length, third.shares.length])
+      .toEqual([25, 25, 14]);
+    expect([first.continuation, second.continuation, third.continuation])
+      .toEqual([
+        generationRows[24]?.destinationMemberId,
+        generationRows[49]?.destinationMemberId,
+        null,
+      ]);
+    expect([...first.shares, ...second.shares, ...third.shares].map(({ id }) => id))
+      .toEqual(generationRows.map(({ id }) => id));
+  });
+
+  it("advances unfinished destinations when a retry restarts without a cursor", async () => {
+    const rows = Array.from(
+      { length: 64 },
+      (_, index) => ({
+        ...buildShareRow(index + 1),
+        projectionSourceWorkspaceVersion: null as bigint | null,
+      }),
+    );
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({
+      hostedVaultShare: { findMany },
+    });
+
+    const first = await findActiveHostedVaultSharePage({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    });
+    for (const share of first.shares.slice(1)) {
+      const row = rows.find(({ id }) => id === share.id);
+      if (row) row.projectionSourceWorkspaceVersion = 7n;
+    }
+
+    const retry = await findActiveHostedVaultSharePage({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    });
+    expect(retry.shares.map(({ id }) => id)).toEqual([
+      rows[0]?.id,
+      ...rows.slice(25, 49).map(({ id }) => id),
+    ]);
+
+    for (const share of retry.shares.slice(1)) {
+      const row = rows.find(({ id }) => id === share.id);
+      if (row) row.projectionSourceWorkspaceVersion = 7n;
+    }
+    const nextRetry = await findActiveHostedVaultSharePage({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    });
+    expect(nextRetry.shares.map(({ id }) => id)).toEqual([
+      rows[0]?.id,
+      ...rows.slice(49).map(({ id }) => id),
+    ]);
+  });
+
+  it("converges first materialization beyond 25 without changing its full-cohort token", async () => {
+    const rows = Array.from(
+      { length: 64 },
+      (_, index) => ({
+        ...buildShareRow(index + 1),
+        projectionSnapshotCiphertext: null as string | null,
+      }),
+    );
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({
+      hostedVaultShare: { findMany },
+    });
+    const expectedToken = buildHostedVaultShareGenerationToken(
+      rows.map((row) => row.id),
+    );
+    let continuation: string | null = null;
+    const deliveredIds: string[] = [];
+
+    do {
+      const page = await findActiveHostedVaultSharePage({
+        ...(continuation === null ? {} : { continuation }),
+        grantorMemberId: SHARE.grantorMemberId,
+        prisma,
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        projectionScope: SLEEP_SCOPE,
+        sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+      });
+      expect(page.generationToken).toBe(expectedToken);
+      deliveredIds.push(...page.shares.map(({ id }) => id));
+      for (const share of page.shares) {
+        const row = rows.find(({ id }) => id === share.id);
+        if (row) row.projectionSnapshotCiphertext = "sealed:materialized";
+      }
+      continuation = page.continuation;
+    } while (continuation !== null);
+
+    expect(deliveredIds).toEqual(rows.map(({ id }) => id));
+    await expect(findActiveHostedVaultSharePage({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).resolves.toMatchObject({
+      continuation: null,
+      generationToken: expectedToken,
+      shares: [],
+    });
   });
 });
 
@@ -273,7 +440,10 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
       userId: SHARE.destinationMemberId,
     })]);
     expect(updateMany).toHaveBeenCalledWith({
-      data: { projectionSnapshotCiphertext: "sealed:1" },
+      data: {
+        projectionSnapshotCiphertext: "sealed:1",
+        projectionSourceWorkspaceVersion: 7n,
+      },
       where: {
         destinationMemberId: SHARE.destinationMemberId,
         grantorMemberId: SHARE.grantorMemberId,
@@ -283,7 +453,10 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
         status: "granted",
       },
     });
-    expect(JSON.stringify(updateMany.mock.calls)).not.toContain("sleepStartAt");
+    expect(JSON.stringify(
+      updateMany.mock.calls,
+      (_key, value) => typeof value === "bigint" ? value.toString() : value,
+    )).not.toContain("sleepStartAt");
   });
 
   it("persists a valid encrypted empty snapshot instead of treating empty as absent", async () => {
@@ -638,7 +811,6 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       prisma,
     });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: expect.any(Number),
       where: {
         grantorMemberId: SHARE.grantorMemberId,
         status: "granted",
@@ -672,8 +844,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     expect(rows).toHaveLength(2_450);
     expect(rows.filter((row) => row.projectionSnapshotCiphertext !== null))
       .toHaveLength(2_449);
-    const pendingRows = rows.filter((row) => row.projectionSnapshotCiphertext === null);
-    const findMany = vi.fn().mockResolvedValue(pendingRows);
+    const findMany = vi.fn().mockResolvedValue(rows);
     const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
     const supportedProjectionScopeKeys = new Set(
       runtimeScopes.map(buildHostedVaultShareProjectionScopeKey),
@@ -692,14 +863,13 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       hasDeferredProjectionWork: true,
     });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+      where: {
         grantorMemberId: SHARE.grantorMemberId,
-        projectionSnapshotCiphertext: null,
         status: "granted",
-      }),
+      },
     }));
     expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenNthCalledWith(1, {
-      memberIds: [inactiveId],
+      memberIds: rows.map((row) => row.destinationMemberId),
       prisma,
     });
 
@@ -713,22 +883,27 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       supportedProjectionScopeKeys,
     })).resolves.toEqual({
       generations: [{
-        generationToken: buildHostedVaultShareGenerationToken(["share_0_0"]),
+        generationToken: buildHostedVaultShareGenerationToken(
+          Array.from(
+            { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX },
+            (_, index) => `share_0_${index}`,
+          ),
+        ),
         projectionScope: firstRuntimeScope,
       }],
       hasDeferredProjectionWork: false,
     });
     expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenNthCalledWith(2, {
-      memberIds: [inactiveId],
+      memberIds: rows.map((row) => row.destinationMemberId),
       prisma,
     });
   });
 
-  it("selects complete exact-scope generations within one 25-row page", async () => {
+  it("selects and drains one complete 26-row exact-scope generation before deferring another scope", async () => {
     const trailingScope = hostedVaultShareProjectionKindToScope("time-zone.v0");
     const rows = [
       ...Array.from(
-        { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX },
+        { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX + 1 },
         (_, index) => ({
           destinationMemberId: `member_sleep_${index}`,
           id: `share_sleep_${index}`,
@@ -760,7 +935,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     expect(result.generations[0]).toEqual({
       generationToken: buildHostedVaultShareGenerationToken(
         Array.from(
-          { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX },
+          { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX + 1 },
           (_, index) => `share_sleep_${index}`,
         ),
       ),
@@ -794,7 +969,7 @@ describe("hasUnmaterializedHostedVaultShareProjectionGeneration", () => {
   });
 });
 
-describe("findActiveHostedVaultShares", () => {
+describe("findActiveHostedVaultSharePage access and materialization filters", () => {
   it("discovers a participant-backed destination and excludes an inactive one", async () => {
     const findMany = vi.fn().mockResolvedValue([
       {
@@ -802,6 +977,8 @@ describe("findActiveHostedVaultShares", () => {
         grantorMemberId: SHARE.grantorMemberId,
         id: "share_participant",
         projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -810,6 +987,8 @@ describe("findActiveHostedVaultShares", () => {
         grantorMemberId: SHARE.grantorMemberId,
         id: "share_inactive",
         projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -819,43 +998,68 @@ describe("findActiveHostedVaultShares", () => {
     );
     const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
 
-    await expect(findActiveHostedVaultShares({
+    await expect(findActiveHostedVaultSharePage({
       grantorMemberId: SHARE.grantorMemberId,
       prisma,
       projectionScope: SLEEP_SCOPE,
-    })).resolves.toEqual([{
-      destinationMemberId: "member_participant_backed",
-      grantorMemberId: SHARE.grantorMemberId,
-      id: "share_participant",
-      projectionKind: SLEEP_SCOPE.projectionKind,
-      projectionScope: SLEEP_SCOPE,
-      projectionScopeKey: SLEEP_SCOPE_KEY,
-    }]);
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).resolves.toEqual({
+      continuation: null,
+      generationToken: buildHostedVaultShareGenerationToken(["share_participant"]),
+      hasActiveShares: true,
+      shares: [{
+        destinationMemberId: "member_participant_backed",
+        grantorMemberId: SHARE.grantorMemberId,
+        id: "share_participant",
+        projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionScope: SLEEP_SCOPE,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+      }],
+    });
     expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenCalledWith({
       memberIds: ["member_participant_backed", "member_inactive"],
       prisma,
     });
+    expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 26,
+      orderBy: { destinationMemberId: "asc" },
+      select: expect.objectContaining({
+        projectionSnapshotCiphertext: true,
+        projectionSourceWorkspaceVersion: true,
+      }),
     }));
   });
 
   it("discovers only null snapshots during first-materialization delivery", async () => {
-    const findMany = vi.fn().mockResolvedValue([]);
+    const findMany = vi.fn().mockResolvedValueOnce([
+      {
+        ...buildShareRow(1),
+        projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
+      },
+      {
+        ...buildShareRow(2),
+        projectionSnapshotCiphertext: "materialized-ciphertext",
+        projectionSourceWorkspaceVersion: BigInt(SOURCE_WORKSPACE_VERSION),
+      },
+    ]);
     const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
 
-    await findActiveHostedVaultShares({
+    await expect(findActiveHostedVaultSharePage({
       grantorMemberId: SHARE.grantorMemberId,
       prisma,
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).resolves.toMatchObject({
+      shares: [{ id: "share_001" }],
     });
 
+    expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         grantorMemberId: SHARE.grantorMemberId,
         projectionScopeKey: SLEEP_SCOPE_KEY,
-        projectionSnapshotCiphertext: null,
         status: "granted",
       }),
     }));

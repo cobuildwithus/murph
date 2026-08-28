@@ -2663,6 +2663,115 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
   })
 
+  it.each([
+    { label: 'direct', threadIsDirect: true },
+    { label: 'group', threadIsDirect: false },
+  ] as const)(
+    'rotates an eligible pre-existing $label group-tool thread once with bounded history',
+    async ({ label, threadIsDirect }) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: true,
+      })
+      const vault = await mkdtemp(
+        path.join(os.tmpdir(), `assistant-group-contract-rotation-${label}-`),
+      )
+      const route = createRoute()
+      const threadId = `thread-contract-rotation-${label}`
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+      }
+      const sharedPlan = createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: threadIsDirect,
+        threadId,
+        threadIsDirect,
+      })
+      const common = {
+        executionContext: {
+          hosted: {
+            memberId: `member-contract-rotation-${label}`,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          deliverResponse: true,
+          threadId,
+          threadIsDirect,
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation' as const,
+          threadScope: 'session-thread' as const,
+          toolProfile: 'provider-turn' as const,
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+        },
+        route,
+        sharedPlan,
+      }
+
+      try {
+        await appendAssistantTranscriptEntries(vault, 'session-test', [
+          { kind: 'user', text: 'Keep the earlier constraint in mind.' },
+          { kind: 'assistant', text: 'I will preserve that constraint.' },
+        ])
+        const firstPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint: '0'.repeat(64),
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: `provider-thread-before-${label}`,
+            },
+            turnCount: 2,
+          }),
+        })
+
+        expect(firstPostDeployPlan.resume).toBeNull()
+        expect(firstPostDeployPlan.dynamicTools).toContainEqual(
+          expect.objectContaining({ name: 'group_consult', namespace: 'murph' }),
+        )
+        expect(firstPostDeployPlan.conversationHistoryMessages).toEqual([
+          { content: 'Keep the earlier constraint in mind.', role: 'user' },
+          { content: 'I will preserve that constraint.', role: 'assistant' },
+        ])
+        expect(firstPostDeployPlan.developerInstructions).not.toBeNull()
+
+        const replacementThreadId = `provider-thread-after-${label}`
+        const secondPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint:
+                firstPostDeployPlan.assistantContractFingerprint,
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: replacementThreadId,
+            },
+            turnCount: 3,
+          }),
+        })
+
+        expect(secondPostDeployPlan.resume?.codexThreadId).toBe(
+          replacementThreadId,
+        )
+        expect(secondPostDeployPlan.conversationHistoryMessages).toBeUndefined()
+        expect(secondPostDeployPlan.developerInstructions).toBeNull()
+      } finally {
+        await rm(vault, { force: true, recursive: true })
+      }
+    },
+  )
+
   it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -3285,7 +3394,7 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
-  it('plans murph.analyze_video only for private accepted-input turns with the Gemini key', async () => {
+  it('plans murph.analyze_video for accepted direct and authenticated group turns with the Gemini key', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -3376,7 +3485,7 @@ describe('assistant Codex turn planning', () => {
       conversationScope: 'group',
       env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
     }))
-      .not.toContain('analyze_video')
+      .toContain('analyze_video')
   })
 
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
@@ -7222,10 +7331,13 @@ describe('assistant Codex turn planning', () => {
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
+          contentReceivedAt: '2026-07-12T12:54:00.000Z',
+          createdAt: '2026-07-12T12:55:00.000Z',
           kind: 'user',
           text: 'I want to make weekday lunches easier.',
         },
         {
+          createdAt: '2026-07-12T12:56:00.000Z',
           kind: 'assistant',
           text: 'We can keep that practical and low pressure.',
         },
@@ -7264,10 +7376,12 @@ describe('assistant Codex turn planning', () => {
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'I want to make weekday lunches easier.',
+          occurredAt: '2026-07-12T12:54:00.000Z',
           role: 'user',
         },
         {
           content: 'We can keep that practical and low pressure.',
+          occurredAt: '2026-07-12T12:56:00.000Z',
           role: 'assistant',
         },
       ])

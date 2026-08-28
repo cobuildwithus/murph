@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "./hosted-execution/logging";
+import { ProductLabelsSearchFailureError } from "./product-labels";
 
 const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
 const DEFAULT_PRODUCT_LABELS_LIMIT = 1;
@@ -276,16 +277,23 @@ function formatProductLabelsSafeLogErrorDetails(
   error: unknown,
   errorCode: string,
 ): Record<string, string> {
-  const details = formatHostedExecutionSafeLogErrorDetails(error, {
+  const searchFailure = error instanceof ProductLabelsSearchFailureError
+    ? error
+    : null;
+  const safeError = searchFailure ? searchFailure.cause : error;
+  const details = formatHostedExecutionSafeLogErrorDetails(safeError, {
     code: errorCode,
   });
-  const databaseErrorCode = readSafeDatabaseErrorCode(error);
-  const cause = error instanceof Error ? error.cause : undefined;
+  const databaseErrorCode = readSafeDatabaseErrorCode(safeError);
+  const cause = safeError instanceof Error ? safeError.cause : undefined;
   const causeDatabaseErrorCode = readSafeDatabaseErrorCode(cause);
 
   return {
     errorCode: details.errorCode,
     errorType: details.errorType,
+    ...(searchFailure
+      ? { failureStage: searchFailure.failureStage }
+      : {}),
     ...(databaseErrorCode ? { databaseErrorCode } : {}),
     ...(details.errorCauseType
       ? { errorCauseType: details.errorCauseType }

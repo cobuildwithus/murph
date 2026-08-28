@@ -144,6 +144,7 @@ export {
   importDocument,
   importEventBatch,
   importSamples,
+  validateSampleImport,
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,

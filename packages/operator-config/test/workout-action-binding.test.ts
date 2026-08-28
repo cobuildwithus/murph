@@ -111,6 +111,13 @@ describe('workout action binding', () => {
     expect(deriveWorkoutActionBinding('evt_workout', {
       exercises: [{ ...BASE_EXERCISES[0]!, setPlanIsFinite: true }],
     })).not.toBe(original)
+    expect(deriveWorkoutActionBinding('evt_workout', {
+      exercises: [{
+        ...BASE_EXERCISES[0]!,
+        targetWeightPerSet: 135,
+        targetWeightUnit: 'lb',
+      }],
+    })).not.toBe(original)
 
     for (const structurallyChanged of [
       [{
@@ -232,6 +239,7 @@ describe('workout set-removal binding', () => {
     ['note', { note: 'Controlled tempo' }],
     ['member repetitions', { memberRepsPerSet: 12 }],
     ['finite set plan', { setPlanIsFinite: true }],
+    ['planned weight', { targetWeightPerSet: 135, targetWeightUnit: 'lb' as const }],
   ] satisfies Array<[string, Partial<WorkoutExercise>]>)(
     'changes when canonical exercise %s changes',
     (_label, patch) => {

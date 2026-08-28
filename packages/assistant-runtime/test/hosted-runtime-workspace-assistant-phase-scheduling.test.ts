@@ -163,6 +163,113 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("rechecks exact Web ownership after the model and before turn commit", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-turn-commit-authority-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const authorityError = Object.assign(
+      new Error("Web already answered the exact inbound"),
+      {
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+        retryable: false,
+      },
+    );
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const persisted = await upsertAssistantInputEvent({
+        event: {
+          content: {
+            text: "hello",
+            transcriptText: "hello",
+            userMessageContent: [{ text: "hello", type: "text" as const }],
+          },
+          conversation: {
+            accountId: `hid_${"1".repeat(32)}`,
+            actorId: `hid_${"2".repeat(32)}`,
+            actorIsSelf: false,
+            source: "linq",
+            threadId: `hid_${"3".repeat(32)}`,
+            threadIsDirect: true,
+          },
+          occurredAt: "2026-04-27T00:00:00.000Z",
+          receivedAt: "2026-04-27T00:00:00.500Z",
+          replyTarget: {
+            channel: "linq",
+            messageId: "linq_message_first_turn",
+            threadId: "linq_chat_first_turn",
+          },
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: false,
+            kind: "linq" as const,
+            partCount: 0,
+            reactionEligible: false,
+            replyToMessageId: null,
+            senderHandle: "+15555550123",
+            service: "iMessage",
+          },
+          sourceRef: {
+            dedupeKey: "dedupe_first_turn",
+            eventId: "event_first_turn",
+            itemId: "mailbox_item_first_turn",
+            kind: "hosted-mailbox" as const,
+            lane: "conversation" as const,
+            laneSeq: "1",
+            payloadSchema: "murph.hosted-mailbox-payload.v1",
+            payloadSource: "inline" as const,
+            source: "hosted-mailbox" as const,
+            wakeSchema: "murph.hosted-execution-wake.v1",
+          },
+        },
+        vault: vaultRoot,
+      });
+      const assistantAutomation = await vi.importActual<
+        typeof import("@murphai/assistant-engine/assistant-automation")
+      >("@murphai/assistant-engine/assistant-automation");
+      mocks.readAssistantInputEvent.mockImplementation(
+        assistantAutomation.readAssistantInputEvent,
+      );
+      mocks.assertHostedAssistantLinqTurnCommitAuthority
+        .mockRejectedValueOnce(authorityError);
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        const assertTurnCommitAuthority =
+          laneInput.executionContext.hosted?.assertTurnCommitAuthority;
+        if (!assertTurnCommitAuthority) {
+          throw new Error("Expected hosted turn commit authority.");
+        }
+        await assertTurnCommitAuthority({
+          acceptedInputs: [{
+            id: persisted.inputId,
+            source: "assistant-input",
+          }],
+          turnId: "turn_first_contact",
+        });
+        throw new Error("Expected turn commit authority to reject.");
+      });
+
+      await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [persisted.inputId],
+        importedCount: 1,
+        vaultRoot,
+      }))).rejects.toMatchObject({
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      });
+      expect(
+        mocks.assertHostedAssistantLinqTurnCommitAuthority,
+      ).toHaveBeenCalledWith(expect.objectContaining({
+        linqDeliveryContexts: [expect.objectContaining({
+          replyToMessageId: "linq_message_first_turn",
+          target: "linq_chat_first_turn",
+          threadIsDirect: true,
+        })],
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("starts the assistant lane before a scheduled group operation lazily reads the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     const sequence: string[] = [];

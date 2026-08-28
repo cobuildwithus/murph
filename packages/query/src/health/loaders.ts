@@ -12,6 +12,7 @@ import {
   parseFrontmatterDocument,
   type MarkdownDocumentRecord,
 } from "./shared.ts";
+import { QueryVaultSourceError } from "../source-errors.ts";
 
 export interface ParseFailure {
   ok: false;
@@ -84,15 +85,11 @@ function buildFrontmatterParseFailure(
 }
 
 function toStrictParseError(failure: ParseFailure): Error {
-  if (failure.parser === "json") {
-    return new Error(
-      `Failed to parse JSONL at ${failure.relativePath}:${failure.lineNumber ?? 0}: ${failure.reason}`,
-    );
-  }
-
-  return new Error(
-    `Failed to parse frontmatter at ${failure.relativePath}: ${failure.reason}`,
-  );
+  return new QueryVaultSourceError({
+    issue: failure.parser === "json" ? "malformed_json" : "frontmatter_invalid",
+    relativePath: failure.relativePath,
+    ...(failure.lineNumber === undefined ? {} : { lineNumber: failure.lineNumber }),
+  });
 }
 
 function collectRelativeFilePaths(

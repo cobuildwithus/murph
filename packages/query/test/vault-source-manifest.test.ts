@@ -180,7 +180,12 @@ test("readVaultSourceStrict rejects a direct experiment filename that disagrees 
     (error: unknown) =>
       error instanceof Error
       && "code" in error
-      && error.code === "EXPERIMENT_DOCUMENT_PATH_MISMATCH",
+      && error.code === "QUERY_SOURCE_INVALID"
+      && "details" in error
+      && typeof error.details === "object"
+      && error.details !== null
+      && "issue" in error.details
+      && error.details.issue === "document_path_mismatch",
   );
 });
 

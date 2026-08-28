@@ -60,6 +60,20 @@ export type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
 
+export type ProductLabelsSearchFailureStage =
+  | "search_rows"
+  | "contaminant_summary";
+
+export class ProductLabelsSearchFailureError extends Error {
+  constructor(
+    readonly failureStage: ProductLabelsSearchFailureStage,
+    cause: unknown,
+  ) {
+    super("product label search failed", { cause });
+    this.name = "ProductLabelsSearchFailureError";
+  }
+}
+
 export class ProductContaminantSchemaMissingError extends Error {
   constructor() {
     super(
@@ -402,6 +416,23 @@ export function createProductLabelsQueries(
     }
   }
 
+  function throwProductLabelsSearchFailure(
+    failureStage: ProductLabelsSearchFailureStage,
+    error: unknown,
+  ): never {
+    if (
+      table === "foods"
+      && (
+        failureStage !== "contaminant_summary"
+        || !isProductContaminantSchemaMissingError(error)
+      )
+    ) {
+      throw new ProductLabelsSearchFailureError(failureStage, error);
+    }
+
+    throw error;
+  }
+
   async function searchRows(input: {
     genericOnly?: boolean;
     includeOffMarket: boolean;
@@ -463,8 +494,10 @@ export function createProductLabelsQueries(
         return null;
       }
 
-      const { rows } = await client.query<ProductLabelSearchRow>(
-        `
+      let rows: ProductLabelSearchRow[];
+      try {
+        ({ rows } = await client.query<ProductLabelSearchRow>(
+          `
         SELECT
           id,
           canonical_key AS "canonicalKey",
@@ -482,16 +515,23 @@ export function createProductLabelsQueries(
           AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
         LIMIT 1
         `,
-        [id, input.includeOffMarket],
-      );
+          [id, input.includeOffMarket],
+        ));
+      } catch (error) {
+        throwProductLabelsSearchFailure("search_rows", error);
+      }
 
-      const [item] = await attachProductContaminantSummaries(
-        client,
-        tableSql,
-        rows,
-      );
+      try {
+        const [item] = await attachProductContaminantSummaries(
+          client,
+          tableSql,
+          rows,
+        );
 
-      return item ?? null;
+        return item ?? null;
+      } catch (error) {
+        throwProductLabelsSearchFailure("contaminant_summary", error);
+      }
     },
 
     async getByUpc(input) {
@@ -502,8 +542,10 @@ export function createProductLabelsQueries(
         return null;
       }
 
-      const { rows } = await client.query<ProductLabelSearchRow>(
-        `
+      let rows: ProductLabelSearchRow[];
+      try {
+        ({ rows } = await client.query<ProductLabelSearchRow>(
+          `
         SELECT
           id,
           canonical_key AS "canonicalKey",
@@ -527,24 +569,42 @@ export function createProductLabelsQueries(
           id ASC
         LIMIT 1
         `,
-        [upcVariants, input.includeOffMarket],
-      );
+          [upcVariants, input.includeOffMarket],
+        ));
+      } catch (error) {
+        throwProductLabelsSearchFailure("search_rows", error);
+      }
 
-      const [item] = await attachProductContaminantSummaries(
-        client,
-        tableSql,
-        rows,
-      );
+      try {
+        const [item] = await attachProductContaminantSummaries(
+          client,
+          tableSql,
+          rows,
+        );
 
-      return item ?? null;
+        return item ?? null;
+      } catch (error) {
+        throwProductLabelsSearchFailure("contaminant_summary", error);
+      }
     },
 
     async search(input) {
-      return await attachProductContaminantSummaries(
-        client,
-        tableSql,
-        await searchRows(input),
-      );
+      let rows: ProductLabelSearchRow[];
+      try {
+        rows = await searchRows(input);
+      } catch (error) {
+        throwProductLabelsSearchFailure("search_rows", error);
+      }
+
+      try {
+        return await attachProductContaminantSummaries(
+          client,
+          tableSql,
+          rows,
+        );
+      } catch (error) {
+        throwProductLabelsSearchFailure("contaminant_summary", error);
+      }
     },
   };
 }
