@@ -1717,7 +1717,6 @@ describe("hosted runtime control contracts", () => {
         admissionMs: 4,
         preProviderSetupMs: 5,
         providerPlanAndGateMs: 13,
-        linqEgressGuardMs: 6,
       },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({

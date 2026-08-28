@@ -1445,9 +1445,8 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: false,
       },
-      threadIsDirect: false,
     });
-    expect(responseBody).not.toHaveProperty("targetOverride");
+    expect(responseBody).not.toHaveProperty("threadIsDirect");
     expect(
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
     ).toHaveBeenCalledWith({
@@ -1665,9 +1664,8 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: true,
       },
-      threadIsDirect: true,
     });
-    expect(responseBody).not.toHaveProperty("targetOverride");
+    expect(responseBody).not.toHaveProperty("threadIsDirect");
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
@@ -1733,12 +1731,6 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: true,
       },
-      targetOverride: {
-        conversationThreadId: expectedRoute.threadId,
-        target: "chat-current-home",
-        targetKind: "thread",
-      },
-      threadIsDirect: true,
     });
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);

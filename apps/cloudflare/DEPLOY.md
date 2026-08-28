@@ -948,28 +948,35 @@ New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
 
-### Canonical Linq Send-Route Rollout
+### Canonical Linq Send-Route Runtime Floor
 
-Deploy Web first with the complete ephemeral `resolvedRoute` response while it
-continues returning the deprecated `threadIsDirect` and conditional
-`targetOverride` fields. The existing runtime ignores the additive route and
-continues using the legacy fields, so this short reader-first window preserves
-ordinary delivery. Then deploy Cloudflare and the runner bundle immediately
-with `container_rollout=immediate`; the new runtime requires `resolvedRoute`,
-uses it as the sole provider target/recipient/sender/directness source, and
-reasserts the exact value before capability lookup and provider dispatch.
+The Web engagement response returns the complete ephemeral `resolvedRoute` as
+its sole route authority. Current Cloudflare and runner code requires that
+field, uses it as the only provider target/recipient/sender/directness source,
+and reasserts the exact value before capability lookup and provider dispatch.
+There is no database migration or persisted runtime-state floor.
 
-Do not deploy the new runtime before Web. It intentionally fails closed when
-the canonical route is absent. If rollback is required during the compatibility
-window, roll Cloudflare back first and Web second. Keep the legacy Web fields
-until a later independently reviewed cleanup after the old runtime is outside
-the rollback window; no database migration or persisted runtime-state floor is
-introduced by this protocol.
+The supported skew is one-way: pre-cleanup Web, which returns `resolvedRoute`
+plus ignored legacy fields, works with the current runtime; cleanup Web, which
+returns only `resolvedRoute`, also works with the current runtime. Cleanup Web
+does not support a pre-canonical runtime because that runtime does not read the
+route authority.
+
+For this cleanup, deploy Cloudflare and the runner bundle first with
+`container_rollout=immediate`, prove the canonical reader fleet has converged,
+and wait one full 60-second signed-callback skew after the last older container
+is gone before deploying Web. That drain also prevents the retired
+guard-only provider-start telemetry shape from reaching the cleanup Web parser.
+After Web is live, the canonical reader is the hard runtime rollback floor.
+Web may roll back only to a build that still emits complete `resolvedRoute`;
+never roll Cloudflare or the runner below the canonical reader while cleanup
+Web is live. Prefer a compatible forward fix.
 
 After rollout, prove one authorized private scheduled native card, one ordinary
 direct reply, one group reply, and one private Assistant Ask continuation.
 Confirm no canonical-route protocol-unavailable or route-mismatch error appears
-for those controlled sends.
+for those controlled sends, and confirm provider-start telemetry contains no
+guard-only event from an older runtime.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 

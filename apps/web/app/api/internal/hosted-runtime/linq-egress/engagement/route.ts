@@ -261,21 +261,6 @@ export const POST = withJsonError(async (request: Request) => {
       ? { assistantAskFallbackRequired: true }
       : {}),
     resolvedRoute,
-    // Keep the pre-canonical-route response shape during the Web-first rollout.
-    // The old runtime ignores `resolvedRoute`; the new runtime ignores these
-    // legacy fields and requires the complete route above.
-    threadIsDirect: resolvedRoute.threadIsDirect,
-    ...(resolvedRoute.targetKind === "thread" && resolvedRoute.target !== target
-      ? {
-          targetOverride: {
-            ...(resolvedRoute.conversationThreadId
-              ? { conversationThreadId: resolvedRoute.conversationThreadId }
-              : {}),
-            target: resolvedRoute.target,
-            targetKind: resolvedRoute.targetKind,
-          },
-        }
-      : {}),
     ...(assertion.deliveryBlockCode
       ? { deliveryBlockCode: assertion.deliveryBlockCode }
       : {}),
